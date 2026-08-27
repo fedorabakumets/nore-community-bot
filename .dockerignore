@@ -1,0 +1,11 @@
+.env
+.git
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+*.db
+*.sqlite*
+!data/community.db
+tests

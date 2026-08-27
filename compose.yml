@@ -1,0 +1,20 @@
+services:
+  community-bot:
+    build: .
+    container_name: nore-community-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - community_bot_data:/app/data
+    mem_limit: 256m
+    cpus: 0.35
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  community_bot_data:
+    name: nore_community_bot_data
