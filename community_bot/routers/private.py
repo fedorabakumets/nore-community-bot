@@ -32,7 +32,7 @@ from community_bot.helpers import (
     user_link,
 )
 from community_bot.keyboards import (
-    MAIN_PRIVATE_KEYBOARD,
+    STYLE_CLOSE,
     YES_NO_KEYBOARD,
     admin_panel_keyboard,
     admin_user_keyboard,
@@ -42,12 +42,15 @@ from community_bot.keyboards import (
     automessages_keyboard,
     cookie_order_review_keyboard,
     feature_flags_keyboard,
+    flow_reply_keyboard,
     main_private_keyboard,
     profile_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
+    start_apply_keyboard,
     ticket_keyboard,
 )
+from community_bot.routers.flows import restore_private_menu
 from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, ProfileEdit, TicketForm
 from community_bot.texts import (
     APPLICATION_INTRO,
@@ -64,8 +67,8 @@ router.callback_query.filter(F.message.chat.type == "private")
 EMERGENCY_STOP_COMMAND = "nore_stop_9x4q"
 EMERGENCY_STOP_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="⛔ Да, отключить бота", callback_data="emergency:stop:confirm")],
-        [InlineKeyboardButton(text="Отмена", callback_data="emergency:stop:cancel")],
+        [InlineKeyboardButton(text="⛔ Да, отключить бота", callback_data="emergency:stop:confirm", style="danger")],
+        [InlineKeyboardButton(text="Отмена", callback_data="emergency:stop:cancel", style=STYLE_CLOSE)],
     ]
 )
 
@@ -77,16 +80,19 @@ async def _private_keyboard(user_id: int, db: Database, settings: Settings):
 
 async def _send_welcome(message: Message, settings: Settings, reply_markup) -> None:
     cover = settings.welcome_cover
+    inline = start_apply_keyboard()
     if not cover:
-        await message.answer(WELCOME_TEXT, reply_markup=reply_markup)
+        await message.answer(WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
+        await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
         source = FSInputFile(cover)
     try:
-        await message.answer_photo(source, caption=WELCOME_TEXT, reply_markup=reply_markup)
+        await message.answer_photo(source, caption=WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
-        await message.answer(WELCOME_TEXT, reply_markup=reply_markup)
+        await message.answer(WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
+    await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
@@ -316,8 +322,19 @@ async def begin_application(message: Message, state: FSMContext, db: Database) -
         return
     await register_telegram_user(db, message.from_user)
     await state.set_state(ApplicationForm.name)
-    await state.set_data({})
-    await message.answer(APPLICATION_INTRO)
+    await state.set_data({"flow_kind": "application"})
+    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+
+
+@router.callback_query(F.data == "start:apply")
+async def begin_application_button(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    if not callback.message or not callback.from_user:
+        return
+    await callback.answer()
+    await register_telegram_user(db, callback.from_user)
+    await state.set_state(ApplicationForm.name)
+    await state.set_data({"flow_kind": "application"})
+    await callback.message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
 
 
 async def _validate_text(message: Message, minimum: int = 1, maximum: int | None = None) -> str | None:
@@ -337,7 +354,7 @@ async def application_name(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(name=text)
     await state.set_state(ApplicationForm.age)
-    await message.answer(APPLICATION_QUESTIONS["age"])
+    await message.answer(APPLICATION_QUESTIONS["age"], reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.age)
@@ -346,7 +363,7 @@ async def application_age(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(age=text)
     await state.set_state(ApplicationForm.referral)
-    await message.answer(APPLICATION_QUESTIONS["referral"])
+    await message.answer(APPLICATION_QUESTIONS["referral"], reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.referral)
@@ -355,7 +372,7 @@ async def application_referral(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(referral=text)
     await state.set_state(ApplicationForm.expectations)
-    await message.answer(APPLICATION_QUESTIONS["expectations"])
+    await message.answer(APPLICATION_QUESTIONS["expectations"], reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.expectations)
@@ -364,7 +381,7 @@ async def application_expectations(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(expectations=text)
     await state.set_state(ApplicationForm.bio)
-    await message.answer(APPLICATION_QUESTIONS["bio"])
+    await message.answer(APPLICATION_QUESTIONS["bio"], reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.bio)
@@ -400,7 +417,8 @@ async def finish_application(
     if callback.data.endswith(":no"):
         await state.clear()
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(APPLICATION_REJECTED_INTERVIEW, reply_markup=MAIN_PRIVATE_KEYBOARD)
+        await callback.message.answer(APPLICATION_REJECTED_INTERVIEW)
+        await restore_private_menu(callback.message, db, settings)
         return
     answers = await state.get_data()
     application_id = await db.create_application(callback.from_user.id, answers)
@@ -417,8 +435,8 @@ async def finish_application(
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(
         f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт сюда.",
-        reply_markup=MAIN_PRIVATE_KEYBOARD,
     )
+    await restore_private_menu(callback.message, db, settings)
 
 
 async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -> bool:
@@ -444,12 +462,14 @@ async def _notify_application_decision(
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
+    user = await db.get_user(int(application["user_id"]))
+    is_admin = bool(user and str(user["role"]) in {"admin", "owner"})
     await safe_send(
         bot,
         int(application["user_id"]),
         f"{result}.{reason_text}",
         parse_mode="HTML",
-        reply_markup=MAIN_PRIVATE_KEYBOARD,
+        reply_markup=main_private_keyboard(is_admin),
     )
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
@@ -483,7 +503,7 @@ async def reject_application(callback: CallbackQuery, state: FSMContext, db: Dat
     await state.set_data({"application_id": application_id})
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Напишите причину отказа одним сообщением.")
+        await callback.message.answer("Напишите причину отказа одним сообщением.", reply_markup=flow_reply_keyboard())
 
 
 @router.message(ModeratorReply.rejection_reason)
@@ -733,7 +753,7 @@ async def admin_begin_user_edit(
     await state.set_state(AdminFlow.user_value)
     await state.set_data({"admin_action": action, "target_user_id": user_id})
     await callback.answer()
-    await callback.message.answer(prompts[action])
+    await callback.message.answer(prompts[action], reply_markup=flow_reply_keyboard())
 
 
 @router.message(AdminFlow.user_value)
@@ -845,7 +865,10 @@ async def admin_begin_broadcast(
         return
     await state.set_state(AdminFlow.broadcast_private)
     await callback.answer()
-    await callback.message.answer("Отправьте сообщение или вложение для рассылки всем пользователям бота.")
+    await callback.message.answer(
+        "Отправьте сообщение или вложение для рассылки всем пользователям бота.",
+        reply_markup=flow_reply_keyboard(),
+    )
 
 
 @router.message(AdminFlow.broadcast_private)
@@ -883,7 +906,10 @@ async def admin_begin_community_post(
         return
     await state.set_state(AdminFlow.post_community)
     await callback.answer()
-    await callback.message.answer("Отправьте сообщение или вложение, которое нужно опубликовать в сообществе.")
+    await callback.message.answer(
+        "Отправьте сообщение или вложение, которое нужно опубликовать в сообществе.",
+        reply_markup=flow_reply_keyboard(),
+    )
 
 
 @router.message(AdminFlow.post_community)
@@ -921,7 +947,10 @@ async def admin_begin_mention(
         return
     await state.set_state(AdminFlow.mention_all)
     await callback.answer()
-    await callback.message.answer("Введите текст уведомления. После него бот упомянет всех известных участников.")
+    await callback.message.answer(
+        "Введите текст уведомления. После него бот упомянет всех известных участников.",
+        reply_markup=flow_reply_keyboard(),
+    )
 
 
 @router.message(AdminFlow.mention_all)
@@ -995,7 +1024,10 @@ async def admin_begin_automessage(
     await state.set_state(AdminFlow.automessage_content)
     await state.set_data({"automessage_target": target})
     await callback.answer()
-    await callback.message.answer("Отправьте содержимое автосообщения: текст или одно вложение с подписью.")
+    await callback.message.answer(
+        "Отправьте содержимое автосообщения: текст или одно вложение с подписью.",
+        reply_markup=flow_reply_keyboard(),
+    )
 
 
 @router.message(AdminFlow.automessage_content)
@@ -1011,7 +1043,10 @@ async def admin_automessage_content(message: Message, state: FSMContext) -> None
         automessage_media_file_id=media_file_id,
     )
     await state.set_state(AdminFlow.automessage_interval)
-    await message.answer("Введите период отправки в минутах — от 5 до 10080 (7 суток).")
+    await message.answer(
+        "Введите период отправки в минутах — от 5 до 10080 (7 суток).",
+        reply_markup=flow_reply_keyboard(),
+    )
 
 
 @router.message(AdminFlow.automessage_interval)
@@ -1078,17 +1113,20 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
             )
     await message.answer(
         f"🎫 Тикет №{ticket_id} открыт. Отправьте вопрос, фото или файл. "
-        "Все следующие сообщения попадут модераторам. Для завершения — /close."
+        "Все следующие сообщения попадут модераторам.\n"
+        "Снизу — «Отмена», либо команда /close.",
+        reply_markup=flow_reply_keyboard(),
     )
 
 
 @router.message(Command("close"), TicketForm.active)
-async def close_own_ticket(message: Message, state: FSMContext, db: Database) -> None:
+async def close_own_ticket(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
     await db.close_ticket(ticket_id)
     await state.clear()
-    await message.answer(f"Тикет №{ticket_id} закрыт.", reply_markup=MAIN_PRIVATE_KEYBOARD)
+    await message.answer(f"Тикет №{ticket_id} закрыт.")
+    await restore_private_menu(message, db, settings)
 
 
 @router.message(TicketForm.active)
@@ -1134,7 +1172,10 @@ async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Dat
     await state.set_data({"ticket_id": ticket_id})
     await callback.answer()
     if callback.message:
-        await callback.message.answer(f"Отправьте ответ для тикета №{ticket_id}. Можно приложить файл.")
+        await callback.message.answer(
+            f"Отправьте ответ для тикета №{ticket_id}. Можно приложить файл.",
+            reply_markup=flow_reply_keyboard(),
+        )
 
 
 @router.message(ModeratorReply.ticket_message)
@@ -1227,20 +1268,21 @@ async def edit_profile(callback: CallbackQuery, state: FSMContext) -> None:
     next_state, prompt = prompts[field]
     await state.set_state(next_state)
     await callback.answer()
-    await callback.message.answer(prompt)
+    await callback.message.answer(prompt, reply_markup=flow_reply_keyboard())
 
 
 @router.message(ProfileEdit.name)
-async def edit_profile_name(message: Message, state: FSMContext, db: Database) -> None:
+async def edit_profile_name(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user or (text := await _validate_text(message, maximum=50)) is None:
         return
     await db.update_profile(message.from_user.id, "profile_name", text)
     await state.clear()
     await message.answer("Имя обновлено.")
+    await restore_private_menu(message, db, settings)
 
 
 @router.message(ProfileEdit.age)
-async def edit_profile_age(message: Message, state: FSMContext, db: Database) -> None:
+async def edit_profile_age(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user or not message.text or not message.text.isdigit():
         await message.answer("Введите возраст числом от 14 до 120.")
         return
@@ -1251,19 +1293,21 @@ async def edit_profile_age(message: Message, state: FSMContext, db: Database) ->
     await db.update_profile(message.from_user.id, "age", age)
     await state.clear()
     await message.answer("Возраст обновлён.")
+    await restore_private_menu(message, db, settings)
 
 
 @router.message(ProfileEdit.hobbies)
-async def edit_profile_hobbies(message: Message, state: FSMContext, db: Database) -> None:
+async def edit_profile_hobbies(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user or (text := await _validate_text(message, maximum=500)) is None:
         return
     await db.update_profile(message.from_user.id, "hobbies", text)
     await state.clear()
     await message.answer("Увлечения обновлены.")
+    await restore_private_menu(message, db, settings)
 
 
 @router.message(ProfileEdit.avatar)
-async def edit_profile_avatar(message: Message, state: FSMContext, db: Database) -> None:
+async def edit_profile_avatar(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user or not message.photo:
         await message.answer("Нужно отправить фотографию.")
         return
@@ -1271,3 +1315,4 @@ async def edit_profile_avatar(message: Message, state: FSMContext, db: Database)
     await db.update_profile(message.from_user.id, "avatar_media_type", "photo")
     await state.clear()
     await message.answer("Аватар обновлён.")
+    await restore_private_menu(message, db, settings)

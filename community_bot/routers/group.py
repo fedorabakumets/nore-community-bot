@@ -48,15 +48,18 @@ from community_bot.keyboards import (
     admin_panel_keyboard,
     cookie_order_review_keyboard,
     cookie_packages_keyboard,
+    flow_reply_keyboard,
     freebie_keyboard,
     pet_species_keyboard,
     profile_transfer_keyboard,
     public_profile_keyboard,
     roulette_invite_keyboard,
     sbp_payment_keyboard,
-    shop_keyboard,
+    shop_category_keyboard,
+    shop_home_keyboard,
     transfer_keyboard,
 )
+from community_bot.shop_catalog import IMMUNITY_HOURS, PET_SUPPLIES, SHOP_CATEGORIES, shop_prices_for
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
 from community_bot.texts import GROUP_COMMANDS_TEXT, REPUTATION_HELP_TEXT, STORE_HELP_TEXT
 
@@ -165,21 +168,6 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
 
 
 router.message.outer_middleware(DeleteGroupCommandMiddleware())
-
-BASE_SHOP_PRICES = {
-    "restore_rep": 5,
-    "immunity": 10,
-    "custom_status": 5,
-    "reset_limits": 10,
-    "forgive": 50,
-    "video_avatar": 10,
-    "tamagotchi": 50,
-    "pet_snack": 1,
-    "pet_meal": 3,
-    "pet_feast": 5,
-    "pet_water": 2,
-    "pet_drink": 5,
-}
 
 
 def _group_chat(message: Message) -> bool:
@@ -593,36 +581,85 @@ async def admin_set_status(message: Message, db: Database, settings: Settings) -
 
 
 async def _shop_prices(user: dict[str, object], settings: Settings) -> dict[str, int]:
+    return shop_prices_for(user, settings.restricted_reputation_threshold)
+
+
+def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
-    base = dict(BASE_SHOP_PRICES)
-    return {key: discounted_price(price, tier.discount) for key, price in base.items()}
+    return (
+        f"🛒 <b>Магазин NORA</b>\n"
+        f"Баланс: <b>{user['cookies']} 🍪</b>\n"
+        f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
+        "Полки: тамагочи, репутация, профиль и мероприятия. "
+        "Покупка применяется сразу после кнопки."
+    )
 
 
 @router.message(Command("shop"))
 @router.message(F.text == "🛒 Магазин")
-async def show_shop(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
+async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
     user = await register_telegram_user(db, message.from_user)
-    tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
-    prices = await _shop_prices(user, settings)
-    text = (
-        f"🛒 <b>Магазин</b>\nБаланс: {user['cookies']} 🍪\n"
-        f"Уровень: {tier.emoji}, скидка {tier.discount}%\n\n"
-        "Покупка применяется сразу после подтверждения кнопкой."
+    await message.answer(
+        _shop_home_text(user, settings),
+        parse_mode="HTML",
+        reply_markup=shop_home_keyboard(),
     )
-    if _group_chat(message):
-        try:
-            await bot.send_message(
-                message.from_user.id,
-                text,
-                parse_mode="HTML",
-                reply_markup=shop_keyboard(prices),
-            )
-        except (TelegramForbiddenError, TelegramBadRequest):
-            await _private_chat_notice(message, bot)
+
+
+@router.callback_query(F.data == "shop:home")
+async def shop_home(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message:
         return
-    await message.answer(text, parse_mode="HTML", reply_markup=shop_keyboard(prices))
+    user = await register_telegram_user(db, callback.from_user)
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            _shop_home_text(user, settings),
+            parse_mode="HTML",
+            reply_markup=shop_home_keyboard(),
+        )
+    except TelegramBadRequest:
+        await callback.message.answer(
+            _shop_home_text(user, settings),
+            parse_mode="HTML",
+            reply_markup=shop_home_keyboard(),
+        )
+
+
+@router.callback_query(F.data.startswith("shop:cat:"))
+async def shop_category(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not callback.message:
+        return
+    category = callback.data.rsplit(":", 1)[1]
+    user = await register_telegram_user(db, callback.from_user)
+    prices = await _shop_prices(user, settings)
+    if category == "extra":
+        title = "🎟 Мероприятия"
+        intro = "Гибкая сумма в печеньках. Скидка уровня применится автоматически."
+    elif category in SHOP_CATEGORIES:
+        title = str(SHOP_CATEGORIES[category]["title"])
+        intro = str(SHOP_CATEGORIES[category]["intro"])
+    else:
+        await callback.answer("Нет такой полки.", show_alert=True)
+        return
+    text = (
+        f"{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
+    )
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=shop_category_keyboard(category, prices),
+        )
+    except TelegramBadRequest:
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=shop_category_keyboard(category, prices),
+        )
 
 
 @router.callback_query(F.data == "shop:buy_cookies")
@@ -637,18 +674,8 @@ async def choose_cookie_pack(callback: CallbackQuery, settings: Settings) -> Non
 
 
 @router.message(Command("buycookies"))
-async def buycookies_command(message: Message, bot: Bot, settings: Settings) -> None:
+async def buycookies_command(message: Message, settings: Settings) -> None:
     prompt = f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽:"
-    if _group_chat(message) and message.from_user:
-        try:
-            await bot.send_message(
-                message.from_user.id,
-                prompt,
-                reply_markup=cookie_packages_keyboard(),
-            )
-        except (TelegramForbiddenError, TelegramBadRequest):
-            await _private_chat_notice(message, bot)
-        return
     await message.answer(prompt, reply_markup=cookie_packages_keyboard())
 
 
@@ -673,6 +700,8 @@ async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, setting
         parse_mode="HTML",
         reply_markup=sbp_payment_keyboard(settings.sbp_payment_url),
     )
+    if callback.message.chat.type == "private":
+        await callback.message.answer("Чтобы выйти — красная «Отмена» снизу.", reply_markup=flow_reply_keyboard())
 
 
 @router.message(CookiePurchase.receipt)
@@ -784,7 +813,12 @@ async def buy_shop_item(
     settings: Settings,
     bot: Bot,
 ) -> None:
-    if not callback.data or not callback.message or callback.data == "shop:buy_cookies":
+    if (
+        not callback.data
+        or not callback.message
+        or callback.data in {"shop:buy_cookies", "shop:home", "shop:close"}
+        or callback.data.startswith("shop:cat:")
+    ):
         return
     item = callback.data.split(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
@@ -797,7 +831,8 @@ async def buy_shop_item(
         await callback.answer()
         await callback.message.answer(
             f"Введите желаемую сумму для {label} в печеньках. "
-            f"Ваша скидка уровня — {tier.discount}%; итог бот покажет перед списанием."
+            f"Ваша скидка уровня — {tier.discount}%; итог бот покажет перед списанием.",
+            reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
         )
         return
     if item not in prices:
@@ -815,7 +850,8 @@ async def buy_shop_item(
         await state.set_data({"shop_price": price})
         await callback.answer()
         await callback.message.answer(
-            "Отправьте короткое видео для карточки профиля. После сохранения спишется стоимость товара."
+            "Отправьте короткое видео для карточки профиля. После сохранения спишется стоимость товара.",
+            reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
         )
         return
     if item == "tamagotchi":
@@ -834,13 +870,7 @@ async def buy_shop_item(
             reply_markup=pet_species_keyboard(price),
         )
         return
-    pet_items = {
-        "pet_snack": ("food", 10, "Перекус"),
-        "pet_meal": ("food", 35, "Обед"),
-        "pet_feast": ("food", 70, "Пир"),
-        "pet_water": ("water", 25, "Вода"),
-        "pet_drink": ("water", 70, "Большая поилка"),
-    }
+    pet_items = PET_SUPPLIES
     if item in pet_items:
         kind, gain, label = pet_items[item]
         ok, error, _ = await db.purchase_pet_supply(callback.from_user.id, kind, gain, price, item)
@@ -857,15 +887,27 @@ async def buy_shop_item(
         await state.set_state(ProfileEdit.custom_status)
         await state.set_data({"shop_price": price})
         await callback.answer()
-        await callback.message.answer("Введите новый кастомный статус (до 50 символов).")
+        await callback.message.answer("Введите новый кастомный статус (до 50 символов).",
+            reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
+        )
+        return
+    if item in IMMUNITY_HOURS:
+        ok, error = await db.buy_item(callback.from_user.id, item, price)
+        if not ok:
+            await callback.answer(error, show_alert=True)
+            return
+        hours = IMMUNITY_HOURS[item]
+        await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=hours))
+        await callback.answer("Покупка выполнена.")
+        await callback.message.answer(
+            f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪."
+        )
         return
     ok, error = await db.buy_item(callback.from_user.id, item, price)
     if not ok:
         await callback.answer(error, show_alert=True)
         return
-    if item == "immunity":
-        await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=24))
-    elif item == "forgive" and settings.community_chat_id:
+    if item == "forgive" and settings.community_chat_id:
         try:
             await bot.restrict_chat_member(
                 settings.community_chat_id, callback.from_user.id, permissions=_full_permissions()

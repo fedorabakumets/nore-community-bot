@@ -1,26 +1,25 @@
 from __future__ import annotations
 
 import html
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.keyboards import pet_keyboard
+from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
+from community_bot.pets_talk import SPECIES, aftercare_line, species_meta, talk_line
+from community_bot.shop_catalog import SHOP_CATEGORIES, shop_prices_for
 from community_bot.states import PetFlow
 
 router = Router(name="pets")
 
-SPECIES = {
-    "cat": ("🐈", "кот"),
-    "dog": ("🐕", "пёс"),
-    "raccoon": ("🦝", "енот"),
-    "fox": ("🦊", "лиса"),
-    "dragon": ("🐉", "дракончик"),
-}
+ASSETS = Path(__file__).resolve().parent.parent.parent / "assets" / "pets"
 
 
 def _bar(value: int) -> str:
@@ -28,63 +27,70 @@ def _bar(value: int) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
+def pet_photo(species: str) -> FSInputFile | None:
+    path = ASSETS / f"{species}.png"
+    return FSInputFile(path) if path.is_file() else None
+
+
 def pet_text(pet: dict[str, object]) -> str:
-    emoji, species = SPECIES.get(str(pet["species"]), ("🐾", "питомец"))
+    emoji, species = species_meta(str(pet["species"]))
     hunger = int(pet["hunger"])
     thirst = int(pet["thirst"])
     mood = int(pet["mood"])
     sleeping = bool(int(pet["sleeping"]))
     farm_milli = int(pet["farm_milli"])
-    status = "💤 спит от голода или жажды" if sleeping else "✨ бодрствует"
+    status = "💤 сладко спит от голода или жажды" if sleeping else "✨ бодрствует и светится"
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
-        f"Состояние: {status}\n\n"
+        f"{status}\n\n"
         f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
         f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
-        f"🍪 Найдено крошек: <b>{farm_milli}/1000</b> до следующей печеньки\n\n"
-        "За каждые 50 сообщений в чате выдаётся еда и вода. "
-        "Сытый питомец приносит 0,1–0,3 🍪 каждые 6 часов; целая печенька начисляется после накопления 1000 крошек."
+        f"🍪 Крошки: <b>{farm_milli}/1000</b> до печеньки\n\n"
+        "Поговори, покорми или напои — малыш отвечает милыми пингами 💕"
     )
 
 
-async def _send_pet(message: Message, db: Database) -> None:
+async def send_pet_card(message: Message, pet: dict[str, object]) -> None:
+    text = pet_text(pet)
+    photo = pet_photo(str(pet["species"]))
+    if photo:
+        try:
+            await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+            return
+        except TelegramBadRequest:
+            pass
+    await message.answer(text, parse_mode="HTML", reply_markup=pet_keyboard())
+
+
+async def refresh_pet_card(target: Message, pet: dict[str, object]) -> None:
+    text = pet_text(pet)
+    try:
+        await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+        return
+    except TelegramBadRequest:
+        pass
+    try:
+        await target.edit_text(text, parse_mode="HTML", reply_markup=pet_keyboard())
+    except TelegramBadRequest:
+        await send_pet_card(target, pet)
+
+
+async def _show_pet(message: Message, db: Database) -> None:
     if not message.from_user:
         return
     pet = await db.get_pet(message.from_user.id)
     if not pet:
-        await message.answer("У вас пока нет тамагочи. Его можно завести в /shop за 50 🍪 со скидкой уровня.")
+        await message.answer("У вас пока нет тамагочи. Откройте /shop → 🐾 Тамагочи.")
         return
-    await message.answer(pet_text(pet), parse_mode="HTML", reply_markup=pet_keyboard())
+    await send_pet_card(message, pet)
 
 
-@router.message(Command("pet"), F.chat.type == "private")
-async def show_pet_private(message: Message, db: Database) -> None:
-    await _send_pet(message, db)
-
-
-@router.message(Command("pet"), F.chat.type.in_({"group", "supergroup"}))
-async def show_pet_group(message: Message, db: Database) -> None:
-    if not message.from_user:
-        return
-    try:
-        await message.bot.send_message(message.from_user.id, "🐾 Ваш тамагочи:")
-        pet = await db.get_pet(message.from_user.id)
-        if pet:
-            await message.bot.send_message(
-                message.from_user.id,
-                pet_text(pet),
-                parse_mode="HTML",
-                reply_markup=pet_keyboard(),
-            )
-        else:
-            await message.bot.send_message(
-                message.from_user.id,
-                "У вас пока нет тамагочи. Его можно завести в /shop за 50 🍪 со скидкой уровня.",
-            )
-    except Exception:
-        await message.answer("Сначала откройте личный чат с ботом и нажмите Start.")
+@router.message(Command("pet"))
+@router.message(F.text == "🐾 Тамагочи")
+async def show_pet(message: Message, db: Database) -> None:
+    await _show_pet(message, db)
 
 
 @router.callback_query(F.data.startswith("pet:species:"))
@@ -100,10 +106,14 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
         return
     price = int(raw_price)
     await state.set_state(PetFlow.name)
-    await state.set_data({"pet_species": species, "pet_price": price})
+    await state.set_data({"pet_species": species, "pet_price": price, "flow_kind": "pet_name"})
     await callback.answer()
+    emoji, label = SPECIES[species]
+    markup = flow_reply_keyboard() if callback.message.chat.type == "private" else None
     await callback.message.answer(
-        f"Вы выбрали {SPECIES[species][0]} {SPECIES[species][1]}. Как его назвать? До 24 символов."
+        f"Вы выбрали {emoji} {label}. Как его назвать? До 24 символов.\n"
+        "Снизу можно отменить.",
+        reply_markup=markup,
     )
 
 
@@ -129,7 +139,7 @@ async def create_pet(message: Message, state: FSMContext, db: Database) -> None:
         f"✅ {SPECIES[species][0]} <b>{html.escape(name)}</b> теперь живёт у вас. Списано {price} 🍪.",
         parse_mode="HTML",
     )
-    await message.answer(pet_text(pet), parse_mode="HTML", reply_markup=pet_keyboard())
+    await send_pet_card(message, pet)
 
 
 @router.callback_query(F.data.startswith("pet:use:"))
@@ -142,7 +152,30 @@ async def use_supply(callback: CallbackQuery, db: Database) -> None:
         await callback.answer(error, show_alert=True)
         return
     await callback.answer("Готово!")
-    await callback.message.edit_text(pet_text(pet), parse_mode="HTML", reply_markup=pet_keyboard())
+    await refresh_pet_card(callback.message, pet)
+    await callback.message.answer(aftercare_line(pet, kind))
+
+
+@router.callback_query(F.data == "pet:talk")
+async def talk_with_pet(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    pet = await db.get_pet(callback.from_user.id)
+    if not pet:
+        await callback.answer("Сначала заведите тамагочи.", show_alert=True)
+        return
+    last_raw = pet.get("last_talk_at")
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(str(last_raw)).astimezone(UTC)
+            if datetime.now(UTC) - last < timedelta(seconds=20):
+                await callback.answer("Малыш ещё переводит дыхание 💕", show_alert=True)
+                return
+        except ValueError:
+            pass
+    await db.mark_pet_talk(callback.from_user.id)
+    await callback.answer()
+    await callback.message.answer(talk_line(pet))
 
 
 @router.callback_query(F.data == "pet:rename")
@@ -150,8 +183,10 @@ async def begin_rename(callback: CallbackQuery, state: FSMContext) -> None:
     if not callback.message:
         return
     await state.set_state(PetFlow.rename)
+    await state.set_data({"flow_kind": "pet_rename"})
     await callback.answer()
-    await callback.message.answer("Введите новое имя питомца — до 24 символов.")
+    markup = flow_reply_keyboard() if callback.message.chat.type == "private" else None
+    await callback.message.answer("Введите новое имя питомца — до 24 символов.", reply_markup=markup)
 
 
 @router.message(PetFlow.rename)
@@ -171,7 +206,18 @@ async def rename_pet(message: Message, state: FSMContext, db: Database) -> None:
 
 
 @router.callback_query(F.data == "pet:shop")
-async def pet_shop(callback: CallbackQuery) -> None:
-    if callback.message:
-        await callback.message.answer("Откройте /shop — корм и вода находятся в общем магазине.")
+async def pet_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.from_user:
+        await callback.answer()
+        return
+    user = await db.get_user(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала откройте /start.", show_alert=True)
+        return
+    prices = shop_prices_for(user, settings.restricted_reputation_threshold)
     await callback.answer()
+    meta = SHOP_CATEGORIES["pets"]
+    await callback.message.answer(
+        f"{meta['title']}\nБаланс: {user['cookies']} 🍪\n\n{meta['intro']}",
+        reply_markup=shop_category_keyboard("pets", prices),
+    )

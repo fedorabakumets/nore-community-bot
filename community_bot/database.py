@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS pets (
     sleeping INTEGER NOT NULL DEFAULT 0 CHECK(sleeping IN (0, 1)),
     last_tick_at TEXT NOT NULL,
     last_notice_at TEXT,
+    last_talk_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -257,6 +258,9 @@ class Database:
             columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
             if "avatar_media_type" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN avatar_media_type TEXT NOT NULL DEFAULT 'photo'")
+            pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
+            if "last_talk_at" not in pet_columns:
+                await db.execute("ALTER TABLE pets ADD COLUMN last_talk_at TEXT")
             now = utcnow()
             for key, enabled in DEFAULT_FEATURE_FLAGS.items():
                 await db.execute(
@@ -1154,6 +1158,13 @@ class Database:
             )
             await db.commit()
             return cursor.rowcount == 1
+
+    async def mark_pet_talk(self, user_id: int) -> None:
+        now = utcnow()
+        await self.execute(
+            "UPDATE pets SET last_talk_at = ?, mood = MIN(100, mood + 4), updated_at = ? WHERE user_id = ?",
+            (now, now, user_id),
+        )
 
     async def create_party_game(self, chat_id: int, game_type: str, creator_id: int) -> tuple[int, bool]:
         now = utcnow()

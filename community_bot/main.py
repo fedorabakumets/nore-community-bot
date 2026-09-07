@@ -12,7 +12,8 @@ from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandSc
 from community_bot.config import Settings, load_settings
 from community_bot.database import Database
 from community_bot.helpers import send_stored_message
-from community_bot.routers import games_router, group_router, pets_router, private_router
+from community_bot.pets_talk import idle_ping
+from community_bot.routers import flows_router, games_router, group_router, pets_router, private_router
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +132,22 @@ async def pet_notifications_job(db: Database, bot: Bot) -> None:
                 last_notice_raw = pet.get("last_notice_at")
                 last_notice = datetime.fromisoformat(str(last_notice_raw)) if last_notice_raw else None
                 hungry_notice_due = sleeping and (not last_notice or now - last_notice >= timedelta(hours=12))
-                if not payout and not hungry_notice_due:
+                cute_ping_due = (
+                    not sleeping
+                    and not payout
+                    and (not last_notice or now - last_notice >= timedelta(hours=8))
+                )
+                if not payout and not hungry_notice_due and not cute_ping_due:
                     continue
                 if payout:
-                    text = f"🐾 {pet['name']} только что принёс вам {payout} 🍪!"
+                    text = f"🍪✨ {pet['name']} притащил тебе {payout} 🍪 и смотрит глазами-сердечками 💕"
+                elif hungry_notice_due:
+                    text = (
+                        f"💤🥺 {pet['name']} свернулся калачиком: сытость или вода на нуле. "
+                        "Загляни в /pet, пожалуйста 🫶🌸"
+                    )
                 else:
-                    text = f"💤 {pet['name']} уснул: сытость или вода на нуле. Загляните в /pet."
+                    text = idle_ping(pet)
                 if await send_stored_message(bot, user_id, text, None, None):
                     await db.execute(
                         "UPDATE pets SET last_notice_at = ?, updated_at = ? WHERE user_id = ?",
@@ -170,6 +181,7 @@ async def main() -> None:
 
     bot = Bot(settings.bot_token)
     dispatcher = Dispatcher()
+    dispatcher.include_router(flows_router)
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
     dispatcher.include_router(private_router)

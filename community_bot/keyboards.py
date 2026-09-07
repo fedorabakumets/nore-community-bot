@@ -7,25 +7,86 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from community_bot.shop_catalog import ITEM_LABELS, SHOP_CATEGORIES
+
+# Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
+STYLE_GO = "success"
+STYLE_FUN = "primary"
+STYLE_CLOSE = "danger"
+
+FLOW_CANCEL = "❌ Отмена"
+FLOW_RESTART = "🔄 Начать заново"
+
+
+def ibtn(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
+    if style:
+        return InlineKeyboardButton(text=text, callback_data=data, style=style)
+    return InlineKeyboardButton(text=text, callback_data=data)
+
+
+def kbtn(text: str, style: str | None = None) -> KeyboardButton:
+    if style:
+        return KeyboardButton(text=text, style=style)
+    return KeyboardButton(text=text)
+
+
+def close_btn(data: str = "ui:close") -> InlineKeyboardButton:
+    return ibtn("❌ Закрыть", data, STYLE_CLOSE)
+
+
+def back_btn(data: str) -> InlineKeyboardButton:
+    return ibtn("↩️ Назад", data)
+
+
+def flow_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn(FLOW_RESTART, "flow:restart", STYLE_FUN),
+                ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE),
+            ]
+        ]
+    )
+
+
+def flow_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[kbtn(FLOW_RESTART, STYLE_FUN), kbtn(FLOW_CANCEL, STYLE_CLOSE)]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
 
 def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton(text="📝 Заполнить анкету"), KeyboardButton(text="❓ Задать вопрос")],
-        [KeyboardButton(text="👤 Мой профиль"), KeyboardButton(text="🛒 Магазин")],
+        [kbtn("📝 Заполнить анкету", STYLE_GO), kbtn("❓ Задать вопрос")],
+        [kbtn("👤 Мой профиль"), kbtn("🛒 Магазин", STYLE_FUN)],
+        [kbtn("🐾 Тамагочи", STYLE_FUN)],
     ]
     if is_admin:
-        rows.append([KeyboardButton(text="🛡 Админ-панель")])
+        rows.append([kbtn("🛡 Админ-панель")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 MAIN_PRIVATE_KEYBOARD = main_private_keyboard()
 
+
+def start_apply_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[ibtn("📝 Заполнить анкету", "start:apply", STYLE_GO)]]
+    )
+
+
 YES_NO_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [
-            InlineKeyboardButton(text="Да", callback_data="application:interview:yes"),
-            InlineKeyboardButton(text="Нет", callback_data="application:interview:no"),
-        ]
+            ibtn("Да", "application:interview:yes", STYLE_GO),
+            ibtn("Нет", "application:interview:no", STYLE_CLOSE),
+        ],
+        [
+            ibtn(FLOW_RESTART, "flow:restart", STYLE_FUN),
+            ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE),
+        ],
     ]
 )
 
@@ -34,8 +95,8 @@ def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"application:approve:{application_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"application:reject:{application_id}"),
+                ibtn("✅ Одобрить", f"application:approve:{application_id}", STYLE_GO),
+                ibtn("❌ Отклонить", f"application:reject:{application_id}", STYLE_CLOSE),
             ]
         ]
     )
@@ -44,32 +105,18 @@ def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
 def admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [ibtn("📋 Анкеты", "admin:applications"), ibtn("💳 Платежи", "admin:orders")],
+            [ibtn("👥 Права", "admin:roles"), ibtn("👤 Профили и 🍪", "admin:users")],
+            [ibtn("⏱ Автосообщения", "admin:auto:list")],
             [
-                InlineKeyboardButton(text="📋 Анкеты", callback_data="admin:applications"),
-                InlineKeyboardButton(text="💳 Платежи", callback_data="admin:orders"),
+                ibtn("🔇 Мут чата", "admin:chat:mute", STYLE_CLOSE),
+                ibtn("🔊 Открыть чат", "admin:chat:unmute", STYLE_GO),
             ],
-            [
-                InlineKeyboardButton(text="👥 Права", callback_data="admin:roles"),
-                InlineKeyboardButton(text="👤 Профили и 🍪", callback_data="admin:users"),
-            ],
-            [InlineKeyboardButton(text="⏱ Автосообщения", callback_data="admin:auto:list")],
-            [
-                InlineKeyboardButton(text="🔇 Мут чата", callback_data="admin:chat:mute"),
-                InlineKeyboardButton(text="🔊 Открыть чат", callback_data="admin:chat:unmute"),
-            ],
-            [
-                InlineKeyboardButton(text="📣 Упомянуть всех", callback_data="admin:mention"),
-                InlineKeyboardButton(text="💌 Рассылка в ЛС", callback_data="admin:broadcast"),
-            ],
-            [InlineKeyboardButton(text="📢 Сообщение в сообщество", callback_data="admin:post")],
-            [
-                InlineKeyboardButton(text="⚙️ Функции", callback_data="admin:features"),
-                InlineKeyboardButton(text="📊 Состояние", callback_data="admin:health"),
-            ],
-            [
-                InlineKeyboardButton(text="💤 Инактив", callback_data="admin:inactive"),
-                InlineKeyboardButton(text="🧾 Журнал", callback_data="admin:audit"),
-            ],
+            [ibtn("📣 Упомянуть всех", "admin:mention"), ibtn("💌 Рассылка в ЛС", "admin:broadcast")],
+            [ibtn("📢 Сообщение в сообщество", "admin:post")],
+            [ibtn("⚙️ Функции", "admin:features"), ibtn("📊 Состояние", "admin:health")],
+            [ibtn("💤 Инактив", "admin:inactive"), ibtn("🧾 Журнал", "admin:audit")],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -80,27 +127,20 @@ def role_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup:
     for user in users:
         role = str(user["role"])
         name = str(user.get("profile_name") or user.get("telegram_name") or user.get("username") or user["user_id"])
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{icons.get(role, '👤')} {name[:40]}",
-                    callback_data=f"admin:user:{user['user_id']}",
-                )
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")])
+        rows.append([ibtn(f"{icons.get(role, '👤')} {name[:40]}", f"admin:user:{user['user_id']}")])
+    rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def role_selection_keyboard(user_id: int, can_assign_admin: bool) -> InlineKeyboardMarkup:
     row = [
-        InlineKeyboardButton(text="👤 Участник", callback_data=f"admin:setrole:{user_id}:member"),
-        InlineKeyboardButton(text="🔨 Модератор", callback_data=f"admin:setrole:{user_id}:moderator"),
+        ibtn("👤 Участник", f"admin:setrole:{user_id}:member"),
+        ibtn("🔨 Модератор", f"admin:setrole:{user_id}:moderator"),
     ]
     rows = [row]
     if can_assign_admin:
-        rows.append([InlineKeyboardButton(text="🛡 Админ", callback_data=f"admin:setrole:{user_id}:admin")])
-    rows.append([InlineKeyboardButton(text="↩️ К пользователям", callback_data="admin:roles")])
+        rows.append([ibtn("🛡 Админ", f"admin:setrole:{user_id}:admin", STYLE_FUN)])
+    rows.append([back_btn("admin:roles")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -108,10 +148,8 @@ def admin_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup
     rows: list[list[InlineKeyboardButton]] = []
     for user in users:
         name = str(user.get("profile_name") or user.get("telegram_name") or user.get("username") or user["user_id"])
-        rows.append(
-            [InlineKeyboardButton(text=f"👤 {name[:42]}", callback_data=f"admin:manage:{user['user_id']}")]
-        )
-    rows.append([InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")])
+        rows.append([ibtn(f"👤 {name[:42]}", f"admin:manage:{user['user_id']}")])
+    rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -119,18 +157,18 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🍪 Установить баланс", callback_data=f"admin:edit:cookies:{user_id}"),
-                InlineKeyboardButton(text="➕ Начислить 🍪", callback_data=f"admin:edit:add_cookies:{user_id}"),
+                ibtn("🍪 Установить баланс", f"admin:edit:cookies:{user_id}"),
+                ibtn("➕ Начислить 🍪", f"admin:edit:add_cookies:{user_id}", STYLE_GO),
             ],
             [
-                InlineKeyboardButton(text="✏️ Имя", callback_data=f"admin:edit:name:{user_id}"),
-                InlineKeyboardButton(text="🎂 Возраст", callback_data=f"admin:edit:age:{user_id}"),
+                ibtn("✏️ Имя", f"admin:edit:name:{user_id}"),
+                ibtn("🎂 Возраст", f"admin:edit:age:{user_id}"),
             ],
             [
-                InlineKeyboardButton(text="🖼 Аватар", callback_data=f"admin:edit:avatar:{user_id}"),
-                InlineKeyboardButton(text="⚠️ Нарушения", callback_data=f"admin:edit:warnings:{user_id}"),
+                ibtn("🖼 Аватар", f"admin:edit:avatar:{user_id}"),
+                ibtn("⚠️ Нарушения", f"admin:edit:warnings:{user_id}"),
             ],
-            [InlineKeyboardButton(text="↩️ К пользователям", callback_data="admin:users")],
+            [back_btn("admin:users")],
         ]
     )
 
@@ -138,16 +176,16 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
 def automessage_target_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📢 В чат сообщества", callback_data="admin:auto:new:community")],
-            [InlineKeyboardButton(text="💌 Всем в личку бота", callback_data="admin:auto:new:private_all")],
-            [InlineKeyboardButton(text="↩️ Назад", callback_data="admin:auto:list")],
+            [ibtn("📢 В чат сообщества", "admin:auto:new:community", STYLE_FUN)],
+            [ibtn("💌 Всем в личку бота", "admin:auto:new:private_all", STYLE_FUN)],
+            [back_btn("admin:auto:list")],
         ]
     )
 
 
 def automessages_keyboard(rows: list[dict[str, object]]) -> InlineKeyboardMarkup:
     buttons: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="➕ Создать автосообщение", callback_data="admin:auto:new")]
+        [ibtn("➕ Создать автосообщение", "admin:auto:new", STYLE_GO)]
     ]
     for row in rows[:20]:
         icon = "✅" if int(row["enabled"]) else "⏸"
@@ -155,14 +193,14 @@ def automessages_keyboard(rows: list[dict[str, object]]) -> InlineKeyboardMarkup
         schedule_id = int(row["id"])
         buttons.append(
             [
-                InlineKeyboardButton(
-                    text=f"{icon} №{schedule_id} · {target} · {row['interval_minutes']} мин",
-                    callback_data=f"admin:auto:toggle:{schedule_id}",
+                ibtn(
+                    f"{icon} №{schedule_id} · {target} · {row['interval_minutes']} мин",
+                    f"admin:auto:toggle:{schedule_id}",
                 ),
-                InlineKeyboardButton(text="🗑", callback_data=f"admin:auto:delete:{schedule_id}"),
+                ibtn("🗑", f"admin:auto:delete:{schedule_id}", STYLE_CLOSE),
             ]
         )
-    buttons.append([InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")])
+    buttons.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -170,8 +208,8 @@ def ticket_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💬 Ответить", callback_data=f"ticket:reply:{ticket_id}"),
-                InlineKeyboardButton(text="Закрыть", callback_data=f"ticket:close:{ticket_id}"),
+                ibtn("💬 Ответить", f"ticket:reply:{ticket_id}", STYLE_FUN),
+                ibtn("Закрыть", f"ticket:close:{ticket_id}", STYLE_CLOSE),
             ]
         ]
     )
@@ -181,13 +219,14 @@ def profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Имя", callback_data=f"profile:name:{user_id}"),
-                InlineKeyboardButton(text="Возраст", callback_data=f"profile:age:{user_id}"),
+                ibtn("Имя", f"profile:name:{user_id}"),
+                ibtn("Возраст", f"profile:age:{user_id}"),
             ],
             [
-                InlineKeyboardButton(text="Увлечения", callback_data=f"profile:hobbies:{user_id}"),
-                InlineKeyboardButton(text="Аватар", callback_data=f"profile:avatar:{user_id}"),
+                ibtn("Увлечения", f"profile:hobbies:{user_id}"),
+                ibtn("Аватар", f"profile:avatar:{user_id}"),
             ],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -196,12 +235,12 @@ def public_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👍 +реп", callback_data=f"profile_action:rep_up:{user_id}"),
-                InlineKeyboardButton(text="👎 −реп", callback_data=f"profile_action:rep_down:{user_id}"),
+                ibtn("👍 +реп", f"profile_action:rep_up:{user_id}", STYLE_GO),
+                ibtn("👎 −реп", f"profile_action:rep_down:{user_id}", STYLE_CLOSE),
             ],
             [
-                InlineKeyboardButton(text="💌 Обнять", callback_data=f"profile_action:hug:{user_id}"),
-                InlineKeyboardButton(text="🍪 Перевести", callback_data=f"profile_action:transfer:{user_id}"),
+                ibtn("💌 Обнять", f"profile_action:hug:{user_id}", STYLE_FUN),
+                ibtn("🍪 Перевести", f"profile_action:transfer:{user_id}", STYLE_FUN),
             ],
         ]
     )
@@ -211,61 +250,75 @@ def profile_transfer_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="5 🍪", callback_data=f"profile_transfer:{user_id}:5"),
-                InlineKeyboardButton(text="10 🍪", callback_data=f"profile_transfer:{user_id}:10"),
-                InlineKeyboardButton(text="25 🍪", callback_data=f"profile_transfer:{user_id}:25"),
+                ibtn("5 🍪", f"profile_transfer:{user_id}:5", STYLE_FUN),
+                ibtn("10 🍪", f"profile_transfer:{user_id}:10", STYLE_FUN),
+                ibtn("25 🍪", f"profile_transfer:{user_id}:25", STYLE_FUN),
             ],
             [
-                InlineKeyboardButton(text="50 🍪", callback_data=f"profile_transfer:{user_id}:50"),
-                InlineKeyboardButton(text="100 🍪", callback_data=f"profile_transfer:{user_id}:100"),
+                ibtn("50 🍪", f"profile_transfer:{user_id}:50", STYLE_FUN),
+                ibtn("100 🍪", f"profile_transfer:{user_id}:100", STYLE_GO),
             ],
-            [InlineKeyboardButton(text="↩️ Назад", callback_data=f"profile_action:back:{user_id}")],
+            [ibtn("↩️ Назад", f"profile_action:back:{user_id}"), close_btn("ui:close")],
         ]
     )
 
 
-def shop_keyboard(prices: dict[str, int]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    labels = {
-        "restore_rep": "Восстановить репутацию",
-        "immunity": "Иммунитет на 24 часа",
-        "event_pass": "Проходка на мероприятие",
-        "custom_status": "Кастомный статус",
-        "reset_limits": "Сброс лимитов",
-        "forgive": "Прости меня…",
-        "video_avatar": "Видео-аватар профиля",
-        "tamagotchi": "Завести тамагочи",
-        "pet_snack": "Перекус питомцу +10",
-        "pet_meal": "Обед питомцу +35",
-        "pet_feast": "Пир питомцу +70",
-        "pet_water": "Вода питомцу +25",
-        "pet_drink": "Большая поилка +70",
-    }
-    for key, label in labels.items():
-        price = prices.get(key, 0)
-        if price > 0:
-            rows.append([InlineKeyboardButton(text=f"{label} — {price} 🍪", callback_data=f"shop:{key}")])
-    rows.append([InlineKeyboardButton(text="🎟 Оплата мероприятия · 🍪", callback_data="shop:event_pass")])
-    rows.append([InlineKeyboardButton(text="💚 Поддержать развитие · 🍪", callback_data="shop:support")])
-    rows.append(
-        [InlineKeyboardButton(text="🍪 Купить печеньки", callback_data="shop:buy_cookies", style="success")]
+def shop_home_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("🐾 Тамагочи", "shop:cat:pets", STYLE_GO),
+                ibtn("🏅 Репутация", "shop:cat:reputation", STYLE_FUN),
+            ],
+            [
+                ibtn("✨ Профиль", "shop:cat:profile"),
+                ibtn("🎟 Мероприятия", "shop:cat:extra"),
+            ],
+            [ibtn("🍪 Купить печеньки", "shop:buy_cookies", STYLE_GO)],
+            [close_btn("shop:close")],
+        ]
     )
+
+
+def shop_category_keyboard(category: str, prices: dict[str, int]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if category == "extra":
+        rows.append([ibtn("🎟 Оплата мероприятия · 🍪", "shop:event_pass", STYLE_FUN)])
+        rows.append([ibtn("💚 Поддержать развитие · 🍪", "shop:support", STYLE_GO)])
+    else:
+        meta = SHOP_CATEGORIES[category]
+        style = STYLE_GO if category == "pets" else STYLE_FUN if category == "reputation" else None
+        for key in meta["items"]:
+            price = prices.get(key, 0)
+            if price <= 0:
+                continue
+            rows.append([ibtn(f"{ITEM_LABELS[key]} — {price} 🍪", f"shop:{key}", style)])
+    rows.append([back_btn("shop:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def shop_keyboard(prices: dict[str, int]) -> InlineKeyboardMarkup:
+    del prices
+    return shop_home_keyboard()
 
 
 def cookie_packages_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="10 🍪 — 100 ₽", callback_data="cookies:sbp:10")],
-            [InlineKeyboardButton(text="50 🍪 — 500 ₽", callback_data="cookies:sbp:50")],
-            [InlineKeyboardButton(text="100 🍪 — 1 000 ₽", callback_data="cookies:sbp:100")],
+            [ibtn("10 🍪 — 100 ₽", "cookies:sbp:10", STYLE_FUN)],
+            [ibtn("50 🍪 — 500 ₽", "cookies:sbp:50", STYLE_FUN)],
+            [ibtn("100 🍪 — 1 000 ₽", "cookies:sbp:100", STYLE_GO)],
+            [back_btn("shop:home"), close_btn("shop:close")],
         ]
     )
 
 
 def sbp_payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="💳 Оплатить через СБП", url=payment_url)]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить через СБП", url=payment_url, style=STYLE_GO)],
+            [ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE)],
+        ]
     )
 
 
@@ -273,8 +326,8 @@ def cookie_order_review_keyboard(order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"cookie_order:approve:{order_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"cookie_order:reject:{order_id}"),
+                ibtn("✅ Подтвердить", f"cookie_order:approve:{order_id}", STYLE_GO),
+                ibtn("❌ Отклонить", f"cookie_order:reject:{order_id}", STYLE_CLOSE),
             ]
         ]
     )
@@ -284,8 +337,8 @@ def roulette_invite_keyboard(game_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🎯 Играть", callback_data=f"roulette:accept:{game_id}"),
-                InlineKeyboardButton(text="Отказаться", callback_data=f"roulette:decline:{game_id}"),
+                ibtn("🎯 Играть", f"roulette:accept:{game_id}", STYLE_GO),
+                ibtn("Отказаться", f"roulette:decline:{game_id}", STYLE_CLOSE),
             ]
         ]
     )
@@ -294,8 +347,8 @@ def roulette_invite_keyboard(game_id: int) -> InlineKeyboardMarkup:
 def freebie_keyboard(channel_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📣 Подписаться", url=channel_url)],
-            [InlineKeyboardButton(text="✅ Проверить подписку", callback_data="freebie:check")],
+            [InlineKeyboardButton(text="📣 Подписаться", url=channel_url, style=STYLE_FUN)],
+            [ibtn("✅ Проверить подписку", "freebie:check", STYLE_GO)],
         ]
     )
 
@@ -304,8 +357,8 @@ def transfer_keyboard(transfer_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"transfer:yes:{transfer_id}"),
-                InlineKeyboardButton(text="Отмена", callback_data=f"transfer:no:{transfer_id}"),
+                ibtn("✅ Подтвердить", f"transfer:yes:{transfer_id}", STYLE_GO),
+                ibtn("Отмена", f"transfer:no:{transfer_id}", STYLE_CLOSE),
             ]
         ]
     )
@@ -315,14 +368,15 @@ def pet_species_keyboard(price: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🐈 Кот", callback_data=f"pet:species:cat:{price}"),
-                InlineKeyboardButton(text="🐕 Пёс", callback_data=f"pet:species:dog:{price}"),
+                ibtn("🐈 Кот", f"pet:species:cat:{price}", STYLE_FUN),
+                ibtn("🐕 Пёс", f"pet:species:dog:{price}", STYLE_FUN),
             ],
             [
-                InlineKeyboardButton(text="🦝 Енот", callback_data=f"pet:species:raccoon:{price}"),
-                InlineKeyboardButton(text="🦊 Лиса", callback_data=f"pet:species:fox:{price}"),
+                ibtn("🦝 Енот", f"pet:species:raccoon:{price}", STYLE_FUN),
+                ibtn("🦊 Лиса", f"pet:species:fox:{price}", STYLE_FUN),
             ],
-            [InlineKeyboardButton(text="🐉 Дракончик", callback_data=f"pet:species:dragon:{price}")],
+            [ibtn("🐉 Дракончик", f"pet:species:dragon:{price}", STYLE_GO)],
+            [ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE)],
         ]
     )
 
@@ -331,11 +385,12 @@ def pet_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🍗 Накормить", callback_data="pet:use:food"),
-                InlineKeyboardButton(text="💧 Напоить", callback_data="pet:use:water"),
+                ibtn("🍗 Накормить", "pet:use:food", STYLE_GO),
+                ibtn("💧 Напоить", "pet:use:water", STYLE_FUN),
             ],
-            [InlineKeyboardButton(text="✏️ Переименовать", callback_data="pet:rename")],
-            [InlineKeyboardButton(text="🛒 Магазин", callback_data="pet:shop")],
+            [ibtn("💬 Поговорить", "pet:talk", STYLE_FUN)],
+            [ibtn("✏️ Переименовать", "pet:rename"), ibtn("🛒 Магазин", "pet:shop", STYLE_GO)],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -360,24 +415,25 @@ def feature_flags_keyboard(flags: list[dict[str, object]]) -> InlineKeyboardMark
         enabled = bool(int(flag["enabled"]))
         rows.append(
             [
-                InlineKeyboardButton(
-                    text=f"{'🟢' if enabled else '⚪'} {FEATURE_LABELS.get(key, key)}",
-                    callback_data=f"admin:feature:{key}",
-                    style="success" if enabled else "danger",
+                ibtn(
+                    f"{'🟢' if enabled else '⚪'} {FEATURE_LABELS.get(key, key)}",
+                    f"admin:feature:{key}",
+                    STYLE_GO if enabled else STYLE_CLOSE,
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")])
+    rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def games_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🧳 Контрабанда", callback_data="game:new:smuggle")],
-            [InlineKeyboardButton(text="🧩 Сбой протокола", callback_data="game:new:protocol")],
-            [InlineKeyboardButton(text="☢️ Аукцион убежища", callback_data="game:new:bunker")],
-            [InlineKeyboardButton(text="📚 Подробные правила", callback_data="game:rules:all")],
+            [ibtn("🧳 Контрабанда", "game:new:smuggle", STYLE_FUN)],
+            [ibtn("🧩 Сбой протокола", "game:new:protocol", STYLE_FUN)],
+            [ibtn("☢️ Аукцион убежища", "game:new:bunker", STYLE_GO)],
+            [ibtn("📚 Подробные правила", "game:rules:all")],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -385,10 +441,10 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
 def game_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Войти в игру", callback_data=f"game:join:{game_id}", style="success")],
+            [ibtn("➕ Войти в игру", f"game:join:{game_id}", STYLE_GO)],
             [
-                InlineKeyboardButton(text="▶️ Начать", callback_data=f"game:start:{game_id}", style="primary"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"game:cancel:{game_id}", style="danger"),
+                ibtn("▶️ Начать", f"game:start:{game_id}", STYLE_FUN),
+                ibtn("❌ Отмена", f"game:cancel:{game_id}", STYLE_CLOSE),
             ],
         ]
     )
@@ -403,7 +459,5 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
             or player.get("username")
             or player["user_id"]
         )
-        rows.append(
-            [InlineKeyboardButton(text=f"🗳 {name[:38]}", callback_data=f"game:vote:{game_id}:{player['user_id']}")]
-        )
+        rows.append([ibtn(f"🗳 {name[:38]}", f"game:vote:{game_id}:{player['user_id']}", STYLE_FUN)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
