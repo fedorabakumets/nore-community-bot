@@ -633,7 +633,7 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
     if not target or new_role not in {"member", "moderator", "admin"}:
         await callback.answer("Некорректный пользователь или роль.", show_alert=True)
         return
-    if user_id == settings.owner_id or user_id == callback.from_user.id:
+    if settings.is_owner(user_id) or user_id == callback.from_user.id:
         await callback.answer("Эту роль нельзя изменить здесь.", show_alert=True)
         return
     target_role = await effective_role(db, settings, user_id)

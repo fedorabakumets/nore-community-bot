@@ -160,8 +160,9 @@ async def main() -> None:
         logger.critical("Бот заблокирован аварийным выключателем")
         await asyncio.Event().wait()
         return
-    await db.ensure_user(settings.owner_id, telegram_name="Владелец")
-    await db.set_role(settings.owner_id, "owner")
+    for owner_id in settings.owner_ids:
+        await db.ensure_user(owner_id, telegram_name="Владелец")
+        await db.set_role(owner_id, "owner")
     for moderator_id in settings.moderator_ids:
         moderator = await db.ensure_user(moderator_id, telegram_name="Модератор")
         if moderator["role"] == "member":

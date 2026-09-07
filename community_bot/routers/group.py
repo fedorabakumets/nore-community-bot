@@ -571,7 +571,7 @@ async def change_role(message: Message, db: Database, settings: Settings) -> Non
     if new_role == "owner" or (new_role == "admin" and actor_role != "owner"):
         await _respond(message, "Только владелец может назначать админов; роль владельца не передаётся командой.")
         return
-    if int(target["user_id"]) == settings.owner_id:
+    if settings.is_owner(int(target["user_id"])):
         await _respond(message, "Роль владельца изменить нельзя.")
         return
     await db.set_role(int(target["user_id"]), new_role)
@@ -873,13 +873,14 @@ async def buy_shop_item(
         except TelegramBadRequest:
             pass
     elif item in {"event_pass", "support"}:
-        await safe_send(
-            bot,
-            settings.owner_id,
-            f"🛒 Пользователь {user_link(callback.from_user.id, callback.from_user.full_name)} "
-            f"купил: <b>{html.escape(item)}</b> за {price} 🍪.",
-            parse_mode="HTML",
-        )
+        for owner_id in settings.owner_ids:
+            await safe_send(
+                bot,
+                owner_id,
+                f"🛒 Пользователь {user_link(callback.from_user.id, callback.from_user.full_name)} "
+                f"купил: <b>{html.escape(item)}</b> за {price} 🍪.",
+                parse_mode="HTML",
+            )
     labels = {
         "restore_rep": "Репутация восстановлена до 100.",
         "immunity": "Иммунитет от отрицательной репутации включён на 24 часа.",
@@ -922,13 +923,14 @@ async def finish_flexible_purchase(
         f"✅ {label}: выбрано {base_amount} 🍪, скидка {discount}%, списано <b>{price} 🍪</b>.",
         parse_mode="HTML",
     )
-    await safe_send(
-        bot,
-        settings.owner_id,
-        f"💚 {user_link(message.from_user.id, message.from_user.full_name)} — {label.lower()}: "
-        f"{base_amount} 🍪, списано {price} 🍪 со скидкой {discount}%.",
-        parse_mode="HTML",
-    )
+    for owner_id in settings.owner_ids:
+        await safe_send(
+            bot,
+            owner_id,
+            f"💚 {user_link(message.from_user.id, message.from_user.full_name)} — {label.lower()}: "
+            f"{base_amount} 🍪, списано {price} 🍪 со скидкой {discount}%.",
+            parse_mode="HTML",
+        )
 
 
 @router.message(ProfileEdit.video_avatar)

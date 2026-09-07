@@ -29,6 +29,7 @@ def _as_int_set(name: str) -> frozenset[int]:
 class Settings:
     bot_token: str
     owner_id: int
+    owner_ids: frozenset[int]
     moderator_ids: frozenset[int]
     community_chat_id: int
     database_path: Path
@@ -42,18 +43,25 @@ class Settings:
     freebie_channel_id: int
     freebie_channel_url: str
 
+    def is_owner(self, user_id: int) -> bool:
+        return user_id in self.owner_ids
+
     @property
     def reviewers(self) -> frozenset[int]:
-        return self.moderator_ids | ({self.owner_id} if self.owner_id else set())
+        return self.moderator_ids | self.owner_ids
 
 
 def load_settings() -> Settings:
     load_dotenv()
+    owner_id = _as_int("OWNER_ID")
+    owner_ids = frozenset(_as_int_set("OWNER_IDS") | ({owner_id} if owner_id else set()))
+    community_chat_id = _as_int("COMMUNITY_CHAT_ID") or _as_int("GROUP_ID")
     settings = Settings(
         bot_token=os.getenv("BOT_TOKEN", "").strip(),
-        owner_id=_as_int("OWNER_ID"),
+        owner_id=owner_id,
+        owner_ids=owner_ids,
         moderator_ids=_as_int_set("MODERATOR_IDS"),
-        community_chat_id=_as_int("COMMUNITY_CHAT_ID"),
+        community_chat_id=community_chat_id,
         database_path=Path(os.getenv("DATABASE_PATH", "data/community.db")),
         welcome_cover=os.getenv("WELCOME_COVER", "").strip() or None,
         event_pass_price=max(0, _as_int("EVENT_PASS_PRICE")),

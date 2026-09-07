@@ -75,7 +75,7 @@ async def send_stored_message(
 
 
 async def effective_role(db: Database, settings: Settings, user_id: int) -> str:
-    if user_id == settings.owner_id:
+    if settings.is_owner(user_id):
         return "owner"
     if user_id in settings.moderator_ids:
         user = await db.get_user(user_id)
