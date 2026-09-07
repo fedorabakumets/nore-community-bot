@@ -11,9 +11,9 @@ from aiogram.types import CallbackQuery, Message
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LEVELS
-from community_bot.helpers import effective_role, register_telegram_user, user_link
+from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import game_lobby_keyboard, game_vote_keyboard, games_menu_keyboard
+from community_bot.permissions import PERM_GAMES
 
 router = Router(name="games")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
@@ -48,7 +48,11 @@ GAME_RULES = """🎮 <b>Игры NORA COMMUNITY</b>
 Вход, старт и голосование выполняются кнопками. Секретные карточки приходят в личный чат,
 поэтому каждый игрок должен заранее нажать Start у бота.
 
-Игры не используют купленные печеньки и не влияют на основной баланс."""
+Игры не используют купленные печеньки и не влияют на основной баланс.
+
+🍪 <b>Блэкджек и кости на печеньки · 2–4 игрока</b>
+/cgames, /blackjack 10 или /dice 25. Ставка списывается при входе в лобби.
+В блэкджеке сдаёт Нора, в костях банк забирает лучший 2d6. Отмена возвращает ставки."""
 
 
 def _player_name(player: dict[str, object]) -> str:
@@ -299,8 +303,7 @@ async def cancel_game_command(message: Message, db: Database, settings: Settings
     if not game:
         await message.answer("В этом чате нет активной игры.")
         return
-    role = await effective_role(db, settings, message.from_user.id)
-    is_admin = ROLE_LEVELS.get(role, 0) >= ROLE_LEVELS["admin"]
+    is_admin = await has_permission(db, settings, message.from_user.id, PERM_GAMES)
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
         await message.answer("Отменить игру может создатель или администратор.")
         return
@@ -312,8 +315,7 @@ async def cancel_game_callback(callback: CallbackQuery, db: Database, settings: 
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
-    role = await effective_role(db, settings, callback.from_user.id)
-    is_admin = ROLE_LEVELS.get(role, 0) >= ROLE_LEVELS["admin"]
+    is_admin = await has_permission(db, settings, callback.from_user.id, PERM_GAMES)
     if not await db.cancel_party_game(game_id, callback.from_user.id, is_admin):
         await callback.answer("Отменить игру может создатель или администратор.", show_alert=True)
         return

@@ -7,9 +7,16 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LEVELS
-from community_bot.helpers import effective_role
-from community_bot.keyboards import FLOW_CANCEL, FLOW_RESTART, flow_reply_keyboard, main_private_keyboard
+from community_bot.helpers import has_permission, render_profile
+from community_bot.keyboards import (
+    BTN_MENU,
+    BTN_PROFILE,
+    flow_reply_keyboard,
+    main_private_keyboard,
+    private_menu_keyboard,
+    profile_keyboard,
+)
+from community_bot.permissions import PERM_ADMIN_PANEL
 from community_bot.states import ApplicationForm
 from community_bot.texts import APPLICATION_INTRO
 
@@ -22,14 +29,11 @@ class InFlow(Filter):
 
 
 async def restore_private_menu(message: Message, db: Database, settings: Settings) -> None:
-    if message.chat.type != "private" or not message.from_user:
+    del db, settings
+    if message.chat.type != "private":
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
-    role = await effective_role(db, settings, message.from_user.id)
-    await message.answer(
-        "Главное меню снова снизу.",
-        reply_markup=main_private_keyboard(ROLE_LEVELS.get(role, 0) >= ROLE_LEVELS["admin"]),
-    )
+    await message.answer("Снизу всегда зелёный «Профиль» и синее «Меню».", reply_markup=main_private_keyboard())
 
 
 async def restart_application(message: Message, state: FSMContext) -> None:
@@ -56,21 +60,52 @@ async def cancel_current_flow(
         await restore_private_menu(message, db, settings)
 
 
-@router.message(InFlow(), F.text.in_({FLOW_CANCEL, FLOW_RESTART}))
-async def flow_text_control(
+async def _show_own_profile(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    user = await db.ensure_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
+    text = await render_profile(db, settings, user)
+    markup = profile_keyboard(message.from_user.id, bool(user.get("profile_private")))
+    if user["avatar_file_id"]:
+        try:
+            if user.get("avatar_media_type") == "video":
+                await message.answer_video(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            await message.answer_photo(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
+            return
+        except Exception:
+            pass
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+async def _show_inline_menu(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
+    await message.answer(
+        "📋 <b>Меню НОРЫ</b>\n\nАнкета, вопрос модераторам, магазин, тамагочи — всё здесь.",
+        parse_mode="HTML",
+        reply_markup=private_menu_keyboard(show_admin),
+    )
+
+
+@router.message(F.chat.type == "private", F.text.in_({BTN_PROFILE, BTN_MENU}))
+async def persistent_nav(
     message: Message,
     state: FSMContext,
     db: Database,
     settings: Settings,
 ) -> None:
-    current = await state.get_state()
-    if message.text == FLOW_RESTART and current and current.startswith("ApplicationForm:"):
-        await restart_application(message, state)
+    data = await state.get_data()
+    ticket_id = data.get("ticket_id")
+    await state.clear()
+    if ticket_id:
+        await db.close_ticket(int(ticket_id))
+        await message.answer(f"Тикет №{ticket_id} закрыт, чтобы открыть это меню.")
+    if message.text == BTN_PROFILE:
+        await _show_own_profile(message, db, settings)
         return
-    if message.text == FLOW_RESTART:
-        await message.answer("Здесь можно только отменить. Нажмите ❌ Отмена.")
-        return
-    await cancel_current_flow(message, state, db, settings)
+    await _show_inline_menu(message, db, settings)
 
 
 @router.callback_query(InFlow(), F.data.in_({"flow:cancel", "flow:restart"}))
@@ -136,4 +171,4 @@ async def shop_close(callback: CallbackQuery) -> None:
 
 
 def with_flow_prompt(text: str) -> str:
-    return f"{text}\n\nСнизу — только «Начать заново» и «Отмена»."
+    return f"{text}\n\nСнизу — зелёный «Профиль» и синее «Меню», они всегда работают."

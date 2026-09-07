@@ -27,8 +27,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import (
-    ROLE_LABELS,
-    ROLE_LEVELS,
     discounted_price,
     parse_duration,
     reputation_delta,
@@ -36,13 +34,17 @@ from community_bot.domain import (
     transfer_amount,
 )
 from community_bot.helpers import (
+    can_manage_user,
     effective_role,
+    has_permission,
     is_immunity_active,
-    profile_text,
+    pet_guard_reputation,
+    rank_of_user,
     register_telegram_user,
     resolve_reply_target,
     safe_send,
     user_link,
+    user_permissions,
 )
 from community_bot.keyboards import (
     admin_panel_keyboard,
@@ -58,6 +60,17 @@ from community_bot.keyboards import (
     shop_category_keyboard,
     shop_home_keyboard,
     transfer_keyboard,
+)
+from community_bot.permissions import (
+    PERM_ADMIN_PANEL,
+    PERM_BAN,
+    PERM_KICK,
+    PERM_MUTE,
+    PERM_PAYMENTS,
+    PERM_ROLES_ASSIGN,
+    PERM_USERS_COOKIES,
+    PERM_USERS_EDIT,
+    PERM_WARN,
 )
 from community_bot.shop_catalog import IMMUNITY_HOURS, PET_SUPPLIES, SHOP_CATEGORIES, shop_prices_for
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
@@ -109,8 +122,7 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                             f"🎁 За активность в чате ({activity_count} сообщений) "
                             "ваш тамагочи получил 1 еду и 1 воду.",
                         )
-                role = await effective_role(db, settings, event.from_user.id)
-                member = ROLE_LEVELS.get(role, 0) < ROLE_LEVELS["moderator"]
+                member = await rank_of_user(db, settings, event.from_user.id) < 40
                 blocked_reason: str | None = None
                 text = event.text or event.caption or ""
                 if member and flags.get("quiet_hours"):
@@ -204,10 +216,22 @@ async def _require_role(message: Message, db: Database, settings: Settings, mini
         return None
     await register_telegram_user(db, message.from_user)
     role = await effective_role(db, settings, message.from_user.id)
-    if ROLE_LEVELS.get(role, 0) < ROLE_LEVELS[minimum]:
+    from community_bot.helpers import rank_of_role
+
+    if await rank_of_user(db, settings, message.from_user.id) < await rank_of_role(db, minimum):
         await _respond(message, "Недостаточно прав для этой команды.")
         return None
     return role
+
+
+async def _require_perm(message: Message, db: Database, settings: Settings, permission: str) -> str | None:
+    if not message.from_user:
+        return None
+    await register_telegram_user(db, message.from_user)
+    if not await has_permission(db, settings, message.from_user.id, permission):
+        await _respond(message, "Недостаточно прав для этой команды.")
+        return None
+    return await effective_role(db, settings, message.from_user.id)
 
 
 def _target_display(target: dict[str, object]) -> str:
@@ -216,15 +240,12 @@ def _target_display(target: dict[str, object]) -> str:
 
 
 async def _can_manage_target(
-    actor_role: str,
+    actor_id: int,
     target: dict[str, object],
     db: Database,
     settings: Settings,
 ) -> bool:
-    if actor_role == "owner":
-        return True
-    target_role = await effective_role(db, settings, int(target["user_id"]))
-    return ROLE_LEVELS.get(actor_role, 0) > ROLE_LEVELS.get(target_role, 0)
+    return await can_manage_user(db, settings, actor_id, int(target["user_id"]))
 
 
 def _full_permissions() -> ChatPermissions:
@@ -262,8 +283,7 @@ async def store_help(message: Message) -> None:
 async def open_admin_from_group(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not message.from_user:
         return
-    role = await effective_role(db, settings, message.from_user.id)
-    if ROLE_LEVELS.get(role, 0) < ROLE_LEVELS["admin"]:
+    if not await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL):
         await _respond(message, "Недостаточно прав для админ-панели.")
         return
     pending = len(await db.pending_applications(limit=100))
@@ -278,7 +298,7 @@ async def open_admin_from_group(message: Message, db: Database, settings: Settin
             message.from_user.id,
             text,
             parse_mode="HTML",
-            reply_markup=admin_panel_keyboard(),
+            reply_markup=admin_panel_keyboard(await user_permissions(db, settings, message.from_user.id)),
         )
     except (TelegramForbiddenError, TelegramBadRequest):
         await _private_chat_notice(message, bot)
@@ -298,38 +318,9 @@ async def show_identifiers(message: Message, bot: Bot) -> None:
 
 
 @router.message(Command("profile"), F.chat.type.in_({"group", "supergroup"}))
-async def group_profile(message: Message, db: Database, settings: Settings) -> None:
-    if not message.from_user:
-        return
-    actor = await register_telegram_user(db, message.from_user)
-    target = await resolve_reply_target(message, db) or actor
-    text = profile_text(target, settings)
-    if target["avatar_file_id"]:
-        try:
-            if target.get("avatar_media_type") == "video":
-                profile_message = await message.answer_video(
-                    target["avatar_file_id"],
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=public_profile_keyboard(int(target["user_id"])),
-                )
-            else:
-                profile_message = await message.answer_photo(
-                    target["avatar_file_id"],
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=public_profile_keyboard(int(target["user_id"])),
-                )
-            asyncio.create_task(_delete_later(profile_message, 25))
-            return
-        except TelegramBadRequest:
-            pass
-    profile_message = await message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=public_profile_keyboard(int(target["user_id"])),
-    )
-    asyncio.create_task(_delete_later(profile_message, 25))
+async def group_profile_legacy(message: Message) -> None:
+    del message
+    return
 
 
 @router.callback_query(F.data.startswith("profile_action:"), F.message.chat.type.in_({"group", "supergroup"}))
@@ -386,12 +377,15 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
         await callback.answer("У пользователя действует иммунитет от понижения репутации.", show_alert=True)
         return
+    delta, pet_line = await pet_guard_reputation(db, target_id, delta)
     new_value = await db.apply_reputation(callback.from_user.id, target_id, delta, local_date)
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
-    await callback.answer(f"Репутация изменена на {'+' if delta > 0 else ''}{delta}.")
+    sign = "+" if delta > 0 else ""
+    await callback.answer("Питомец вмешался!" if pet_line else f"Репутация изменена на {sign}{delta}.")
+    extra = f"\n{pet_line}" if pet_line else ""
     await callback.message.answer(
         f"{target_tier.emoji} Репутация {_target_display(target)}: "
-        f"{'+' if delta > 0 else ''}{delta}, теперь {new_value}.",
+        f"{sign}{delta}, теперь {new_value}.{extra}",
         parse_mode="HTML",
     )
     if new_value < settings.restricted_reputation_threshold:
@@ -438,7 +432,7 @@ async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
 
 @router.message(Command("mute"), F.chat.type.in_({"group", "supergroup"}))
 async def mute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_MUTE):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -465,7 +459,7 @@ async def mute_member(message: Message, db: Database, settings: Settings, bot: B
 
 @router.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
 async def unmute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_MUTE):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -477,7 +471,7 @@ async def unmute_member(message: Message, db: Database, settings: Settings, bot:
 
 @router.message(Command("kick"), F.chat.type.in_({"group", "supergroup"}))
 async def kick_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_KICK):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -491,7 +485,7 @@ async def kick_member(message: Message, db: Database, settings: Settings, bot: B
 
 @router.message(Command("ban"), F.chat.type.in_({"group", "supergroup"}))
 async def ban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_BAN):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -503,7 +497,7 @@ async def ban_member(message: Message, db: Database, settings: Settings, bot: Bo
 
 @router.message(Command("unban"), F.chat.type.in_({"group", "supergroup"}))
 async def unban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_BAN):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
@@ -515,7 +509,7 @@ async def unban_member(message: Message, db: Database, settings: Settings, bot: 
 
 @router.message(Command("warn"), F.chat.type.in_({"group", "supergroup"}))
 async def warn_member(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_WARN):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -531,7 +525,7 @@ async def warn_member(message: Message, db: Database, settings: Settings) -> Non
 
 @router.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
 async def unwarn_member(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_role(message, db, settings):
+    if not await _require_perm(message, db, settings, PERM_WARN):
         return
     target = await resolve_reply_target(message, db)
     if not target:
@@ -547,28 +541,40 @@ async def unwarn_member(message: Message, db: Database, settings: Settings) -> N
 
 @router.message(Command("role"), F.chat.type.in_({"group", "supergroup"}))
 async def change_role(message: Message, db: Database, settings: Settings) -> None:
-    actor_role = await _require_role(message, db, settings, "admin")
-    if not actor_role:
+    if not await _require_perm(message, db, settings, PERM_ROLES_ASSIGN) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     parts = (message.text or "").split()
-    if not target or len(parts) != 2 or parts[1].casefold() not in ROLE_LEVELS:
-        await _respond(message, "Ответьте на сообщение: /role member|moderator|admin")
+    if not target or len(parts) != 2:
+        await _respond(message, "Ответьте на сообщение: /role код_роли")
         return
     new_role = parts[1].casefold()
-    if new_role == "owner" or (new_role == "admin" and actor_role != "owner"):
-        await _respond(message, "Только владелец может назначать админов; роль владельца не передаётся командой.")
+    role = await db.get_staff_role(new_role)
+    if not role or new_role == "owner":
+        names = ", ".join(item["slug"] for item in await db.list_staff_roles() if item["slug"] != "owner")
+        await _respond(message, f"Неизвестная роль. Доступны: {names}")
         return
-    if settings.is_owner(int(target["user_id"])):
-        await _respond(message, "Роль владельца изменить нельзя.")
+    if settings.is_owner(int(target["user_id"])) or int(target["user_id"]) == message.from_user.id:
+        await _respond(message, "Эту роль нельзя изменить командой.")
+        return
+    if not await can_manage_user(db, settings, message.from_user.id, int(target["user_id"])):
+        await _respond(message, "Нельзя менять роль равного или выше.")
+        return
+    actor_rank = await rank_of_user(db, settings, message.from_user.id)
+    if not settings.is_owner(message.from_user.id) and int(role["rank"]) >= actor_rank:
+        await _respond(message, "Нельзя выдать роль не ниже своей.")
         return
     await db.set_role(int(target["user_id"]), new_role)
-    await _respond(message, f"Роль {_target_display(target)}: {ROLE_LABELS[new_role]}.", parse_mode="HTML")
+    await _respond(
+        message,
+        f"Роль {_target_display(target)}: {html.escape(str(role['name']))}.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("setstatus"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_set_status(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_role(message, db, settings, "admin"):
+    if not await _require_perm(message, db, settings, PERM_USERS_EDIT):
         return
     target = await resolve_reply_target(message, db)
     parts = (message.text or "").split(maxsplit=1)
@@ -701,7 +707,10 @@ async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, setting
         reply_markup=sbp_payment_keyboard(settings.sbp_payment_url),
     )
     if callback.message.chat.type == "private":
-        await callback.message.answer("Чтобы выйти — красная «Отмена» снизу.", reply_markup=flow_reply_keyboard())
+        await callback.message.answer(
+            "Чтобы выйти — зелёный «Профиль» или синее «Меню» снизу.",
+            reply_markup=flow_reply_keyboard(),
+        )
 
 
 @router.message(CookiePurchase.receipt)
@@ -745,7 +754,7 @@ async def receive_sbp_receipt(
     recipients = {
         user_id
         for user_id in candidates
-        if ROLE_LEVELS.get(await effective_role(db, settings, user_id), 0) >= ROLE_LEVELS["admin"]
+        if await has_permission(db, settings, user_id, PERM_PAYMENTS)
     }
     caption = (
         f"💳 <b>Заказ печенек №{order_id}</b>\n"
@@ -778,8 +787,7 @@ async def receive_sbp_receipt(
 async def review_cookie_order(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
-    role = await effective_role(db, settings, callback.from_user.id)
-    if ROLE_LEVELS.get(role, 0) < ROLE_LEVELS["admin"]:
+    if not await has_permission(db, settings, callback.from_user.id, PERM_PAYMENTS):
         await callback.answer("Недостаточно прав.", show_alert=True)
         return
     _, decision, raw_order_id = callback.data.split(":")
@@ -903,6 +911,12 @@ async def buy_shop_item(
             f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪."
         )
         return
+    if item == "private_profile" and user.get("profile_private"):
+        await callback.answer("Профиль уже скрыт.", show_alert=True)
+        return
+    if item == "ornate_profile" and user.get("profile_ornate"):
+        await callback.answer("Кастомный профиль уже куплен.", show_alert=True)
+        return
     ok, error = await db.buy_item(callback.from_user.id, item, price)
     if not ok:
         await callback.answer(error, show_alert=True)
@@ -930,6 +944,8 @@ async def buy_shop_item(
         "reset_limits": "Лимит действий репутации сброшен.",
         "forgive": "Предупреждения очищены, мут снят.",
         "support": "Спасибо за поддержку проекта!",
+        "private_profile": "Профиль скрыт от чужих. Открыть снова можно кнопкой на своей карточке.",
+        "ornate_profile": "Кастомное оформление профиля включено.",
     }
     await callback.answer("Покупка выполнена.")
     await callback.message.answer(f"✅ {labels[item]} Списано {price} 🍪.")
@@ -1016,7 +1032,7 @@ async def save_purchased_status(message: Message, state: FSMContext, db: Databas
 
 @router.message(Command("givecookies"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_give_cookies(message: Message, db: Database, settings: Settings) -> None:
-    actor_role = await _require_role(message, db, settings, "admin")
+    actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role:
         return
     target = await resolve_reply_target(message, db)
@@ -1024,7 +1040,7 @@ async def admin_give_cookies(message: Message, db: Database, settings: Settings)
     if not target or len(parts) != 2 or not parts[1].isdigit():
         await _respond(message, "Ответьте на сообщение: /givecookies 100")
         return
-    if not await _can_manage_target(actor_role, target, db, settings):
+    if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
         return
     amount = int(parts[1])
@@ -1037,7 +1053,7 @@ async def admin_give_cookies(message: Message, db: Database, settings: Settings)
 
 @router.message(Command("setcookies"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_set_cookies(message: Message, db: Database, settings: Settings) -> None:
-    actor_role = await _require_role(message, db, settings, "admin")
+    actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
@@ -1045,7 +1061,7 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
     if not target or len(parts) != 2 or not parts[1].isdigit():
         await _respond(message, "Ответьте на сообщение: /setcookies 100")
         return
-    if not await _can_manage_target(actor_role, target, db, settings):
+    if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
         return
     amount = int(parts[1])
@@ -1280,11 +1296,13 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
     if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
         await message.reply("🛡 У пользователя действует иммунитет от понижения репутации.")
         return
+    delta, pet_line = await pet_guard_reputation(db, int(target["user_id"]), delta)
     new_value = await db.apply_reputation(message.from_user.id, int(target["user_id"]), delta, local_date)
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
     sign = "+" if delta > 0 else ""
+    extra = f"\n{pet_line}" if pet_line else ""
     await message.reply(
-        f"{target_tier.emoji} Репутация {_target_display(target)}: {sign}{delta}, теперь {new_value}.",
+        f"{target_tier.emoji} Репутация {_target_display(target)}: {sign}{delta}, теперь {new_value}.{extra}",
         parse_mode="HTML",
     )
     if new_value < settings.restricted_reputation_threshold:

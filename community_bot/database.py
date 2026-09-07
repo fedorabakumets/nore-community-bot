@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS users (
     reputation INTEGER NOT NULL DEFAULT 100,
     warnings INTEGER NOT NULL DEFAULT 0 CHECK(warnings >= 0),
     hate_immunity_until TEXT,
+    profile_private INTEGER NOT NULL DEFAULT 0 CHECK(profile_private IN (0, 1)),
+    profile_ornate INTEGER NOT NULL DEFAULT 0 CHECK(profile_ornate IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -190,6 +192,15 @@ CREATE TABLE IF NOT EXISTS pets (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS staff_roles (
+    slug TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    rank INTEGER NOT NULL DEFAULT 0,
+    permissions_json TEXT NOT NULL DEFAULT '[]',
+    is_system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS party_games (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
@@ -261,6 +272,13 @@ class Database:
             pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
             if "last_talk_at" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN last_talk_at TEXT")
+            if "profile_private" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN profile_private INTEGER NOT NULL DEFAULT 0")
+            if "profile_ornate" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN profile_ornate INTEGER NOT NULL DEFAULT 0")
+            await db.commit()
+        await self._seed_staff_roles()
+        async with self.connect() as db:
             now = utcnow()
             for key, enabled in DEFAULT_FEATURE_FLAGS.items():
                 await db.execute(
@@ -395,14 +413,92 @@ class Database:
             (role, utcnow(), user_id),
         )
 
+    async def _seed_staff_roles(self) -> None:
+        from community_bot.permissions import DEFAULT_STAFF_ROLES, dump_permissions
+
+        now = utcnow()
+        async with self.connect() as db:
+            for slug, name, rank, perms, is_system in DEFAULT_STAFF_ROLES:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO staff_roles(slug, name, rank, permissions_json, is_system, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (slug, name, rank, dump_permissions(perms), is_system, now),
+                )
+            await db.commit()
+
+    async def list_staff_roles(self) -> list[dict[str, Any]]:
+        from community_bot.permissions import parse_permissions
+
+        rows = await self.fetchall("SELECT * FROM staff_roles ORDER BY rank DESC, name")
+        for row in rows:
+            row["permissions"] = parse_permissions(str(row.get("permissions_json") or "[]"))
+        return rows
+
+    async def get_staff_role(self, slug: str) -> dict[str, Any] | None:
+        from community_bot.permissions import parse_permissions
+
+        row = await self.fetchone("SELECT * FROM staff_roles WHERE slug = ?", (slug,))
+        if not row:
+            return None
+        row["permissions"] = parse_permissions(str(row.get("permissions_json") or "[]"))
+        return row
+
+    async def create_staff_role(self, slug: str, name: str, rank: int, permissions: list[str] | None = None) -> bool:
+        from community_bot.permissions import dump_permissions
+
+        try:
+            await self.execute(
+                """
+                INSERT INTO staff_roles(slug, name, rank, permissions_json, is_system, created_at)
+                VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (slug, name, rank, dump_permissions(permissions or []), utcnow()),
+            )
+        except Exception:
+            return False
+        return True
+
+    async def update_staff_role(
+        self,
+        slug: str,
+        *,
+        name: str | None = None,
+        rank: int | None = None,
+        permissions: list[str] | None = None,
+    ) -> bool:
+        from community_bot.permissions import dump_permissions
+
+        role = await self.get_staff_role(slug)
+        if not role:
+            return False
+        new_name = name if name is not None else str(role["name"])
+        new_rank = rank if rank is not None else int(role["rank"])
+        new_perms = dump_permissions(permissions if permissions is not None else list(role["permissions"]))
+        await self.execute(
+            "UPDATE staff_roles SET name = ?, rank = ?, permissions_json = ? WHERE slug = ?",
+            (new_name, new_rank, new_perms, slug),
+        )
+        return True
+
+    async def delete_staff_role(self, slug: str) -> bool:
+        role = await self.get_staff_role(slug)
+        if not role or int(role["is_system"]):
+            return False
+        async with self.connect() as db:
+            await db.execute("UPDATE users SET role = 'member', updated_at = ? WHERE role = ?", (utcnow(), slug))
+            cursor = await db.execute("DELETE FROM staff_roles WHERE slug = ? AND is_system = 0", (slug,))
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def list_users(self, limit: int = 30) -> list[dict[str, Any]]:
         return await self.fetchall(
             """
-            SELECT user_id, username, telegram_name, profile_name, role
-            FROM users
-            ORDER BY
-                CASE role WHEN 'owner' THEN 3 WHEN 'admin' THEN 2 WHEN 'moderator' THEN 1 ELSE 0 END DESC,
-                updated_at DESC
+            SELECT u.user_id, u.username, u.telegram_name, u.profile_name, u.role
+            FROM users u
+            LEFT JOIN staff_roles r ON r.slug = u.role
+            ORDER BY COALESCE(r.rank, 0) DESC, u.updated_at DESC
             LIMIT ?
             """,
             (limit,),
@@ -417,7 +513,16 @@ class Database:
         )
 
     async def update_profile(self, user_id: int, field: str, value: Any) -> None:
-        allowed = {"profile_name", "age", "hobbies", "avatar_file_id", "avatar_media_type", "custom_status"}
+        allowed = {
+            "profile_name",
+            "age",
+            "hobbies",
+            "avatar_file_id",
+            "avatar_media_type",
+            "custom_status",
+            "profile_private",
+            "profile_ornate",
+        }
         if field not in allowed:
             raise ValueError("Недопустимое поле профиля")
         await self.execute(
@@ -668,6 +773,16 @@ class Database:
                 )
             elif item == "forgive":
                 await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
+            elif item == "private_profile":
+                await db.execute(
+                    "UPDATE users SET profile_private = 1, updated_at = ? WHERE user_id = ?",
+                    (now, user_id),
+                )
+            elif item == "ornate_profile":
+                await db.execute(
+                    "UPDATE users SET profile_ornate = 1, updated_at = ? WHERE user_id = ?",
+                    (now, user_id),
+                )
             await db.execute(
                 "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
                 (user_id, -price, "shop", item, now),
@@ -1166,8 +1281,15 @@ class Database:
             (now, now, user_id),
         )
 
-    async def create_party_game(self, chat_id: int, game_type: str, creator_id: int) -> tuple[int, bool]:
+    async def create_party_game(
+        self,
+        chat_id: int,
+        game_type: str,
+        creator_id: int,
+        state: dict[str, Any] | None = None,
+    ) -> tuple[int, bool]:
         now = utcnow()
+        payload = json.dumps(state or {}, ensure_ascii=False)
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute(
@@ -1180,9 +1302,9 @@ class Database:
                 await db.rollback()
                 return int(existing["id"]), False
             cursor = await db.execute(
-                "INSERT INTO party_games(chat_id, game_type, creator_id, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (chat_id, game_type, creator_id, now, now),
+                "INSERT INTO party_games(chat_id, game_type, creator_id, state_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (chat_id, game_type, creator_id, payload, now, now),
             )
             game_id = int(cursor.lastrowid)
             await db.execute(
@@ -1191,6 +1313,134 @@ class Database:
             )
             await db.commit()
             return game_id, True
+
+    async def create_staked_game(
+        self,
+        chat_id: int,
+        game_type: str,
+        creator_id: int,
+        stake: int,
+    ) -> tuple[int | None, str]:
+        if stake <= 0:
+            return None, "Ставка должна быть больше нуля."
+        now = utcnow()
+        state = {"stake": stake, "phase": "lobby"}
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT id FROM party_games WHERE chat_id = ? AND status IN ('lobby', 'active') "
+                "ORDER BY id DESC LIMIT 1",
+                (chat_id,),
+            )
+            existing = await cursor.fetchone()
+            if existing:
+                await db.rollback()
+                return int(existing["id"]), "В чате уже идёт другая игра."
+            cursor = await db.execute(
+                "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
+                (stake, now, creator_id, stake),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return None, "Недостаточно печенек для этой ставки."
+            await db.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                (creator_id, -stake, "cookie_game_stake", game_type, now),
+            )
+            cursor = await db.execute(
+                "INSERT INTO party_games(chat_id, game_type, creator_id, state_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (chat_id, game_type, creator_id, json.dumps(state, ensure_ascii=False), now, now),
+            )
+            game_id = int(cursor.lastrowid)
+            await db.execute(
+                "INSERT INTO party_game_players(game_id, user_id, secret_json, joined_at) VALUES (?, ?, ?, ?)",
+                (game_id, creator_id, json.dumps({"stake": stake}), now),
+            )
+            await db.commit()
+            return game_id, "ok"
+
+    async def join_staked_game(self, game_id: int, user_id: int, maximum: int = 4) -> tuple[bool, str]:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "lobby":
+                await db.rollback()
+                return False, "Набор в эту игру уже закрыт."
+            state = json.loads(str(game["state_json"]) or "{}")
+            stake = int(state.get("stake") or 0)
+            if stake <= 0:
+                await db.rollback()
+                return False, "У этой игры нет ставки."
+            cursor = await db.execute("SELECT COUNT(*) AS count FROM party_game_players WHERE game_id = ?", (game_id,))
+            count = int((await cursor.fetchone())["count"])
+            if count >= maximum:
+                await db.rollback()
+                return False, "В лобби уже нет мест."
+            cursor = await db.execute(
+                "SELECT 1 FROM party_game_players WHERE game_id = ? AND user_id = ?",
+                (game_id, user_id),
+            )
+            if await cursor.fetchone():
+                await db.rollback()
+                return False, "Вы уже присоединились."
+            cursor = await db.execute(
+                "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
+                (stake, now, user_id, stake),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False, "Недостаточно печенек для этой ставки."
+            await db.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, -stake, "cookie_game_stake", str(game["game_type"]), now),
+            )
+            await db.execute(
+                "INSERT INTO party_game_players(game_id, user_id, secret_json, joined_at) VALUES (?, ?, ?, ?)",
+                (game_id, user_id, json.dumps({"stake": stake}), now),
+            )
+            await db.commit()
+            return True, "Вы в игре. Ставка списана."
+
+    async def save_party_state(self, game_id: int, state: dict[str, Any]) -> None:
+        await self.execute(
+            "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(state, ensure_ascii=False), utcnow(), game_id),
+        )
+
+    async def save_player_secret(self, game_id: int, user_id: int, secret: dict[str, Any]) -> None:
+        await self.execute(
+            "UPDATE party_game_players SET secret_json = ? WHERE game_id = ? AND user_id = ?",
+            (json.dumps(secret, ensure_ascii=False), game_id, user_id),
+        )
+
+    async def payout_staked_game(self, game_id: int, payouts: dict[int, int]) -> None:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT status FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] not in {"lobby", "active"}:
+                await db.rollback()
+                return
+            for user_id, amount in payouts.items():
+                if amount <= 0:
+                    continue
+                await db.execute(
+                    "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                    (amount, now, user_id),
+                )
+                await db.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, amount, "cookie_game_win", str(game_id), now),
+                )
+            await db.execute(
+                "UPDATE party_games SET status = 'completed', updated_at = ?, completed_at = ? WHERE id = ?",
+                (now, now, game_id),
+            )
+            await db.commit()
 
     async def get_party_game(self, game_id: int) -> dict[str, Any] | None:
         row = await self.fetchone("SELECT * FROM party_games WHERE id = ?", (game_id,))
@@ -1328,18 +1578,37 @@ class Database:
 
     async def cancel_party_game(self, game_id: int, actor_id: int, is_admin: bool = False) -> bool:
         now = utcnow()
-        query = (
-            "UPDATE party_games SET status = 'cancelled', updated_at = ?, completed_at = ? "
-            "WHERE id = ? AND status IN ('lobby', 'active')"
-        )
-        parameters: tuple[Any, ...] = (now, now, game_id)
-        if not is_admin:
-            query += " AND creator_id = ?"
-            parameters += (actor_id,)
         async with self.connect() as db:
-            cursor = await db.execute(query, parameters)
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] not in {"lobby", "active"}:
+                await db.rollback()
+                return False
+            if not is_admin and int(game["creator_id"]) != actor_id:
+                await db.rollback()
+                return False
+            state = json.loads(str(game["state_json"] or "{}"))
+            stake = int(state.get("stake") or 0)
+            if stake > 0:
+                cursor = await db.execute("SELECT user_id FROM party_game_players WHERE game_id = ?", (game_id,))
+                players = await cursor.fetchall()
+                for player in players:
+                    user_id = int(player["user_id"])
+                    await db.execute(
+                        "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                        (stake, now, user_id),
+                    )
+                    await db.execute(
+                        "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, stake, "cookie_game_refund", str(game_id), now),
+                    )
+            await db.execute(
+                "UPDATE party_games SET status = 'cancelled', updated_at = ?, completed_at = ? WHERE id = ?",
+                (now, now, game_id),
+            )
             await db.commit()
-            return cursor.rowcount == 1
+            return True
 
     async def restore_daily_reputation(self, local_date: date) -> list[dict[str, Any]]:
         key = "last_reputation_restore"

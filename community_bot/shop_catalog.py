@@ -12,6 +12,8 @@ ITEM_LABELS = {
     "immunity_72h": "Иммунитет · 3 дня",
     "custom_status": "Кастомный статус",
     "video_avatar": "Видео-аватар профиля",
+    "private_profile": "Приватный профиль",
+    "ornate_profile": "Кастомный профиль",
     "tamagotchi": "Завести тамагочи",
     "pet_snack": "Перекус питомцу +10",
     "pet_meal": "Обед питомцу +35",
@@ -30,6 +32,8 @@ BASE_SHOP_PRICES = {
     "immunity_72h": 22,
     "custom_status": 5,
     "video_avatar": 10,
+    "private_profile": 15,
+    "ornate_profile": 25,
     "tamagotchi": 50,
     "pet_snack": 1,
     "pet_meal": 3,
@@ -66,8 +70,8 @@ SHOP_CATEGORIES = {
     },
     "profile": {
         "title": "✨ Профиль",
-        "intro": "Косметика карточки: статус и видео-аватар.",
-        "items": ("custom_status", "video_avatar"),
+        "intro": "Косметика карточки: статус, видео-аватар, скрытый и кастомный профиль.",
+        "items": ("custom_status", "video_avatar", "private_profile", "ornate_profile"),
     },
 }
 

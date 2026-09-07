@@ -48,3 +48,5 @@ class AdminFlow(StatesGroup):
     mention_all = State()
     automessage_content = State()
     automessage_interval = State()
+    role_name = State()
+    role_rename = State()

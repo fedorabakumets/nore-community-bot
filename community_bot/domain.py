@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 
-ROLE_LEVELS = {"member": 0, "moderator": 1, "admin": 2, "owner": 3}
+ROLE_LEVELS = {"member": 0, "moderator": 40, "admin": 70, "owner": 100}
 ROLE_LABELS = {
     "member": "участник",
     "moderator": "модератор",

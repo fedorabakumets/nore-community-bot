@@ -11,9 +11,17 @@ from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandSc
 
 from community_bot.config import Settings, load_settings
 from community_bot.database import Database
-from community_bot.helpers import send_stored_message
+from community_bot.helpers import send_stored_message, user_link
 from community_bot.pets_talk import idle_ping
-from community_bot.routers import flows_router, games_router, group_router, pets_router, private_router
+from community_bot.routers import (
+    cookie_games_router,
+    flows_router,
+    games_router,
+    group_router,
+    pets_router,
+    private_router,
+    profile_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +49,10 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="reputation", description="Система репутации"),
             BotCommand(command="store", description="Магазин и оплата"),
             BotCommand(command="shop", description="Магазин"),
-            BotCommand(command="transfer", description="Перевести печеньки ответом"),
+            BotCommand(command="pet", description="Открыть тамагочи"),
+            BotCommand(command="cgames", description="Игры на печеньки 2–4 игрока"),
+            BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
+            BotCommand(command="dice", description="Кости: /dice 10"),
             BotCommand(command="roulette", description="Русская рулетка ответом"),
             BotCommand(command="games", description="Мини-игры и правила"),
             BotCommand(command="pet", description="Открыть тамагочи в личке"),
@@ -118,7 +129,7 @@ async def emergency_stop_job(dispatcher: Dispatcher, emergency_stop: asyncio.Eve
     await dispatcher.stop_polling()
 
 
-async def pet_notifications_job(db: Database, bot: Bot) -> None:
+async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> None:
     while True:
         try:
             for stored_pet in await db.list_pets():
@@ -139,16 +150,38 @@ async def pet_notifications_job(db: Database, bot: Bot) -> None:
                 )
                 if not payout and not hungry_notice_due and not cute_ping_due:
                     continue
+                owner = await db.get_user(user_id)
+                owner_name = str(
+                    (owner or {}).get("profile_name")
+                    or (owner or {}).get("telegram_name")
+                    or (owner or {}).get("username")
+                    or user_id
+                )
+                mention = user_link(user_id, owner_name)
                 if payout:
-                    text = f"🍪✨ {pet['name']} притащил тебе {payout} 🍪 и смотрит глазами-сердечками 💕"
+                    dm_text = f"🍪✨ {pet['name']} притащил тебе {payout} 🍪 и смотрит глазами-сердечками 💕"
+                    chat_text = (
+                        f"🍪✨ <b>{pet['name']}</b> принёс печеньку хозяину {mention}: "
+                        f"+{payout} 🍪. Малыш гордо несёт добычу по норе!"
+                    )
                 elif hungry_notice_due:
-                    text = (
+                    dm_text = (
                         f"💤🥺 {pet['name']} свернулся калачиком: сытость или вода на нуле. "
                         "Загляни в /pet, пожалуйста 🫶🌸"
                     )
+                    chat_text = (
+                        f"💤 <b>{pet['name']}</b> свернулся у {mention} и тихо сопит: "
+                        "нужно покормить или напоить."
+                    )
                 else:
-                    text = idle_ping(pet)
-                if await send_stored_message(bot, user_id, text, None, None):
+                    dm_text = idle_ping(pet)
+                    chat_text = f"🐾 <b>{pet['name']}</b> выглянул из норки к {mention}: {idle_ping(pet)}"
+                sent = await send_stored_message(bot, user_id, dm_text, None, None)
+                if settings.community_chat_id and (payout or hungry_notice_due):
+                    with contextlib.suppress(Exception):
+                        await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
+                        sent = True
+                if sent:
                     await db.execute(
                         "UPDATE pets SET last_notice_at = ?, updated_at = ? WHERE user_id = ?",
                         (now.isoformat(), now.isoformat(), user_id),
@@ -182,6 +215,8 @@ async def main() -> None:
     bot = Bot(settings.bot_token)
     dispatcher = Dispatcher()
     dispatcher.include_router(flows_router)
+    dispatcher.include_router(profile_router)
+    dispatcher.include_router(cookie_games_router)
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
     dispatcher.include_router(private_router)
@@ -192,7 +227,7 @@ async def main() -> None:
     emergency_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
-    pet_task = asyncio.create_task(pet_notifications_job(db, bot))
+    pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     try:
         await dispatcher.start_polling(bot, db=db, settings=settings, emergency_stop=emergency_stop)

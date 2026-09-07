@@ -7,6 +7,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
 from community_bot.shop_catalog import ITEM_LABELS, SHOP_CATEGORIES
 
 # Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
@@ -16,6 +17,8 @@ STYLE_CLOSE = "danger"
 
 FLOW_CANCEL = "❌ Отмена"
 FLOW_RESTART = "🔄 Начать заново"
+BTN_PROFILE = "👤 Профиль"
+BTN_MENU = "📋 Меню"
 
 
 def ibtn(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
@@ -50,25 +53,30 @@ def flow_inline_keyboard() -> InlineKeyboardMarkup:
 
 
 def flow_reply_keyboard() -> ReplyKeyboardMarkup:
+    return main_private_keyboard()
+
+
+def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    del is_admin
     return ReplyKeyboardMarkup(
-        keyboard=[[kbtn(FLOW_RESTART, STYLE_FUN), kbtn(FLOW_CANCEL, STYLE_CLOSE)]],
+        keyboard=[[kbtn(BTN_PROFILE, STYLE_GO), kbtn(BTN_MENU, STYLE_FUN)]],
         resize_keyboard=True,
         is_persistent=True,
     )
 
 
-def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
-    rows = [
-        [kbtn("📝 Заполнить анкету", STYLE_GO), kbtn("❓ Задать вопрос")],
-        [kbtn("👤 Мой профиль"), kbtn("🛒 Магазин", STYLE_FUN)],
-        [kbtn("🐾 Тамагочи", STYLE_FUN)],
-    ]
-    if is_admin:
-        rows.append([kbtn("🛡 Админ-панель")])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
-
-
 MAIN_PRIVATE_KEYBOARD = main_private_keyboard()
+
+
+def private_menu_keyboard(show_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn("📝 Анкета", "menu:apply", STYLE_GO), ibtn("❓ Вопрос", "menu:question")],
+        [ibtn("🛒 Магазин", "menu:shop", STYLE_FUN), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
+    ]
+    if show_admin:
+        rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
+    rows.append([close_btn("ui:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def start_apply_keyboard() -> InlineKeyboardMarkup:
@@ -102,23 +110,59 @@ def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def admin_panel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [ibtn("📋 Анкеты", "admin:applications"), ibtn("💳 Платежи", "admin:orders")],
-            [ibtn("👥 Права", "admin:roles"), ibtn("👤 Профили и 🍪", "admin:users")],
-            [ibtn("⏱ Автосообщения", "admin:auto:list")],
+def admin_panel_keyboard(permissions: list[str] | None = None) -> InlineKeyboardMarkup:
+    perms = permissions if permissions is not None else ["*"]
+
+    def allow(key: str) -> bool:
+        return role_has_permission(perms, key)
+
+    rows: list[list[InlineKeyboardButton]] = []
+    first: list[InlineKeyboardButton] = []
+    if allow("applications"):
+        first.append(ibtn("📋 Анкеты", "admin:applications"))
+    if allow("payments"):
+        first.append(ibtn("💳 Платежи", "admin:orders"))
+    if first:
+        rows.append(first)
+    second: list[InlineKeyboardButton] = []
+    if allow("roles.assign") or allow("roles.edit"):
+        second.append(ibtn("👥 Права", "admin:roles"))
+    if allow("users.edit") or allow("users.cookies"):
+        second.append(ibtn("👤 Профили и 🍪", "admin:users"))
+    if second:
+        rows.append(second)
+    if allow("automessages"):
+        rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
+    lock_row: list[InlineKeyboardButton] = []
+    if allow("chat.lock"):
+        lock_row.extend(
             [
                 ibtn("🔇 Мут чата", "admin:chat:mute", STYLE_CLOSE),
                 ibtn("🔊 Открыть чат", "admin:chat:unmute", STYLE_GO),
-            ],
-            [ibtn("📣 Упомянуть всех", "admin:mention"), ibtn("💌 Рассылка в ЛС", "admin:broadcast")],
-            [ibtn("📢 Сообщение в сообщество", "admin:post")],
-            [ibtn("⚙️ Функции", "admin:features"), ibtn("📊 Состояние", "admin:health")],
-            [ibtn("💤 Инактив", "admin:inactive"), ibtn("🧾 Журнал", "admin:audit")],
-            [close_btn("ui:close")],
-        ]
-    )
+            ]
+        )
+    if lock_row:
+        rows.append(lock_row)
+    chat_row: list[InlineKeyboardButton] = []
+    if allow("chat.mention"):
+        chat_row.append(ibtn("📣 Упомянуть всех", "admin:mention"))
+    if allow("chat.broadcast"):
+        chat_row.append(ibtn("💌 Рассылка в ЛС", "admin:broadcast"))
+    if chat_row:
+        rows.append(chat_row)
+    if allow("chat.post"):
+        rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
+    extra: list[InlineKeyboardButton] = []
+    if allow("features"):
+        extra.append(ibtn("⚙️ Функции", "admin:features"))
+    extra.append(ibtn("📊 Состояние", "admin:health"))
+    rows.append(extra)
+    bottom: list[InlineKeyboardButton] = [ibtn("💤 Инактив", "admin:inactive")]
+    if allow("audit"):
+        bottom.append(ibtn("🧾 Журнал", "admin:audit"))
+    rows.append(bottom)
+    rows.append([close_btn("ui:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def role_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup:
@@ -132,15 +176,74 @@ def role_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def role_selection_keyboard(user_id: int, can_assign_admin: bool) -> InlineKeyboardMarkup:
-    row = [
-        ibtn("👤 Участник", f"admin:setrole:{user_id}:member"),
-        ibtn("🔨 Модератор", f"admin:setrole:{user_id}:moderator"),
+def roles_hub_keyboard(can_edit_roles: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn("👤 Назначить человеку", "admin:roleusers", STYLE_FUN)],
+        [ibtn("📜 Список ролей", "admin:rolelist", STYLE_GO)],
     ]
-    rows = [row]
-    if can_assign_admin:
-        rows.append([ibtn("🛡 Админ", f"admin:setrole:{user_id}:admin", STYLE_FUN)])
+    if can_edit_roles:
+        rows.append([ibtn("➕ Создать роль", "admin:rolenew", STYLE_GO)])
+    rows.append([back_btn("admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def staff_roles_keyboard(roles: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    icons = {"owner": "👑", "admin": "🛡", "moderator": "🔨", "member": "👤"}
+    for role in roles:
+        slug = str(role["slug"])
+        icon = icons.get(slug, "💠")
+        rows.append([ibtn(f"{icon} {role['name']} · {role['rank']}", f"admin:roleview:{slug}")])
     rows.append([back_btn("admin:roles")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def staff_role_view_keyboard(role: dict[str, object], can_edit: bool) -> InlineKeyboardMarkup:
+    slug = str(role["slug"])
+    perms = list(role.get("permissions") or [])
+    rows: list[list[InlineKeyboardButton]] = []
+    if can_edit and slug != "owner":
+        for key, _label in PERMISSIONS:
+            mark = "✅" if role_has_permission(perms, key) else "⚪"
+            rows.append(
+                [
+                    ibtn(
+                        f"{mark} {permission_label(key)}",
+                        f"admin:roletog:{slug}:{key}",
+                        STYLE_GO if role_has_permission(perms, key) else None,
+                    )
+                ]
+            )
+        rows.append(
+            [
+                ibtn("➖ Ранг", f"admin:rolerank:{slug}:-5"),
+                ibtn("➕ Ранг", f"admin:rolerank:{slug}:+5", STYLE_FUN),
+            ]
+        )
+        if not int(role.get("is_system") or 0):
+            rows.append([ibtn("🗑 Удалить роль", f"admin:roledel:{slug}", STYLE_CLOSE)])
+    rows.append([back_btn("admin:rolelist")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def role_selection_keyboard(
+    user_id: int,
+    roles: list[dict[str, object]],
+    actor_rank: int,
+    is_owner: bool,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    icons = {"owner": "👑", "admin": "🛡", "moderator": "🔨", "member": "👤"}
+    for role in roles:
+        slug = str(role["slug"])
+        if slug == "owner":
+            continue
+        rank = int(role["rank"])
+        if not is_owner and rank >= actor_rank:
+            continue
+        icon = icons.get(slug, "💠")
+        rows.append([ibtn(f"{icon} {role['name']}", f"admin:setrole:{user_id}:{slug}")])
+    rows.append([back_btn("admin:roleusers")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -215,20 +318,21 @@ def ticket_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                ibtn("Имя", f"profile:name:{user_id}"),
-                ibtn("Возраст", f"profile:age:{user_id}"),
-            ],
-            [
-                ibtn("Увлечения", f"profile:hobbies:{user_id}"),
-                ibtn("Аватар", f"profile:avatar:{user_id}"),
-            ],
-            [close_btn("ui:close")],
-        ]
-    )
+def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            ibtn("Имя", f"profile:name:{user_id}"),
+            ibtn("Возраст", f"profile:age:{user_id}"),
+        ],
+        [
+            ibtn("Увлечения", f"profile:hobbies:{user_id}"),
+            ibtn("Аватар", f"profile:avatar:{user_id}"),
+        ],
+    ]
+    if is_private:
+        rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
+    rows.append([close_btn("ui:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def public_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -432,8 +536,49 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
             [ibtn("🧳 Контрабанда", "game:new:smuggle", STYLE_FUN)],
             [ibtn("🧩 Сбой протокола", "game:new:protocol", STYLE_FUN)],
             [ibtn("☢️ Аукцион убежища", "game:new:bunker", STYLE_GO)],
+            [
+                ibtn("🃏 Блэкджек 🍪", "cg:pick:bj", STYLE_GO),
+                ibtn("🎲 Кости 🍪", "cg:pick:dice", STYLE_FUN),
+            ],
             [ibtn("📚 Подробные правила", "game:rules:all")],
             [close_btn("ui:close")],
+        ]
+    )
+
+
+def cookie_stake_keyboard(game_type: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("5 🍪", f"cg:new:{game_type}:5", STYLE_FUN),
+                ibtn("10 🍪", f"cg:new:{game_type}:10", STYLE_FUN),
+                ibtn("25 🍪", f"cg:new:{game_type}:25", STYLE_GO),
+            ],
+            [ibtn("50 🍪", f"cg:new:{game_type}:50", STYLE_GO)],
+            [back_btn("cg:home"), close_btn("ui:close")],
+        ]
+    )
+
+
+def cookie_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("➕ Войти (ставка спишется)", f"cg:join:{game_id}", STYLE_GO)],
+            [
+                ibtn("▶️ Начать", f"cg:start:{game_id}", STYLE_FUN),
+                ibtn("❌ Отмена", f"cg:cancel:{game_id}", STYLE_CLOSE),
+            ],
+        ]
+    )
+
+
+def blackjack_turn_keyboard(game_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("🃏 Взять", f"cg:hit:{game_id}", STYLE_FUN),
+                ibtn("✋ Хватит", f"cg:stand:{game_id}", STYLE_GO),
+            ]
         ]
     )
 

@@ -22,14 +22,17 @@ from aiogram.types import (
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LABELS, ROLE_LEVELS
 from community_bot.helpers import (
+    can_manage_user,
     effective_role,
+    has_permission,
     media_from_message,
-    profile_text,
+    rank_of_user,
     register_telegram_user,
+    role_title,
     safe_send,
     user_link,
+    user_permissions,
 )
 from community_bot.keyboards import (
     STYLE_CLOSE,
@@ -44,14 +47,32 @@ from community_bot.keyboards import (
     feature_flags_keyboard,
     flow_reply_keyboard,
     main_private_keyboard,
-    profile_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
+    roles_hub_keyboard,
+    staff_role_view_keyboard,
+    staff_roles_keyboard,
     start_apply_keyboard,
     ticket_keyboard,
 )
+from community_bot.permissions import (
+    PERM_ADMIN_PANEL,
+    PERM_APPLICATIONS,
+    PERM_AUTOMESSAGES,
+    PERM_BROADCAST,
+    PERM_CHAT_LOCK,
+    PERM_FEATURES,
+    PERM_MENTION,
+    PERM_PAYMENTS,
+    PERM_POST,
+    PERM_ROLES_ASSIGN,
+    PERM_ROLES_EDIT,
+    PERM_USERS_COOKIES,
+    PERM_USERS_EDIT,
+    slugify_role,
+)
 from community_bot.routers.flows import restore_private_menu
-from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, ProfileEdit, TicketForm
+from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, TicketForm
 from community_bot.texts import (
     APPLICATION_INTRO,
     APPLICATION_QUESTIONS,
@@ -74,8 +95,12 @@ EMERGENCY_STOP_KEYBOARD = InlineKeyboardMarkup(
 
 
 async def _private_keyboard(user_id: int, db: Database, settings: Settings):
-    role = await effective_role(db, settings, user_id)
-    return main_private_keyboard(ROLE_LEVELS.get(role, 0) >= ROLE_LEVELS["admin"])
+    del user_id, db, settings
+    return main_private_keyboard()
+
+
+async def _panel_markup(db: Database, settings: Settings, user_id: int):
+    return admin_panel_keyboard(await user_permissions(db, settings, user_id))
 
 
 async def _send_welcome(message: Message, settings: Settings, reply_markup) -> None:
@@ -171,15 +196,85 @@ async def help_command(message: Message, db: Database, settings: Settings) -> No
     )
 
 
+@router.callback_query(F.data == "menu:apply")
+async def menu_apply(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
+    if not callback.message or not callback.from_user:
+        return
+    await callback.answer()
+    await register_telegram_user(db, callback.from_user)
+    await state.set_state(ApplicationForm.name)
+    await state.set_data({"flow_kind": "application"})
+    await callback.message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+
+
+@router.callback_query(F.data == "menu:question")
+async def menu_question(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+    bot: Bot,
+) -> None:
+    if not callback.message:
+        return
+    await callback.answer()
+    await open_ticket(callback.message, state, db, settings, bot)
+
+
+@router.callback_query(F.data == "menu:shop")
+async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.from_user:
+        return
+    from community_bot.keyboards import shop_home_keyboard
+    from community_bot.routers.group import _shop_home_text
+
+    user = await register_telegram_user(db, callback.from_user)
+    await callback.answer()
+    await callback.message.answer(
+        _shop_home_text(user, settings),
+        parse_mode="HTML",
+        reply_markup=shop_home_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "menu:pet")
+async def menu_pet(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    from community_bot.routers.pets import _show_pet
+
+    await callback.answer()
+    await _show_pet(callback.message, db)
+
+
+@router.callback_query(F.data == "menu:admin")
+async def menu_admin(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    await callback.message.answer(
+        await _admin_panel_text(db),
+        parse_mode="HTML",
+        reply_markup=await _panel_markup(db, settings, callback.from_user.id),
+    )
+
+
 async def _admin_role(user_id: int, db: Database, settings: Settings) -> str | None:
-    role = await effective_role(db, settings, user_id)
-    return role if ROLE_LEVELS.get(role, 0) >= ROLE_LEVELS["admin"] else None
+    if await has_permission(db, settings, user_id, PERM_ADMIN_PANEL):
+        return await effective_role(db, settings, user_id)
+    return None
 
 
-async def _admin_callback(callback: CallbackQuery, db: Database, settings: Settings) -> str | None:
+async def _admin_callback(
+    callback: CallbackQuery,
+    db: Database,
+    settings: Settings,
+    permission: str = PERM_ADMIN_PANEL,
+) -> str | None:
     role = await _admin_role(callback.from_user.id, db, settings)
-    if not role:
+    if not role or not await has_permission(db, settings, callback.from_user.id, permission):
         await callback.answer("Недостаточно прав.", show_alert=True)
+        return None
     return role
 
 
@@ -202,7 +297,7 @@ async def admin_panel(message: Message, db: Database, settings: Settings) -> Non
     await message.answer(
         await _admin_panel_text(db),
         parse_mode="HTML",
-        reply_markup=admin_panel_keyboard(),
+        reply_markup=await _panel_markup(db, settings, message.from_user.id),
     )
 
 
@@ -214,13 +309,13 @@ async def admin_panel_callback(callback: CallbackQuery, db: Database, settings: 
     await callback.message.edit_text(
         await _admin_panel_text(db),
         parse_mode="HTML",
-        reply_markup=admin_panel_keyboard(),
+        reply_markup=await _panel_markup(db, settings, callback.from_user.id),
     )
 
 
 @router.callback_query(F.data == "admin:features")
 async def admin_features(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_FEATURES):
         return
     flags = await db.list_feature_flags()
     await callback.answer()
@@ -440,11 +535,10 @@ async def finish_application(
 
 
 async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -> bool:
-    role = await effective_role(db, settings, callback.from_user.id)
-    if ROLE_LEVELS.get(role, 0) < ROLE_LEVELS["moderator"]:
-        await callback.answer("Недостаточно прав.", show_alert=True)
-        return False
-    return True
+    if await has_permission(db, settings, callback.from_user.id, PERM_APPLICATIONS):
+        return True
+    await callback.answer("Недостаточно прав.", show_alert=True)
+    return False
 
 
 async def _notify_application_decision(
@@ -462,14 +556,13 @@ async def _notify_application_decision(
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
-    user = await db.get_user(int(application["user_id"]))
-    is_admin = bool(user and str(user["role"]) in {"admin", "owner"})
+    is_staff = await has_permission(db, settings, int(application["user_id"]), PERM_ADMIN_PANEL)
     await safe_send(
         bot,
         int(application["user_id"]),
         f"{result}.{reason_text}",
         parse_mode="HTML",
-        reply_markup=main_private_keyboard(is_admin),
+        reply_markup=main_private_keyboard(is_staff),
     )
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
@@ -552,17 +645,14 @@ async def _send_pending_applications(message: Message, db: Database) -> None:
 
 @router.message(Command("applications"))
 async def applications_list(message: Message, db: Database, settings: Settings) -> None:
-    if (
-        not message.from_user
-        or ROLE_LEVELS.get(await effective_role(db, settings, message.from_user.id), 0) < ROLE_LEVELS["moderator"]
-    ):
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_APPLICATIONS):
         return
     await _send_pending_applications(message, db)
 
 
 @router.callback_query(F.data == "admin:applications")
 async def admin_applications(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_APPLICATIONS):
         return
     await callback.answer()
     await _send_pending_applications(callback.message, db)
@@ -570,7 +660,7 @@ async def admin_applications(callback: CallbackQuery, db: Database, settings: Se
 
 @router.callback_query(F.data == "admin:orders")
 async def admin_cookie_orders(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_PAYMENTS):
         return
     orders = await db.pending_cookie_orders()
     await callback.answer()
@@ -610,18 +700,181 @@ async def admin_cookie_orders(callback: CallbackQuery, db: Database, settings: S
 async def admin_roles(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
+    can_assign = await has_permission(db, settings, callback.from_user.id, PERM_ROLES_ASSIGN)
+    can_edit = await has_permission(db, settings, callback.from_user.id, PERM_ROLES_EDIT)
+    if not can_assign and not can_edit:
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "👥 <b>Права и роли</b>\n\n"
+        "Создавайте роли, включайте нужные права тумблерами и назначайте их людям.",
+        parse_mode="HTML",
+        reply_markup=roles_hub_keyboard(can_edit),
+    )
+
+
+@router.callback_query(F.data == "admin:roleusers")
+async def admin_role_users(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_ASSIGN):
+        return
     users = await db.list_users()
     await callback.answer()
     await callback.message.edit_text(
-        "👥 <b>Права пользователей</b>\n\nВыберите пользователя:",
+        "👥 <b>Назначить роль человеку</b>\n\nВыберите пользователя:",
         parse_mode="HTML",
         reply_markup=role_users_keyboard(users),
     )
 
 
+@router.callback_query(F.data == "admin:rolelist")
+async def admin_role_list(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    roles = await db.list_staff_roles()
+    await callback.answer()
+    await callback.message.edit_text(
+        "📜 <b>Роли</b>\n\nНажмите роль, чтобы править права и ранг.",
+        parse_mode="HTML",
+        reply_markup=staff_roles_keyboard(roles),
+    )
+
+
+@router.callback_query(F.data == "admin:rolenew")
+async def admin_role_new(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    await state.set_state(AdminFlow.role_name)
+    await callback.answer()
+    await callback.message.answer(
+        "Напишите название новой роли (до 40 символов). Права потом включите тумблерами.",
+        reply_markup=flow_reply_keyboard(),
+    )
+
+
+@router.message(AdminFlow.role_name)
+async def admin_role_create_name(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_ROLES_EDIT):
+        await state.clear()
+        return
+    name = (message.text or "").strip()
+    if not 2 <= len(name) <= 40:
+        await message.answer("Название — от 2 до 40 символов.")
+        return
+    slug = slugify_role(name)
+    existing = await db.get_staff_role(slug)
+    suffix = 2
+    while existing:
+        slug = f"{slugify_role(name)[:20]}_{suffix}"
+        existing = await db.get_staff_role(slug)
+        suffix += 1
+    actor_rank = await rank_of_user(db, settings, message.from_user.id)
+    rank = min(50, max(1, actor_rank - 1))
+    if not await db.create_staff_role(slug, name, rank, []):
+        await message.answer("Не удалось создать роль, попробуйте другое имя.")
+        return
+    await state.clear()
+    await db.log_admin_action(message.from_user.id, "role_create", slug, name)
+    role = await db.get_staff_role(slug)
+    assert role
+    await message.answer(
+        f"✅ Роль <b>{html.escape(name)}</b> создана (ранг {rank}). Включите нужные права:",
+        parse_mode="HTML",
+        reply_markup=staff_role_view_keyboard(role, True),
+    )
+
+
+async def _show_role_view(callback: CallbackQuery, db: Database, settings: Settings, slug: str) -> None:
+    role = await db.get_staff_role(slug)
+    if not role or not callback.message:
+        await callback.answer("Роль не найдена.", show_alert=True)
+        return
+    can_edit = await has_permission(db, settings, callback.from_user.id, PERM_ROLES_EDIT)
+    perms = ", ".join(str(item) for item in role["permissions"]) or "нет"
+    await callback.message.edit_text(
+        f"💠 <b>{html.escape(str(role['name']))}</b>\n"
+        f"Код: <code>{html.escape(slug)}</code>\n"
+        f"Ранг: <b>{role['rank']}</b> · {'системная' if int(role['is_system']) else 'своя'}\n"
+        f"Права: <code>{html.escape(perms)}</code>\n\n"
+        "Нажимайте строки, чтобы включать и выключать права.",
+        parse_mode="HTML",
+        reply_markup=staff_role_view_keyboard(role, can_edit),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:roleview:"))
+async def admin_role_view(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    await _show_role_view(callback, db, settings, callback.data.rsplit(":", 1)[1])
+
+
+@router.callback_query(F.data.startswith("admin:roletog:"))
+async def admin_role_toggle(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    _, _, slug, perm = callback.data.split(":", 3)
+    role = await db.get_staff_role(slug)
+    if not role or slug == "owner":
+        await callback.answer("Эту роль нельзя менять.", show_alert=True)
+        return
+    perms = list(role["permissions"])
+    if perm in perms:
+        perms.remove(perm)
+    else:
+        perms.append(perm)
+    await db.update_staff_role(slug, permissions=perms)
+    await db.log_admin_action(callback.from_user.id, "role_perm", slug, perm)
+    await callback.answer("Право обновлено.")
+    await _show_role_view(callback, db, settings, slug)
+
+
+@router.callback_query(F.data.startswith("admin:rolerank:"))
+async def admin_role_rank(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    _, _, slug, delta_raw = callback.data.split(":")
+    role = await db.get_staff_role(slug)
+    if not role or slug == "owner":
+        await callback.answer("Ранг этой роли фиксирован.", show_alert=True)
+        return
+    delta = int(delta_raw)
+    actor_rank = await rank_of_user(db, settings, callback.from_user.id)
+    ceiling = 99 if settings.is_owner(callback.from_user.id) else actor_rank - 1
+    new_rank = max(0, min(ceiling, int(role["rank"]) + delta))
+    await db.update_staff_role(slug, rank=new_rank)
+    await callback.answer(f"Ранг: {new_rank}")
+    await _show_role_view(callback, db, settings, slug)
+
+
+@router.callback_query(F.data.startswith("admin:roledel:"))
+async def admin_role_delete(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    slug = callback.data.rsplit(":", 1)[1]
+    if not await db.delete_staff_role(slug):
+        await callback.answer("Системную роль удалить нельзя.", show_alert=True)
+        return
+    await db.log_admin_action(callback.from_user.id, "role_delete", slug)
+    await callback.answer("Роль удалена, людям назначен участник.")
+    roles = await db.list_staff_roles()
+    if callback.message:
+        await callback.message.edit_text(
+            "📜 <b>Роли</b>",
+            parse_mode="HTML",
+            reply_markup=staff_roles_keyboard(roles),
+        )
+
+
 @router.callback_query(F.data.startswith("admin:user:"))
 async def admin_role_user(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    actor_role = await _admin_callback(callback, db, settings)
+    actor_role = await _admin_callback(callback, db, settings, PERM_ROLES_ASSIGN)
     if not callback.data or not callback.message or not actor_role:
         return
     user_id = int(callback.data.rsplit(":", 1)[1])
@@ -631,62 +884,83 @@ async def admin_role_user(callback: CallbackQuery, db: Database, settings: Setti
         return
     name = user["profile_name"] or user["telegram_name"] or user["username"] or f"ID {user_id}"
     username = f"@{user['username']}" if user["username"] else "без юзернейма"
+    title = await role_title(db, str(user["role"]))
+    roles = await db.list_staff_roles()
+    actor_rank = await rank_of_user(db, settings, callback.from_user.id)
     await callback.answer()
     await callback.message.edit_text(
         f"👤 <b>{html.escape(str(name))}</b>\n"
         f"{html.escape(username)} · <code>{user_id}</code>\n"
-        f"Текущая роль: <b>{ROLE_LABELS.get(str(user['role']), 'участник')}</b>\n\n"
+        f"Текущая роль: <b>{html.escape(title)}</b>\n\n"
         "Выберите новую роль:",
         parse_mode="HTML",
-        reply_markup=role_selection_keyboard(user_id, actor_role == "owner"),
+        reply_markup=role_selection_keyboard(
+            user_id,
+            roles,
+            actor_rank,
+            settings.is_owner(callback.from_user.id),
+        ),
     )
 
 
 @router.callback_query(F.data.startswith("admin:setrole:"))
 async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    actor_role = await _admin_callback(callback, db, settings)
+    actor_role = await _admin_callback(callback, db, settings, PERM_ROLES_ASSIGN)
     if not callback.data or not callback.message or not actor_role:
         return
     _, _, user_id_raw, new_role = callback.data.split(":")
     user_id = int(user_id_raw)
     target = await db.get_user(user_id)
-    if not target or new_role not in {"member", "moderator", "admin"}:
+    role = await db.get_staff_role(new_role)
+    if not target or not role or new_role == "owner":
         await callback.answer("Некорректный пользователь или роль.", show_alert=True)
         return
     if settings.is_owner(user_id) or user_id == callback.from_user.id:
         await callback.answer("Эту роль нельзя изменить здесь.", show_alert=True)
         return
-    target_role = await effective_role(db, settings, user_id)
-    if actor_role != "owner" and (ROLE_LEVELS.get(target_role, 0) >= ROLE_LEVELS["admin"] or new_role == "admin"):
-        await callback.answer("Только владелец может управлять администраторами.", show_alert=True)
+    if not await can_manage_user(db, settings, callback.from_user.id, user_id):
+        await callback.answer("Нельзя менять роль равного или выше.", show_alert=True)
+        return
+    actor_rank = await rank_of_user(db, settings, callback.from_user.id)
+    if not settings.is_owner(callback.from_user.id) and int(role["rank"]) >= actor_rank:
+        await callback.answer("Нельзя выдать роль не ниже своей.", show_alert=True)
         return
     await db.set_role(user_id, new_role)
-    label = ROLE_LABELS[new_role]
+    label = str(role["name"])
     await callback.answer(f"Новая роль: {label}.")
+    roles = await db.list_staff_roles()
     await callback.message.edit_text(
-        f"✅ Пользователю <code>{user_id}</code> назначена роль <b>{label}</b>.",
+        f"✅ Пользователю <code>{user_id}</code> назначена роль <b>{html.escape(label)}</b>.",
         parse_mode="HTML",
-        reply_markup=role_selection_keyboard(user_id, actor_role == "owner"),
+        reply_markup=role_selection_keyboard(
+            user_id,
+            roles,
+            actor_rank,
+            settings.is_owner(callback.from_user.id),
+        ),
     )
     await safe_send(
         bot,
         user_id,
-        f"Ваша роль изменена: <b>{label}</b>.",
+        f"Ваша роль изменена: <b>{html.escape(label)}</b>.",
         parse_mode="HTML",
-        reply_markup=main_private_keyboard(new_role == "admin"),
+        reply_markup=main_private_keyboard(),
     )
 
 
-async def _can_admin_manage(actor_role: str, target_id: int, db: Database, settings: Settings) -> bool:
-    if actor_role == "owner":
-        return True
-    target_role = await effective_role(db, settings, target_id)
-    return ROLE_LEVELS.get(actor_role, 0) > ROLE_LEVELS.get(target_role, 0)
+async def _can_admin_manage(actor_id: int, target_id: int, db: Database, settings: Settings) -> bool:
+    return await can_manage_user(db, settings, actor_id, target_id)
 
 
 @router.callback_query(F.data == "admin:users")
 async def admin_users(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    if not (
+        await has_permission(db, settings, callback.from_user.id, PERM_USERS_EDIT)
+        or await has_permission(db, settings, callback.from_user.id, PERM_USERS_COOKIES)
+    ):
+        await callback.answer("Недостаточно прав.", show_alert=True)
         return
     users = await db.list_users(limit=100)
     await callback.answer()
@@ -707,14 +981,14 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
         return
-    if not await _can_admin_manage(actor_role, user_id, db, settings):
+    if not await _can_admin_manage(callback.from_user.id, user_id, db, settings):
         await callback.answer("Нельзя редактировать пользователя с равной или более высокой ролью.", show_alert=True)
         return
     name = user["profile_name"] or user["telegram_name"] or user["username"] or f"ID {user_id}"
     await callback.answer()
     await callback.message.edit_text(
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
-        f"Роль: {ROLE_LABELS.get(str(user['role']), 'участник')}\n"
+        f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
         f"Возраст: {user['age'] or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Предупреждения: <b>{user['warnings']}</b>\n\n"
@@ -736,7 +1010,7 @@ async def admin_begin_user_edit(
         return
     _, _, action, raw_user_id = callback.data.split(":")
     user_id = int(raw_user_id)
-    if not await db.get_user(user_id) or not await _can_admin_manage(actor_role, user_id, db, settings):
+    if not await db.get_user(user_id) or not await _can_admin_manage(callback.from_user.id, user_id, db, settings):
         await callback.answer("Редактирование этого пользователя недоступно.", show_alert=True)
         return
     prompts = {
@@ -764,7 +1038,7 @@ async def admin_save_user_edit(message: Message, state: FSMContext, db: Database
     data = await state.get_data()
     user_id = int(data["target_user_id"])
     action = str(data["admin_action"])
-    if not actor_role or not await _can_admin_manage(actor_role, user_id, db, settings):
+    if not actor_role or not await _can_admin_manage(message.from_user.id, user_id, db, settings):
         await state.clear()
         await message.answer("Недостаточно прав для изменения этого пользователя.")
         return
@@ -834,7 +1108,7 @@ def _open_chat_permissions() -> ChatPermissions:
 
 @router.callback_query(F.data.startswith("admin:chat:"))
 async def admin_toggle_chat(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    if not callback.data or not await _admin_callback(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_CHAT_LOCK):
         return
     if not settings.community_chat_id:
         await callback.answer("ID чата сообщества не настроен.", show_alert=True)
@@ -861,7 +1135,7 @@ async def admin_begin_broadcast(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_BROADCAST):
         return
     await state.set_state(AdminFlow.broadcast_private)
     await callback.answer()
@@ -902,7 +1176,7 @@ async def admin_begin_community_post(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
     await state.set_state(AdminFlow.post_community)
     await callback.answer()
@@ -943,7 +1217,7 @@ async def admin_begin_mention(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_MENTION):
         return
     await state.set_state(AdminFlow.mention_all)
     await callback.answer()
@@ -988,7 +1262,7 @@ async def admin_send_mention(message: Message, state: FSMContext, db: Database, 
 
 @router.callback_query(F.data == "admin:auto:list")
 async def admin_automessages(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_AUTOMESSAGES):
         return
     rows = await db.list_scheduled_messages()
     await callback.answer()
@@ -1218,101 +1492,3 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
         await callback.message.edit_reply_markup(reply_markup=None)
     await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
 
-
-@router.message(Command("profile"))
-@router.message(F.text == "👤 Мой профиль")
-async def show_profile(message: Message, db: Database, settings: Settings) -> None:
-    if not message.from_user:
-        return
-    user = await register_telegram_user(db, message.from_user)
-    text = profile_text(user, settings)
-    if user["avatar_file_id"]:
-        try:
-            if user.get("avatar_media_type") == "video":
-                await message.answer_video(
-                    user["avatar_file_id"],
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=profile_keyboard(message.from_user.id),
-                )
-            else:
-                await message.answer_photo(
-                    user["avatar_file_id"],
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=profile_keyboard(message.from_user.id),
-                )
-            return
-        except TelegramBadRequest:
-            pass
-    await message.answer(text, parse_mode="HTML", reply_markup=profile_keyboard(message.from_user.id))
-
-
-@router.callback_query(F.data.startswith("profile:"))
-async def edit_profile(callback: CallbackQuery, state: FSMContext) -> None:
-    if not callback.data or not callback.message:
-        return
-    _, field, user_id = callback.data.split(":")
-    if callback.from_user.id != int(user_id):
-        await callback.answer("Можно редактировать только свой профиль.", show_alert=True)
-        return
-    prompts = {
-        "name": (ProfileEdit.name, "Введите имя (до 50 символов)."),
-        "age": (ProfileEdit.age, "Введите возраст числом от 14 до 120."),
-        "hobbies": (ProfileEdit.hobbies, "Расскажите об увлечениях (до 500 символов)."),
-        "avatar": (ProfileEdit.avatar, "Отправьте фотографию для аватара."),
-    }
-    if field not in prompts:
-        await callback.answer()
-        return
-    next_state, prompt = prompts[field]
-    await state.set_state(next_state)
-    await callback.answer()
-    await callback.message.answer(prompt, reply_markup=flow_reply_keyboard())
-
-
-@router.message(ProfileEdit.name)
-async def edit_profile_name(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not message.from_user or (text := await _validate_text(message, maximum=50)) is None:
-        return
-    await db.update_profile(message.from_user.id, "profile_name", text)
-    await state.clear()
-    await message.answer("Имя обновлено.")
-    await restore_private_menu(message, db, settings)
-
-
-@router.message(ProfileEdit.age)
-async def edit_profile_age(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not message.from_user or not message.text or not message.text.isdigit():
-        await message.answer("Введите возраст числом от 14 до 120.")
-        return
-    age = int(message.text)
-    if not 14 <= age <= 120:
-        await message.answer("Возраст должен быть от 14 до 120.")
-        return
-    await db.update_profile(message.from_user.id, "age", age)
-    await state.clear()
-    await message.answer("Возраст обновлён.")
-    await restore_private_menu(message, db, settings)
-
-
-@router.message(ProfileEdit.hobbies)
-async def edit_profile_hobbies(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not message.from_user or (text := await _validate_text(message, maximum=500)) is None:
-        return
-    await db.update_profile(message.from_user.id, "hobbies", text)
-    await state.clear()
-    await message.answer("Увлечения обновлены.")
-    await restore_private_menu(message, db, settings)
-
-
-@router.message(ProfileEdit.avatar)
-async def edit_profile_avatar(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not message.from_user or not message.photo:
-        await message.answer("Нужно отправить фотографию.")
-        return
-    await db.update_profile(message.from_user.id, "avatar_file_id", message.photo[-1].file_id)
-    await db.update_profile(message.from_user.id, "avatar_media_type", "photo")
-    await state.clear()
-    await message.answer("Аватар обновлён.")
-    await restore_private_menu(message, db, settings)
