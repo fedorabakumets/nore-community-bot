@@ -164,6 +164,70 @@ async def test_housekeeping_deletes_command_before_handler() -> None:
     assert deleted == [(-1004331642093, 77)]
 
 
+def _group_message(message_id: int = 88, chat_type: str = "supergroup"):
+    from aiogram.types import Message
+
+    return Message.model_validate(
+        {
+            "message_id": message_id,
+            "date": 1_725_000_000,
+            "chat": {"id": -1004331642093, "type": chat_type, "title": "Nora"},
+            "from": {"id": 8992215311, "is_bot": True, "first_name": "Nore Community"},
+            "text": "📚 Команды",
+        }
+    )
+
+
+async def test_bot_group_replies_are_scheduled_via_session_middleware(monkeypatch) -> None:
+    import asyncio
+
+    from community_bot.ephemeral import (
+        _REPLY_TTL,
+        BOT_REPLY_TTL,
+        EphemeralSendMiddleware,
+        keep_in_chat,
+        patch_bot_ephemeral,
+    )
+    from community_bot.helpers import BOT_REPLY_TTL as TTL
+
+    seen: list[tuple[int, float]] = []
+
+    async def fake_delete_later(message, delay: float = TTL) -> None:
+        seen.append((message.message_id, delay))
+
+    monkeypatch.setattr("community_bot.ephemeral.delete_later", fake_delete_later)
+
+    async def make_request(_bot, _method):
+        return _group_message()
+
+    middleware = EphemeralSendMiddleware()
+    token = _REPLY_TTL.set(BOT_REPLY_TTL)
+    try:
+        await middleware(make_request, None, None)
+        await asyncio.sleep(0)
+    finally:
+        _REPLY_TTL.reset(token)
+    assert seen == [(88, 30.0)]
+
+    seen.clear()
+    token = _REPLY_TTL.set(BOT_REPLY_TTL)
+    try:
+        with keep_in_chat():
+            await middleware(make_request, None, None)
+            await asyncio.sleep(0)
+    finally:
+        _REPLY_TTL.reset(token)
+    assert seen == []
+
+    from aiogram import Bot
+    from aiogram.client.session.aiohttp import AiohttpSession
+
+    bot = Bot(token="123:abc", session=AiohttpSession())
+    patch_bot_ephemeral(bot)
+    assert any(isinstance(item, EphemeralSendMiddleware) for item in bot.session.middleware)
+    await bot.session.close()
+
+
 async def test_audit_log_persists_names_and_status(tmp_path) -> None:
     from pathlib import Path
 

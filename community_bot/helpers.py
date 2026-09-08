@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import html
+import logging
 import secrets
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +21,7 @@ from community_bot.permissions import (
 )
 
 BOT_REPLY_TTL = 30.0
+logger = logging.getLogger(__name__)
 
 
 async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
@@ -39,8 +40,15 @@ def display_name(user: dict[str, Any] | None, fallback: str = "неизвест�
 
 async def delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
     await asyncio.sleep(delay)
-    with contextlib.suppress(TelegramBadRequest):
+    try:
         await message.delete()
+    except (TelegramBadRequest, TelegramForbiddenError) as error:
+        logger.warning(
+            "Не удалось удалить сообщение бота %s в чате %s: %s",
+            message.message_id,
+            message.chat.id,
+            error,
+        )
 
 
 async def answer_group_ephemeral(

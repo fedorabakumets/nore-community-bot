@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
 
 from aiogram import BaseMiddleware, Bot
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import Message, TelegramObject
+from aiogram.methods.base import TelegramMethod, TelegramType
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from community_bot.aliases import is_command_message
 from community_bot.helpers import BOT_REPLY_TTL, delete_later
@@ -17,21 +19,7 @@ from community_bot.helpers import BOT_REPLY_TTL, delete_later
 logger = logging.getLogger(__name__)
 
 _REPLY_TTL: ContextVar[float | None] = ContextVar("group_reply_ttl", default=None)
-
-_SEND_METHODS = (
-    "send_message",
-    "send_photo",
-    "send_video",
-    "send_animation",
-    "send_document",
-    "send_audio",
-    "send_voice",
-    "send_video_note",
-    "send_sticker",
-    "send_dice",
-    "send_media_group",
-    "copy_message",
-)
+_PENDING: set[asyncio.Task[Any]] = set()
 
 _HARMLESS_DELETE = (
     "message to delete not found",
@@ -50,9 +38,14 @@ def keep_in_chat() -> Iterator[None]:
         _REPLY_TTL.reset(token)
 
 
-def _schedule(result: Any) -> None:
-    ttl = _REPLY_TTL.get()
-    if not ttl:
+def _track(task: asyncio.Task[Any]) -> None:
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+
+
+def schedule_group_reply(result: Any, ttl: float | None = None) -> None:
+    delay = BOT_REPLY_TTL if ttl is None else ttl
+    if not delay:
         return
     messages: list[Message] = []
     if isinstance(result, Message):
@@ -61,19 +54,35 @@ def _schedule(result: Any) -> None:
         messages.extend(item for item in result if isinstance(item, Message))
     for sent in messages:
         if sent.chat.type in {"group", "supergroup"}:
-            asyncio.create_task(delete_later(sent, ttl))
+            _track(asyncio.create_task(delete_later(sent, delay)))
+
+
+def _schedule(result: Any) -> None:
+    ttl = _REPLY_TTL.get()
+    if not ttl:
+        return
+    schedule_group_reply(result, ttl)
+
+
+class EphemeralSendMiddleware(BaseRequestMiddleware):
+    """Catch every outgoing Telegram method, including message.answer()/reply() shortcuts."""
+
+    async def __call__(
+        self,
+        make_request: Callable[[Bot, TelegramMethod[TelegramType]], Awaitable[TelegramType]],
+        bot: Bot,
+        method: TelegramMethod[TelegramType],
+    ) -> TelegramType:
+        result = await make_request(bot, method)
+        _schedule(result)
+        return result
 
 
 def patch_bot_ephemeral(bot: Bot) -> None:
-    for name in _SEND_METHODS:
-        original: Callable[..., Any] = getattr(bot, name)
-
-        async def wrapped(*args: Any, __orig: Callable[..., Any] = original, **kwargs: Any) -> Any:
-            result = await __orig(*args, **kwargs)
-            _schedule(result)
-            return result
-
-        setattr(bot, name, wrapped)
+    if getattr(bot.session, "_nore_ephemeral", False):
+        return
+    bot.session.middleware.register(EphemeralSendMiddleware())
+    bot.session._nore_ephemeral = True  # type: ignore[attr-defined]
 
 
 async def delete_user_command(event: Message, bot: Any) -> bool:
@@ -121,3 +130,22 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
             _REPLY_TTL.reset(token)
             if is_cmd and not deleted:
                 await delete_user_command(event, bot)
+
+
+class GroupCallbackEphemeralMiddleware(BaseMiddleware):
+    """Expire bot replies that come from inline buttons in the group chat."""
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Any],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        message = event.message if isinstance(event, CallbackQuery) else None
+        if message is None or message.chat.type not in {"group", "supergroup"}:
+            return await handler(event, data)
+        token = _REPLY_TTL.set(BOT_REPLY_TTL)
+        try:
+            return await handler(event, data)
+        finally:
+            _REPLY_TTL.reset(token)
