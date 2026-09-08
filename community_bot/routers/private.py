@@ -213,15 +213,25 @@ async def private_reputation(message: Message) -> None:
 
 
 @router.message(command_or_alias("updates"))
-async def private_updates_command(message: Message) -> None:
+async def private_updates_command(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL):
+        await message.answer("Раздел «Обновления» доступен только администраторам.")
+        return
     await message.answer(updates_text(), parse_mode="HTML")
 
 
-@router.callback_query(F.data == "menu:updates")
-async def menu_updates(callback: CallbackQuery) -> None:
+@router.callback_query(F.data.in_({"admin:updates", "menu:updates"}))
+async def admin_updates(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
     await callback.answer()
-    if callback.message:
-        await callback.message.answer(updates_text(), parse_mode="HTML")
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")]]
+    )
+    try:
+        await callback.message.edit_text(updates_text(), parse_mode="HTML", reply_markup=markup)
+    except TelegramBadRequest:
+        await callback.message.answer(updates_text(), parse_mode="HTML", reply_markup=markup)
 
 
 @router.callback_query(F.data == "menu:apply")
@@ -414,9 +424,7 @@ async def admin_inactive(callback: CallbackQuery, db: Database, settings: Settin
     for row in rows:
         name = row["profile_name"] or row["telegram_name"] or row["username"] or row["user_id"]
         last_seen = str(row["last_message_at"] or "нет сообщений")[:10]
-        lines.append(
-            f"• {user_link(int(row['user_id']), str(name))} · {row['message_count']} сообщений · {last_seen}"
-        )
+        lines.append(f"• {user_link(int(row['user_id']), str(name))} · {row['message_count']} сообщений · {last_seen}")
     if not rows:
         lines.append("Все известные участники проявляли активность за последние 7 дней.")
     lines.append("\nБот ничего не удаляет автоматически — список только для проверки администратором.")
@@ -747,8 +755,7 @@ async def admin_roles(callback: CallbackQuery, db: Database, settings: Settings)
         return
     await callback.answer()
     await callback.message.edit_text(
-        "👥 <b>Права и роли</b>\n\n"
-        "Создавайте роли, включайте нужные права тумблерами и назначайте их людям.",
+        "👥 <b>Права и роли</b>\n\nСоздавайте роли, включайте нужные права тумблерами и назначайте их людям.",
         parse_mode="HTML",
         reply_markup=roles_hub_keyboard(can_edit),
     )
@@ -1232,8 +1239,7 @@ async def admin_begin_community_post(
     )
     await callback.answer()
     await callback.message.answer(
-        "📢 <b>Студия поста в сообщество</b>\n\n"
-        "Выберите шаблон оформления. Дальше — текст, медиа и кнопки-ссылки.",
+        "📢 <b>Студия поста в сообщество</b>\n\nВыберите шаблон оформления. Дальше — текст, медиа и кнопки-ссылки.",
         parse_mode="HTML",
         reply_markup=templates_keyboard(),
     )
@@ -1522,8 +1528,7 @@ async def admin_automessages(callback: CallbackQuery, db: Database, settings: Se
     rows = await db.list_scheduled_messages()
     await callback.answer()
     await callback.message.edit_text(
-        "⏱ <b>Автосообщения</b>\n\n"
-        "✅ — активно, ⏸ — приостановлено. Нажатие на строку меняет состояние.",
+        "⏱ <b>Автосообщения</b>\n\n✅ — активно, ⏸ — приостановлено. Нажатие на строку меняет состояние.",
         parse_mode="HTML",
         reply_markup=automessages_keyboard(rows),
     )
@@ -1754,4 +1759,3 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
     await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
-

@@ -135,9 +135,7 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                         blocked_reason = "Включён ночной режим: чат открыт с 07:00."
                 if member and flags.get("raid_mode") and activity_count <= 2:
                     blocked_reason = "Включён рейд-режим: первые сообщения новых участников проходят проверку."
-                contains_link = any(
-                    marker in text.casefold() for marker in ("http://", "https://", "t.me/")
-                )
+                contains_link = any(marker in text.casefold() for marker in ("http://", "https://", "t.me/"))
                 if member and flags.get("link_filter") and contains_link:
                     blocked_reason = "Ссылки сейчас запрещены настройками чата."
                 has_media = bool(
@@ -290,7 +288,11 @@ async def store_help(message: Message) -> None:
 
 
 @router.message(command_or_alias("updates"), F.chat.type.in_({"group", "supergroup"}))
-async def group_updates(message: Message) -> None:
+async def group_updates(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    if not await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL):
+        return
     from community_bot.updates import updates_text
 
     await _respond(message, updates_text(), parse_mode="HTML")
@@ -431,8 +433,7 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     await callback.answer("Питомец вмешался!" if pet_line else f"Репутация изменена на {sign}{delta}.")
     extra = f"\n{pet_line}" if pet_line else ""
     await callback.message.answer(
-        f"{target_tier.emoji} Репутация {_target_display(target)}: "
-        f"{sign}{delta}, теперь {new_value}.{extra}",
+        f"{target_tier.emoji} Репутация {_target_display(target)}: {sign}{delta}, теперь {new_value}.{extra}",
         parse_mode="HTML",
     )
     if new_value < settings.restricted_reputation_threshold:
@@ -470,8 +471,7 @@ async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
     await callback.message.edit_reply_markup(reply_markup=public_profile_keyboard(target_id))
     await callback.answer("Подтвердите перевод.")
     await callback.message.answer(
-        f"Перевести {_target_display(target)} {amount} 🍪?\n"
-        f"Комиссия 20%, пользователь получит {received} 🍪.",
+        f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
         parse_mode="HTML",
         reply_markup=transfer_keyboard(transfer_id),
     )
@@ -746,9 +746,7 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
     else:
         await callback.answer("Нет такой полки.", show_alert=True)
         return
-    text = (
-        f"{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
-    )
+    text = f"{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
     await callback.answer()
     try:
         await callback.message.edit_text(
@@ -769,8 +767,7 @@ async def choose_cookie_pack(callback: CallbackQuery, settings: Settings) -> Non
     await callback.answer()
     if callback.message:
         await callback.message.answer(
-            f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽, "
-            "оплата проводится вручную через СБП:",
+            f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽, оплата проводится вручную через СБП:",
             reply_markup=cookie_packages_keyboard(),
         )
 
@@ -847,11 +844,7 @@ async def receive_sbp_receipt(
     for user in await db.list_all_users():
         if str(user["role"]) in {"owner", "admin"}:
             candidates.add(int(user["user_id"]))
-    recipients = {
-        user_id
-        for user_id in candidates
-        if await has_permission(db, settings, user_id, PERM_PAYMENTS)
-    }
+    recipients = {user_id for user_id in candidates if await has_permission(db, settings, user_id, PERM_PAYMENTS)}
     caption = (
         f"💳 <b>Заказ печенек №{order_id}</b>\n"
         f"Пользователь: {user_link(message.from_user.id, message.from_user.full_name)}\n"
@@ -999,7 +992,8 @@ async def buy_shop_item(
         await state.set_state(ProfileEdit.custom_status)
         await state.set_data({"shop_price": price})
         await callback.answer()
-        await callback.message.answer("Введите новый кастомный статус (до 50 символов).",
+        await callback.message.answer(
+            "Введите новый кастомный статус (до 50 символов).",
             reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
         )
         return
@@ -1011,9 +1005,7 @@ async def buy_shop_item(
         hours = IMMUNITY_HOURS[item]
         await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=hours))
         await callback.answer("Покупка выполнена.")
-        await callback.message.answer(
-            f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪."
-        )
+        await callback.message.answer(f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪.")
         return
     if item == "private_profile" and user.get("profile_private"):
         await callback.answer("Профиль уже скрыт.", show_alert=True)

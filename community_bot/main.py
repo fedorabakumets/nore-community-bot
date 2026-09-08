@@ -38,7 +38,6 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Мой тамагочи"),
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
-            BotCommand(command="updates", description="Обновления бота"),
             BotCommand(command="help", description="Помощь"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
@@ -52,7 +51,6 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="store", description="Магазин и оплата"),
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Открыть тамагочи"),
-            BotCommand(command="updates", description="Обновления"),
             BotCommand(command="cgames", description="Игры на печеньки 2–4 игрока"),
             BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
             BotCommand(command="dice", description="Кости: /dice 10"),
@@ -78,6 +76,25 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
     await db.set_bot_state("last_announced_update", str(item.number))
+
+
+async def log_community_permissions(bot: Bot, settings: Settings) -> None:
+    if not settings.community_chat_id:
+        logger.warning("COMMUNITY_CHAT_ID не задан — бот не сможет стирать команды в чате")
+        return
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(settings.community_chat_id, me.id)
+        can_delete = bool(getattr(member, "can_delete_messages", False) or member.status == "creator")
+        logger.info(
+            "Права бота в чате сообщества: status=%s can_delete_messages=%s",
+            member.status,
+            can_delete,
+        )
+        if member.status not in {"administrator", "creator"} or not can_delete:
+            logger.warning("Чтобы стирать команды, бот должен быть администратором с правом удалять сообщения.")
+    except Exception:
+        logger.exception("Не удалось проверить права бота в чате сообщества")
 
 
 async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> None:
@@ -154,9 +171,7 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                 last_notice = datetime.fromisoformat(str(last_notice_raw)) if last_notice_raw else None
                 hungry_notice_due = sleeping and (not last_notice or now - last_notice >= timedelta(hours=12))
                 cute_ping_due = (
-                    not sleeping
-                    and not payout
-                    and (not last_notice or now - last_notice >= timedelta(hours=8))
+                    not sleeping and not payout and (not last_notice or now - last_notice >= timedelta(hours=8))
                 )
                 if not payout and not hungry_notice_due and not cute_ping_due:
                     continue
@@ -180,8 +195,7 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                         "Загляни в /pet, пожалуйста 🫶🌸"
                     )
                     chat_text = (
-                        f"💤 <b>{pet['name']}</b> свернулся у {mention} и тихо сопит: "
-                        "нужно покормить или напоить."
+                        f"💤 <b>{pet['name']}</b> свернулся у {mention} и тихо сопит: нужно покормить или напоить."
                     )
                 else:
                     dm_text = idle_ping(pet)
@@ -235,6 +249,7 @@ async def main() -> None:
     dispatcher.include_router(group_router)
 
     await configure_commands(bot)
+    await log_community_permissions(bot, settings)
     await announce_latest_update(bot, db, settings)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()

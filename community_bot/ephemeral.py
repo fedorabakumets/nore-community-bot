@@ -33,6 +33,12 @@ _SEND_METHODS = (
     "copy_message",
 )
 
+_HARMLESS_DELETE = (
+    "message to delete not found",
+    "message identifier is not specified",
+    "message can't be found",
+)
+
 
 @contextmanager
 def keep_in_chat() -> Iterator[None]:
@@ -70,8 +76,29 @@ def patch_bot_ephemeral(bot: Bot) -> None:
         setattr(bot, name, wrapped)
 
 
+async def delete_user_command(event: Message, bot: Any) -> bool:
+    """Delete a group command using the live Bot, not Message.bot."""
+    try:
+        if bot is not None and hasattr(bot, "delete_message"):
+            await bot.delete_message(event.chat.id, event.message_id)
+        else:
+            await event.delete()
+        return True
+    except (TelegramBadRequest, TelegramForbiddenError) as error:
+        detail = str(error).casefold()
+        if any(item in detail for item in _HARMLESS_DELETE):
+            return True
+        logger.warning(
+            "Не удалось удалить команду %s в чате %s: %s",
+            event.message_id,
+            event.chat.id,
+            error,
+        )
+        return False
+
+
 class GroupHousekeepingMiddleware(BaseMiddleware):
-    """Delete user commands in groups and expire bot replies to those commands."""
+    """Delete user commands in groups immediately, then expire bot replies."""
 
     async def __call__(
         self,
@@ -83,13 +110,14 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
             return await handler(event, data)
         text = event.text or event.caption or ""
         is_cmd = is_command_message(text)
+        bot = data.get("bot")
+        deleted = False
+        if is_cmd:
+            deleted = await delete_user_command(event, bot)
         token = _REPLY_TTL.set(BOT_REPLY_TTL if is_cmd else None)
         try:
             return await handler(event, data)
         finally:
             _REPLY_TTL.reset(token)
-            if is_cmd:
-                try:
-                    await event.delete()
-                except (TelegramBadRequest, TelegramForbiddenError) as error:
-                    logger.warning("Не удалось удалить команду в чате %s: %s", event.chat.id, error)
+            if is_cmd and not deleted:
+                await delete_user_command(event, bot)

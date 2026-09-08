@@ -72,7 +72,6 @@ def private_menu_keyboard(show_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [ibtn("📝 Анкета", "menu:apply", STYLE_GO), ibtn("❓ Вопрос", "menu:question")],
         [ibtn("🛒 Магазин", "menu:shop", STYLE_FUN), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
-        [ibtn("✨ Обновления", "menu:updates", STYLE_FUN)],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
@@ -81,9 +80,7 @@ def private_menu_keyboard(show_admin: bool = False) -> InlineKeyboardMarkup:
 
 
 def start_apply_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[ibtn("📝 Заполнить анкету", "start:apply", STYLE_GO)]]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[[ibtn("📝 Заполнить анкету", "start:apply", STYLE_GO)]])
 
 
 YES_NO_KEYBOARD = InlineKeyboardMarkup(
@@ -157,6 +154,7 @@ def admin_panel_keyboard(permissions: list[str] | None = None) -> InlineKeyboard
     if allow("features"):
         extra.append(ibtn("⚙️ Функции", "admin:features"))
     extra.append(ibtn("📊 Состояние", "admin:health"))
+    extra.append(ibtn("✨ Обновления", "admin:updates", STYLE_FUN))
     rows.append(extra)
     bottom: list[InlineKeyboardButton] = [ibtn("💤 Инактив", "admin:inactive")]
     if allow("audit"):
@@ -288,9 +286,7 @@ def automessage_target_keyboard() -> InlineKeyboardMarkup:
 
 
 def automessages_keyboard(rows: list[dict[str, object]]) -> InlineKeyboardMarkup:
-    buttons: list[list[InlineKeyboardButton]] = [
-        [ibtn("➕ Создать автосообщение", "admin:auto:new", STYLE_GO)]
-    ]
+    buttons: list[list[InlineKeyboardButton]] = [[ibtn("➕ Создать автосообщение", "admin:auto:new", STYLE_GO)]]
     for row in rows[:20]:
         icon = "✅" if int(row["enabled"]) else "⏸"
         target = "чат" if row["target"] == "community" else "ЛС"
@@ -600,10 +596,7 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
     rows: list[list[InlineKeyboardButton]] = []
     for player in players:
         name = str(
-            player.get("profile_name")
-            or player.get("telegram_name")
-            or player.get("username")
-            or player["user_id"]
+            player.get("profile_name") or player.get("telegram_name") or player.get("username") or player["user_id"]
         )
         rows.append([ibtn(f"🗳 {name[:38]}", f"game:vote:{game_id}:{player['user_id']}", STYLE_FUN)])
     return InlineKeyboardMarkup(inline_keyboard=rows)

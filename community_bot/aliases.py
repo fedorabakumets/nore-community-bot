@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from aiogram.filters import Command, Filter, or_f
+from aiogram.filters import Filter
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
@@ -54,6 +54,7 @@ MULTIWORD_ALIASES: dict[str, str] = {
 }
 
 _PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
+_SLASH_PREFIXES = "/!.／"
 
 _ALIAS_TO_COMMAND: dict[str, str] = {}
 for _command, _aliases in COMMAND_ALIASES.items():
@@ -80,8 +81,8 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
             return command, raw[len(alias) :].strip()
     first, _, rest = raw.partition(" ")
     token = first
-    if token.startswith("/"):
-        token = token[1:].split("@", 1)[0]
+    if token[:1] in _SLASH_PREFIXES:
+        token = token.lstrip(_SLASH_PREFIXES).split("@", 1)[0]
     command = canonical_command(token)
     if not command:
         return None
@@ -103,12 +104,14 @@ def is_command_trigger(text: str) -> bool:
 
 def is_command_message(text: str) -> bool:
     stripped = (text or "").lstrip()
-    if stripped.startswith("/"):
+    if stripped[:1] in _SLASH_PREFIXES:
         return True
     return is_command_trigger(stripped)
 
 
 class CommandOrAlias(Filter):
+    """Match /command, /command@bot and a bare Russian/English alias in text or caption."""
+
     def __init__(self, *commands: str) -> None:
         self.commands = {item.casefold() for item in commands}
 
@@ -131,4 +134,6 @@ class CommandOrAlias(Filter):
 
 
 def command_or_alias(*commands: str) -> Filter:
-    return or_f(Command(*commands), CommandOrAlias(*commands))
+    # Only CommandOrAlias: aiogram Command() requires a leading slash and `bot: Bot`.
+    # Nested in or_f it can fail before the alias filter ever runs.
+    return CommandOrAlias(*commands)

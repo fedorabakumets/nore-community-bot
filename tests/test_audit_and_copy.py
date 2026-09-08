@@ -1,6 +1,8 @@
-from community_bot.aliases import is_command_trigger, parse_trigger
+from types import SimpleNamespace
+
+from community_bot.aliases import CommandOrAlias, command_or_alias, is_command_trigger, parse_trigger
 from community_bot.audit import classify_status, format_audit_row, parse_moderation_args
-from community_bot.keyboards import private_menu_keyboard
+from community_bot.keyboards import admin_panel_keyboard, private_menu_keyboard
 from community_bot.posting import parse_button_lines, render_post
 from community_bot.texts import GROUP_COMMANDS_TEXT, STORE_HELP_TEXT
 from community_bot.updates import latest_update, updates_text
@@ -69,7 +71,8 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     lowered = GROUP_COMMANDS_TEXT.casefold()
     assert "«команды»" in GROUP_COMMANDS_TEXT
     assert "«магазин»" in GROUP_COMMANDS_TEXT
-    assert "«обновления»" in GROUP_COMMANDS_TEXT
+    assert "«обновления»" not in GROUP_COMMANDS_TEXT
+    assert "/updates" not in lowered
     for leaked in ("/mute", "/warn", "/kick", "/ban", "/unban", "/givecookies", "/role"):
         assert leaked not in lowered
     assert "тамагочи" in STORE_HELP_TEXT.casefold()
@@ -90,15 +93,75 @@ def test_post_templates_and_buttons() -> None:
     assert err
 
 
-def test_updates_block_and_menu_button() -> None:
+def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 3
+    assert latest.number == 4
     text = updates_text()
-    assert "№3" in text
-    assert "Журнал" in text
-    markup = private_menu_keyboard()
-    labels = [button.text for row in markup.inline_keyboard for button in row]
-    assert "✨ Обновления" in labels
+    assert "№4" in text
+    assert "админ" in text.casefold()
+    assert "Написать боту" not in text
+    member_menu = private_menu_keyboard()
+    member_labels = [button.text for row in member_menu.inline_keyboard for button in row]
+    member_data = [button.callback_data for row in member_menu.inline_keyboard for button in row]
+    assert "✨ Обновления" not in member_labels
+    assert "admin:updates" not in member_data
+    assert "menu:updates" not in member_data
+    admin_menu = admin_panel_keyboard(["*"])
+    admin_buttons = [button for row in admin_menu.inline_keyboard for button in row]
+    assert any(button.callback_data == "admin:updates" for button in admin_buttons)
+    assert any(button.text == "✨ Обновления" for button in admin_buttons)
+
+
+async def test_command_or_alias_matches_bare_russian_words() -> None:
+    filt = command_or_alias("commands", "profile", "shop", "pet")
+    assert isinstance(filt, CommandOrAlias)
+    for text, expected in (
+        ("команды", "commands"),
+        ("Профиль", "profile"),
+        ("магазин", "shop"),
+        ("тамагочи", "pet"),
+        ("/profile@nore_community_bot", "profile"),
+    ):
+        message = SimpleNamespace(text=text, caption=None)
+        result = await filt(message)  # type: ignore[arg-type]
+        assert result is not False
+        assert result["command"].command == expected
+    miss = await filt(SimpleNamespace(text="привет", caption=None))  # type: ignore[arg-type]
+    assert miss is False
+
+
+async def test_housekeeping_deletes_command_before_handler() -> None:
+    from aiogram.types import Message
+
+    from community_bot.ephemeral import GroupHousekeepingMiddleware
+
+    deleted: list[tuple[int, int]] = []
+
+    class FakeBot:
+        async def delete_message(self, chat_id: int, message_id: int) -> bool:
+            deleted.append((chat_id, message_id))
+            return True
+
+    event = Message.model_validate(
+        {
+            "message_id": 77,
+            "date": 1_725_000_000,
+            "chat": {"id": -1004331642093, "type": "supergroup", "title": "Nora"},
+            "from": {"id": 1, "is_bot": False, "first_name": "Анна"},
+            "text": "команды",
+        }
+    )
+    seen_before_handler = False
+
+    async def handler(_event, _data):
+        nonlocal seen_before_handler
+        seen_before_handler = bool(deleted)
+        return "ok"
+
+    result = await GroupHousekeepingMiddleware()(handler, event, {"bot": FakeBot()})
+    assert result == "ok"
+    assert seen_before_handler is True
+    assert deleted == [(-1004331642093, 77)]
 
 
 async def test_audit_log_persists_names_and_status(tmp_path) -> None:

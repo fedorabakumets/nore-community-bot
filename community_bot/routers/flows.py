@@ -84,7 +84,7 @@ async def _show_inline_menu(message: Message, db: Database, settings: Settings) 
     show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
     await message.answer(
         "📋 <b>Меню НОРЫ</b>\n\n"
-        "Анкета, вопрос модераторам, магазин, тамагочи и блок «Обновления».\n"
+        "Анкета, вопрос модераторам, магазин и тамагочи.\n"
         "Снизу всегда зелёный «Профиль» и синее «Меню».",
         parse_mode="HTML",
         reply_markup=private_menu_keyboard(show_admin),
