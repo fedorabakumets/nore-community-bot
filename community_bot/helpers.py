@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import html
 import secrets
 from datetime import UTC, datetime
@@ -18,6 +20,8 @@ from community_bot.permissions import (
     role_has_permission,
 )
 
+BOT_REPLY_TTL = 30.0
+
 
 async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
     return await db.ensure_user(user.id, user.username, user.full_name)
@@ -25,6 +29,31 @@ async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
 
 def user_link(user_id: int, name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>'
+
+
+def display_name(user: dict[str, Any] | None, fallback: str = "неизвестный") -> str:
+    from community_bot.audit import person_label
+
+    return person_label(user, fallback)
+
+
+async def delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
+    await asyncio.sleep(delay)
+    with contextlib.suppress(TelegramBadRequest):
+        await message.delete()
+
+
+async def answer_group_ephemeral(
+    message: Message,
+    text: str,
+    *,
+    ttl: float | None = BOT_REPLY_TTL,
+    **kwargs: Any,
+) -> Message:
+    sent = await message.answer(text, **kwargs)
+    if ttl and message.chat.type in {"group", "supergroup"}:
+        asyncio.create_task(delete_later(sent, ttl))
+    return sent
 
 
 def media_from_message(message: Message) -> tuple[str | None, str | None]:

@@ -6,9 +6,9 @@ import secrets
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import has_permission, register_telegram_user, user_link
@@ -43,15 +43,15 @@ GAME_RULES = """🎮 <b>Игры NORA COMMUNITY</b>
 Здесь нет заранее назначенного злодея — решает убедительность.
 
 <b>Команды</b>
-/games — выбрать игру и создать лобби.
-/gamecancel — отменить текущую игру создателю или администратору.
-Вход, старт и голосование выполняются кнопками. Секретные карточки приходят в личный чат,
-поэтому каждый игрок должен заранее нажать Start у бота.
+/games или «игры» — выбрать игру и создать лобби.
+/gamecancel или «отменить игру» — отменить партию создателю.
+Вход, старт и голосование — кнопками. Секретные карточки приходят в личку,
+поэтому заранее нажмите Start у бота.
 
-Игры не используют купленные печеньки и не влияют на основной баланс.
+Игры на роли не тратят печеньки.
 
 🍪 <b>Блэкджек и кости на печеньки · 2–4 игрока</b>
-/cgames, /blackjack 10 или /dice 25. Ставка списывается при входе в лобби.
+/cgames, «блэкджек 10» или «кости 25». Ставка списывается при входе в лобби.
 В блэкджеке сдаёт Нора, в костях банк забирает лучший 2d6. Отмена возвращает ставки."""
 
 
@@ -137,7 +137,7 @@ def _secret_text(game_type: str, data: dict[str, object], state: dict[str, objec
     )
 
 
-@router.message(Command("games"))
+@router.message(command_or_alias("games"))
 async def games_menu(message: Message, db: Database) -> None:
     if not await db.feature_enabled("games"):
         await message.answer("Мини-игры временно выключены администрацией.")
@@ -295,7 +295,7 @@ async def vote_game(callback: CallbackQuery, db: Database) -> None:
     await callback.message.answer(text, parse_mode="HTML")
 
 
-@router.message(Command("gamecancel"))
+@router.message(command_or_alias("gamecancel"))
 async def cancel_game_command(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return

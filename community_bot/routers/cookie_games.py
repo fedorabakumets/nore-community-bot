@@ -3,9 +3,10 @@ from __future__ import annotations
 import secrets
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject
+from aiogram.filters.command import CommandObject
 from aiogram.types import CallbackQuery, Message
 
+from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import has_permission, register_telegram_user, user_link
@@ -74,7 +75,7 @@ async def _admin_cancel(db: Database, settings: Settings, user_id: int) -> bool:
     return await has_permission(db, settings, user_id, PERM_GAMES)
 
 
-@router.message(Command("cgames", "blackjack", "dice"))
+@router.message(command_or_alias("cgames", "blackjack", "dice"))
 async def cookie_games_command(
     message: Message,
     command: CommandObject,
@@ -92,7 +93,7 @@ async def cookie_games_command(
         await message.answer(
             "🍪 <b>Игры на печеньки</b>\n2–4 игрока, ставка списывается при входе.\n"
             "🃏 Блэкджек — против дилера Норы.\n🎲 Кости — 2d6, банк забирает лучший бросок.\n\n"
-            "Команды: <code>/blackjack 10</code> · <code>/dice 25</code>",
+            "Команды: <code>/blackjack 10</code> · «блэкджек 10» · <code>/dice 25</code> · «кости 25»",
             parse_mode="HTML",
             reply_markup=cookie_stake_keyboard("bj"),
         )
@@ -103,7 +104,7 @@ async def cookie_games_command(
     except ValueError:
         stake = 0
     if not 1 <= stake <= 500:
-        await message.answer("Ставка — целое число от 1 до 500 🍪. Пример: /blackjack 10")
+        await message.answer("Ставка — целое число от 1 до 500 🍪. Пример: /blackjack 10 или «кости 25»")
         return
     await register_telegram_user(db, message.from_user)
     game_id, status = await db.create_staked_game(message.chat.id, game_type, message.from_user.id, stake)

@@ -22,6 +22,7 @@ from community_bot.routers import (
     private_router,
     profile_router,
 )
+from community_bot.updates import community_announcement, latest_update
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Мой тамагочи"),
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
-            BotCommand(command="admin", description="Админ-панель"),
+            BotCommand(command="updates", description="Обновления бота"),
             BotCommand(command="help", description="Помощь"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
@@ -45,29 +46,37 @@ async def configure_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="profile", description="Профиль (можно ответом)"),
-            BotCommand(command="commands", description="Все команды бота"),
+            BotCommand(command="commands", description="Команды бота"),
             BotCommand(command="reputation", description="Система репутации"),
             BotCommand(command="store", description="Магазин и оплата"),
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Открыть тамагочи"),
+            BotCommand(command="updates", description="Обновления"),
             BotCommand(command="cgames", description="Игры на печеньки 2–4 игрока"),
             BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
             BotCommand(command="dice", description="Кости: /dice 10"),
             BotCommand(command="roulette", description="Русская рулетка ответом"),
             BotCommand(command="games", description="Мини-игры и правила"),
-            BotCommand(command="pet", description="Открыть тамагочи в личке"),
             BotCommand(command="gamecancel", description="Отменить текущую игру"),
-            BotCommand(command="mute", description="Мут ответом: /mute 30m"),
-            BotCommand(command="unmute", description="Снять мут ответом"),
-            BotCommand(command="warn", description="Предупреждение ответом"),
-            BotCommand(command="unwarn", description="Снять предупреждение ответом"),
-            BotCommand(command="kick", description="Исключить ответом"),
-            BotCommand(command="ban", description="Заблокировать ответом"),
-            BotCommand(command="unban", description="Разблокировать по ID"),
         ],
         scope=BotCommandScopeAllGroupChats(),
         language_code="ru",
     )
+
+
+async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> None:
+    item = latest_update()
+    last = await db.get_bot_state("last_announced_update")
+    if last == str(item.number):
+        return
+    if not settings.community_chat_id:
+        return
+    try:
+        await bot.send_message(settings.community_chat_id, community_announcement(item), parse_mode="HTML")
+    except Exception:
+        logger.exception("Не удалось объявить обновление в чате сообщества")
+        return
+    await db.set_bot_state("last_announced_update", str(item.number))
 
 
 async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> None:
@@ -223,6 +232,7 @@ async def main() -> None:
     dispatcher.include_router(group_router)
 
     await configure_commands(bot)
+    await announce_latest_update(bot, db, settings)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))

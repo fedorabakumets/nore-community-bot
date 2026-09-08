@@ -161,6 +161,10 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
     action TEXT NOT NULL,
     target TEXT,
     details TEXT,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    actor_name TEXT NOT NULL DEFAULT '',
+    target_name TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log(created_at DESC);
@@ -276,6 +280,17 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_private INTEGER NOT NULL DEFAULT 0")
             if "profile_ornate" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_ornate INTEGER NOT NULL DEFAULT 0")
+            audit_columns = {
+                str(row[1]) for row in await (await db.execute("PRAGMA table_info(admin_audit_log)")).fetchall()
+            }
+            for column, definition in (
+                ("reason", "TEXT NOT NULL DEFAULT ''"),
+                ("status", "TEXT NOT NULL DEFAULT ''"),
+                ("actor_name", "TEXT NOT NULL DEFAULT ''"),
+                ("target_name", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column not in audit_columns:
+                    await db.execute(f"ALTER TABLE admin_audit_log ADD COLUMN {column} {definition}")
             await db.commit()
         await self._seed_staff_roles()
         async with self.connect() as db:
@@ -336,21 +351,72 @@ class Database:
                 (enabled, actor_id, now, key),
             )
             await db.execute(
-                "INSERT INTO admin_audit_log(actor_id, action, target, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                (actor_id, "feature_toggle", key, f"enabled:{enabled}", now),
+                """
+                INSERT INTO admin_audit_log(
+                    actor_id, action, target, details, reason, status, actor_name, target_name, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (actor_id, "feature_toggle", key, f"enabled:{enabled}", "", "green", "", key, now),
             )
             await db.commit()
             return bool(enabled)
 
-    async def log_admin_action(self, actor_id: int, action: str, target: str = "", details: str = "") -> None:
+    async def log_admin_action(
+        self,
+        actor_id: int,
+        action: str,
+        target: str = "",
+        details: str = "",
+        *,
+        reason: str = "",
+        status: str = "",
+        actor_name: str = "",
+        target_name: str = "",
+        default_duration: bool = False,
+    ) -> None:
+        from community_bot.audit import SYSTEM_ACTOR_ID, classify_status, person_label
+
+        if not actor_name:
+            if actor_id == SYSTEM_ACTOR_ID:
+                actor_name = "Система"
+            else:
+                actor = await self.get_user(actor_id)
+                actor_name = person_label(actor, str(actor_id))
+        if not target_name and str(target).lstrip("-").isdigit():
+            target_user = await self.get_user(int(target))
+            if target_user:
+                target_name = person_label(target_user, str(target))
+        if not status:
+            status = classify_status(
+                action,
+                reason=reason,
+                details=details,
+                target=str(target or ""),
+                target_name=target_name,
+                default_duration=default_duration,
+            )
         await self.execute(
-            "INSERT INTO admin_audit_log(actor_id, action, target, details, created_at) VALUES (?, ?, ?, ?, ?)",
-            (actor_id, action, target, details, utcnow()),
+            """
+            INSERT INTO admin_audit_log(
+                actor_id, action, target, details, reason, status, actor_name, target_name, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (actor_id, action, target, details, reason, status, actor_name, target_name, utcnow()),
         )
 
     async def recent_admin_actions(self, limit: int = 20) -> list[dict[str, Any]]:
         return await self.fetchall(
-            "SELECT * FROM admin_audit_log ORDER BY id DESC LIMIT ?",
+            """
+            SELECT
+                a.*,
+                COALESCE(NULLIF(a.actor_name, ''), ua.profile_name, ua.telegram_name, ua.username) AS actor_display,
+                COALESCE(NULLIF(a.target_name, ''), ut.profile_name, ut.telegram_name, ut.username) AS target_display
+            FROM admin_audit_log a
+            LEFT JOIN users ua ON ua.user_id = a.actor_id
+            LEFT JOIN users ut ON CAST(ut.user_id AS TEXT) = a.target
+            ORDER BY a.id DESC
+            LIMIT ?
+            """,
             (limit,),
         )
 

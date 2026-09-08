@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -24,17 +23,21 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from community_bot.aliases import command_or_alias, is_command_trigger, remainder_args
+from community_bot.audit import SYSTEM_ACTOR_ID, parse_moderation_args, person_label
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import (
     discounted_price,
-    parse_duration,
     reputation_delta,
     reputation_tier,
     transfer_amount,
 )
 from community_bot.helpers import (
+    BOT_REPLY_TTL,
     can_manage_user,
+    delete_later,
+    display_name,
     effective_role,
     has_permission,
     is_immunity_active,
@@ -168,14 +171,21 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                         await event.delete()
                     with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
                         await bot.send_message(event.from_user.id, f"🛡 {blocked_reason}")
+                    await db.log_admin_action(
+                        SYSTEM_ACTOR_ID,
+                        "delete_message",
+                        str(event.from_user.id),
+                        blocked_reason,
+                        reason=blocked_reason,
+                        actor_name="Система",
+                        target_name=event.from_user.full_name,
+                    )
                     return None
         result = await handler(event, data)
         text = (event.text or "").lstrip()
-        if event.chat.type in {"group", "supergroup"} and text.startswith("/"):
-            try:
+        if event.chat.type in {"group", "supergroup"} and is_command_trigger(text):
+            with contextlib.suppress(TelegramBadRequest):
                 await event.delete()
-            except TelegramBadRequest:
-                pass
         return result
 
 
@@ -186,18 +196,25 @@ def _group_chat(message: Message) -> bool:
     return message.chat.type in {"group", "supergroup"}
 
 
-async def _respond(message: Message, text: str, **kwargs: Any) -> Message:
-    if (message.text or "").lstrip().startswith("/"):
-        return await message.answer(text, **kwargs)
-    return await message.reply(text, **kwargs)
+async def _respond(
+    message: Message,
+    text: str,
+    *,
+    ephemeral: bool = True,
+    ttl: float = BOT_REPLY_TTL,
+    **kwargs: Any,
+) -> Message:
+    if is_command_trigger(message.text or ""):
+        sent = await message.answer(text, **kwargs)
+    else:
+        sent = await message.reply(text, **kwargs)
+    if ephemeral and message.chat.type in {"group", "supergroup"}:
+        asyncio.create_task(delete_later(sent, ttl))
+    return sent
 
 
-async def _delete_later(message: Message, delay: float = 12) -> None:
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except TelegramBadRequest:
-        pass
+async def _delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
+    await delete_later(message, delay)
 
 
 async def _private_chat_notice(message: Message, bot: Bot) -> None:
@@ -235,8 +252,7 @@ async def _require_perm(message: Message, db: Database, settings: Settings, perm
 
 
 def _target_display(target: dict[str, object]) -> str:
-    name = str(target["profile_name"] or target["telegram_name"] or target["user_id"])
-    return user_link(int(target["user_id"]), name)
+    return user_link(int(target["user_id"]), display_name(target))
 
 
 async def _can_manage_target(
@@ -264,22 +280,29 @@ def _full_permissions() -> ChatPermissions:
     )
 
 
-@router.message(Command("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
 async def group_commands(message: Message) -> None:
-    await message.answer(GROUP_COMMANDS_TEXT, parse_mode="HTML")
+    await _respond(message, GROUP_COMMANDS_TEXT, parse_mode="HTML")
 
 
-@router.message(Command("reputation"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("reputation"), F.chat.type.in_({"group", "supergroup"}))
 async def reputation_help(message: Message) -> None:
-    await message.answer(REPUTATION_HELP_TEXT, parse_mode="HTML")
+    await _respond(message, REPUTATION_HELP_TEXT, parse_mode="HTML")
 
 
-@router.message(Command("store"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("store"), F.chat.type.in_({"group", "supergroup"}))
 async def store_help(message: Message) -> None:
-    await message.answer(STORE_HELP_TEXT, parse_mode="HTML")
+    await _respond(message, STORE_HELP_TEXT, parse_mode="HTML")
 
 
-@router.message(Command("admin"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("updates"), F.chat.type.in_({"group", "supergroup"}))
+async def group_updates(message: Message) -> None:
+    from community_bot.updates import updates_text
+
+    await _respond(message, updates_text(), parse_mode="HTML", ttl=60)
+
+
+@router.message(command_or_alias("admin"), F.chat.type.in_({"group", "supergroup"}))
 async def open_admin_from_group(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not message.from_user:
         return
@@ -304,7 +327,7 @@ async def open_admin_from_group(message: Message, db: Database, settings: Settin
         await _private_chat_notice(message, bot)
 
 
-@router.message(Command("id"))
+@router.message(command_or_alias("id"))
 async def show_identifiers(message: Message, bot: Bot) -> None:
     user_id = message.from_user.id if message.from_user else "—"
     text = f"Ваш Telegram ID: <code>{user_id}</code>\nID этого чата: <code>{message.chat.id}</code>"
@@ -317,10 +340,40 @@ async def show_identifiers(message: Message, bot: Bot) -> None:
     await message.answer(text, parse_mode="HTML")
 
 
-@router.message(Command("profile"), F.chat.type.in_({"group", "supergroup"}))
-async def group_profile_legacy(message: Message) -> None:
-    del message
-    return
+@router.message(command_or_alias("mute"), F.chat.type.in_({"group", "supergroup"}))
+async def mute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
+    if not await _require_perm(message, db, settings, PERM_MUTE) or not message.from_user:
+        return
+    target = await resolve_reply_target(message, db)
+    if not target:
+        await _respond(message, "Ответьте командой на сообщение пользователя: /mute 30m причина")
+        return
+    duration, reason, explicit = parse_moderation_args(message.text or "")
+    until = datetime.now(UTC) + duration
+    minutes = max(1, int(duration.total_seconds() // 60))
+    label = f"{minutes} мин" if minutes < 120 else f"{minutes // 60} ч"
+    await bot.restrict_chat_member(
+        message.chat.id,
+        int(target["user_id"]),
+        permissions=ChatPermissions(can_send_messages=False),
+        until_date=until,
+    )
+    await db.log_admin_action(
+        message.from_user.id,
+        "mute",
+        str(target["user_id"]),
+        label,
+        reason=reason,
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        default_duration=not explicit,
+    )
+    note = f" · {reason}" if reason else " · без причины"
+    await _respond(
+        message,
+        f"🔇 {_target_display(target)} получает мут на {label}{note}.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("profile_action:"), F.message.chat.type.in_({"group", "supergroup"}))
@@ -430,108 +483,140 @@ async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
     )
 
 
-@router.message(Command("mute"), F.chat.type.in_({"group", "supergroup"}))
-async def mute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_perm(message, db, settings, PERM_MUTE):
-        return
-    target = await resolve_reply_target(message, db)
-    if not target:
-        await _respond(message, "Ответьте командой на сообщение пользователя: /mute 30m")
-        return
-    parts = (message.text or "").split()
-    duration = parse_duration(parts[1]) if len(parts) > 1 else timedelta(hours=1)
-    if not duration:
-        await _respond(message, "Формат времени: 30m, 2h, 3d или 1w (также м/ч/д/н).")
-        return
-    until = datetime.now(UTC) + duration
-    await bot.restrict_chat_member(
-        message.chat.id,
-        int(target["user_id"]),
-        permissions=ChatPermissions(can_send_messages=False),
-        until_date=until,
-    )
-    await _respond(
-        message,
-        f"🔇 {_target_display(target)} получает мут на {parts[1] if len(parts) > 1 else '1h'}.",
-        parse_mode="HTML",
-    )
-
-
-@router.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("unmute"), F.chat.type.in_({"group", "supergroup"}))
 async def unmute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_perm(message, db, settings, PERM_MUTE):
+    if not await _require_perm(message, db, settings, PERM_MUTE) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
         await _respond(message, "Ответьте командой на сообщение пользователя: /unmute")
         return
     await bot.restrict_chat_member(message.chat.id, int(target["user_id"]), permissions=_full_permissions())
+    await db.log_admin_action(
+        message.from_user.id,
+        "unmute",
+        str(target["user_id"]),
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=" ".join(remainder_args(message.text or "")),
+    )
     await _respond(message, f"🔊 Мут с {_target_display(target)} снят.", parse_mode="HTML")
 
 
-@router.message(Command("kick"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("kick"), F.chat.type.in_({"group", "supergroup"}))
 async def kick_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_perm(message, db, settings, PERM_KICK):
+    if not await _require_perm(message, db, settings, PERM_KICK) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
-        await _respond(message, "Ответьте командой на сообщение пользователя: /kick")
+        await _respond(message, "Ответьте командой на сообщение пользователя: /kick причина")
         return
+    reason = " ".join(remainder_args(message.text or ""))
     target_id = int(target["user_id"])
     await bot.ban_chat_member(message.chat.id, target_id)
     await bot.unban_chat_member(message.chat.id, target_id, only_if_banned=True)
-    await _respond(message, f"👢 {_target_display(target)} исключён из чата.", parse_mode="HTML")
+    await db.log_admin_action(
+        message.from_user.id,
+        "kick",
+        str(target_id),
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=reason,
+    )
+    note = f" · {reason}" if reason else " · без причины"
+    await _respond(message, f"👢 {_target_display(target)} исключён из чата{note}.", parse_mode="HTML")
 
 
-@router.message(Command("ban"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("ban"), F.chat.type.in_({"group", "supergroup"}))
 async def ban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_perm(message, db, settings, PERM_BAN):
+    if not await _require_perm(message, db, settings, PERM_BAN) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
-        await _respond(message, "Ответьте командой на сообщение пользователя: /ban")
+        await _respond(message, "Ответьте командой на сообщение пользователя: /ban причина")
         return
+    reason = " ".join(remainder_args(message.text or ""))
     await bot.ban_chat_member(message.chat.id, int(target["user_id"]))
-    await _respond(message, f"⛔ {_target_display(target)} заблокирован.", parse_mode="HTML")
+    await db.log_admin_action(
+        message.from_user.id,
+        "ban",
+        str(target["user_id"]),
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=reason,
+    )
+    note = f" · {reason}" if reason else " · без причины"
+    await _respond(message, f"⛔ {_target_display(target)} заблокирован{note}.", parse_mode="HTML")
 
 
-@router.message(Command("unban"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("unban"), F.chat.type.in_({"group", "supergroup"}))
 async def unban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    if not await _require_perm(message, db, settings, PERM_BAN):
+    if not await _require_perm(message, db, settings, PERM_BAN) or not message.from_user:
         return
-    parts = (message.text or "").split()
-    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+    args = remainder_args(message.text or "")
+    if not args or not args[0].lstrip("-").isdigit():
         await _respond(message, "Использование: /unban TELEGRAM_ID")
         return
-    await bot.unban_chat_member(message.chat.id, int(parts[1]), only_if_banned=True)
+    target_id = int(args[0])
+    reason = " ".join(args[1:])
+    stored = await db.get_user(target_id)
+    await bot.unban_chat_member(message.chat.id, target_id, only_if_banned=True)
+    await db.log_admin_action(
+        message.from_user.id,
+        "unban",
+        str(target_id),
+        actor_name=message.from_user.full_name,
+        target_name=person_label(stored, str(target_id)),
+        reason=reason,
+    )
     await _respond(message, "Пользователь разблокирован.")
 
 
-@router.message(Command("warn"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("warn"), F.chat.type.in_({"group", "supergroup"}))
 async def warn_member(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_perm(message, db, settings, PERM_WARN):
+    if not await _require_perm(message, db, settings, PERM_WARN) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
-        await _respond(message, "Ответьте командой на сообщение пользователя: /warn")
+        await _respond(message, "Ответьте командой на сообщение пользователя: /warn причина")
         return
+    reason = " ".join(remainder_args(message.text or ""))
     warnings = await db.add_warning(int(target["user_id"]))
+    await db.log_admin_action(
+        message.from_user.id,
+        "warn",
+        str(target["user_id"]),
+        f"всего {warnings}",
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=reason,
+    )
+    note = f" · {reason}" if reason else " · без причины"
     await _respond(
         message,
-        f"⚠️ {_target_display(target)} получает предупреждение. Всего: {warnings}.",
+        f"⚠️ {_target_display(target)} получает предупреждение. Всего: {warnings}.{note}",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("unwarn"), F.chat.type.in_({"group", "supergroup"}))
 async def unwarn_member(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_perm(message, db, settings, PERM_WARN):
+    if not await _require_perm(message, db, settings, PERM_WARN) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
         await _respond(message, "Ответьте командой на сообщение пользователя: /unwarn")
         return
     warnings = await db.remove_warning(int(target["user_id"]))
+    await db.log_admin_action(
+        message.from_user.id,
+        "unwarn",
+        str(target["user_id"]),
+        f"осталось {warnings}",
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=" ".join(remainder_args(message.text or "")),
+    )
     await _respond(
         message,
         f"✅ С {_target_display(target)} снято предупреждение. Осталось: {warnings}.",
@@ -539,16 +624,16 @@ async def unwarn_member(message: Message, db: Database, settings: Settings) -> N
     )
 
 
-@router.message(Command("role"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("role"), F.chat.type.in_({"group", "supergroup"}))
 async def change_role(message: Message, db: Database, settings: Settings) -> None:
     if not await _require_perm(message, db, settings, PERM_ROLES_ASSIGN) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
-    parts = (message.text or "").split()
-    if not target or len(parts) != 2:
+    args = remainder_args(message.text or "")
+    if not target or len(args) != 1:
         await _respond(message, "Ответьте на сообщение: /role код_роли")
         return
-    new_role = parts[1].casefold()
+    new_role = args[0].casefold()
     role = await db.get_staff_role(new_role)
     if not role or new_role == "owner":
         names = ", ".join(item["slug"] for item in await db.list_staff_roles() if item["slug"] != "owner")
@@ -565,6 +650,15 @@ async def change_role(message: Message, db: Database, settings: Settings) -> Non
         await _respond(message, "Нельзя выдать роль не ниже своей.")
         return
     await db.set_role(int(target["user_id"]), new_role)
+    await db.log_admin_action(
+        message.from_user.id,
+        "role",
+        str(target["user_id"]),
+        str(role["name"]),
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=str(role["name"]),
+    )
     await _respond(
         message,
         f"Роль {_target_display(target)}: {html.escape(str(role['name']))}.",
@@ -572,17 +666,25 @@ async def change_role(message: Message, db: Database, settings: Settings) -> Non
     )
 
 
-@router.message(Command("setstatus"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("setstatus"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_set_status(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_perm(message, db, settings, PERM_USERS_EDIT):
+    if not await _require_perm(message, db, settings, PERM_USERS_EDIT) or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
-    parts = (message.text or "").split(maxsplit=1)
-    if not target or len(parts) != 2:
+    status = " ".join(remainder_args(message.text or "")).strip()[:50]
+    if not target or not status:
         await _respond(message, "Ответьте на сообщение: /setstatus Новый статус")
         return
-    status = parts[1].strip()[:50]
     await db.update_profile(int(target["user_id"]), "custom_status", status)
+    await db.log_admin_action(
+        message.from_user.id,
+        "set_status",
+        str(target["user_id"]),
+        status,
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=status,
+    )
     await _respond(message, "Кастомный статус установлен.")
 
 
@@ -596,12 +698,12 @@ def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
         f"🛒 <b>Магазин NORA</b>\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
-        "Полки: тамагочи, репутация, профиль и мероприятия. "
-        "Покупка применяется сразу после кнопки."
+        "Откройте полку и нажмите товар — покупка списывается сразу. "
+        "В чате этот экран не исчезает через 30 секунд."
     )
 
 
-@router.message(Command("shop"))
+@router.message(command_or_alias("shop"))
 @router.message(F.text == "🛒 Магазин")
 async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
@@ -679,7 +781,7 @@ async def choose_cookie_pack(callback: CallbackQuery, settings: Settings) -> Non
         )
 
 
-@router.message(Command("buycookies"))
+@router.message(command_or_alias("buycookies"))
 async def buycookies_command(message: Message, settings: Settings) -> None:
     prompt = f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽:"
     await message.answer(prompt, reply_markup=cookie_packages_keyboard())
@@ -799,6 +901,14 @@ async def review_cookie_order(callback: CallbackQuery, db: Database, settings: S
         return
     await callback.answer("Оплата подтверждена." if approved else "Оплата отклонена.")
     await callback.message.edit_reply_markup(reply_markup=None)
+    await db.log_admin_action(
+        callback.from_user.id,
+        "payment_approved" if approved else "payment_rejected",
+        str(order["user_id"]),
+        f"заказ №{order_id} · {order['amount']} 🍪",
+        actor_name=callback.from_user.full_name,
+        reason="проверка СБП",
+    )
     if approved:
         await safe_send(
             bot,
@@ -1030,41 +1140,52 @@ async def save_purchased_status(message: Message, state: FSMContext, db: Databas
     await message.answer(f"✅ Статус установлен. Списано {price} 🍪.")
 
 
-@router.message(Command("givecookies"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("givecookies"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_give_cookies(message: Message, db: Database, settings: Settings) -> None:
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
-    if not actor_role:
+    if not actor_role or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
-    parts = (message.text or "").split()
-    if not target or len(parts) != 2 or not parts[1].isdigit():
-        await _respond(message, "Ответьте на сообщение: /givecookies 100")
+    args = remainder_args(message.text or "")
+    if not target or not args or not args[0].isdigit():
+        await _respond(message, "Ответьте на сообщение: /givecookies 100 причина")
         return
     if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
         return
-    amount = int(parts[1])
+    amount = int(args[0])
+    reason = " ".join(args[1:])
     if amount <= 0 or amount > 1_000_000:
         await _respond(message, "Количество должно быть от 1 до 1 000 000 🍪.")
         return
     await db.add_cookies(int(target["user_id"]), amount, "admin", f"by:{message.from_user.id}")
+    await db.log_admin_action(
+        message.from_user.id,
+        "give_cookies",
+        str(target["user_id"]),
+        f"+{amount} 🍪",
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=reason,
+    )
     await _respond(message, f"Начислено {amount} 🍪 пользователю {_target_display(target)}.", parse_mode="HTML")
 
 
-@router.message(Command("setcookies"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("setcookies"), F.chat.type.in_({"group", "supergroup"}))
 async def admin_set_cookies(message: Message, db: Database, settings: Settings) -> None:
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
     target = await resolve_reply_target(message, db)
-    parts = (message.text or "").split()
-    if not target or len(parts) != 2 or not parts[1].isdigit():
-        await _respond(message, "Ответьте на сообщение: /setcookies 100")
+    args = remainder_args(message.text or "")
+    if not target or not args or not args[0].isdigit():
+        await _respond(message, "Ответьте на сообщение: /setcookies 100 причина")
         return
     if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
         return
-    amount = int(parts[1])
+    amount = int(args[0])
+    reason = " ".join(args[1:])
     if amount > 1_000_000:
         await _respond(message, "Баланс не может превышать 1 000 000 🍪.")
         return
@@ -1073,6 +1194,15 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
         await _respond(message, "Не удалось изменить баланс.")
         return
     sign = "+" if difference >= 0 else ""
+    await db.log_admin_action(
+        message.from_user.id,
+        "set_cookies",
+        str(target["user_id"]),
+        f"{amount} 🍪 ({sign}{difference})",
+        actor_name=message.from_user.full_name,
+        target_name=person_label(target),
+        reason=reason,
+    )
     await _respond(
         message,
         f"Баланс {_target_display(target)} установлен: {amount} 🍪 ({sign}{difference}).",
@@ -1080,7 +1210,7 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
     )
 
 
-@router.message(Command("roulette"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("roulette"), F.chat.type.in_({"group", "supergroup"}))
 async def roulette_invite(message: Message, db: Database) -> None:
     if not message.from_user:
         return
@@ -1106,6 +1236,7 @@ async def roulette_invite(message: Message, db: Database) -> None:
         "Ставка — 10 🍪. Победитель определяется автоматически.",
         parse_mode="HTML",
         reply_markup=roulette_invite_keyboard(game_id),
+        ephemeral=False,
     )
 
 
@@ -1149,24 +1280,20 @@ async def roulette_decision(callback: CallbackQuery, db: Database) -> None:
     )
 
 
-def _is_freebie_request(message: Message) -> bool:
-    return bool(message.text and message.text.strip().casefold() == "халява")
-
-
-@router.message(_is_freebie_request, F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("freebie"), F.chat.type.in_({"group", "supergroup"}))
 async def freebie_offer(message: Message, settings: Settings) -> None:
     if not settings.freebie_channel_url:
-        offer = await message.answer("Бонус за подписку ещё не настроен владельцем.")
-        asyncio.create_task(_delete_later(offer, 25))
+        await _respond(message, "Бонус за подписку ещё не настроен владельцем.")
         return
-    offer = await message.answer(
+    await _respond(
+        message,
         "🎁 <b>Бесплатные печеньки</b>\n\n"
         "Подпишитесь на канал и нажмите «Проверить подписку». "
         "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
         parse_mode="HTML",
         reply_markup=freebie_keyboard(settings.freebie_channel_url),
+        ttl=60,
     )
-    asyncio.create_task(_delete_later(offer, 60))
 
 
 @router.callback_query(F.data == "freebie:check", F.message.chat.type.in_({"group", "supergroup"}))
@@ -1201,16 +1328,16 @@ async def freebie_check(callback: CallbackQuery, db: Database, settings: Setting
         )
 
 
-@router.message(Command("transfer"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(command_or_alias("transfer"), F.chat.type.in_({"group", "supergroup"}))
 async def transfer_command(message: Message, db: Database) -> None:
     if not message.from_user:
         return
     target = await resolve_reply_target(message, db)
-    parts = (message.text or "").split()
-    if not target or len(parts) != 2 or not parts[1].isdigit():
+    args = remainder_args(message.text or "")
+    if not target or not args or not args[0].isdigit():
         await _respond(message, "Ответьте на сообщение пользователя: /transfer 100")
         return
-    await _prepare_transfer(message, db, target, int(parts[1]))
+    await _prepare_transfer(message, db, target, int(args[0]))
 
 
 async def _prepare_transfer(message: Message, db: Database, target: dict[str, object], amount: int) -> None:
@@ -1232,6 +1359,7 @@ async def _prepare_transfer(message: Message, db: Database, target: dict[str, ob
         f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
         parse_mode="HTML",
         reply_markup=transfer_keyboard(transfer_id),
+        ephemeral=False,
     )
 
 

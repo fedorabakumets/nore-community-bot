@@ -72,6 +72,7 @@ def private_menu_keyboard(show_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [ibtn("📝 Анкета", "menu:apply", STYLE_GO), ibtn("❓ Вопрос", "menu:question")],
         [ibtn("🛒 Магазин", "menu:shop", STYLE_FUN), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
+        [ibtn("✨ Обновления", "menu:updates", STYLE_FUN)],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])

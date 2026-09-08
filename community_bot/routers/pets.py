@@ -6,10 +6,10 @@ from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
+from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
@@ -87,7 +87,7 @@ async def _show_pet(message: Message, db: Database) -> None:
     await send_pet_card(message, pet)
 
 
-@router.message(Command("pet"))
+@router.message(command_or_alias("pet"))
 @router.message(F.text == "🐾 Тамагочи")
 async def show_pet(message: Message, db: Database) -> None:
     await _show_pet(message, db)

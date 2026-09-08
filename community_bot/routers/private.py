@@ -20,6 +20,8 @@ from aiogram.types import (
     Message,
 )
 
+from community_bot.aliases import command_or_alias
+from community_bot.audit import format_audit_log, person_label
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
@@ -78,8 +80,11 @@ from community_bot.texts import (
     APPLICATION_QUESTIONS,
     APPLICATION_REJECTED_INTERVIEW,
     GROUP_COMMANDS_TEXT,
+    REPUTATION_HELP_TEXT,
+    STORE_HELP_TEXT,
     WELCOME_TEXT,
 )
+from community_bot.updates import updates_text
 
 router = Router(name="private")
 router.message.filter(F.chat.type == "private")
@@ -177,6 +182,7 @@ async def emergency_stop_confirm(
 
 
 @router.message(CommandStart())
+@router.message(F.text.func(lambda text: (text or "").casefold() == "старт"))
 async def start(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -185,7 +191,7 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
     await _send_welcome(message, settings, await _private_keyboard(message.from_user.id, db, settings))
 
 
-@router.message(Command("help"))
+@router.message(command_or_alias("help", "commands"))
 async def help_command(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -194,6 +200,28 @@ async def help_command(message: Message, db: Database, settings: Settings) -> No
         parse_mode="HTML",
         reply_markup=await _private_keyboard(message.from_user.id, db, settings),
     )
+
+
+@router.message(command_or_alias("store"))
+async def private_store(message: Message) -> None:
+    await message.answer(STORE_HELP_TEXT, parse_mode="HTML")
+
+
+@router.message(command_or_alias("reputation"))
+async def private_reputation(message: Message) -> None:
+    await message.answer(REPUTATION_HELP_TEXT, parse_mode="HTML")
+
+
+@router.message(command_or_alias("updates"))
+async def private_updates_command(message: Message) -> None:
+    await message.answer(updates_text(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:updates")
+async def menu_updates(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(updates_text(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu:apply")
@@ -289,7 +317,7 @@ async def _admin_panel_text(db: Database) -> str:
     )
 
 
-@router.message(Command("admin"))
+@router.message(command_or_alias("admin"))
 @router.message(F.text == "🛡 Админ-панель")
 async def admin_panel(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
@@ -367,17 +395,9 @@ async def admin_audit(callback: CallbackQuery, db: Database, settings: Settings)
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
     rows = await db.recent_admin_actions(20)
-    lines = ["🧾 <b>Последние действия</b>", ""]
-    for row in rows:
-        lines.append(
-            f"#{row['id']} · <code>{row['actor_id']}</code> · {html.escape(str(row['action']))} · "
-            f"{html.escape(str(row['target'] or '—'))}"
-        )
-    if not rows:
-        lines.append("Журнал пока пуст.")
     await callback.answer()
     await callback.message.edit_text(
-        "\n".join(lines),
+        format_audit_log(rows),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")]]
@@ -410,7 +430,7 @@ async def admin_inactive(callback: CallbackQuery, db: Database, settings: Settin
     )
 
 
-@router.message(Command("apply"))
+@router.message(command_or_alias("apply"))
 @router.message(F.text == "📝 Заполнить анкету")
 async def begin_application(message: Message, state: FSMContext, db: Database) -> None:
     if not message.from_user:
@@ -580,6 +600,16 @@ async def approve_application(callback: CallbackQuery, db: Database, settings: S
     await callback.answer("Анкета одобрена.")
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
+    application = await db.get_application(application_id)
+    await db.log_admin_action(
+        callback.from_user.id,
+        "application_approved",
+        str((application or {}).get("user_id") or ""),
+        f"анкета №{application_id}",
+        actor_name=callback.from_user.full_name,
+        target_name=person_label(application, str((application or {}).get("user_id") or "")),
+        reason="одобрение анкеты",
+    )
     await _notify_application_decision(bot, db, settings, application_id, callback.from_user.id, "approved", None)
 
 
@@ -613,6 +643,16 @@ async def rejection_reason(message: Message, state: FSMContext, db: Database, se
         return
     await state.clear()
     await message.answer("Анкета отклонена, пользователь уведомлён.")
+    application = await db.get_application(application_id)
+    await db.log_admin_action(
+        message.from_user.id,
+        "application_rejected",
+        str((application or {}).get("user_id") or ""),
+        f"анкета №{application_id}",
+        actor_name=message.from_user.full_name,
+        target_name=person_label(application, str((application or {}).get("user_id") or "")),
+        reason=reason,
+    )
     await _notify_application_decision(bot, db, settings, application_id, message.from_user.id, "rejected", reason)
 
 
@@ -643,7 +683,7 @@ async def _send_pending_applications(message: Message, db: Database) -> None:
         )
 
 
-@router.message(Command("applications"))
+@router.message(command_or_alias("applications"))
 async def applications_list(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_APPLICATIONS):
         return
@@ -1178,36 +1218,251 @@ async def admin_begin_community_post(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
-    await state.set_state(AdminFlow.post_community)
+    from community_bot.posting import templates_keyboard
+
+    await state.set_state(AdminFlow.post_pick)
+    await state.set_data(
+        {
+            "post_template": "announce",
+            "post_body": "",
+            "post_media_type": None,
+            "post_file_id": None,
+            "post_buttons": [],
+        }
+    )
     await callback.answer()
     await callback.message.answer(
-        "Отправьте сообщение или вложение, которое нужно опубликовать в сообществе.",
-        reply_markup=flow_reply_keyboard(),
+        "📢 <b>Студия поста в сообщество</b>\n\n"
+        "Выберите шаблон оформления. Дальше — текст, медиа и кнопки-ссылки.",
+        parse_mode="HTML",
+        reply_markup=templates_keyboard(),
     )
 
 
-@router.message(AdminFlow.post_community)
-async def admin_send_community_post(
-    message: Message,
+@router.callback_query(F.data == "post:cancel")
+async def admin_post_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.answer("Отменено")
+    if callback.message:
+        await callback.message.answer("Публикация отменена.")
+
+
+@router.callback_query(F.data.startswith("post:tpl:"))
+async def admin_post_pick_template(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    from community_bot.posting import TEMPLATES, skip_keyboard
+
+    template_id = callback.data.rsplit(":", 1)[1]
+    if template_id not in TEMPLATES:
+        await callback.answer("Нет такого шаблона.", show_alert=True)
+        return
+    await state.set_state(AdminFlow.post_body)
+    await state.update_data(post_template=template_id)
+    meta = TEMPLATES[template_id]
+    await callback.answer()
+    await callback.message.answer(
+        f"{meta['title']}\n{meta['hint']}\n\nПришлите текст поста одним сообщением.",
+        reply_markup=skip_keyboard("body") if template_id == "html" else flow_reply_keyboard(),
+    )
+
+
+@router.message(AdminFlow.post_body)
+async def admin_post_body(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        await state.clear()
+        return
+    from community_bot.posting import media_from_studio_message, skip_keyboard
+
+    body = (message.html_text or message.text or message.caption or "").strip()
+    media_type, file_id = media_from_studio_message(message)
+    if not body and not media_type:
+        await message.answer("Нужен текст или вложение.")
+        return
+    await state.update_data(post_body=body, post_media_type=media_type, post_file_id=file_id)
+    if media_type:
+        await state.set_state(AdminFlow.post_buttons)
+        await message.answer(
+            "Кнопки: каждая с новой строки\n"
+            "<code>Текст | https://ссылка | green</code>\n"
+            "Цвет: green, blue, red, gray. Или напишите «нет».",
+            parse_mode="HTML",
+            reply_markup=skip_keyboard("buttons"),
+        )
+        return
+    await state.set_state(AdminFlow.post_media)
+    await message.answer(
+        "Прикрепите фото, видео, GIF или файл — или нажмите «Пропустить».",
+        reply_markup=skip_keyboard("media"),
+    )
+
+
+@router.callback_query(F.data == "post:skip:body")
+async def admin_post_skip_body(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    from community_bot.posting import skip_keyboard
+
+    await state.update_data(post_body="")
+    await state.set_state(AdminFlow.post_media)
+    await callback.answer()
+    await callback.message.answer("Медиа или «Пропустить».", reply_markup=skip_keyboard("media"))
+
+
+@router.message(AdminFlow.post_media)
+async def admin_post_media(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        await state.clear()
+        return
+    from community_bot.posting import is_skip_text, media_from_studio_message, skip_keyboard
+
+    if is_skip_text(message.text):
+        await state.update_data(post_media_type=None, post_file_id=None)
+    else:
+        media_type, file_id = media_from_studio_message(message)
+        if not media_type:
+            await message.answer("Пришлите медиа или «нет».")
+            return
+        await state.update_data(post_media_type=media_type, post_file_id=file_id)
+    await state.set_state(AdminFlow.post_buttons)
+    await message.answer(
+        "Кнопки: <code>Текст | https://ссылка | green</code> — по одной в строке. Или «нет».",
+        parse_mode="HTML",
+        reply_markup=skip_keyboard("buttons"),
+    )
+
+
+@router.callback_query(F.data == "post:skip:media")
+async def admin_post_skip_media(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    from community_bot.posting import skip_keyboard
+
+    await state.update_data(post_media_type=None, post_file_id=None)
+    await state.set_state(AdminFlow.post_buttons)
+    await callback.answer()
+    await callback.message.answer(
+        "Кнопки: <code>Текст | https://ссылка | green</code> — по одной в строке. Или «нет».",
+        parse_mode="HTML",
+        reply_markup=skip_keyboard("buttons"),
+    )
+
+
+async def _show_post_preview(message: Message, data: dict[str, Any], bot: Bot) -> None:
+    from community_bot.posting import buttons_markup, preview_keyboard, render_post, send_studio_post
+
+    html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
+    markup = buttons_markup(list(data.get("post_buttons") or []))
+    preview = preview_keyboard()
+    if markup:
+        # Show URL buttons on the actual post; preview actions separately.
+        try:
+            await send_studio_post(
+                bot,
+                message.chat.id,
+                html_text or " ",
+                data.get("post_media_type"),
+                data.get("post_file_id"),
+                markup,
+            )
+        except TelegramBadRequest:
+            await message.answer(html_text or "Предпросмотр без текста.", parse_mode="HTML", reply_markup=markup)
+        await message.answer("Так пост увидит сообщество. Опубликовать?", reply_markup=preview)
+        return
+    try:
+        await send_studio_post(
+            bot,
+            message.chat.id,
+            html_text or " ",
+            data.get("post_media_type"),
+            data.get("post_file_id"),
+            preview,
+        )
+    except TelegramBadRequest:
+        await message.answer(html_text or "Предпросмотр без текста.", parse_mode="HTML", reply_markup=preview)
+
+
+@router.message(AdminFlow.post_buttons)
+async def admin_post_buttons(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
+    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        await state.clear()
+        return
+    from community_bot.posting import is_skip_text, parse_button_lines
+
+    if is_skip_text(message.text):
+        await state.update_data(post_buttons=[])
+    else:
+        buttons, error = parse_button_lines(message.text or "")
+        if error:
+            await message.answer(error)
+            return
+        await state.update_data(post_buttons=buttons)
+    data = await state.get_data()
+    await _show_post_preview(message, data, bot)
+
+
+@router.callback_query(F.data == "post:skip:buttons")
+async def admin_post_skip_buttons(
+    callback: CallbackQuery,
     state: FSMContext,
     db: Database,
     settings: Settings,
     bot: Bot,
 ) -> None:
-    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
-        await state.clear()
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.update_data(post_buttons=[])
+    await callback.answer()
+    data = await state.get_data()
+    await _show_post_preview(callback.message, data, bot)
+
+
+@router.callback_query(F.data == "post:send")
+async def admin_post_send(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+    bot: Bot,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
     if not settings.community_chat_id:
-        await state.clear()
-        await message.answer("ID чата сообщества не настроен.")
+        await callback.answer("ID чата сообщества не настроен.", show_alert=True)
         return
+    from community_bot.posting import buttons_markup, render_post, send_studio_post
+
+    data = await state.get_data()
+    html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
+    markup = buttons_markup(list(data.get("post_buttons") or []))
     try:
-        await bot.copy_message(settings.community_chat_id, message.chat.id, message.message_id)
+        await send_studio_post(
+            bot,
+            settings.community_chat_id,
+            html_text or " ",
+            data.get("post_media_type"),
+            data.get("post_file_id"),
+            markup,
+        )
     except TelegramBadRequest:
-        await message.answer("Telegram не смог отправить это сообщение в сообщество.")
+        await callback.answer("Telegram не принял это сообщение.", show_alert=True)
         return
+    await db.log_admin_action(
+        callback.from_user.id,
+        "post_community",
+        str(settings.community_chat_id),
+        str(data.get("post_template") or ""),
+        actor_name=callback.from_user.full_name,
+        reason=str(data.get("post_template") or "пост"),
+    )
     await state.clear()
-    await message.answer("✅ Сообщение опубликовано в чате сообщества.")
+    await callback.answer("Опубликовано")
+    await callback.message.answer("✅ Пост ушёл в чат сообщества.")
 
 
 @router.callback_query(F.data == "admin:mention")
@@ -1366,7 +1621,7 @@ async def admin_delete_automessage(callback: CallbackQuery, db: Database, settin
     await callback.message.edit_reply_markup(reply_markup=automessages_keyboard(rows))
 
 
-@router.message(Command("question"))
+@router.message(command_or_alias("question"))
 @router.message(F.text == "❓ Задать вопрос")
 async def open_ticket(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
     if not message.from_user:
@@ -1393,7 +1648,7 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
     )
 
 
-@router.message(Command("close"), TicketForm.active)
+@router.message(command_or_alias("close"), TicketForm.active)
 async def close_own_ticket(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
@@ -1487,6 +1742,14 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
         await callback.answer("Тикет уже закрыт.", show_alert=True)
         return
     await db.close_ticket(ticket_id)
+    await db.log_admin_action(
+        callback.from_user.id,
+        "ticket_close",
+        str(ticket["user_id"]),
+        f"тикет №{ticket_id}",
+        actor_name=callback.from_user.full_name,
+        reason="закрытие тикета",
+    )
     await callback.answer("Тикет закрыт.")
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)

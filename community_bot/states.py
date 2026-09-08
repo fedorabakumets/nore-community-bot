@@ -44,7 +44,10 @@ class PetFlow(StatesGroup):
 class AdminFlow(StatesGroup):
     user_value = State()
     broadcast_private = State()
-    post_community = State()
+    post_pick = State()
+    post_body = State()
+    post_media = State()
+    post_buttons = State()
     mention_all = State()
     automessage_content = State()
     automessage_interval = State()

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
@@ -55,7 +55,7 @@ async def send_profile_card(
     return await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
-@router.message(Command("profile"))
+@router.message(command_or_alias("profile"))
 @router.message(F.text == "👤 Мой профиль")
 async def show_profile(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
