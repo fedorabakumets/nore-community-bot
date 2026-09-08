@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from aiogram.filters import Filter
+from aiogram.filters import Command, Filter, or_f
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
@@ -52,6 +53,8 @@ MULTIWORD_ALIASES: dict[str, str] = {
     "отменить игру": "gamecancel",
 }
 
+_PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
+
 _ALIAS_TO_COMMAND: dict[str, str] = {}
 for _command, _aliases in COMMAND_ALIASES.items():
     _ALIAS_TO_COMMAND[_command] = _command
@@ -60,7 +63,10 @@ for _command, _aliases in COMMAND_ALIASES.items():
 
 
 def canonical_command(token: str) -> str | None:
-    return _ALIAS_TO_COMMAND.get(token.casefold())
+    cleaned = _PUNCT.sub("", token).casefold()
+    if not cleaned:
+        return None
+    return _ALIAS_TO_COMMAND.get(cleaned)
 
 
 def parse_trigger(text: str) -> tuple[str, str] | None:
@@ -95,12 +101,20 @@ def is_command_trigger(text: str) -> bool:
     return parse_trigger(text) is not None
 
 
+def is_command_message(text: str) -> bool:
+    stripped = (text or "").lstrip()
+    if stripped.startswith("/"):
+        return True
+    return is_command_trigger(stripped)
+
+
 class CommandOrAlias(Filter):
     def __init__(self, *commands: str) -> None:
         self.commands = {item.casefold() for item in commands}
 
-    async def __call__(self, message: Message) -> bool | dict[str, Any]:
-        parsed = parse_trigger(message.text or "")
+    async def __call__(self, message: Message, **kwargs: Any) -> bool | dict[str, Any]:
+        del kwargs
+        parsed = parse_trigger(message.text or message.caption or "")
         if not parsed:
             return False
         name, args = parsed
@@ -116,5 +130,5 @@ class CommandOrAlias(Filter):
         }
 
 
-def command_or_alias(*commands: str) -> CommandOrAlias:
-    return CommandOrAlias(*commands)
+def command_or_alias(*commands: str) -> Filter:
+    return or_f(Command(*commands), CommandOrAlias(*commands))

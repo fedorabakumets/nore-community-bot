@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -250,6 +251,9 @@ DEFAULT_FEATURE_FLAGS = {
 
 def utcnow() -> str:
     return datetime.now(UTC).isoformat()
+
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -1268,7 +1272,12 @@ class Database:
 
     async def get_pet(self, user_id: int, settle: bool = True) -> dict[str, Any] | None:
         if settle:
-            return await self.settle_pet(user_id)
+            try:
+                settled = await self.settle_pet(user_id)
+                if settled is not None:
+                    return settled
+            except Exception:
+                logger.exception("Не удалось обновить состояние питомца %s", user_id)
         return await self.fetchone("SELECT * FROM pets WHERE user_id = ?", (user_id,))
 
     async def list_pets(self) -> list[dict[str, Any]]:

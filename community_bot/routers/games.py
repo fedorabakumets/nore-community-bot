@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
+from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import game_lobby_keyboard, game_vote_keyboard, games_menu_keyboard
 from community_bot.permissions import PERM_GAMES
@@ -142,11 +143,12 @@ async def games_menu(message: Message, db: Database) -> None:
     if not await db.feature_enabled("games"):
         await message.answer("Мини-игры временно выключены администрацией.")
         return
-    await message.answer(
-        "🎮 <b>Игровая</b>\n\nВыберите игру. Одновременно в чате может идти одна партия.",
-        parse_mode="HTML",
-        reply_markup=games_menu_keyboard(),
-    )
+    with keep_in_chat():
+        await message.answer(
+            "🎮 <b>Игровая</b>\n\nВыберите игру. Одновременно в чате может идти одна партия.",
+            parse_mode="HTML",
+            reply_markup=games_menu_keyboard(),
+        )
 
 
 @router.callback_query(F.data == "game:rules:all")

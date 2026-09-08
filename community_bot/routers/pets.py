@@ -77,10 +77,8 @@ async def refresh_pet_card(target: Message, pet: dict[str, object]) -> None:
         await send_pet_card(target, pet)
 
 
-async def _show_pet(message: Message, db: Database) -> None:
-    if not message.from_user:
-        return
-    pet = await db.get_pet(message.from_user.id)
+async def _show_pet(message: Message, db: Database, user_id: int) -> None:
+    pet = await db.get_pet(user_id)
     if not pet:
         await message.answer("У вас пока нет тамагочи. Откройте /shop → 🐾 Тамагочи.")
         return
@@ -90,7 +88,9 @@ async def _show_pet(message: Message, db: Database) -> None:
 @router.message(command_or_alias("pet"))
 @router.message(F.text == "🐾 Тамагочи")
 async def show_pet(message: Message, db: Database) -> None:
-    await _show_pet(message, db)
+    if not message.from_user:
+        return
+    await _show_pet(message, db, message.from_user.id)
 
 
 @router.callback_query(F.data.startswith("pet:species:"))

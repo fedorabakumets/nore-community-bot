@@ -11,6 +11,7 @@ from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandSc
 
 from community_bot.config import Settings, load_settings
 from community_bot.database import Database
+from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message, user_link
 from community_bot.pets_talk import idle_ping
 from community_bot.routers import (
@@ -222,7 +223,9 @@ async def main() -> None:
             await db.set_role(moderator_id, "moderator")
 
     bot = Bot(settings.bot_token)
+    patch_bot_ephemeral(bot)
     dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)
     dispatcher.include_router(cookie_games_router)

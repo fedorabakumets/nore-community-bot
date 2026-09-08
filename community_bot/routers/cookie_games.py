@@ -6,9 +6,10 @@ from aiogram import F, Router
 from aiogram.filters.command import CommandObject
 from aiogram.types import CallbackQuery, Message
 
-from community_bot.aliases import command_or_alias
+from community_bot.aliases import command_or_alias, parse_trigger
 from community_bot.config import Settings
 from community_bot.database import Database
+from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import (
     blackjack_turn_keyboard,
@@ -88,19 +89,25 @@ async def cookie_games_command(
     if not await db.feature_enabled("games"):
         await message.answer("Мини-игры временно выключены администрацией.")
         return
-    raw = (command.command or "cgames").casefold()
+    parsed = parse_trigger(message.text or "")
+    if parsed:
+        raw, args = parsed
+    else:
+        raw = (command.command or "cgames").casefold()
+        args = command.args or ""
     if raw == "cgames":
-        await message.answer(
-            "🍪 <b>Игры на печеньки</b>\n2–4 игрока, ставка списывается при входе.\n"
-            "🃏 Блэкджек — против дилера Норы.\n🎲 Кости — 2d6, банк забирает лучший бросок.\n\n"
-            "Команды: <code>/blackjack 10</code> · «блэкджек 10» · <code>/dice 25</code> · «кости 25»",
-            parse_mode="HTML",
-            reply_markup=cookie_stake_keyboard("bj"),
-        )
+        with keep_in_chat():
+            await message.answer(
+                "🍪 <b>Игры на печеньки</b>\n2–4 игрока, ставка списывается при входе.\n"
+                "🃏 Блэкджек — против дилера Норы.\n🎲 Кости — 2d6, банк забирает лучший бросок.\n\n"
+                "Команды: <code>/blackjack 10</code> · «блэкджек 10» · <code>/dice 25</code> · «кости 25»",
+                parse_mode="HTML",
+                reply_markup=cookie_stake_keyboard("bj"),
+            )
         return
     game_type = "bj" if raw == "blackjack" else "dice"
     try:
-        stake = int((command.args or "10").split()[0])
+        stake = int((args or "10").split()[0])
     except ValueError:
         stake = 0
     if not 1 <= stake <= 500:
@@ -114,7 +121,8 @@ async def cookie_games_command(
     game = await db.get_party_game(game_id)
     players = await db.list_game_players(game_id)
     assert game is not None
-    await message.answer(_lobby_text(game, players), parse_mode="HTML", reply_markup=cookie_lobby_keyboard(game_id))
+    with keep_in_chat():
+        await message.answer(_lobby_text(game, players), parse_mode="HTML", reply_markup=cookie_lobby_keyboard(game_id))
 
 
 @router.callback_query(F.data == "cg:home")

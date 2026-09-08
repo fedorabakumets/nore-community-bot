@@ -15,9 +15,16 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("купить печеньки") == ("buycookies", "")
     assert parse_trigger("мут 30m спам") == ("mute", "30m спам")
     assert parse_trigger("привет") is None
-    assert parse_trigger("+реп") is None
+    assert parse_trigger("/команды") == ("commands", "")
+    assert parse_trigger("команды!") == ("commands", "")
+    assert parse_trigger("Команды") == ("commands", "")
     assert is_command_trigger("халява")
     assert is_command_trigger("обновления")
+    from community_bot.aliases import is_command_message
+
+    assert is_command_message("/неизвестная")
+    assert is_command_message("команды")
+    assert not is_command_message("привет всем")
 
 
 def test_moderation_status_red_yellow_green() -> None:
@@ -112,3 +119,23 @@ async def test_audit_log_persists_names_and_status(tmp_path) -> None:
     assert mute["target_name"] == "Борис"
     assert mute["status"] == "green"
     assert warn["status"] == "red"
+
+
+async def test_get_pet_still_returns_row_if_settle_fails(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from community_bot.database import Database
+
+    db = Database(Path(tmp_path) / "pet.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Хозяин")
+    await db.add_cookies(1, 80, "test")
+    assert (await db.purchase_pet(1, "cat", "Булочка", 50))[0] is True
+
+    async def boom(_user_id: int):
+        raise RuntimeError("settle failed")
+
+    monkeypatch.setattr(db, "settle_pet", boom)
+    pet = await db.get_pet(1)
+    assert pet is not None
+    assert pet["name"] == "Булочка"

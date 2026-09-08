@@ -23,7 +23,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from community_bot.aliases import command_or_alias, is_command_trigger, remainder_args
+from community_bot.aliases import command_or_alias, is_command_message, remainder_args
 from community_bot.audit import SYSTEM_ACTOR_ID, parse_moderation_args, person_label
 from community_bot.config import Settings
 from community_bot.database import Database
@@ -33,6 +33,7 @@ from community_bot.domain import (
     reputation_tier,
     transfer_amount,
 )
+from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -182,10 +183,6 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                     )
                     return None
         result = await handler(event, data)
-        text = (event.text or "").lstrip()
-        if event.chat.type in {"group", "supergroup"} and is_command_trigger(text):
-            with contextlib.suppress(TelegramBadRequest):
-                await event.delete()
         return result
 
 
@@ -204,13 +201,10 @@ async def _respond(
     ttl: float = BOT_REPLY_TTL,
     **kwargs: Any,
 ) -> Message:
-    if is_command_trigger(message.text or ""):
-        sent = await message.answer(text, **kwargs)
-    else:
-        sent = await message.reply(text, **kwargs)
-    if ephemeral and message.chat.type in {"group", "supergroup"}:
-        asyncio.create_task(delete_later(sent, ttl))
-    return sent
+    del ephemeral, ttl
+    if is_command_message(message.text or message.caption or ""):
+        return await message.answer(text, **kwargs)
+    return await message.reply(text, **kwargs)
 
 
 async def _delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
@@ -299,7 +293,7 @@ async def store_help(message: Message) -> None:
 async def group_updates(message: Message) -> None:
     from community_bot.updates import updates_text
 
-    await _respond(message, updates_text(), parse_mode="HTML", ttl=60)
+    await _respond(message, updates_text(), parse_mode="HTML")
 
 
 @router.message(command_or_alias("admin"), F.chat.type.in_({"group", "supergroup"}))
@@ -1229,15 +1223,15 @@ async def roulette_invite(message: Message, db: Database) -> None:
         await _respond(message, "Для игры у обоих участников должно быть минимум 10 🍪.")
         return
     game_id = await db.create_roulette(message.chat.id, message.from_user.id, int(target["user_id"]))
-    await _respond(
-        message,
-        f"🎯 {_target_display(target)}, вас вызывает на русскую рулетку "
-        f"{user_link(message.from_user.id, message.from_user.full_name)}!\n"
-        "Ставка — 10 🍪. Победитель определяется автоматически.",
-        parse_mode="HTML",
-        reply_markup=roulette_invite_keyboard(game_id),
-        ephemeral=False,
-    )
+    with keep_in_chat():
+        await _respond(
+            message,
+            f"🎯 {_target_display(target)}, вас вызывает на русскую рулетку "
+            f"{user_link(message.from_user.id, message.from_user.full_name)}!\n"
+            "Ставка — 10 🍪. Победитель определяется автоматически.",
+            parse_mode="HTML",
+            reply_markup=roulette_invite_keyboard(game_id),
+        )
 
 
 @router.callback_query(F.data.startswith("roulette:"), F.message.chat.type.in_({"group", "supergroup"}))
@@ -1285,15 +1279,15 @@ async def freebie_offer(message: Message, settings: Settings) -> None:
     if not settings.freebie_channel_url:
         await _respond(message, "Бонус за подписку ещё не настроен владельцем.")
         return
-    await _respond(
-        message,
-        "🎁 <b>Бесплатные печеньки</b>\n\n"
-        "Подпишитесь на канал и нажмите «Проверить подписку». "
-        "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
-        parse_mode="HTML",
-        reply_markup=freebie_keyboard(settings.freebie_channel_url),
-        ttl=60,
-    )
+    with keep_in_chat():
+        await _respond(
+            message,
+            "🎁 <b>Бесплатные печеньки</b>\n\n"
+            "Подпишитесь на канал и нажмите «Проверить подписку». "
+            "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
+            parse_mode="HTML",
+            reply_markup=freebie_keyboard(settings.freebie_channel_url),
+        )
 
 
 @router.callback_query(F.data == "freebie:check", F.message.chat.type.in_({"group", "supergroup"}))
@@ -1354,13 +1348,13 @@ async def _prepare_transfer(message: Message, db: Database, target: dict[str, ob
         await _respond(message, "После комиссии получателю ничего не останется. Минимум — 2 🍪.")
         return
     transfer_id = await db.create_transfer(message.from_user.id, int(target["user_id"]), amount)
-    await _respond(
-        message,
-        f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
-        parse_mode="HTML",
-        reply_markup=transfer_keyboard(transfer_id),
-        ephemeral=False,
-    )
+    with keep_in_chat():
+        await _respond(
+            message,
+            f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
+            parse_mode="HTML",
+            reply_markup=transfer_keyboard(transfer_id),
+        )
 
 
 @router.callback_query(F.data.startswith("transfer:"))

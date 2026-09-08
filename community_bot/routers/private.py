@@ -267,12 +267,12 @@ async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -
 
 @router.callback_query(F.data == "menu:pet")
 async def menu_pet(callback: CallbackQuery, db: Database) -> None:
-    if not callback.message:
+    if not callback.message or not callback.from_user:
         return
     from community_bot.routers.pets import _show_pet
 
     await callback.answer()
-    await _show_pet(callback.message, db)
+    await _show_pet(callback.message, db, callback.from_user.id)
 
 
 @router.callback_query(F.data == "menu:admin")
