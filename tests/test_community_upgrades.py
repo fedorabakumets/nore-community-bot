@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from community_bot.helpers import ornate_profile_text, pet_guard_reputation, profile_text
-from community_bot.keyboards import BTN_MENU, BTN_PROFILE, STYLE_FUN, STYLE_GO, main_private_keyboard
+from community_bot.keyboards import BTN_MENU, BTN_PROFILE, BTN_WALLET, STYLE_FUN, STYLE_GO, main_private_keyboard
 from community_bot.permissions import (
     PERM_MUTE,
     dump_permissions,
@@ -13,12 +13,14 @@ from community_bot.routers.cookie_games import _hand_value
 from community_bot.shop_catalog import SHOP_CATEGORIES
 
 
-def test_persistent_keyboard_is_profile_and_menu() -> None:
+def test_persistent_keyboard_is_profile_wallet_and_menu() -> None:
     row = main_private_keyboard().keyboard[0]
     assert row[0].text == BTN_PROFILE
     assert row[0].style == STYLE_GO
-    assert row[1].text == BTN_MENU
+    assert row[1].text == BTN_WALLET
     assert row[1].style == STYLE_FUN
+    assert row[2].text == BTN_MENU
+    assert row[2].style == STYLE_FUN
 
 
 def test_shop_profile_shelf_has_privacy_and_ornate() -> None:

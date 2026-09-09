@@ -30,6 +30,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "roulette": ("рулетка",),
     "gamecancel": ("отменитьигру",),
     "transfer": ("трансфер",),
+    "balance": ("баланс", "кошелек", "кошелёк"),
     "updates": ("обновления", "обновление"),
     "freebie": ("халява",),
     "id": ("айди",),

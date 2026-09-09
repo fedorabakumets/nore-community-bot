@@ -18,6 +18,7 @@ STYLE_CLOSE = "danger"
 FLOW_CANCEL = "❌ Отмена"
 FLOW_RESTART = "🔄 Начать заново"
 BTN_PROFILE = "👤 Профиль"
+BTN_WALLET = "💼 Кошелёк"
 BTN_MENU = "📋 Меню"
 
 
@@ -59,7 +60,7 @@ def flow_reply_keyboard() -> ReplyKeyboardMarkup:
 def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     del is_admin
     return ReplyKeyboardMarkup(
-        keyboard=[[kbtn(BTN_PROFILE, STYLE_GO), kbtn(BTN_MENU, STYLE_FUN)]],
+        keyboard=[[kbtn(BTN_PROFILE, STYLE_GO), kbtn(BTN_WALLET, STYLE_FUN), kbtn(BTN_MENU, STYLE_FUN)]],
         resize_keyboard=True,
         is_persistent=True,
     )
@@ -496,35 +497,102 @@ def pet_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-FEATURE_LABELS = {
-    "games": "Мини-игры",
-    "tamagotchi": "Тамагочи",
-    "profile_video": "Видео-профили",
-    "activity_rewards": "Награды за активность",
-    "anti_flood": "Антифлуд",
-    "link_filter": "Фильтр ссылок",
-    "media_filter": "Фильтр медиа",
-    "quiet_hours": "Ночной режим 00–07",
-    "raid_mode": "Рейд-режим",
+FEATURE_META = {
+    "games": (
+        "🎮 Мини-игры",
+        "Лобби, блэкджек, кости, рулетка и ролевые игры в чате. Выключение прячет игровые команды.",
+    ),
+    "tamagotchi": (
+        "🐾 Тамагочи",
+        "Питомцы, фарм печенек и магазин припасов. Не влияет на уже существующих питомцев в базе.",
+    ),
+    "profile_video": (
+        "🎬 Видео-профили",
+        "Разрешает видео-аватар в карточке. Если выключено, остаётся только фото.",
+    ),
+    "activity_rewards": (
+        "🎁 Награды за активность",
+        "За каждые 50 сообщений в чате владелец тамагочи получает еду и воду.",
+    ),
+    "anti_flood": (
+        "🛡 Антифлуд",
+        "Больше 6 сообщений за 10 секунд — сообщение удаляется, "
+        "участник получает мут на 5 минут. Не касается модераторов.",
+    ),
+    "link_filter": (
+        "🔗 Фильтр ссылок",
+        "Удаляет сообщения обычных участников со ссылками http/https/t.me. Модераторам можно.",
+    ),
+    "media_filter": (
+        "🖼 Фильтр медиа",
+        "Удаляет фото, видео, файлы, кружки, голосовые и GIF обычных участников. Стикеры этим флагом не трогает.",
+    ),
+    "sticker_filter": (
+        "🎞 Фильтр стикеров",
+        "Отдельно от медиа: удаляет только стикеры обычных участников. Выключите, если стикеры должны проходить.",
+    ),
+    "quiet_hours": (
+        "🌙 Ночной режим 00–07",
+        "С полуночи до семи по часовому поясу бота обычные участники не могут писать в чат.",
+    ),
+    "raid_mode": (
+        "🚨 Рейд-режим",
+        "Первые два сообщения новых участников удаляются, пока режим включён.",
+    ),
 }
+
+FEATURE_LABELS = {key: meta[0] for key, meta in FEATURE_META.items()}
+
+
+def features_panel_text(flags: list[dict[str, object]]) -> str:
+    enabled = {str(row["key"]): bool(int(row["enabled"])) for row in flags}
+    lines = [
+        "⚙️ <b>Функции и защита чата</b>",
+        "",
+        "🟢 включено · ⚪ выключено. Каждая кнопка — переключатель.",
+        "«Сброс» возвращает заводские значения (игры и тамагочи включены, фильтры выключены).",
+        "",
+    ]
+    for key, (title, description) in FEATURE_META.items():
+        mark = "🟢" if enabled.get(key) else "⚪"
+        lines.append(f"{mark} <b>{title}</b>")
+        lines.append(description)
+        lines.append("")
+    extra = [str(row["key"]) for row in flags if str(row["key"]) not in FEATURE_META]
+    for key in extra:
+        mark = "🟢" if enabled.get(key) else "⚪"
+        lines.append(f"{mark} <code>{key}</code>")
+    return "\n".join(lines).strip()
 
 
 def feature_flags_keyboard(flags: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    enabled = {str(row["key"]): bool(int(row["enabled"])) for row in flags}
     rows: list[list[InlineKeyboardButton]] = []
-    for flag in flags:
-        key = str(flag["key"])
-        enabled = bool(int(flag["enabled"]))
+    keys = list(FEATURE_META) + [str(row["key"]) for row in flags if str(row["key"]) not in FEATURE_META]
+    for key in keys:
+        on = enabled.get(key, False)
+        title = FEATURE_LABELS.get(key, key)
         rows.append(
             [
                 ibtn(
-                    f"{'🟢' if enabled else '⚪'} {FEATURE_LABELS.get(key, key)}",
+                    f"{'🟢' if on else '⚪'} {title}",
                     f"admin:feature:{key}",
-                    STYLE_GO if enabled else STYLE_CLOSE,
+                    STYLE_GO if on else STYLE_CLOSE,
                 )
             ]
         )
+    rows.append([ibtn("♻️ Сброс до заводских", "admin:features:reset", STYLE_CLOSE)])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def feature_reset_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("Да, сбросить всё", "admin:features:reset:yes", STYLE_CLOSE)],
+            [ibtn("Не надо", "admin:features", STYLE_FUN)],
+        ]
+    )
 
 
 def games_menu_keyboard() -> InlineKeyboardMarkup:
@@ -543,6 +611,9 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+COOKIE_STAKE_CHOICES = (5, 10, 25, 50, 100)
+
+
 def cookie_stake_keyboard(game_type: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -551,16 +622,37 @@ def cookie_stake_keyboard(game_type: str) -> InlineKeyboardMarkup:
                 ibtn("10 🍪", f"cg:new:{game_type}:10", STYLE_FUN),
                 ibtn("25 🍪", f"cg:new:{game_type}:25", STYLE_GO),
             ],
-            [ibtn("50 🍪", f"cg:new:{game_type}:50", STYLE_GO)],
+            [
+                ibtn("50 🍪", f"cg:new:{game_type}:50", STYLE_GO),
+                ibtn("100 🍪", f"cg:new:{game_type}:100", STYLE_GO),
+            ],
             [back_btn("cg:home"), close_btn("ui:close")],
         ]
     )
 
 
-def cookie_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
+def cookie_lobby_keyboard(game_id: int, current_stake: int = 10) -> InlineKeyboardMarkup:
+    first = [
+        ibtn(
+            f"{'• ' if stake == current_stake else ''}{stake}",
+            f"cg:stake:{game_id}:{stake}",
+            STYLE_GO if stake == current_stake else STYLE_FUN,
+        )
+        for stake in COOKIE_STAKE_CHOICES[:3]
+    ]
+    second = [
+        ibtn(
+            f"{'• ' if stake == current_stake else ''}{stake}",
+            f"cg:stake:{game_id}:{stake}",
+            STYLE_GO if stake == current_stake else STYLE_FUN,
+        )
+        for stake in COOKIE_STAKE_CHOICES[3:]
+    ]
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ibtn("➕ Войти (ставка спишется)", f"cg:join:{game_id}", STYLE_GO)],
+            first,
+            second,
             [
                 ibtn("▶️ Начать", f"cg:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"cg:cancel:{game_id}", STYLE_CLOSE),
@@ -600,3 +692,27 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
         )
         rows.append([ibtn(f"🗳 {name[:38]}", f"game:vote:{game_id}:{player['user_id']}", STYLE_FUN)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def wallet_keyboard(can_borrow: bool) -> InlineKeyboardMarkup:
+    loan_label = "🍪 Взять 100 в долг" if can_borrow else "🍪 Кредит уже открыт"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("📜 История", "wallet:history", STYLE_FUN),
+                ibtn("🛒 Пополнить", "wallet:shop", STYLE_GO),
+            ],
+            [ibtn(loan_label, "wallet:loan", STYLE_GO if can_borrow else None)],
+            [ibtn("❓ Помощь по кошельку", "wallet:help")],
+            [close_btn("ui:close")],
+        ]
+    )
+
+
+def wallet_loan_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("Да, взять 100 🍪", "wallet:loan:yes", STYLE_GO)],
+            [ibtn("Не надо", "wallet:back", STYLE_CLOSE)],
+        ]
+    )

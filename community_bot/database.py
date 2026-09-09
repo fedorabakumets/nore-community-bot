@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'member',
     custom_status TEXT,
     cookies INTEGER NOT NULL DEFAULT 0 CHECK(cookies >= 0),
+    cookie_debt INTEGER NOT NULL DEFAULT 0 CHECK(cookie_debt >= 0),
     reputation INTEGER NOT NULL DEFAULT 100,
     warnings INTEGER NOT NULL DEFAULT 0 CHECK(warnings >= 0),
     hate_immunity_until TEXT,
@@ -95,6 +96,20 @@ CREATE TABLE IF NOT EXISTS transactions (
     details TEXT,
     created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS cookie_loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    principal INTEGER NOT NULL,
+    interest_percent INTEGER NOT NULL,
+    due_amount INTEGER NOT NULL,
+    due_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    collected_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cookie_loans_status ON cookie_loans(status, due_at);
 
 CREATE TABLE IF NOT EXISTS bot_state (
     key TEXT PRIMARY KEY,
@@ -244,6 +259,7 @@ DEFAULT_FEATURE_FLAGS = {
     "anti_flood": 0,
     "link_filter": 0,
     "media_filter": 0,
+    "sticker_filter": 0,
     "quiet_hours": 0,
     "raid_mode": 0,
 }
@@ -284,6 +300,8 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_private INTEGER NOT NULL DEFAULT 0")
             if "profile_ornate" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_ornate INTEGER NOT NULL DEFAULT 0")
+            if "cookie_debt" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN cookie_debt INTEGER NOT NULL DEFAULT 0")
             audit_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(admin_audit_log)")).fetchall()
             }
@@ -338,7 +356,36 @@ class Database:
         return bool(row and int(row["enabled"]))
 
     async def list_feature_flags(self) -> list[dict[str, Any]]:
-        return await self.fetchall("SELECT * FROM feature_flags ORDER BY key")
+        rows = await self.fetchall("SELECT * FROM feature_flags")
+        order = {key: index for index, key in enumerate(DEFAULT_FEATURE_FLAGS)}
+        rows.sort(key=lambda row: (order.get(str(row["key"]), 1000), str(row["key"])))
+        return rows
+
+    async def reset_feature_flags(self, actor_id: int) -> None:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            for key, enabled in DEFAULT_FEATURE_FLAGS.items():
+                await db.execute(
+                    """
+                    INSERT INTO feature_flags(key, enabled, updated_by, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        enabled=excluded.enabled,
+                        updated_by=excluded.updated_by,
+                        updated_at=excluded.updated_at
+                    """,
+                    (key, enabled, actor_id, now),
+                )
+            await db.execute(
+                """
+                INSERT INTO admin_audit_log(
+                    actor_id, action, target, details, reason, status, actor_name, target_name, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (actor_id, "feature_reset", "features", "factory_defaults", "сброс функций", "yellow", "", "", now),
+            )
+            await db.commit()
 
     async def toggle_feature(self, key: str, actor_id: int) -> bool | None:
         now = utcnow()
@@ -732,6 +779,8 @@ class Database:
         )
 
     async def complete_transfer(self, transfer_id: int, sender_id: int) -> tuple[bool, str, int]:
+        from community_bot.domain import transfer_commission_percent
+
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -744,7 +793,16 @@ class Database:
                 await db.rollback()
                 return False, "Перевод уже обработан или не найден.", 0
             amount = int(transfer["amount"])
-            receiver_amount = amount * 80 // 100
+            cursor = await db.execute("SELECT reputation FROM users WHERE user_id = ?", (sender_id,))
+            sender = await cursor.fetchone()
+            if not sender:
+                await db.rollback()
+                return False, "Отправитель не найден.", 0
+            percent = transfer_commission_percent(int(sender["reputation"]))
+            receiver_amount = amount * (100 - percent) // 100
+            if receiver_amount <= 0:
+                await db.rollback()
+                return False, "После комиссии получателю ничего не останется.", 0
             debit = await db.execute(
                 """
                 UPDATE users SET cookies = cookies - ?, updated_at = ?
@@ -773,6 +831,114 @@ class Database:
             )
             await db.commit()
             return True, "ok", receiver_amount
+
+    async def list_transactions(self, user_id: int, limit: int = 12) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            "SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        )
+
+    async def get_active_loan(self, user_id: int) -> dict[str, Any] | None:
+        return await self.fetchone(
+            "SELECT * FROM cookie_loans WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        )
+
+    async def take_cookie_loan(
+        self,
+        user_id: int,
+        restricted_threshold: int = 0,
+    ) -> tuple[bool, str, dict[str, Any] | None]:
+        from community_bot.economy import LOAN_DAYS, LOAN_PRINCIPAL, loan_interest_percent, loan_repay_amount
+
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT cookies, reputation, cookie_debt FROM users WHERE user_id = ?",
+                (user_id,),
+            )
+            user = await cursor.fetchone()
+            if not user:
+                await db.rollback()
+                return False, "Пользователь не найден.", None
+            if int(user["cookie_debt"] or 0) > 0:
+                await db.rollback()
+                return False, "Сначала закройте текущий долг кошелька.", None
+            cursor = await db.execute(
+                "SELECT 1 FROM cookie_loans WHERE user_id = ? AND status = 'active'",
+                (user_id,),
+            )
+            if await cursor.fetchone():
+                await db.rollback()
+                return False, "У вас уже есть открытый кредит.", None
+            percent = loan_interest_percent(int(user["reputation"]), restricted_threshold)
+            due_amount = loan_repay_amount(LOAN_PRINCIPAL, percent)
+            due_at = (now_dt + timedelta(days=LOAN_DAYS)).isoformat()
+            await db.execute(
+                "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                (LOAN_PRINCIPAL, now, user_id),
+            )
+            cursor = await db.execute(
+                """
+                INSERT INTO cookie_loans(
+                    user_id, principal, interest_percent, due_amount, due_at, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'active', ?)
+                """,
+                (user_id, LOAN_PRINCIPAL, percent, due_amount, due_at, now),
+            )
+            await db.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, LOAN_PRINCIPAL, "loan", f"due:{due_amount}", now),
+            )
+            await db.commit()
+            return True, "ok", {
+                "principal": LOAN_PRINCIPAL,
+                "interest_percent": percent,
+                "due_amount": due_amount,
+                "due_at": due_at,
+                "id": int(cursor.lastrowid or 0),
+            }
+
+    async def collect_due_loans(self) -> list[dict[str, Any]]:
+        now = utcnow()
+        collected: list[dict[str, Any]] = []
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT * FROM cookie_loans WHERE status = 'active' AND due_at <= ?",
+                (now,),
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+            for loan in rows:
+                user_id = int(loan["user_id"])
+                due_amount = int(loan["due_amount"])
+                cursor = await db.execute("SELECT cookies FROM users WHERE user_id = ?", (user_id,))
+                user = await cursor.fetchone()
+                if not user:
+                    continue
+                cookies = int(user["cookies"])
+                pay = min(cookies, due_amount)
+                remainder = due_amount - pay
+                await db.execute(
+                    """
+                    UPDATE users SET cookies = cookies - ?, cookie_debt = cookie_debt + ?, updated_at = ?
+                    WHERE user_id = ?
+                    """,
+                    (pay, remainder, now, user_id),
+                )
+                await db.execute(
+                    "UPDATE cookie_loans SET status = 'collected', collected_at = ? WHERE id = ?",
+                    (now, int(loan["id"])),
+                )
+                await db.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, -due_amount, "loan_repay", f"loan:{loan['id']}", now),
+                )
+                collected.append({**loan, "paid": pay, "debt_added": remainder})
+            await db.commit()
+        return collected
 
     async def cancel_transfer(self, transfer_id: int, sender_id: int) -> bool:
         async with self.connect() as db:
@@ -1478,6 +1644,65 @@ class Database:
             )
             await db.commit()
             return True, "Вы в игре. Ставка списана."
+
+    async def update_staked_game_stake(self, game_id: int, actor_id: int, new_stake: int) -> tuple[bool, str]:
+        if not 1 <= new_stake <= 500:
+            return False, "Ставка — целое число от 1 до 500 🍪."
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "lobby":
+                await db.rollback()
+                return False, "Менять ставку можно только в открытом лобби."
+            if int(game["creator_id"]) != actor_id:
+                await db.rollback()
+                return False, "Ставку меняет только создатель лобби."
+            state = json.loads(str(game["state_json"] or "{}"))
+            old_stake = int(state.get("stake") or 0)
+            if old_stake == new_stake:
+                await db.rollback()
+                return False, "Эта ставка уже стоит."
+            delta = new_stake - old_stake
+            cursor = await db.execute("SELECT user_id FROM party_game_players WHERE game_id = ?", (game_id,))
+            players = [int(row["user_id"]) for row in await cursor.fetchall()]
+            if delta > 0:
+                for user_id in players:
+                    cursor = await db.execute(
+                        "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
+                        (delta, now, user_id, delta),
+                    )
+                    if cursor.rowcount != 1:
+                        await db.rollback()
+                        return False, "Не у всех игроков хватает печенек на новую ставку."
+                    await db.execute(
+                        "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, -delta, "cookie_game_restake", f"{old_stake}->{new_stake}", now),
+                    )
+            elif delta < 0:
+                refund = -delta
+                for user_id in players:
+                    await db.execute(
+                        "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                        (refund, now, user_id),
+                    )
+                    await db.execute(
+                        "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, refund, "cookie_game_restake", f"{old_stake}->{new_stake}", now),
+                    )
+            state["stake"] = new_stake
+            await db.execute(
+                "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(state, ensure_ascii=False), now, game_id),
+            )
+            for user_id in players:
+                await db.execute(
+                    "UPDATE party_game_players SET secret_json = ? WHERE game_id = ? AND user_id = ?",
+                    (json.dumps({"stake": new_stake}), game_id, user_id),
+                )
+            await db.commit()
+            return True, "ok"
 
     async def save_party_state(self, game_id: int, state: dict[str, Any]) -> None:
         await self.execute(

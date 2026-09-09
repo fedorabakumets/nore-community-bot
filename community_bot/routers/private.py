@@ -47,6 +47,8 @@ from community_bot.keyboards import (
     automessages_keyboard,
     cookie_order_review_keyboard,
     feature_flags_keyboard,
+    feature_reset_keyboard,
+    features_panel_text,
     flow_reply_keyboard,
     main_private_keyboard,
     role_selection_keyboard,
@@ -358,23 +360,57 @@ async def admin_features(callback: CallbackQuery, db: Database, settings: Settin
     flags = await db.list_feature_flags()
     await callback.answer()
     await callback.message.edit_text(
-        "⚙️ <b>Функции и защита</b>\n\n🟢 — включено, ⚪ — выключено. Изменения применяются сразу.",
+        features_panel_text(flags),
         parse_mode="HTML",
         reply_markup=feature_flags_keyboard(flags),
     )
 
 
-@router.callback_query(F.data.startswith("admin:feature:"))
+@router.callback_query(F.data == "admin:features:reset")
+async def admin_features_reset_ask(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_FEATURES):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "♻️ <b>Сброс функций</b>\n\n"
+        "Вернуть все переключатели к заводским значениям?\n"
+        "Игры, тамагочи, видео-профили и награды за активность — включены.\n"
+        "Антифлуд, фильтры ссылок/медиа/стикеров, ночной и рейд-режим — выключены.",
+        parse_mode="HTML",
+        reply_markup=feature_reset_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "admin:features:reset:yes")
+async def admin_features_reset_yes(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_FEATURES):
+        return
+    await db.reset_feature_flags(callback.from_user.id)
+    flags = await db.list_feature_flags()
+    await callback.answer("Настройки сброшены.")
+    await callback.message.edit_text(
+        features_panel_text(flags),
+        parse_mode="HTML",
+        reply_markup=feature_flags_keyboard(flags),
+    )
+
+
+@router.callback_query(F.data.regexp(r"^admin:feature:[a-z_]+$"))
 async def admin_toggle_feature(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.data or not callback.message or not await _admin_callback(callback, db, settings):
+    if not callback.data or not callback.message or not await _admin_callback(callback, db, settings, PERM_FEATURES):
         return
     key = callback.data.rsplit(":", 1)[1]
     enabled = await db.toggle_feature(key, callback.from_user.id)
     if enabled is None:
         await callback.answer("Неизвестная функция.", show_alert=True)
         return
+    flags = await db.list_feature_flags()
     await callback.answer("Функция включена." if enabled else "Функция выключена.")
-    await callback.message.edit_reply_markup(reply_markup=feature_flags_keyboard(await db.list_feature_flags()))
+    await callback.message.edit_text(
+        features_panel_text(flags),
+        parse_mode="HTML",
+        reply_markup=feature_flags_keyboard(flags),
+    )
 
 
 @router.callback_query(F.data == "admin:health")
@@ -1235,11 +1271,14 @@ async def admin_begin_community_post(
             "post_media_type": None,
             "post_file_id": None,
             "post_buttons": [],
+            "post_poll": None,
         }
     )
     await callback.answer()
     await callback.message.answer(
-        "📢 <b>Студия поста в сообщество</b>\n\nВыберите шаблон оформления. Дальше — текст, медиа и кнопки-ссылки.",
+        "📢 <b>Студия поста в сообщество</b>\n\n"
+        "Выберите шаблон. Жирный, курсив и ссылки из вашего сообщения сохранятся.\n"
+        "После текста можно добавить медиа, кнопки-ссылки и голосование Telegram.",
         parse_mode="HTML",
         reply_markup=templates_keyboard(),
     )
@@ -1273,7 +1312,8 @@ async def admin_post_pick_template(
     meta = TEMPLATES[template_id]
     await callback.answer()
     await callback.message.answer(
-        f"{meta['title']}\n{meta['hint']}\n\nПришлите текст поста одним сообщением.",
+        f"{meta['title']}\n{meta['hint']}\n\n"
+        "Пришлите текст одним сообщением. Можно выделить жирным или курсивом в Telegram — теги сохранятся.",
         reply_markup=skip_keyboard("body") if template_id == "html" else flow_reply_keyboard(),
     )
 
@@ -1359,14 +1399,31 @@ async def admin_post_skip_media(callback: CallbackQuery, state: FSMContext, db: 
     )
 
 
+async def _ask_post_poll(message: Message, state: FSMContext) -> None:
+    from community_bot.posting import poll_ask_keyboard
+
+    await state.set_state(AdminFlow.post_poll_ask)
+    await message.answer(
+        "📊 Добавить голосование Telegram к этому посту?\n"
+        "Опрос уйдёт отдельным сообщением сразу после публикации (кнопки-ссылки на опрос не ставятся).",
+        reply_markup=poll_ask_keyboard(),
+    )
+
+
 async def _show_post_preview(message: Message, data: dict[str, Any], bot: Bot) -> None:
-    from community_bot.posting import buttons_markup, preview_keyboard, render_post, send_studio_post
+    from community_bot.posting import (
+        buttons_markup,
+        poll_preview_block,
+        preview_keyboard,
+        render_post,
+        send_studio_post,
+    )
 
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
+    html_text = (html_text + poll_preview_block(data.get("post_poll"))).strip() or " "
     markup = buttons_markup(list(data.get("post_buttons") or []))
     preview = preview_keyboard()
     if markup:
-        # Show URL buttons on the actual post; preview actions separately.
         try:
             await send_studio_post(
                 bot,
@@ -1394,7 +1451,7 @@ async def _show_post_preview(message: Message, data: dict[str, Any], bot: Bot) -
 
 
 @router.message(AdminFlow.post_buttons)
-async def admin_post_buttons(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
+async def admin_post_buttons(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
         await state.clear()
         return
@@ -1408,8 +1465,7 @@ async def admin_post_buttons(message: Message, state: FSMContext, db: Database, 
             await message.answer(error)
             return
         await state.update_data(post_buttons=buttons)
-    data = await state.get_data()
-    await _show_post_preview(message, data, bot)
+    await _ask_post_poll(message, state)
 
 
 @router.callback_query(F.data == "post:skip:buttons")
@@ -1418,14 +1474,104 @@ async def admin_post_skip_buttons(
     state: FSMContext,
     db: Database,
     settings: Settings,
-    bot: Bot,
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
     await state.update_data(post_buttons=[])
     await callback.answer()
+    await _ask_post_poll(callback.message, state)
+
+
+@router.callback_query(F.data == "post:poll:no")
+async def admin_post_poll_no(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+    bot: Bot,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.update_data(post_poll=None)
+    await state.set_state(AdminFlow.post_preview)
+    await callback.answer()
+    await _show_post_preview(callback.message, await state.get_data(), bot)
+
+
+@router.callback_query(F.data == "post:poll:yes")
+async def admin_post_poll_yes(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.set_state(AdminFlow.post_poll_question)
+    await callback.answer()
+    await callback.message.answer("Напишите вопрос голосования (до 300 символов).")
+
+
+@router.message(AdminFlow.post_poll_question)
+async def admin_post_poll_question(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        await state.clear()
+        return
+    question = (message.text or "").strip()
+    if not question or len(question) > 300:
+        await message.answer("Вопрос — обычный текст до 300 символов.")
+        return
+    await state.update_data(post_poll_question=question)
+    await state.set_state(AdminFlow.post_poll_options)
+    await message.answer("Варианты — каждый с новой строки, от 2 до 10.")
+
+
+@router.message(AdminFlow.post_poll_options)
+async def admin_post_poll_options(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        await state.clear()
+        return
+    from community_bot.posting import parse_poll_options, poll_anonymous_keyboard
+
+    options, error = parse_poll_options(message.text or "")
+    if error:
+        await message.answer(error)
+        return
+    await state.update_data(post_poll_options=options)
+    await message.answer("Голосование анонимное?", reply_markup=poll_anonymous_keyboard())
+
+
+@router.callback_query(F.data.startswith("post:poll:anon:"))
+async def admin_post_poll_anon(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+    bot: Bot,
+) -> None:
+    if not callback.data or not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    anonymous = callback.data.endswith(":1")
     data = await state.get_data()
-    await _show_post_preview(callback.message, data, bot)
+    question = str(data.get("post_poll_question") or "").strip()
+    options = list(data.get("post_poll_options") or [])
+    if not question or len(options) < 2:
+        await callback.answer("Сначала укажите вопрос и варианты.", show_alert=True)
+        return
+    await state.update_data(post_poll={"question": question, "options": options, "anonymous": anonymous})
+    await state.set_state(AdminFlow.post_preview)
+    await callback.answer()
+    await _show_post_preview(callback.message, await state.get_data(), bot)
+
+
+@router.message(AdminFlow.post_poll_ask)
+async def admin_post_poll_ask_text(message: Message) -> None:
+    await message.answer("Нажмите кнопку: добавить голосование или опубликовать только пост.")
+
+
+@router.message(AdminFlow.post_preview)
+async def admin_post_preview_text(message: Message) -> None:
+    await message.answer("Нажмите «Опубликовать» или «Отмена».")
 
 
 @router.callback_query(F.data == "post:send")
@@ -1441,22 +1587,26 @@ async def admin_post_send(
     if not settings.community_chat_id:
         await callback.answer("ID чата сообщества не настроен.", show_alert=True)
         return
-    from community_bot.posting import buttons_markup, render_post, send_studio_post
+    from community_bot.posting import buttons_markup, render_post, send_studio_poll, send_studio_post
 
     data = await state.get_data()
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
     markup = buttons_markup(list(data.get("post_buttons") or []))
+    poll = data.get("post_poll")
     try:
-        await send_studio_post(
-            bot,
-            settings.community_chat_id,
-            html_text or " ",
-            data.get("post_media_type"),
-            data.get("post_file_id"),
-            markup,
-        )
+        if html_text.strip() or data.get("post_file_id"):
+            await send_studio_post(
+                bot,
+                settings.community_chat_id,
+                html_text or " ",
+                data.get("post_media_type"),
+                data.get("post_file_id"),
+                markup,
+            )
+        if poll:
+            await send_studio_poll(bot, settings.community_chat_id, dict(poll))
     except TelegramBadRequest:
-        await callback.answer("Telegram не принял это сообщение.", show_alert=True)
+        await callback.answer("Telegram не принял это сообщение или опрос.", show_alert=True)
         return
     await db.log_admin_action(
         callback.from_user.id,

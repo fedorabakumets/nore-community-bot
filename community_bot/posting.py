@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -10,34 +9,36 @@ from community_bot.keyboards import STYLE_CLOSE, STYLE_FUN, STYLE_GO, ibtn
 TEMPLATES: dict[str, dict[str, Any]] = {
     "announce": {
         "title": "📢 Объявление",
-        "hint": "Короткий официальный текст. Заголовок и рамка добавятся сами.",
-        "wrap": ("╔══════════════╗\n   📢 <b>ОБЪЯВЛЕНИЕ</b>\n╚══════════════╝\n\n{body}\n\n— <i>Nora Community</i>"),
+        "hint": "Официальный текст. Жирный, курсив и ссылки из сообщения Telegram сохранятся.",
+        "wrap": "<b>📢 Объявление сообщества</b>\n<blockquote>{body}</blockquote>\n<i>Nora Community</i>",
     },
     "event": {
         "title": "🎟 Мероприятие",
-        "hint": "Дата, место, цена. Можно потом добавить кнопки «Билет» и «Магазин».",
-        "wrap": ("✦･ﾟ: *✧･ﾟ:*  <b>МЕРОПРИЯТИЕ</b>  *:･ﾟ✧*:･ﾟ✦\n\n{body}\n\n🍪 Билеты — в магазине · напишите «магазин»"),
+        "hint": "Дата, место, цена. Форматирование Telegram сохраняется.",
+        "wrap": (
+            "<b>🎟 Мероприятие</b>\n"
+            "<blockquote expandable>{body}</blockquote>\n"
+            "🍪 Билеты — в магазине · напишите «магазин»"
+        ),
     },
     "shop": {
         "title": "🛒 Витрина",
-        "hint": "Акция, полка, цена в 🍪. Скидка золота/серебра действует автоматически.",
-        "wrap": (
-            "━━━━━━━━━━━━━━━━\n🛒 <b>НОРА · ВИТРИНА</b>\n━━━━━━━━━━━━━━━━\n\n{body}\n\nОткрыть: /shop или «магазин»"
-        ),
+        "hint": "Акция или полка. Скидка золота и серебра в магазине действует сама.",
+        "wrap": "<b>🛒 НОРА · Витрина</b>\n<blockquote>{body}</blockquote>\nОткрыть: /shop или «магазин»",
     },
     "alert": {
         "title": "⚠️ Важно",
-        "hint": "Правила, предупреждение, срочное сообщение администрации.",
-        "wrap": ("⚠️ <b>ВАЖНО</b>\n────────────────\n{body}\n────────────────"),
+        "hint": "Правила, предупреждение или срочное сообщение администрации.",
+        "wrap": "<b>⚠️ Важно</b>\n<blockquote>{body}</blockquote>",
     },
     "update": {
         "title": "✨ Обновление",
-        "hint": "Краткая новость для чата. Полный список новинок остаётся в админ-панели.",
-        "wrap": ("✨ <b>Обновление Норы</b>\n\n{body}"),
+        "hint": "Короткая новость для чата. Полный список новинок остаётся в админ-панели.",
+        "wrap": "<b>✨ Обновление Норы</b>\n<blockquote>{body}</blockquote>",
     },
     "html": {
-        "title": "🖋 Свой HTML",
-        "hint": "Свой текст: &lt;b&gt;, &lt;i&gt;, &lt;u&gt;, &lt;code&gt;, &lt;a href=&quot;...&quot;&gt;.",
+        "title": "🖋 Свой текст",
+        "hint": "Текст как есть: жирный, курсив, ссылки, код. Без рамки шаблона.",
         "raw": True,
     },
 }
@@ -63,7 +64,12 @@ def render_post(template_id: str, body: str) -> str:
     body = (body or "").strip()
     if template.get("raw"):
         return body
-    return str(template["wrap"]).format(body=html.escape(body))
+    if not body:
+        return str(template["wrap"]).replace("<blockquote>{body}</blockquote>", "").replace(
+            "<blockquote expandable>{body}</blockquote>",
+            "",
+        ).replace("{body}", "")
+    return str(template["wrap"]).replace("{body}", body)
 
 
 def parse_button_lines(raw: str) -> tuple[list[dict[str, str]], str | None]:
@@ -90,6 +96,20 @@ def parse_button_lines(raw: str) -> tuple[list[dict[str, str]], str | None]:
     return buttons, None
 
 
+def parse_poll_options(raw: str) -> tuple[list[str], str | None]:
+    options: list[str] = []
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        options.append(line[:100])
+        if len(options) >= 10:
+            break
+    if len(options) < 2:
+        return [], "Нужно от 2 до 10 вариантов, каждый с новой строки."
+    return options, None
+
+
 def buttons_markup(buttons: list[dict[str, str]] | None) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
@@ -112,6 +132,28 @@ def skip_keyboard(action: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ibtn("Пропустить", f"post:skip:{action}", STYLE_FUN)],
+            [ibtn("Отмена", "post:cancel", STYLE_CLOSE)],
+        ]
+    )
+
+
+def poll_ask_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("📊 Да, голосование", "post:poll:yes", STYLE_GO),
+                ibtn("Нет, только пост", "post:poll:no", STYLE_FUN),
+            ],
+            [ibtn("Отмена", "post:cancel", STYLE_CLOSE)],
+        ]
+    )
+
+
+def poll_anonymous_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("🕶 Анонимное", "post:poll:anon:1", STYLE_FUN)],
+            [ibtn("👁 Видно, кто голосует", "post:poll:anon:0", STYLE_GO)],
             [ibtn("Отмена", "post:cancel", STYLE_CLOSE)],
         ]
     )
@@ -147,6 +189,14 @@ def is_skip_text(text: str | None) -> bool:
     return value in {"нет", "пропуск", "пропустить", "-", "skip", "none"}
 
 
+def poll_preview_block(poll: dict[str, Any] | None) -> str:
+    if not poll:
+        return ""
+    options = "\n".join(f"• {item}" for item in poll.get("options") or [])
+    anonymous = "анонимное" if poll.get("anonymous", True) else "видно, кто голосует"
+    return f"\n\n📊 <b>Голосование</b> ({anonymous})\n<b>{poll.get('question') or ''}</b>\n{options}"
+
+
 async def send_studio_post(
     bot: Any,
     chat_id: int,
@@ -170,3 +220,12 @@ async def send_studio_post(
         await bot.send_voice(chat_id, file_id, caption=html_text[:1024], **kwargs)
     else:
         await bot.send_message(chat_id, html_text, **kwargs)
+
+
+async def send_studio_poll(bot: Any, chat_id: int, poll: dict[str, Any]) -> None:
+    await bot.send_poll(
+        chat_id,
+        question=str(poll["question"])[:300],
+        options=[str(item)[:100] for item in poll["options"]],
+        is_anonymous=bool(poll.get("anonymous", True)),
+    )

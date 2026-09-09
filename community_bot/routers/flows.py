@@ -11,6 +11,7 @@ from community_bot.helpers import has_permission, render_profile
 from community_bot.keyboards import (
     BTN_MENU,
     BTN_PROFILE,
+    BTN_WALLET,
     flow_reply_keyboard,
     main_private_keyboard,
     private_menu_keyboard,
@@ -33,7 +34,10 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
     if message.chat.type != "private":
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
-    await message.answer("Снизу всегда зелёный «Профиль» и синее «Меню».", reply_markup=main_private_keyboard())
+    await message.answer(
+        "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
+        reply_markup=main_private_keyboard(),
+    )
 
 
 async def restart_application(message: Message, state: FSMContext) -> None:
@@ -85,13 +89,13 @@ async def _show_inline_menu(message: Message, db: Database, settings: Settings) 
     await message.answer(
         "📋 <b>Меню НОРЫ</b>\n\n"
         "Анкета, вопрос модераторам, магазин и тамагочи.\n"
-        "Снизу всегда зелёный «Профиль» и синее «Меню».",
+        "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
         parse_mode="HTML",
         reply_markup=private_menu_keyboard(show_admin),
     )
 
 
-@router.message(F.chat.type == "private", F.text.in_({BTN_PROFILE, BTN_MENU}))
+@router.message(F.chat.type == "private", F.text.in_({BTN_PROFILE, BTN_MENU, BTN_WALLET}))
 async def persistent_nav(
     message: Message,
     state: FSMContext,
@@ -106,6 +110,11 @@ async def persistent_nav(
         await message.answer(f"Тикет №{ticket_id} закрыт, чтобы открыть это меню.")
     if message.text == BTN_PROFILE:
         await _show_own_profile(message, db, settings)
+        return
+    if message.text == BTN_WALLET:
+        from community_bot.routers.wallet import send_wallet
+
+        await send_wallet(message, db, settings)
         return
     await _show_inline_menu(message, db, settings)
 
@@ -173,4 +182,4 @@ async def shop_close(callback: CallbackQuery) -> None:
 
 
 def with_flow_prompt(text: str) -> str:
-    return f"{text}\n\nСнизу — зелёный «Профиль» и синее «Меню», они всегда работают."
+    return f"{text}\n\nСнизу — зелёный «Профиль», синий «Кошелёк» и синее «Меню», они всегда работают."

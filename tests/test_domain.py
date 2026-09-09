@@ -6,6 +6,7 @@ from community_bot.domain import (
     reputation_delta,
     reputation_tier,
     transfer_amount,
+    transfer_commission_percent,
 )
 
 
@@ -41,3 +42,9 @@ def test_transfer_phrase() -> None:
     assert transfer_amount("перевести 100 печенек") == 100
     assert transfer_amount("ПЕРЕДАТЬ 2 🍪") == 2
     assert transfer_amount("перевести много печенек") is None
+
+
+def test_transfer_commission_by_tier() -> None:
+    assert transfer_commission_percent(100) == 10
+    assert transfer_commission_percent(80) == 20
+    assert transfer_commission_percent(50) == 30

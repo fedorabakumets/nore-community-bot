@@ -91,6 +91,15 @@ def parse_duration(raw: str) -> timedelta | None:
     return timedelta(weeks=value)
 
 
+def transfer_commission_percent(reputation: int, restricted_threshold: int = 0) -> int:
+    key = reputation_tier(reputation, restricted_threshold).key
+    if key == "gold":
+        return 10
+    if key == "silver":
+        return 20
+    return 30
+
+
 def transfer_amount(text: str) -> int | None:
     match = re.fullmatch(
         r"\s*(?:перевести|передать)\s+(\d+)\s+(?:печен(?:ек|ьки|ья)|🍪)\s*",

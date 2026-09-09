@@ -32,8 +32,10 @@ from community_bot.domain import (
     reputation_delta,
     reputation_tier,
     transfer_amount,
+    transfer_commission_percent,
 )
 from community_bot.ephemeral import keep_in_chat
+from community_bot.game_notify import notify_game_event
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -145,10 +147,11 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                     or event.audio
                     or event.voice
                     or event.animation
-                    or event.sticker
                 )
                 if member and flags.get("media_filter") and has_media:
                     blocked_reason = "Медиа сейчас запрещены настройками чата."
+                if member and flags.get("sticker_filter") and event.sticker:
+                    blocked_reason = "Стикеры сейчас запрещены настройками чата."
                 if member and flags.get("anti_flood"):
                     key = (event.chat.id, event.from_user.id)
                     now_monotonic = time.monotonic()
@@ -466,12 +469,14 @@ async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
     if amount > int(sender["cookies"]):
         await callback.answer(f"Недостаточно печенек. Ваш баланс: {sender['cookies']} 🍪.", show_alert=True)
         return
-    received = amount * 80 // 100
+    percent = transfer_commission_percent(int(sender["reputation"]))
+    received = amount * (100 - percent) // 100
     transfer_id = await db.create_transfer(callback.from_user.id, target_id, amount)
     await callback.message.edit_reply_markup(reply_markup=public_profile_keyboard(target_id))
     await callback.answer("Подтвердите перевод.")
     await callback.message.answer(
-        f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
+        f"Перевести {_target_display(target)} {amount} 🍪?\n"
+        f"Комиссия {percent}% (по уровню репутации), пользователь получит {received} 🍪.",
         parse_mode="HTML",
         reply_markup=transfer_keyboard(transfer_id),
     )
@@ -1197,12 +1202,12 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
 
 
 @router.message(command_or_alias("roulette"), F.chat.type.in_({"group", "supergroup"}))
-async def roulette_invite(message: Message, db: Database) -> None:
+async def roulette_invite(message: Message, db: Database, bot: Bot) -> None:
     if not message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target or not message.reply_to_message or not message.reply_to_message.from_user:
-        await _respond(message, "Ответьте командой /roulette на сообщение игрока.")
+        await _respond(message, "Ответьте командой /roulette на сообщение игрока. Можно указать ставку: /roulette 25")
         return
     if message.reply_to_message.from_user.is_bot:
         await _respond(message, "С ботами играть нельзя.")
@@ -1210,24 +1215,39 @@ async def roulette_invite(message: Message, db: Database) -> None:
     if int(target["user_id"]) == message.from_user.id:
         await _respond(message, "Нельзя сыграть с самим собой.")
         return
-    challenger = await register_telegram_user(db, message.from_user)
-    if int(challenger["cookies"]) < 10 or int(target["cookies"]) < 10:
-        await _respond(message, "Для игры у обоих участников должно быть минимум 10 🍪.")
+    args = remainder_args(message.text or "")
+    try:
+        stake = int(args[0]) if args else 10
+    except ValueError:
+        stake = 0
+    if not 1 <= stake <= 500:
+        await _respond(message, "Ставка рулетки — от 1 до 500 🍪. Пример: /roulette 25 или «рулетка 50»")
         return
-    game_id = await db.create_roulette(message.chat.id, message.from_user.id, int(target["user_id"]))
+    challenger = await register_telegram_user(db, message.from_user)
+    if int(challenger["cookies"]) < stake or int(target["cookies"]) < stake:
+        await _respond(message, f"Для игры у обоих участников должно быть минимум {stake} 🍪.")
+        return
+    game_id = await db.create_roulette(message.chat.id, message.from_user.id, int(target["user_id"]), stake)
     with keep_in_chat():
         await _respond(
             message,
             f"🎯 {_target_display(target)}, вас вызывает на русскую рулетку "
             f"{user_link(message.from_user.id, message.from_user.full_name)}!\n"
-            "Ставка — 10 🍪. Победитель определяется автоматически.",
+            f"Ставка — {stake} 🍪. Победитель определяется автоматически.",
             parse_mode="HTML",
             reply_markup=roulette_invite_keyboard(game_id),
         )
+    await notify_game_event(
+        bot,
+        message.chat.id,
+        [challenger, target],
+        f"🎯 Рулетка №{game_id}: ставка {stake} 🍪.",
+        f"🎯 Вас вызвали / вы вызвали на рулетку. Ставка {stake} 🍪.",
+    )
 
 
 @router.callback_query(F.data.startswith("roulette:"), F.message.chat.type.in_({"group", "supergroup"}))
-async def roulette_decision(callback: CallbackQuery, db: Database) -> None:
+async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
     _, decision, raw_game_id = callback.data.split(":")
@@ -1240,11 +1260,22 @@ async def roulette_decision(callback: CallbackQuery, db: Database) -> None:
         await callback.answer("Ответить на приглашение может только вызванный игрок.", show_alert=True)
         return
     if decision == "decline":
+        challenger = await db.get_user(int(game["challenger_id"]))
+        opponent = await db.get_user(int(game["opponent_id"]))
         await db.cancel_roulette(game_id, callback.from_user.id)
         await callback.answer("Вы отказались от игры.")
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("Русская рулетка отменена: соперник отказался.")
+        players = [item for item in (challenger, opponent) if item]
+        await notify_game_event(
+            bot,
+            callback.message.chat.id,
+            players,
+            f"❌ Рулетка №{game_id} отменена.",
+            f"❌ Рулетка №{game_id} отменена: соперник отказался.",
+        )
         return
+    stake = int(game["stake"])
     winner_id = secrets.choice([int(game["challenger_id"]), int(game["opponent_id"])])
     ok, error, result = await db.settle_roulette(game_id, callback.from_user.id, winner_id)
     if not ok or not result:
@@ -1257,12 +1288,19 @@ async def roulette_decision(callback: CallbackQuery, db: Database) -> None:
         return
     await callback.answer("Выстрел! Результат определён.")
     await callback.message.edit_reply_markup(reply_markup=None)
-    commission = "" if int(result["payout"]) == 10 else " (после комиссии)"
+    commission = "" if int(result["payout"]) == stake else " (после комиссии)"
     await callback.message.answer(
         "🔫 Барабан прокручен… выстрел!\n\n"
         f"🏆 Победил {_target_display(winner)} и получил {result['payout']} 🍪{commission}.\n"
-        f"💀 {_target_display(loser)} потерял 10 🍪.",
+        f"💀 {_target_display(loser)} потерял {stake} 🍪.",
         parse_mode="HTML",
+    )
+    await notify_game_event(
+        bot,
+        callback.message.chat.id,
+        [winner, loser],
+        f"🔫 Рулетка №{game_id}: победил {_target_display(winner)}.",
+        f"🔫 Рулетка №{game_id} сыграна. Победитель получил {result['payout']} 🍪.",
     )
 
 
@@ -1335,15 +1373,17 @@ async def _prepare_transfer(message: Message, db: Database, target: dict[str, ob
     if amount <= 0 or amount > int(sender["cookies"]):
         await _respond(message, f"Недостаточно печенек. Ваш баланс: {sender['cookies']} 🍪.")
         return
-    received = amount * 80 // 100
+    percent = transfer_commission_percent(int(sender["reputation"]))
+    received = amount * (100 - percent) // 100
     if received <= 0:
-        await _respond(message, "После комиссии получателю ничего не останется. Минимум — 2 🍪.")
+        await _respond(message, "После комиссии получателю ничего не останется. Увеличьте сумму.")
         return
     transfer_id = await db.create_transfer(message.from_user.id, int(target["user_id"]), amount)
     with keep_in_chat():
         await _respond(
             message,
-            f"Перевести {_target_display(target)} {amount} 🍪?\nКомиссия 20%, пользователь получит {received} 🍪.",
+            f"Перевести {_target_display(target)} {amount} 🍪?\n"
+            f"Комиссия {percent}% (по уровню репутации), пользователь получит {received} 🍪.",
             parse_mode="HTML",
             reply_markup=transfer_keyboard(transfer_id),
         )

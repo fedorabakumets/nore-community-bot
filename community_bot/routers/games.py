@@ -12,6 +12,7 @@ from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
+from community_bot.game_notify import notify_game_event
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import game_lobby_keyboard, game_vote_keyboard, games_menu_keyboard
 from community_bot.permissions import PERM_GAMES
@@ -178,15 +179,23 @@ async def create_game(callback: CallbackQuery, db: Database) -> None:
     players = await db.list_game_players(game_id)
     assert game is not None
     await callback.answer("Лобби создано.")
-    await callback.message.answer(
-        _lobby_text(game, players),
-        parse_mode="HTML",
-        reply_markup=game_lobby_keyboard(game_id),
+    with keep_in_chat():
+        await callback.message.answer(
+            _lobby_text(game, players),
+            parse_mode="HTML",
+            reply_markup=game_lobby_keyboard(game_id),
+        )
+    await notify_game_event(
+        callback.bot,
+        callback.message.chat.id,
+        players,
+        f"🎮 Лобби №{game_id} открыто: {GAME_META[game_type][1]}.",
+        f"🎮 Вас ждут в лобби №{game_id} «{GAME_META[game_type][1]}».",
     )
 
 
 @router.callback_query(F.data.startswith("game:join:"))
-async def join_game(callback: CallbackQuery, db: Database) -> None:
+async def join_game(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
@@ -198,11 +207,21 @@ async def join_game(callback: CallbackQuery, db: Database) -> None:
     maximum = GAME_META[str(game["game_type"])][3]
     ok, message_text = await db.join_party_game(game_id, callback.from_user.id, maximum)
     await callback.answer(message_text, show_alert=not ok)
+    if not ok:
+        return
     players = await db.list_game_players(game_id)
     await callback.message.edit_text(
         _lobby_text(game, players),
         parse_mode="HTML",
         reply_markup=game_lobby_keyboard(game_id),
+    )
+    joiner = _player_name(next(player for player in players if int(player["user_id"]) == callback.from_user.id))
+    await notify_game_event(
+        bot,
+        callback.message.chat.id,
+        players,
+        f"🎮 {joiner} вошёл в лобби №{game_id}.",
+        f"🎮 {joiner} присоединился к лобби №{game_id}.",
     )
 
 
@@ -255,10 +274,17 @@ async def start_game(callback: CallbackQuery, db: Database, bot: Bot) -> None:
         parse_mode="HTML",
         reply_markup=game_vote_keyboard(game_id, players),
     )
+    await notify_game_event(
+        bot,
+        callback.message.chat.id,
+        players,
+        f"🎮 {title} №{game_id} началась. Карточки в личке, голосуйте в чате.",
+        f"🎮 Игра «{title}» №{game_id} началась. Карточка уже в этом чате — обсудите и голосуйте.",
+    )
 
 
 @router.callback_query(F.data.startswith("game:vote:"))
-async def vote_game(callback: CallbackQuery, db: Database) -> None:
+async def vote_game(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
     _, _, raw_game_id, raw_target_id = callback.data.split(":")
@@ -295,28 +321,44 @@ async def vote_game(callback: CallbackQuery, db: Database) -> None:
         )
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(text, parse_mode="HTML")
+    await notify_game_event(
+        bot,
+        callback.message.chat.id,
+        players,
+        f"🏁 Игра №{game_id} завершена. Смотрите итог в чате.",
+        f"🏁 Итог игры №{game_id} готов. Загляните в чат.",
+    )
 
 
 @router.message(command_or_alias("gamecancel"))
-async def cancel_game_command(message: Message, db: Database, settings: Settings) -> None:
+async def cancel_game_command(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not message.from_user:
         return
     game = await db.active_party_game(message.chat.id)
     if not game:
         await message.answer("В этом чате нет активной игры.")
         return
+    players = await db.list_game_players(int(game["id"]))
     is_admin = await has_permission(db, settings, message.from_user.id, PERM_GAMES)
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
         await message.answer("Отменить игру может создатель или администратор.")
         return
     await message.answer(f"❌ Игра №{game['id']} отменена.")
+    await notify_game_event(
+        bot,
+        message.chat.id,
+        players,
+        f"❌ Игра №{game['id']} отменена.",
+        f"❌ Игра №{game['id']} отменена.",
+    )
 
 
 @router.callback_query(F.data.startswith("game:cancel:"))
-async def cancel_game_callback(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+async def cancel_game_callback(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
+    players = await db.list_game_players(game_id)
     is_admin = await has_permission(db, settings, callback.from_user.id, PERM_GAMES)
     if not await db.cancel_party_game(game_id, callback.from_user.id, is_admin):
         await callback.answer("Отменить игру может создатель или администратор.", show_alert=True)
@@ -324,3 +366,10 @@ async def cancel_game_callback(callback: CallbackQuery, db: Database, settings: 
     await callback.answer("Игра отменена.")
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(f"❌ Игра №{game_id} отменена.")
+    await notify_game_event(
+        bot,
+        callback.message.chat.id,
+        players,
+        f"❌ Игра №{game_id} отменена.",
+        f"❌ Игра №{game_id} отменена.",
+    )

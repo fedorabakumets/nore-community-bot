@@ -22,6 +22,7 @@ from community_bot.routers import (
     pets_router,
     private_router,
     profile_router,
+    wallet_router,
 )
 from community_bot.updates import community_announcement, latest_update
 
@@ -35,6 +36,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="apply", description="Заполнить анкету"),
             BotCommand(command="question", description="Задать вопрос"),
             BotCommand(command="profile", description="Мой профиль"),
+            BotCommand(command="balance", description="Кошелёк"),
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Мой тамагочи"),
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
@@ -46,6 +48,7 @@ async def configure_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="profile", description="Профиль (можно ответом)"),
+            BotCommand(command="balance", description="Кошелёк"),
             BotCommand(command="commands", description="Команды бота"),
             BotCommand(command="reputation", description="Система репутации"),
             BotCommand(command="store", description="Магазин и оплата"),
@@ -216,6 +219,26 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
         await asyncio.sleep(1800)
 
 
+async def cookie_loan_job(db: Database, bot: Bot) -> None:
+    while True:
+        try:
+            collected = await db.collect_due_loans()
+            for loan in collected:
+                user_id = int(loan["user_id"])
+                due_amount = int(loan["due_amount"])
+                debt = int(loan.get("debt_added") or 0)
+                extra = f" Недостающие {debt} 🍪 ушли в долг кошелька." if debt else ""
+                with contextlib.suppress(Exception):
+                    await bot.send_message(
+                        user_id,
+                        f"💳 Срок кредита истёк: списано {due_amount} 🍪.{extra}",
+                    )
+                await asyncio.sleep(0.05)
+        except Exception:
+            logger.exception("Ошибка сбора кредитов кошелька")
+        await asyncio.sleep(60)
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -243,6 +266,7 @@ async def main() -> None:
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)
+    dispatcher.include_router(wallet_router)
     dispatcher.include_router(cookie_games_router)
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
@@ -257,14 +281,15 @@ async def main() -> None:
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
+    loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     try:
         await dispatcher.start_polling(bot, db=db, settings=settings, emergency_stop=emergency_stop)
     finally:
-        for task in (reputation_task, scheduled_task, pet_task, emergency_task):
+        for task in (reputation_task, scheduled_task, pet_task, loan_task, emergency_task):
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reputation_task, scheduled_task, pet_task, emergency_task)
+            await asyncio.gather(reputation_task, scheduled_task, pet_task, loan_task, emergency_task)
         await bot.session.close()
 
 

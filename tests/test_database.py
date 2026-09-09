@@ -9,6 +9,7 @@ async def test_transfer_is_atomic_and_charges_commission(tmp_path: Path) -> None
     await db.initialize()
     await db.ensure_user(1, "one", "One")
     await db.ensure_user(2, "two", "Two")
+    await db.execute("UPDATE users SET reputation = 80 WHERE user_id = 1")
     await db.add_cookies(1, 100, "test")
     transfer_id = await db.create_transfer(1, 2, 100)
 
@@ -18,6 +19,25 @@ async def test_transfer_is_atomic_and_charges_commission(tmp_path: Path) -> None
     assert received == 80
     assert (await db.get_user(1))["cookies"] == 0  # type: ignore[index]
     assert (await db.get_user(2))["cookies"] == 80  # type: ignore[index]
+
+
+async def test_transfer_commission_follows_reputation(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    await db.initialize()
+    await db.ensure_user(1, "one", "One")
+    await db.ensure_user(2, "two", "Two")
+    await db.add_cookies(1, 300, "test")
+    await db.execute("UPDATE users SET reputation = 100 WHERE user_id = 1")
+    gold_id = await db.create_transfer(1, 2, 100)
+    ok, _, gold_received = await db.complete_transfer(gold_id, 1)
+    assert ok is True
+    assert gold_received == 90
+
+    await db.execute("UPDATE users SET reputation = 50 WHERE user_id = 1")
+    bronze_id = await db.create_transfer(1, 2, 100)
+    ok, _, bronze_received = await db.complete_transfer(bronze_id, 1)
+    assert ok is True
+    assert bronze_received == 70
 
 
 async def test_transfer_cannot_be_replayed(tmp_path: Path) -> None:
@@ -160,11 +180,16 @@ async def test_feature_toggle_is_persistent_and_audited(tmp_path: Path) -> None:
     await db.initialize()
 
     assert await db.feature_enabled("games") is True
+    assert await db.feature_enabled("sticker_filter") is False
     assert await db.toggle_feature("games", actor_id=7) is False
     assert await db.feature_enabled("games") is False
+    await db.reset_feature_flags(actor_id=7)
+    assert await db.feature_enabled("games") is True
+    assert await db.feature_enabled("sticker_filter") is False
     actions = await db.recent_admin_actions()
-    assert actions[0]["action"] == "feature_toggle"
-    assert actions[0]["target"] == "games"
+    kinds = {row["action"] for row in actions}
+    assert "feature_toggle" in kinds
+    assert "feature_reset" in kinds
 
 
 async def test_party_game_survives_db_state_and_resolves_once(tmp_path: Path) -> None:
@@ -189,3 +214,46 @@ async def test_party_game_survives_db_state_and_resolves_once(tmp_path: Path) ->
     result = await db.resolve_party_game(game_id)
     assert result and result["outcome"]["selected_id"] == 2
     assert await db.resolve_party_game(game_id) is None
+
+
+async def test_cookie_loan_and_collection(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Borrower")
+    await db.execute("UPDATE users SET reputation = 100 WHERE user_id = 1")
+
+    ok, _, loan = await db.take_cookie_loan(1)
+    assert ok is True
+    assert loan and loan["due_amount"] == 110
+    assert (await db.get_user(1))["cookies"] == 100  # type: ignore[index]
+    assert (await db.take_cookie_loan(1))[0] is False
+
+    past = (datetime.now(UTC) - timedelta(days=8)).isoformat()
+    await db.execute("UPDATE cookie_loans SET due_at = ? WHERE user_id = 1", (past,))
+    collected = await db.collect_due_loans()
+    assert len(collected) == 1
+    user = await db.get_user(1)
+    assert user is not None
+    assert user["cookies"] == 0
+    assert user["cookie_debt"] == 10
+    history = await db.list_transactions(1)
+    assert any(row["kind"] == "loan_repay" for row in history)
+
+
+async def test_staked_game_can_change_stake(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="A")
+    await db.ensure_user(2, telegram_name="B")
+    await db.add_cookies(1, 200, "test")
+    await db.add_cookies(2, 200, "test")
+    game_id, status = await db.create_staked_game(-100, "dice", 1, 10)
+    assert status == "ok" and game_id
+    assert (await db.join_staked_game(game_id, 2))[0] is True
+    ok, text = await db.update_staked_game_stake(game_id, 1, 25)
+    assert ok is True, text
+    game = await db.get_party_game(game_id)
+    assert game and game["state"]["stake"] == 25
+    assert (await db.get_user(1))["cookies"] == 175  # type: ignore[index]
+    assert (await db.get_user(2))["cookies"] == 175  # type: ignore[index]
+    assert (await db.update_staked_game_stake(game_id, 2, 50))[0] is False

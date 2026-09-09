@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from community_bot.aliases import CommandOrAlias, command_or_alias, is_command_trigger, parse_trigger
 from community_bot.audit import classify_status, format_audit_row, parse_moderation_args
 from community_bot.keyboards import admin_panel_keyboard, private_menu_keyboard
-from community_bot.posting import parse_button_lines, render_post
+from community_bot.posting import parse_button_lines, parse_poll_options, render_post
 from community_bot.texts import GROUP_COMMANDS_TEXT, STORE_HELP_TEXT
 from community_bot.updates import latest_update, updates_text
 
@@ -16,6 +16,8 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("блэкджек 10") == ("blackjack", "10")
     assert parse_trigger("купить печеньки") == ("buycookies", "")
     assert parse_trigger("мут 30m спам") == ("mute", "30m спам")
+    assert parse_trigger("баланс") == ("balance", "")
+    assert parse_trigger("кошелёк") == ("balance", "")
     assert parse_trigger("привет") is None
     assert parse_trigger("/команды") == ("commands", "")
     assert parse_trigger("команды!") == ("commands", "")
@@ -82,8 +84,12 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
 
 def test_post_templates_and_buttons() -> None:
     html = render_post("announce", "Собрание в субботу")
-    assert "ОБЪЯВЛЕНИЕ" in html
+    assert "Объявление" in html
     assert "Собрание в субботу" in html
+    assert "<blockquote>" in html
+    formatted = render_post("announce", "<b>Жирный</b> и <i>курсив</i>")
+    assert "<b>Жирный</b>" in formatted
+    assert "&lt;b&gt;" not in formatted
     buttons, error = parse_button_lines("Магазин | https://t.me/nore | green\nПравила | https://example.com | blue")
     assert error is None
     assert len(buttons) == 2
@@ -91,13 +97,17 @@ def test_post_templates_and_buttons() -> None:
     bad, err = parse_button_lines("без ссылки")
     assert not bad
     assert err
+    options, poll_error = parse_poll_options("Да\nНет\nВоздержусь")
+    assert poll_error is None
+    assert options == ["Да", "Нет", "Воздержусь"]
+    assert parse_poll_options("только один")[1]
 
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 4
+    assert latest.number == 5
     text = updates_text()
-    assert "№4" in text
+    assert "№5" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
