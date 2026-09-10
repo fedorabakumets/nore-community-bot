@@ -29,6 +29,41 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert is_command_message("/неизвестная")
     assert is_command_message("команды")
     assert not is_command_message("привет всем")
+    assert not is_command_message("")
+
+
+def test_media_payloads_are_not_swept_as_group_commands() -> None:
+    from community_bot.aliases import is_group_command_to_sweep
+    from community_bot.ephemeral import is_game_callback
+
+    def payload(**overrides: object) -> SimpleNamespace:
+        base = {
+            "sticker": None,
+            "photo": None,
+            "video": None,
+            "video_note": None,
+            "voice": None,
+            "animation": None,
+            "audio": None,
+            "document": None,
+            "paid_media": None,
+            "text": None,
+            "caption": None,
+        }
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    assert not is_group_command_to_sweep(payload(sticker=object()))
+    assert not is_group_command_to_sweep(payload(voice=object()))
+    assert not is_group_command_to_sweep(payload(video_note=object()))
+    assert not is_group_command_to_sweep(payload(photo=object(), caption="красивый вечер"))
+    assert is_group_command_to_sweep(payload(photo=object(), caption="/shop"))
+    assert is_group_command_to_sweep(payload(text="баланс"))
+    assert is_game_callback("cg:join:8")
+    assert is_game_callback("game:start:1")
+    assert is_game_callback("roulette:accept:2")
+    assert is_game_callback("g:hide")
+    assert not is_game_callback("shop:home")
 
 
 def test_moderation_status_red_yellow_green() -> None:
@@ -105,9 +140,9 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 5
+    assert latest.number == 6
     text = updates_text()
-    assert "№5" in text
+    assert "№6" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
@@ -174,6 +209,78 @@ async def test_housekeeping_deletes_command_before_handler() -> None:
     assert deleted == [(-1004331642093, 77)]
 
 
+async def test_housekeeping_does_not_sweep_media_stickers_voice_or_circles() -> None:
+    from aiogram.types import Message
+
+    from community_bot.ephemeral import GroupHousekeepingMiddleware
+
+    deleted: list[tuple[int, int]] = []
+
+    class FakeBot:
+        async def delete_message(self, chat_id: int, message_id: int) -> bool:
+            deleted.append((chat_id, message_id))
+            return True
+
+    async def handler(_event, _data):
+        return "ok"
+
+    payloads = [
+        {
+            "message_id": 101,
+            "sticker": {
+                "file_id": "sticker-file",
+                "file_unique_id": "sticker-unique",
+                "type": "regular",
+                "width": 100,
+                "height": 100,
+                "is_animated": False,
+                "is_video": False,
+            },
+        },
+        {
+            "message_id": 102,
+            "voice": {
+                "file_id": "voice-file",
+                "file_unique_id": "voice-unique",
+                "duration": 3,
+            },
+        },
+        {
+            "message_id": 103,
+            "video_note": {
+                "file_id": "circle-file",
+                "file_unique_id": "circle-unique",
+                "length": 200,
+                "duration": 4,
+            },
+        },
+        {
+            "message_id": 104,
+            "photo": [
+                {
+                    "file_id": "photo-file",
+                    "file_unique_id": "photo-unique",
+                    "width": 800,
+                    "height": 600,
+                }
+            ],
+            "caption": "вечер в норе",
+        },
+    ]
+    for extra in payloads:
+        event = Message.model_validate(
+            {
+                "date": 1_725_000_000,
+                "chat": {"id": -1004331642093, "type": "supergroup", "title": "Nora"},
+                "from": {"id": 1, "is_bot": False, "first_name": "Анна"},
+                **extra,
+            }
+        )
+        result = await GroupHousekeepingMiddleware()(handler, event, {"bot": FakeBot()})
+        assert result == "ok"
+    assert deleted == []
+
+
 def _group_message(message_id: int = 88, chat_type: str = "supergroup"):
     from aiogram.types import Message
 
@@ -236,6 +343,54 @@ async def test_bot_group_replies_are_scheduled_via_session_middleware(monkeypatc
     patch_bot_ephemeral(bot)
     assert any(isinstance(item, EphemeralSendMiddleware) for item in bot.session.middleware)
     await bot.session.close()
+
+
+async def test_game_callbacks_do_not_expire_replies_in_thirty_seconds(monkeypatch) -> None:
+    import asyncio
+
+    from aiogram.types import CallbackQuery
+
+    from community_bot.ephemeral import (
+        _REPLY_TTL,
+        GAME_RESULT_TTL,
+        GroupCallbackEphemeralMiddleware,
+        expire_game_result,
+    )
+
+    seen_ttl: list[float | None] = []
+
+    async def handler(_event, _data):
+        seen_ttl.append(_REPLY_TTL.get())
+        return "ok"
+
+    callback = CallbackQuery.model_validate(
+        {
+            "id": "1",
+            "from": {"id": 1, "is_bot": False, "first_name": "Анна"},
+            "chat_instance": "x",
+            "data": "cg:join:8",
+            "message": {
+                "message_id": 90,
+                "date": 1_725_000_000,
+                "chat": {"id": -1004331642093, "type": "supergroup", "title": "Nora"},
+                "from": {"id": 8992215311, "is_bot": True, "first_name": "Nore Community"},
+                "text": "🍪 лобби",
+            },
+        }
+    )
+    result = await GroupCallbackEphemeralMiddleware()(handler, callback, {})
+    assert result == "ok"
+    assert seen_ttl == [None]
+
+    scheduled: list[tuple[int, float]] = []
+
+    async def fake_delete_later(message, delay: float = 30.0) -> None:
+        scheduled.append((message.message_id, delay))
+
+    monkeypatch.setattr("community_bot.ephemeral.delete_later", fake_delete_later)
+    expire_game_result(_group_message(91))
+    await asyncio.sleep(0)
+    assert scheduled == [(91, GAME_RESULT_TTL)]
 
 
 async def test_audit_log_persists_names_and_status(tmp_path) -> None:

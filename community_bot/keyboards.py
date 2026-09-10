@@ -38,6 +38,14 @@ def close_btn(data: str = "ui:close") -> InlineKeyboardButton:
     return ibtn("❌ Закрыть", data, STYLE_CLOSE)
 
 
+def game_hide_button() -> InlineKeyboardButton:
+    return ibtn("✖️ Скрыть", "g:hide", STYLE_CLOSE)
+
+
+def game_hide_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[game_hide_button()]])
+
+
 def back_btn(data: str) -> InlineKeyboardButton:
     return ibtn("↩️ Назад", data)
 
@@ -441,7 +449,8 @@ def roulette_invite_keyboard(game_id: int) -> InlineKeyboardMarkup:
             [
                 ibtn("🎯 Играть", f"roulette:accept:{game_id}", STYLE_GO),
                 ibtn("Отказаться", f"roulette:decline:{game_id}", STYLE_CLOSE),
-            ]
+            ],
+            [game_hide_button()],
         ]
     )
 
@@ -606,7 +615,7 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
                 ibtn("🎲 Кости 🍪", "cg:pick:dice", STYLE_FUN),
             ],
             [ibtn("📚 Подробные правила", "game:rules:all")],
-            [close_btn("ui:close")],
+            [game_hide_button()],
         ]
     )
 
@@ -626,7 +635,7 @@ def cookie_stake_keyboard(game_type: str) -> InlineKeyboardMarkup:
                 ibtn("50 🍪", f"cg:new:{game_type}:50", STYLE_GO),
                 ibtn("100 🍪", f"cg:new:{game_type}:100", STYLE_GO),
             ],
-            [back_btn("cg:home"), close_btn("ui:close")],
+            [back_btn("cg:home"), game_hide_button()],
         ]
     )
 
@@ -657,6 +666,7 @@ def cookie_lobby_keyboard(game_id: int, current_stake: int = 10) -> InlineKeyboa
                 ibtn("▶️ Начать", f"cg:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"cg:cancel:{game_id}", STYLE_CLOSE),
             ],
+            [game_hide_button()],
         ]
     )
 
@@ -667,7 +677,8 @@ def blackjack_turn_keyboard(game_id: int) -> InlineKeyboardMarkup:
             [
                 ibtn("🃏 Взять", f"cg:hit:{game_id}", STYLE_FUN),
                 ibtn("✋ Хватит", f"cg:stand:{game_id}", STYLE_GO),
-            ]
+            ],
+            [game_hide_button()],
         ]
     )
 
@@ -680,6 +691,7 @@ def game_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("▶️ Начать", f"game:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"game:cancel:{game_id}", STYLE_CLOSE),
             ],
+            [game_hide_button()],
         ]
     )
 
@@ -691,6 +703,7 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
             player.get("profile_name") or player.get("telegram_name") or player.get("username") or player["user_id"]
         )
         rows.append([ibtn(f"🗳 {name[:38]}", f"game:vote:{game_id}:{player['user_id']}", STYLE_FUN)])
+    rows.append([game_hide_button()])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

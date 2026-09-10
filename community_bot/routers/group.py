@@ -35,7 +35,7 @@ from community_bot.domain import (
     transfer_commission_percent,
 )
 from community_bot.ephemeral import keep_in_chat
-from community_bot.game_notify import notify_game_event
+from community_bot.game_notify import notify_game_event, send_game_finale
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -97,6 +97,21 @@ async def remember_managed_channel(event: ChatMemberUpdated, db: Database) -> No
 class DeleteGroupCommandMiddleware(BaseMiddleware):
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+        self._admin_cache: dict[tuple[int, int], tuple[float, bool]] = {}
+
+    async def _is_telegram_admin(self, bot: Bot, chat_id: int, user_id: int) -> bool:
+        key = (chat_id, user_id)
+        now_monotonic = time.monotonic()
+        cached = self._admin_cache.get(key)
+        if cached and now_monotonic - cached[0] < 60:
+            return cached[1]
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+            is_admin = member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
+        except (TelegramBadRequest, TelegramForbiddenError):
+            is_admin = False
+        self._admin_cache[key] = (now_monotonic, is_admin)
+        return is_admin
 
     async def __call__(
         self,
@@ -128,9 +143,12 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                             f"🎁 За активность в чате ({activity_count} сообщений) "
                             "ваш тамагочи получил 1 еду и 1 воду.",
                         )
-                member = await rank_of_user(db, settings, event.from_user.id) < 40
+                chat_admin = await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
+                member = (not chat_admin) and await rank_of_user(db, settings, event.from_user.id) < 40
                 blocked_reason: str | None = None
                 text = event.text or event.caption or ""
+                media_filter_on = bool(flags.get("media_filter"))
+                sticker_filter_on = bool(flags.get("sticker_filter"))
                 if member and flags.get("quiet_hours"):
                     local_hour = datetime.now(ZoneInfo(settings.timezone)).hour
                     if 0 <= local_hour < 7:
@@ -147,10 +165,11 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                     or event.audio
                     or event.voice
                     or event.animation
+                    or event.video_note
                 )
-                if member and flags.get("media_filter") and has_media:
+                if member and media_filter_on and has_media:
                     blocked_reason = "Медиа сейчас запрещены настройками чата."
-                if member and flags.get("sticker_filter") and event.sticker:
+                if member and sticker_filter_on and event.sticker:
                     blocked_reason = "Стикеры сейчас запрещены настройками чата."
                 if member and flags.get("anti_flood"):
                     key = (event.chat.id, event.from_user.id)
@@ -1265,7 +1284,7 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
         await db.cancel_roulette(game_id, callback.from_user.id)
         await callback.answer("Вы отказались от игры.")
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("Русская рулетка отменена: соперник отказался.")
+        await send_game_finale(callback.message, "Русская рулетка отменена: соперник отказался.")
         players = [item for item in (challenger, opponent) if item]
         await notify_game_event(
             bot,
@@ -1289,11 +1308,11 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
     await callback.answer("Выстрел! Результат определён.")
     await callback.message.edit_reply_markup(reply_markup=None)
     commission = "" if int(result["payout"]) == stake else " (после комиссии)"
-    await callback.message.answer(
+    await send_game_finale(
+        callback.message,
         "🔫 Барабан прокручен… выстрел!\n\n"
         f"🏆 Победил {_target_display(winner)} и получил {result['payout']} 🍪{commission}.\n"
         f"💀 {_target_display(loser)} потерял {stake} 🍪.",
-        parse_mode="HTML",
     )
     await notify_game_event(
         bot,

@@ -42,6 +42,7 @@ class Settings:
     sbp_payment_url: str
     freebie_channel_id: int
     freebie_channel_url: str
+    community_invite_url: str
 
     def is_owner(self, user_id: int) -> bool:
         return user_id in self.owner_ids
@@ -72,6 +73,10 @@ def load_settings() -> Settings:
         sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip(),
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),
+        community_invite_url=os.getenv(
+            "COMMUNITY_INVITE_URL",
+            "https://t.me/+MfMowwQUlZlkMDIy",
+        ).strip(),
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")

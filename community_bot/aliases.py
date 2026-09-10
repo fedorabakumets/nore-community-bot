@@ -105,9 +105,40 @@ def is_command_trigger(text: str) -> bool:
 
 def is_command_message(text: str) -> bool:
     stripped = (text or "").lstrip()
+    if not stripped:
+        return False
     if stripped[:1] in _SLASH_PREFIXES:
         return True
     return is_command_trigger(stripped)
+
+
+def message_has_media_payload(message: Message) -> bool:
+    return bool(
+        message.sticker
+        or message.photo
+        or message.video
+        or message.video_note
+        or message.voice
+        or message.animation
+        or message.audio
+        or message.document
+        or getattr(message, "paid_media", None)
+    )
+
+
+def is_group_command_to_sweep(message: Message) -> bool:
+    """Delete only real commands. Media, stickers, voice and circles are never swept as commands."""
+    caption = (message.caption or "").strip()
+    text = (message.text or "").strip()
+    if message_has_media_payload(message):
+        source = caption
+    else:
+        source = text or caption
+    if not source:
+        return False
+    if source[:1] in {"/", "／"}:
+        return True
+    return is_command_trigger(source)
 
 
 class CommandOrAlias(Filter):

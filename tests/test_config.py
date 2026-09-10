@@ -23,5 +23,6 @@ def test_owner_ids_and_group_id_fallback(monkeypatch, tmp_path: Path) -> None:
     assert settings.owner_ids == frozenset({406719727, 1612141295})
     assert settings.is_owner(1612141295)
     assert settings.community_chat_id == -1004331642093
+    assert settings.community_invite_url == "https://t.me/+MfMowwQUlZlkMDIy"
     assert 406719727 in settings.reviewers
     assert 1612141295 in settings.reviewers

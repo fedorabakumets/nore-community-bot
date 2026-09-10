@@ -10,7 +10,7 @@ from community_bot.aliases import command_or_alias, parse_trigger
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
-from community_bot.game_notify import notify_game_event
+from community_bot.game_notify import notify_game_event, send_game_finale
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import (
     COOKIE_STAKE_CHOICES,
@@ -288,7 +288,7 @@ async def cookie_cancel(callback: CallbackQuery, db: Database, settings: Setting
         return
     await callback.answer("Ставки возвращены.")
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(f"❌ Игра №{game_id} отменена, 🍪 вернулись игрокам.")
+    await send_game_finale(callback.message, f"❌ Игра №{game_id} отменена, 🍪 вернулись игрокам.")
     await _alert(
         bot,
         callback.message.chat.id,
@@ -350,7 +350,7 @@ async def _start_dice(
     lines.append(f"\n🏆 Банк <b>{pot} 🍪</b> забирает: {names}.")
     await callback.answer("Кости брошены!")
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("\n".join(lines), parse_mode="HTML")
+    await send_game_finale(callback.message, "\n".join(lines))
     await _alert(
         callback.message.bot,
         callback.message.chat.id,
@@ -507,10 +507,10 @@ async def _finish_blackjack(message: Message, db: Database, game_id: int) -> Non
     await db.payout_staked_game(game_id, payouts)
     dealer_text = f"{_cards_text(dealer)} · <b>{dealer_value}</b>" + (" — перебор" if dealer_bust else "")
     await message.edit_reply_markup(reply_markup=None)
-    await message.answer(
+    await send_game_finale(
+        message,
         "🃏 <b>Итог блэкджека</b>\n"
         f"Дилер: {dealer_text}\n\n" + "\n".join(results),
-        parse_mode="HTML",
     )
     await _alert(
         message.bot,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
@@ -151,6 +152,20 @@ async def flow_cancel_idle(callback: CallbackQuery, state: FSMContext) -> None:
                 await callback.message.edit_reply_markup(reply_markup=None)
             except Exception:
                 pass
+
+
+@router.callback_query(F.data == "g:hide")
+async def game_hide(callback: CallbackQuery) -> None:
+    await callback.answer("Скрыто")
+    if not callback.message:
+        return
+    try:
+        await callback.message.delete()
+    except (TelegramBadRequest, TelegramForbiddenError):
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except (TelegramBadRequest, TelegramForbiddenError, AttributeError):
+            pass
 
 
 @router.callback_query(F.data == "ui:close")

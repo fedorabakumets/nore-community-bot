@@ -13,8 +13,11 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods.base import TelegramMethod, TelegramType
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
-from community_bot.aliases import is_command_message
+from community_bot.aliases import is_group_command_to_sweep
 from community_bot.helpers import BOT_REPLY_TTL, delete_later
+
+GAME_RESULT_TTL = 120.0
+_GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide")
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,16 @@ def keep_in_chat() -> Iterator[None]:
         yield
     finally:
         _REPLY_TTL.reset(token)
+
+
+def is_game_callback(data: str | None) -> bool:
+    raw = data or ""
+    return raw.startswith(_GAME_CALLBACK_PREFIXES)
+
+
+def expire_game_result(message: Any, ttl: float = GAME_RESULT_TTL) -> None:
+    """Keep a finished-game message for a while, then remove it."""
+    schedule_group_reply(message, ttl)
 
 
 def _track(task: asyncio.Task[Any]) -> None:
@@ -117,8 +130,7 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
     ) -> Any:
         if not isinstance(event, Message) or event.chat.type not in {"group", "supergroup"}:
             return await handler(event, data)
-        text = event.text or event.caption or ""
-        is_cmd = is_command_message(text)
+        is_cmd = is_group_command_to_sweep(event)
         bot = data.get("bot")
         deleted = False
         if is_cmd:
@@ -144,7 +156,8 @@ class GroupCallbackEphemeralMiddleware(BaseMiddleware):
         message = event.message if isinstance(event, CallbackQuery) else None
         if message is None or message.chat.type not in {"group", "supergroup"}:
             return await handler(event, data)
-        token = _REPLY_TTL.set(BOT_REPLY_TTL)
+        ttl = None if isinstance(event, CallbackQuery) and is_game_callback(event.data) else BOT_REPLY_TTL
+        token = _REPLY_TTL.set(ttl)
         try:
             return await handler(event, data)
         finally:

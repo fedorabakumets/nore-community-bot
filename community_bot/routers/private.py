@@ -620,11 +620,18 @@ async def _notify_application_decision(
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
+    invite = ""
+    if approved and settings.community_invite_url:
+        invite = (
+            "\n\nДобро пожаловать в НОРУ:\n"
+            f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
+            f"{html.escape(settings.community_invite_url)}</a>"
+        )
     is_staff = await has_permission(db, settings, int(application["user_id"]), PERM_ADMIN_PANEL)
     await safe_send(
         bot,
         int(application["user_id"]),
-        f"{result}.{reason_text}",
+        f"{result}.{reason_text}{invite}",
         parse_mode="HTML",
         reply_markup=main_private_keyboard(is_staff),
     )

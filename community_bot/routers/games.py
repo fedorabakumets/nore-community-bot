@@ -12,9 +12,9 @@ from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
-from community_bot.game_notify import notify_game_event
+from community_bot.game_notify import notify_game_event, send_game_finale
 from community_bot.helpers import has_permission, register_telegram_user, user_link
-from community_bot.keyboards import game_lobby_keyboard, game_vote_keyboard, games_menu_keyboard
+from community_bot.keyboards import game_hide_keyboard, game_lobby_keyboard, game_vote_keyboard, games_menu_keyboard
 from community_bot.permissions import PERM_GAMES
 
 router = Router(name="games")
@@ -156,7 +156,12 @@ async def games_menu(message: Message, db: Database) -> None:
 async def game_rules(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await callback.message.answer(GAME_RULES, parse_mode="HTML")
+        with keep_in_chat():
+            await callback.message.answer(
+                GAME_RULES,
+                parse_mode="HTML",
+                reply_markup=game_hide_keyboard(),
+            )
 
 
 @router.callback_query(F.data.startswith("game:new:"))
@@ -320,7 +325,7 @@ async def vote_game(callback: CallbackQuery, db: Database, bot: Bot) -> None:
             f"Катастрофа: <b>{html.escape(str(state['catastrophe']))}</b>. Остальные занимают места в убежище."
         )
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(text, parse_mode="HTML")
+    await send_game_finale(callback.message, text)
     await notify_game_event(
         bot,
         callback.message.chat.id,
@@ -343,7 +348,7 @@ async def cancel_game_command(message: Message, db: Database, settings: Settings
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
         await message.answer("Отменить игру может создатель или администратор.")
         return
-    await message.answer(f"❌ Игра №{game['id']} отменена.")
+    await send_game_finale(message, f"❌ Игра №{game['id']} отменена.")
     await notify_game_event(
         bot,
         message.chat.id,
@@ -365,7 +370,7 @@ async def cancel_game_callback(callback: CallbackQuery, db: Database, settings: 
         return
     await callback.answer("Игра отменена.")
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(f"❌ Игра №{game_id} отменена.")
+    await send_game_finale(callback.message, f"❌ Игра №{game_id} отменена.")
     await notify_game_event(
         bot,
         callback.message.chat.id,
