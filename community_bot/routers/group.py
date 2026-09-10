@@ -43,8 +43,6 @@ from community_bot.helpers import (
     display_name,
     effective_role,
     has_permission,
-    is_immunity_active,
-    pet_guard_reputation,
     rank_of_user,
     register_telegram_user,
     resolve_reply_target,
@@ -78,7 +76,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
-from community_bot.shop_catalog import IMMUNITY_HOURS, PET_SUPPLIES, SHOP_CATEGORIES, shop_prices_for
+from community_bot.shop_catalog import IMMUNITY_HOURS, PET_SUPPLIES, SHOP_CATEGORIES, TITLE_ITEMS, shop_prices_for
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
 from community_bot.texts import GROUP_COMMANDS_TEXT, REPUTATION_HELP_TEXT, STORE_HELP_TEXT
 
@@ -137,12 +135,7 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                     flags.get("activity_rewards", True),
                 )
                 if rewarded and flags.get("activity_rewards", True):
-                    with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
-                        await bot.send_message(
-                            event.from_user.id,
-                            f"🎁 За активность в чате ({activity_count} сообщений) "
-                            "ваш тамагочи получил 1 еду и 1 воду.",
-                        )
+                    pass
                 chat_admin = await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
                 member = (not chat_admin) and await rank_of_user(db, settings, event.from_user.id) < 40
                 blocked_reason: str | None = None
@@ -339,10 +332,44 @@ async def open_admin_from_group(message: Message, db: Database, settings: Settin
             message.from_user.id,
             text,
             parse_mode="HTML",
-            reply_markup=admin_panel_keyboard(await user_permissions(db, settings, message.from_user.id)),
+            reply_markup=admin_panel_keyboard(
+                await user_permissions(db, settings, message.from_user.id),
+                await db.dashboard_stats(),
+            ),
         )
     except (TelegramForbiddenError, TelegramBadRequest):
         await _private_chat_notice(message, bot)
+
+
+@router.message(command_or_alias("card"), F.chat.type.in_({"group", "supergroup"}))
+async def staff_user_card(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    if not (
+        await has_permission(db, settings, message.from_user.id, PERM_USERS_EDIT)
+        or await has_permission(db, settings, message.from_user.id, PERM_USERS_COOKIES)
+        or await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
+    ):
+        return
+    target = await resolve_reply_target(message, db)
+    if not target:
+        await _respond(message, "Ответьте «карточка» на сообщение человека.")
+        return
+    pet = await db.get_pet(int(target["user_id"]), settle=False)
+    note = str(target.get("moderator_note") or "").strip() or "нет"
+    pet_line = str(pet["name"]) if pet else "нет"
+    with keep_in_chat():
+        await _respond(
+            message,
+            f"👤 <b>{html.escape(person_label(target))}</b> · <code>{target['user_id']}</code>\n"
+            f"Роль: {html.escape(str(target['role']))}\n"
+            f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
+            f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
+            f"Титул: {html.escape(str(target.get('profile_title') or 'нет'))}\n"
+            f"Питомец: {html.escape(str(pet_line))}\n"
+            f"Заметка: {html.escape(note)}",
+            parse_mode="HTML",
+        )
 
 
 @router.message(command_or_alias("id"))
@@ -435,27 +462,21 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
         )
         return
     delta = 5 if action == "rep_up" else -5
-    tier = reputation_tier(int(actor["reputation"]), settings.restricted_reputation_threshold)
-    if tier.daily_actions == 0:
-        await callback.answer("Ваш уровень репутации не позволяет влиять на других участников.", show_alert=True)
-        return
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()
-    used = await db.reputation_actions_today(callback.from_user.id, local_date)
-    if used >= tier.daily_actions:
-        await callback.answer(f"Дневной лимит исчерпан: {tier.daily_actions} действий.", show_alert=True)
+    from community_bot.reputation import change_community_reputation
+
+    ok, text, new_value, pet_line = await change_community_reputation(
+        db, settings, actor, target, delta, local_date
+    )
+    if not ok or new_value is None:
+        await callback.answer(text, show_alert=True)
         return
-    if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
-        await callback.answer("У пользователя действует иммунитет от понижения репутации.", show_alert=True)
-        return
-    delta, pet_line = await pet_guard_reputation(db, target_id, delta)
-    new_value = await db.apply_reputation(callback.from_user.id, target_id, delta, local_date)
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
-    sign = "+" if delta > 0 else ""
-    await callback.answer("Питомец вмешался!" if pet_line else f"Репутация изменена на {sign}{delta}.")
+    await callback.answer("Питомец вмешался!" if pet_line and "перехватил" in pet_line else text[:180])
     extra = f"\n{pet_line}" if pet_line else ""
     await callback.message.answer(
-        f"{target_tier.emoji} Репутация {_target_display(target)}: {sign}{delta}, теперь {new_value}.{extra}",
+        f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
         parse_mode="HTML",
     )
     if new_value < settings.restricted_reputation_threshold:
@@ -721,6 +742,12 @@ def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
     )
 
 
+async def _shop_home_markup(db: Database):
+    key = await db.get_bot_state("shop_featured")
+    label = await db.get_bot_state("shop_featured_label")
+    return shop_home_keyboard(featured_key=key, featured_label=label if key else None)
+
+
 @router.message(command_or_alias("shop"))
 @router.message(F.text == "🛒 Магазин")
 async def show_shop(message: Message, db: Database, settings: Settings) -> None:
@@ -730,7 +757,7 @@ async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     await message.answer(
         _shop_home_text(user, settings),
         parse_mode="HTML",
-        reply_markup=shop_home_keyboard(),
+        reply_markup=await _shop_home_markup(db),
     )
 
 
@@ -740,17 +767,18 @@ async def shop_home(callback: CallbackQuery, db: Database, settings: Settings) -
         return
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
+    markup = await _shop_home_markup(db)
     try:
         await callback.message.edit_text(
             _shop_home_text(user, settings),
             parse_mode="HTML",
-            reply_markup=shop_home_keyboard(),
+            reply_markup=markup,
         )
     except TelegramBadRequest:
         await callback.message.answer(
             _shop_home_text(user, settings),
             parse_mode="HTML",
-            reply_markup=shop_home_keyboard(),
+            reply_markup=markup,
         )
 
 
@@ -762,8 +790,9 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
     user = await register_telegram_user(db, callback.from_user)
     prices = await _shop_prices(user, settings)
     if category == "extra":
+        event_title = (await db.get_bot_state("event_title")) or "текущее мероприятие"
         title = "🎟 Мероприятия"
-        intro = "Гибкая сумма в печеньках. Скидка уровня применится автоматически."
+        intro = f"Сейчас: <b>{html.escape(event_title)}</b>. Введите сумму в печеньках — скидка уровня применится сама."
     elif category in SHOP_CATEGORIES:
         title = str(SHOP_CATEGORIES[category]["title"])
         intro = str(SHOP_CATEGORIES[category]["intro"])
@@ -1031,6 +1060,15 @@ async def buy_shop_item(
         await callback.answer("Покупка выполнена.")
         await callback.message.answer(f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪.")
         return
+    if item in TITLE_ITEMS:
+        ok, error = await db.buy_item(callback.from_user.id, item, price)
+        if not ok:
+            await callback.answer(error, show_alert=True)
+            return
+        await db.update_profile(callback.from_user.id, "profile_title", TITLE_ITEMS[item])
+        await callback.answer("Титул надет.")
+        await callback.message.answer(f"✅ Титул «{html.escape(TITLE_ITEMS[item])}». Списано {price} 🍪.")
+        return
     if item == "private_profile" and user.get("profile_private"):
         await callback.answer("Профиль уже скрыт.", show_alert=True)
         return
@@ -1058,8 +1096,10 @@ async def buy_shop_item(
                 parse_mode="HTML",
             )
     labels = {
-        "restore_rep": "Репутация восстановлена до 100.",
+        "restore_rep": "Репутация поднята на +10 (не выше 100).",
         "immunity": "Иммунитет от отрицательной репутации включён на 24 часа.",
+        "immunity_24h": "Плащ иммунитета на 24 часа.",
+        "rep_shield": "Щит на один −реп добавлен.",
         "event_pass": "Заявка на проходку передана владельцу.",
         "reset_limits": "Лимит действий репутации сброшен.",
         "forgive": "Предупреждения очищены, мут снят.",
@@ -1450,32 +1490,23 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
     if delta is None:
         return
     actor = await register_telegram_user(db, message.from_user)
-    if int(target["user_id"]) == message.from_user.id:
-        await message.reply("Нельзя менять репутацию самому себе.")
-        return
     if message.reply_to_message.from_user.is_bot:
         await message.reply("Репутация ботов не меняется.")
         return
-    tier = reputation_tier(int(actor["reputation"]), settings.restricted_reputation_threshold)
-    if tier.daily_actions == 0:
-        await message.reply("Ваш уровень репутации не позволяет влиять на других участников.")
-        return
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()
-    used = await db.reputation_actions_today(message.from_user.id, local_date)
-    if used >= tier.daily_actions:
-        await message.reply(f"Дневной лимит исчерпан: {tier.daily_actions} действий.")
+    from community_bot.reputation import change_community_reputation
+
+    ok, text, new_value, pet_line = await change_community_reputation(
+        db, settings, actor, target, delta, local_date
+    )
+    if not ok or new_value is None:
+        await message.reply(text)
         return
-    if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
-        await message.reply("🛡 У пользователя действует иммунитет от понижения репутации.")
-        return
-    delta, pet_line = await pet_guard_reputation(db, int(target["user_id"]), delta)
-    new_value = await db.apply_reputation(message.from_user.id, int(target["user_id"]), delta, local_date)
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
-    sign = "+" if delta > 0 else ""
     extra = f"\n{pet_line}" if pet_line else ""
     await message.reply(
-        f"{target_tier.emoji} Репутация {_target_display(target)}: {sign}{delta}, теперь {new_value}.{extra}",
+        f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
         parse_mode="HTML",
     )
     if new_value < settings.restricted_reputation_threshold:

@@ -4,7 +4,7 @@ import asyncio
 import html
 import logging
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from aiogram import Bot
@@ -220,6 +220,9 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
         lines.append(f"💬 <i>«{html.escape(str(user['custom_status']))}»</i>")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
+    title = str(user.get("profile_title") or "").strip()
+    if title:
+        lines.append(f"🏷 {html.escape(title)}")
     lines.extend(
         [
             f"🔗 {html.escape(username)}",
@@ -255,6 +258,8 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         f"\n     <i>❝ {html.escape(str(user['custom_status']))} ❞</i>\n" if user.get("custom_status") else "\n"
     )
     lock = "  🔒 скрыт от чужих глаз\n" if user.get("profile_private") else ""
+    title = str(user.get("profile_title") or "").strip()
+    title_line = f"  🏷  {html.escape(title)}\n" if title else ""
     return (
         "✧･ﾟ: *✧･ﾟ:*  <b>Ｎ Ｏ Ｒ Ａ</b>  *:･ﾟ✧*:･ﾟ✧\n"
         "\n"
@@ -264,6 +269,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         f"{status}"
         "╰─━━━━━━━━━━━━━━━━━─╯\n"
         f"{lock}"
+        f"{title_line}"
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"
         f"  🎂  {age}     🍪  {user['cookies']}\n"
@@ -291,19 +297,26 @@ async def can_view_profile(db: Database, settings: Settings, actor_id: int, targ
     return await has_permission(db, settings, actor_id, PERM_SEE_PRIVATE)
 
 
-async def pet_guard_reputation(db: Database, target_id: int, delta: int) -> tuple[int, str | None]:
-    if delta == 0:
+async def pet_guard_reputation(
+    db: Database,
+    target_id: int,
+    delta: int,
+    action_date: date | None = None,
+) -> tuple[int, str | None]:
+    if delta >= 0:
         return delta, None
     pet = await db.get_pet(target_id)
     if not pet or int(pet.get("sleeping") or 0) or int(pet.get("hunger") or 0) < 70:
         return delta, None
+    used_on = str(pet.get("guard_used_on") or "")
+    today = (action_date or datetime.now(UTC).date()).isoformat()
+    if used_on == today:
+        return delta, None
+    if secrets.randbelow(100) >= 15:
+        return delta, None
+    await db.mark_pet_guard(target_id, today)
     name = html.escape(str(pet["name"]))
-    if delta < 0 and secrets.randbelow(100) < 40:
-        return 0, f"🐾 Сытый <b>{name}</b> перехватил −реп и спрятал его в норке."
-    if delta > 0 and secrets.randbelow(100) < 35:
-        doubled = delta * 2
-        return doubled, f"🐾 Сытый <b>{name}</b> так обрадовался, что +реп удвоился: +{doubled}!"
-    return delta, None
+    return 0, f"🐾 Сытый <b>{name}</b> перехватил −реп и спрятал его в норке."
 
 
 async def resolve_reply_target(message: Message, db: Database) -> dict[str, Any] | None:

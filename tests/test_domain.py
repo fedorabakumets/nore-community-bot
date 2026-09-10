@@ -16,6 +16,9 @@ def test_reputation_tiers_do_not_overlap() -> None:
     assert reputation_tier(89).key == "silver"
     assert reputation_tier(70).discount == 10
     assert reputation_tier(69).key == "bronze"
+    assert reputation_tier(69).daily_actions == 1
+    assert reputation_tier(69).can_minus is False
+    assert reputation_tier(70).can_minus is True
     assert reputation_tier(-1).key == "restricted"
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from aiogram import F, Router
@@ -13,7 +12,7 @@ from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
-from community_bot.pets_talk import SPECIES, aftercare_line, species_meta, talk_line
+from community_bot.pets_talk import SPECIES, aftercare_line, species_meta
 from community_bot.shop_catalog import SHOP_CATEGORIES, shop_prices_for
 from community_bot.states import PetFlow
 
@@ -48,7 +47,7 @@ def pet_text(pet: dict[str, object]) -> str:
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
         f"🍪 Крошки: <b>{farm_milli}/1000</b> до печеньки\n\n"
-        "Поговори, покорми или напои — малыш отвечает милыми пингами 💕"
+        "Покорми или напои — малыш живёт в чате, не в личке."
     )
 
 
@@ -154,28 +153,6 @@ async def use_supply(callback: CallbackQuery, db: Database) -> None:
     await callback.answer("Готово!")
     await refresh_pet_card(callback.message, pet)
     await callback.message.answer(aftercare_line(pet, kind))
-
-
-@router.callback_query(F.data == "pet:talk")
-async def talk_with_pet(callback: CallbackQuery, db: Database) -> None:
-    if not callback.message:
-        return
-    pet = await db.get_pet(callback.from_user.id)
-    if not pet:
-        await callback.answer("Сначала заведите тамагочи.", show_alert=True)
-        return
-    last_raw = pet.get("last_talk_at")
-    if last_raw:
-        try:
-            last = datetime.fromisoformat(str(last_raw)).astimezone(UTC)
-            if datetime.now(UTC) - last < timedelta(seconds=20):
-                await callback.answer("Малыш ещё переводит дыхание 💕", show_alert=True)
-                return
-        except ValueError:
-            pass
-    await db.mark_pet_talk(callback.from_user.id)
-    await callback.answer()
-    await callback.message.answer(talk_line(pet))
 
 
 @router.callback_query(F.data == "pet:rename")

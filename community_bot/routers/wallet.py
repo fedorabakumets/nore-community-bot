@@ -20,8 +20,8 @@ from community_bot.economy import (
 )
 from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import register_telegram_user
-from community_bot.keyboards import shop_home_keyboard, wallet_keyboard, wallet_loan_confirm_keyboard
-from community_bot.routers.group import _shop_home_text
+from community_bot.keyboards import wallet_keyboard, wallet_loan_confirm_keyboard
+from community_bot.routers.group import _shop_home_markup, _shop_home_text
 from community_bot.texts import WALLET_HELP_TEXT
 
 router = Router(name="wallet")
@@ -129,7 +129,7 @@ async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings)
     await callback.message.answer(
         _shop_home_text(user, settings),
         parse_mode="HTML",
-        reply_markup=shop_home_keyboard(),
+        reply_markup=await _shop_home_markup(db),
     )
 
 

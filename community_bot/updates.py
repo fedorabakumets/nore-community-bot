@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -10,6 +11,7 @@ class BotUpdate:
     title: str
     summary: str
     details: tuple[str, ...]
+    staff_details: tuple[str, ...] = field(default_factory=tuple)
 
 
 UPDATES: tuple[BotUpdate, ...] = (
@@ -85,6 +87,23 @@ UPDATES: tuple[BotUpdate, ...] = (
             "После одобрения заявки в личку приходит приглашение в сообщество.",
         ),
     ),
+    BotUpdate(
+        number=7,
+        slug="living-nora",
+        title="Репутация, магазин и тихий тамагочи",
+        summary="Репутацию снова нужно заслуживать, магазин получил титулы и щит, тамагочи больше не пишет в личку.",
+        details=(
+            "Новые участники начинают с серебра (70). Золото — только за плюсы из чата, автохил не выше 89.",
+            "Бронза может только +реп (1 раз в день). Минус — с серебра. Одного человека — не чаще раза в сутки.",
+            "В магазине: щит на один −реп, плащ на 24 часа, титулы. Еда питомца — обед и поилка.",
+            "Тамагочи молчит и не пишет в личку. Пинги — в общий чат. Сытый питомец редко ловит один −реп в день.",
+        ),
+        staff_details=(
+            "Админка собрана в четыре комнаты: очередь, люди, чат, система. На очереди виден счётчик анкет и платежей.",
+            "В карточке человека: репутация, заметка модератора, титул недели. В чате команда «карточка» ответом.",
+            "Витрина магазина и название мероприятия задаются из комнаты «Система».",
+        ),
+    ),
 )
 
 
@@ -102,10 +121,31 @@ def updates_text() -> str:
         lines.append(f"<b>№{item.number} · {item.title}</b>")
         lines.append(item.summary)
         lines.extend(f"• {line}" for line in item.details)
+        lines.extend(f"• {line}" for line in item.staff_details)
         lines.append("")
     lines.append("Открывается только из админ-панели.")
     return "\n".join(lines).strip()
 
 
 def community_announcement(item: BotUpdate) -> str:
-    return f"✨ <b>Обновление №{item.number} «{item.title}»</b>\n\n{item.summary}"
+    return (
+        f"✨ <b>{item.title}</b>\n\n"
+        f"{item.summary}\n\n"
+        "Коротко для участников. Подробности — кнопка ниже."
+    )
+
+
+def member_details_text(item: BotUpdate) -> str:
+    lines = [f"✨ <b>{item.title}</b>", item.summary, ""]
+    lines.extend(f"• {line}" for line in item.details)
+    return "\n".join(lines).strip()
+
+
+def member_details_nodes(item: BotUpdate) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = [
+        {"tag": "h3", "children": [item.title]},
+        {"tag": "p", "children": [item.summary]},
+    ]
+    for line in item.details:
+        nodes.append({"tag": "p", "children": [f"• {line}"]})
+    return nodes

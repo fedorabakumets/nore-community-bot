@@ -26,7 +26,7 @@ def test_persistent_keyboard_is_profile_wallet_and_menu() -> None:
 def test_shop_profile_shelf_has_privacy_and_ornate() -> None:
     items = SHOP_CATEGORIES["profile"]["items"]
     assert "private_profile" in items
-    assert "ornate_profile" in items
+    assert "title_owl" in items
 
 
 def test_permissions_roundtrip_and_wildcard() -> None:
@@ -134,10 +134,156 @@ async def test_pet_guard_requires_full_belly(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("community_bot.helpers.secrets.randbelow", lambda _: 0)
     delta, line = await pet_guard_reputation(db, 1, 5)
-    assert delta == 10
-    assert line and "удвоился" in line
+    assert delta == 5
+    assert line is None
+
+    monkeypatch.setattr("community_bot.helpers.secrets.randbelow", lambda _: 0)
+    delta, line = await pet_guard_reputation(db, 1, -5)
+    assert delta == -5
+    assert line is None
 
     await db.execute("UPDATE pets SET hunger = 10 WHERE user_id = 1")
     delta, line = await pet_guard_reputation(db, 1, -5)
     assert delta == -5
     assert line is None
+
+
+def test_pet_keyboard_has_no_talk() -> None:
+    from community_bot.keyboards import pet_keyboard
+
+    labels = [button.text for row in pet_keyboard().inline_keyboard for button in row]
+    assert all("Поговорить" not in text for text in labels)
+
+
+def test_member_announcement_omits_staff() -> None:
+    from community_bot.updates import community_announcement, latest_update, member_details_nodes, member_details_text
+
+    item = latest_update()
+    pin = community_announcement(item)
+    details = member_details_text(item)
+    nodes = str(member_details_nodes(item))
+    assert "Админ" not in pin
+    assert "четыре комнаты" not in details.casefold()
+    assert "Админка" not in nodes
+    assert "щит" in details.casefold()
+
+
+async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
+    from datetime import date
+    from pathlib import Path
+
+    from community_bot.database import Database
+    from community_bot.reputation import change_community_reputation
+
+    db = Database(Path(tmp_path) / "rep.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Actor")
+    await db.ensure_user(2, telegram_name="Target")
+    await db.ensure_user(3, telegram_name="Other")
+    settings = SimpleNamespace(restricted_reputation_threshold=0)
+    today = date(2026, 9, 11)
+
+    await db.execute("UPDATE users SET reputation = 60 WHERE user_id = 1")
+    actor = await db.get_user(1)
+    target = await db.get_user(2)
+    ok, text, _, _ = await change_community_reputation(db, settings, actor, target, -5, today)
+    assert ok is False
+    assert "Бронза" in text
+
+    ok, _, new_value, _ = await change_community_reputation(db, settings, actor, target, 5, today)
+    assert ok is True
+    assert new_value == 75
+
+    await db.execute("UPDATE users SET reputation = 80 WHERE user_id = 1")
+    actor = await db.get_user(1)
+    other = await db.get_user(3)
+    ok, msg, _, _ = await change_community_reputation(db, settings, actor, target, 5, today)
+    assert ok is False
+    assert "сегодня" in msg.casefold()
+    ok, _, new_value, _ = await change_community_reputation(db, settings, actor, other, 5, today)
+    assert ok is True
+    assert new_value == 75
+
+
+async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:
+    from datetime import date
+    from pathlib import Path
+
+    from community_bot.database import Database
+    from community_bot.reputation import change_community_reputation
+
+    db = Database(Path(tmp_path) / "shield.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Actor")
+    await db.ensure_user(2, telegram_name="Target")
+    await db.add_cookies(2, 20, "test")
+    ok, _ = await db.buy_item(2, "rep_shield", 12)
+    assert ok is True
+    settings = SimpleNamespace(restricted_reputation_threshold=0)
+    actor = await db.get_user(1)
+    target = await db.get_user(2)
+    ok, _, new_value, extra = await change_community_reputation(
+        db, settings, actor, target, -5, date(2026, 9, 11)
+    )
+    assert ok is True
+    assert extra and "Щит" in extra
+    assert new_value == 70
+    assert int((await db.get_user(2))["hate_shields"]) == 0
+
+
+async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from community_bot.database import Database
+    from community_bot.main import announce_latest_update
+
+    db = Database(Path(tmp_path) / "announce.db")
+    await db.initialize()
+    sent: list[SimpleNamespace] = []
+    pinned: list[int] = []
+
+    class FakeBot:
+        async def send_message(self, chat_id, text, **kwargs):
+            message = SimpleNamespace(
+                message_id=7 + len(sent),
+                text=text,
+                reply_markup=kwargs.get("reply_markup"),
+            )
+            sent.append(message)
+            return message
+
+        async def pin_chat_message(self, chat_id, message_id, disable_notification=True):
+            pinned.append(message_id)
+
+        async def unpin_chat_message(self, chat_id, message_id):
+            return None
+
+    async def fake_publish(_db, _item):
+        return "https://telegra.ph/NORA"
+
+    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
+    settings = SimpleNamespace(community_chat_id=-100)
+    await announce_latest_update(FakeBot(), db, settings)
+    assert pinned == [7]
+    assert "Админ" not in sent[0].text
+    assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
+    assert await db.get_bot_state("last_announced_update") == "7"
+    await announce_latest_update(FakeBot(), db, settings)
+    assert len(sent) == 1
+
+    await db.set_bot_state("last_announced_update", "")
+    sent.clear()
+    pinned.clear()
+
+    async def no_publish(_db, _item):
+        return None
+
+    class NoPinBot(FakeBot):
+        async def pin_chat_message(self, chat_id, message_id, disable_notification=True):
+            raise RuntimeError("no pin rights")
+
+    monkeypatch.setattr("community_bot.main.publish_member_update", no_publish)
+    await announce_latest_update(NoPinBot(), db, settings)
+    assert not pinned
+    assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
+    assert await db.get_bot_state("last_announced_update") == "7"

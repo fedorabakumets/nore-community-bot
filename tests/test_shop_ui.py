@@ -1,5 +1,5 @@
 from community_bot.keyboards import FLOW_CANCEL, STYLE_CLOSE, STYLE_GO, shop_home_keyboard, start_apply_keyboard
-from community_bot.pets_talk import talk_line
+from community_bot.pets_talk import aftercare_line
 from community_bot.shop_catalog import IMMUNITY_HOURS, SHOP_CATEGORIES, shop_prices_for
 
 
@@ -14,10 +14,12 @@ def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
     assert "pets" in SHOP_CATEGORIES
     assert "reputation" in SHOP_CATEGORIES
     assert "tamagotchi" in SHOP_CATEGORIES["pets"]["items"]
+    assert "pet_meal" in SHOP_CATEGORIES["pets"]["items"]
     assert "forgive" in SHOP_CATEGORIES["reputation"]["items"]
+    assert "rep_shield" in SHOP_CATEGORIES["reputation"]["items"]
+    assert "title_owl" in SHOP_CATEGORIES["profile"]["items"]
     assert set(IMMUNITY_HOURS) <= set(SHOP_CATEGORIES["reputation"]["items"])
-    assert IMMUNITY_HOURS["immunity_1h"] == 1
-    assert IMMUNITY_HOURS["immunity_72h"] == 72
+    assert IMMUNITY_HOURS["immunity_24h"] == 24
 
 
 def test_shop_home_has_red_close_and_green_cookies() -> None:
@@ -31,11 +33,10 @@ def test_shop_home_has_red_close_and_green_cookies() -> None:
 
 def test_shop_prices_apply_gold_discount() -> None:
     prices = shop_prices_for({"reputation": 95}, 0)
-    assert prices["immunity_24h"] < 10
+    assert prices["immunity_24h"] < 18
     assert prices["forgive"] == 40
 
 
-def test_pet_talk_is_cute() -> None:
-    line = talk_line({"name": "Булочка", "species": "cat"})
+def test_pet_aftercare_mentions_name() -> None:
+    line = aftercare_line({"name": "Булочка", "species": "cat"}, "food")
     assert "Булочка" in line
-    assert any(mark in line for mark in ("💕", "✨", "💖", "🫶"))

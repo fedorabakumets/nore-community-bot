@@ -117,59 +117,99 @@ def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def admin_panel_keyboard(permissions: list[str] | None = None) -> InlineKeyboardMarkup:
-    perms = permissions if permissions is not None else ["*"]
+def admin_panel_keyboard(
+    permissions: list[str] | None = None,
+    stats: dict[str, int] | None = None,
+) -> InlineKeyboardMarkup:
+    stats = stats or {}
+    queue_n = int(stats.get("pending_applications") or 0) + int(stats.get("pending_orders") or 0)
+    queue_label = f"📋 Очередь ({queue_n})" if queue_n else "📋 Очередь"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn(queue_label, "admin:queue", STYLE_GO), ibtn("👤 Люди", "admin:people", STYLE_FUN)],
+            [ibtn("💬 Чат", "admin:chatroom"), ibtn("🛠 Система", "admin:system")],
+            [close_btn("ui:close")],
+        ]
+    )
 
-    def allow(key: str) -> bool:
-        return role_has_permission(perms, key)
 
+def _allow(perms: list[str], key: str) -> bool:
+    return role_has_permission(perms, key)
+
+
+def admin_queue_keyboard(permissions: list[str], stats: dict[str, int] | None = None) -> InlineKeyboardMarkup:
+    stats = stats or {}
     rows: list[list[InlineKeyboardButton]] = []
-    first: list[InlineKeyboardButton] = []
-    if allow("applications"):
-        first.append(ibtn("📋 Анкеты", "admin:applications"))
-    if allow("payments"):
-        first.append(ibtn("💳 Платежи", "admin:orders"))
-    if first:
-        rows.append(first)
-    second: list[InlineKeyboardButton] = []
-    if allow("roles.assign") or allow("roles.edit"):
-        second.append(ibtn("👥 Права", "admin:roles"))
-    if allow("users.edit") or allow("users.cookies"):
-        second.append(ibtn("👤 Профили и 🍪", "admin:users"))
-    if second:
-        rows.append(second)
-    if allow("automessages"):
-        rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
-    lock_row: list[InlineKeyboardButton] = []
-    if allow("chat.lock"):
-        lock_row.extend(
+    if _allow(permissions, "applications"):
+        n = int(stats.get("pending_applications") or 0)
+        rows.append([ibtn(f"📋 Анкеты ({n})" if n else "📋 Анкеты", "admin:applications")])
+    if _allow(permissions, "payments"):
+        n = int(stats.get("pending_orders") or 0)
+        rows.append([ibtn(f"💳 Платежи ({n})" if n else "💳 Платежи", "admin:orders")])
+    rows.append([back_btn("admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_people_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if _allow(permissions, "roles.assign") or _allow(permissions, "roles.edit"):
+        rows.append([ibtn("👥 Права", "admin:roles")])
+    if _allow(permissions, "users.edit") or _allow(permissions, "users.cookies"):
+        rows.append([ibtn("👤 Профили и 🍪", "admin:users", STYLE_FUN)])
+        rows.append([ibtn("🔎 Найти человека", "admin:search")])
+    rows.append([ibtn("💤 Инактив", "admin:inactive")])
+    rows.append([back_btn("admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if _allow(permissions, "chat.lock"):
+        rows.append(
             [
                 ibtn("🔇 Мут чата", "admin:chat:mute", STYLE_CLOSE),
                 ibtn("🔊 Открыть чат", "admin:chat:unmute", STYLE_GO),
             ]
         )
-    if lock_row:
-        rows.append(lock_row)
     chat_row: list[InlineKeyboardButton] = []
-    if allow("chat.mention"):
+    if _allow(permissions, "chat.mention"):
         chat_row.append(ibtn("📣 Упомянуть всех", "admin:mention"))
-    if allow("chat.broadcast"):
+    if _allow(permissions, "chat.broadcast"):
         chat_row.append(ibtn("💌 Рассылка в ЛС", "admin:broadcast"))
     if chat_row:
         rows.append(chat_row)
-    if allow("chat.post"):
+    if _allow(permissions, "chat.post"):
         rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
-    extra: list[InlineKeyboardButton] = []
-    if allow("features"):
-        extra.append(ibtn("⚙️ Функции", "admin:features"))
-    extra.append(ibtn("📊 Состояние", "admin:health"))
-    extra.append(ibtn("✨ Обновления", "admin:updates", STYLE_FUN))
-    rows.append(extra)
-    bottom: list[InlineKeyboardButton] = [ibtn("💤 Инактив", "admin:inactive")]
-    if allow("audit"):
-        bottom.append(ibtn("🧾 Журнал", "admin:audit"))
-    rows.append(bottom)
-    rows.append([close_btn("ui:close")])
+    if _allow(permissions, "automessages"):
+        rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
+    if _allow(permissions, "features"):
+        rows.append([ibtn("⚙️ Функции", "admin:features")])
+    rows.append([back_btn("admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_system_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [ibtn("📊 Сводка дня", "admin:health")],
+        [ibtn("✨ Обновления", "admin:updates", STYLE_FUN)],
+    ]
+    if _allow(permissions, "audit"):
+        rows.append([ibtn("🧾 Журнал", "admin:audit")])
+    if _allow(permissions, "features") or _allow(permissions, "users.edit"):
+        rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
+        rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
+    rows.append([back_btn("admin:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_vitrine_keyboard() -> InlineKeyboardMarkup:
+    from community_bot.shop_catalog import ITEM_LABELS, VITRINE_KEYS
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for key in VITRINE_KEYS:
+        rows.append([ibtn(str(ITEM_LABELS[key])[:42], f"admin:vitrine:{key}")])
+    rows.append([ibtn("✖️ Убрать витрину", "admin:vitrine:off", STYLE_CLOSE)])
+    rows.append([back_btn("admin:system")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -180,7 +220,7 @@ def role_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup:
         role = str(user["role"])
         name = str(user.get("profile_name") or user.get("telegram_name") or user.get("username") or user["user_id"])
         rows.append([ibtn(f"{icons.get(role, '👤')} {name[:40]}", f"admin:user:{user['user_id']}")])
-    rows.append([back_btn("admin:panel")])
+    rows.append([back_btn("admin:roles")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -191,7 +231,7 @@ def roles_hub_keyboard(can_edit_roles: bool) -> InlineKeyboardMarkup:
     ]
     if can_edit_roles:
         rows.append([ibtn("➕ Создать роль", "admin:rolenew", STYLE_GO)])
-    rows.append([back_btn("admin:panel")])
+    rows.append([back_btn("admin:people")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -260,7 +300,7 @@ def admin_users_keyboard(users: list[dict[str, object]]) -> InlineKeyboardMarkup
     for user in users:
         name = str(user.get("profile_name") or user.get("telegram_name") or user.get("username") or user["user_id"])
         rows.append([ibtn(f"👤 {name[:42]}", f"admin:manage:{user['user_id']}")])
-    rows.append([back_btn("admin:panel")])
+    rows.append([back_btn("admin:people")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -272,6 +312,10 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("➕ Начислить 🍪", f"admin:edit:add_cookies:{user_id}", STYLE_GO),
             ],
             [
+                ibtn("🏅 Репутация", f"admin:edit:rep:{user_id}"),
+                ibtn("📝 Заметка", f"admin:edit:note:{user_id}"),
+            ],
+            [
                 ibtn("✏️ Имя", f"admin:edit:name:{user_id}"),
                 ibtn("🎂 Возраст", f"admin:edit:age:{user_id}"),
             ],
@@ -279,7 +323,8 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("🖼 Аватар", f"admin:edit:avatar:{user_id}"),
                 ibtn("⚠️ Нарушения", f"admin:edit:warnings:{user_id}"),
             ],
-            [back_btn("admin:users")],
+            [ibtn("⭐ Титул недели", f"admin:weekstar:{user_id}", STYLE_FUN)],
+            [back_btn("admin:people")],
         ]
     )
 
@@ -373,9 +418,12 @@ def profile_transfer_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def shop_home_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def shop_home_keyboard(featured_key: str | None = None, featured_label: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if featured_key and featured_label:
+        rows.append([ibtn(f"⭐ {featured_label}", f"shop:{featured_key}", STYLE_GO)])
+    rows.extend(
+        [
             [
                 ibtn("🐾 Тамагочи", "shop:cat:pets", STYLE_GO),
                 ibtn("🏅 Репутация", "shop:cat:reputation", STYLE_FUN),
@@ -388,6 +436,7 @@ def shop_home_keyboard() -> InlineKeyboardMarkup:
             [close_btn("shop:close")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def shop_category_keyboard(category: str, prices: dict[str, int]) -> InlineKeyboardMarkup:
@@ -499,7 +548,6 @@ def pet_keyboard() -> InlineKeyboardMarkup:
                 ibtn("🍗 Накормить", "pet:use:food", STYLE_GO),
                 ibtn("💧 Напоить", "pet:use:water", STYLE_FUN),
             ],
-            [ibtn("💬 Поговорить", "pet:talk", STYLE_FUN)],
             [ibtn("✏️ Переименовать", "pet:rename"), ibtn("🛒 Магазин", "pet:shop", STYLE_GO)],
             [close_btn("ui:close")],
         ]
@@ -521,7 +569,7 @@ FEATURE_META = {
     ),
     "activity_rewards": (
         "🎁 Награды за активность",
-        "За каждые 50 сообщений в чате владелец тамагочи получает еду и воду.",
+        "За каждые 120 сообщений в чате владелец тамагочи тихо получает еду и воду — без лички.",
     ),
     "anti_flood": (
         "🛡 Антифлуд",

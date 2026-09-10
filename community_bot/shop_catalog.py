@@ -3,85 +3,89 @@ from __future__ import annotations
 from community_bot.domain import discounted_price, reputation_tier
 
 ITEM_LABELS = {
-    "restore_rep": "Восстановить репутацию",
+    "restore_rep": "Поднять репутацию +10",
     "reset_limits": "Сброс лимитов репутации",
     "forgive": "Прости меня…",
-    "immunity_1h": "Иммунитет · 1 час",
-    "immunity_6h": "Иммунитет · 6 часов",
-    "immunity_24h": "Иммунитет · 24 часа",
-    "immunity_72h": "Иммунитет · 3 дня",
+    "rep_shield": "Щит на 1 удар −репа",
+    "immunity_24h": "Плащ иммунитета · 24 часа",
     "custom_status": "Кастомный статус",
     "video_avatar": "Видео-аватар профиля",
     "private_profile": "Приватный профиль",
     "ornate_profile": "Кастомный профиль",
+    "title_owl": "Титул «Ночная сова»",
+    "title_regular": "Титул «Завсегдатай»",
+    "title_star": "Титул «Звезда норы»",
     "tamagotchi": "Завести тамагочи",
-    "pet_snack": "Перекус питомцу +10",
-    "pet_meal": "Обед питомцу +35",
-    "pet_feast": "Пир питомцу +70",
-    "pet_water": "Вода питомцу +25",
-    "pet_drink": "Большая поилка +70",
+    "pet_meal": "Обед питомцу +40",
+    "pet_drink": "Поилка питомцу +50",
 }
 
 BASE_SHOP_PRICES = {
-    "restore_rep": 5,
-    "reset_limits": 10,
+    "restore_rep": 20,
+    "reset_limits": 15,
     "forgive": 50,
-    "immunity_1h": 4,
-    "immunity_6h": 8,
-    "immunity_24h": 10,
-    "immunity_72h": 22,
+    "rep_shield": 12,
+    "immunity_24h": 18,
     "custom_status": 5,
     "video_avatar": 10,
     "private_profile": 15,
     "ornate_profile": 25,
+    "title_owl": 18,
+    "title_regular": 18,
+    "title_star": 30,
     "tamagotchi": 50,
-    "pet_snack": 1,
-    "pet_meal": 3,
-    "pet_feast": 5,
-    "pet_water": 2,
-    "pet_drink": 5,
+    "pet_meal": 4,
+    "pet_drink": 4,
 }
 
 IMMUNITY_HOURS = {
-    "immunity_1h": 1,
-    "immunity_6h": 6,
     "immunity_24h": 24,
-    "immunity_72h": 72,
+}
+
+TITLE_ITEMS = {
+    "title_owl": "Ночная сова",
+    "title_regular": "Завсегдатай",
+    "title_star": "Звезда норы",
 }
 
 SHOP_CATEGORIES = {
     "pets": {
         "title": "🐾 Тамагочи",
-        "intro": "Корм, вода и новый питомец. Яркие кнопки — это полка с вкусностями.",
-        "items": ("tamagotchi", "pet_snack", "pet_meal", "pet_feast", "pet_water", "pet_drink"),
+        "intro": "Питомец и два припаса. Еда за активность приходит тихо, без лички.",
+        "items": ("tamagotchi", "pet_meal", "pet_drink"),
     },
     "reputation": {
         "title": "🏅 Репутация",
-        "intro": "Восстановление репутации, прощение и иммунитет на разное время.",
+        "intro": "Плюс к репутации, щит на один −реп, плащ на сутки и прощение варнов.",
         "items": (
             "restore_rep",
             "reset_limits",
-            "forgive",
-            "immunity_1h",
-            "immunity_6h",
+            "rep_shield",
             "immunity_24h",
-            "immunity_72h",
+            "forgive",
         ),
     },
     "profile": {
         "title": "✨ Профиль",
-        "intro": "Косметика карточки: статус, видео-аватар, скрытый и кастомный профиль.",
-        "items": ("custom_status", "video_avatar", "private_profile", "ornate_profile"),
+        "intro": "Косметика карточки и титулы, которые видно всем.",
+        "items": (
+            "custom_status",
+            "video_avatar",
+            "private_profile",
+            "ornate_profile",
+            "title_owl",
+            "title_regular",
+            "title_star",
+        ),
     },
 }
 
 PET_SUPPLIES = {
-    "pet_snack": ("food", 10, "Перекус"),
-    "pet_meal": ("food", 35, "Обед"),
-    "pet_feast": ("food", 70, "Пир"),
-    "pet_water": ("water", 25, "Вода"),
-    "pet_drink": ("water", 70, "Большая поилка"),
+    "pet_meal": ("food", 40, "Обед"),
+    "pet_drink": ("water", 50, "Поилка"),
 }
+
+VITRINE_KEYS = tuple(key for key in BASE_SHOP_PRICES if key not in {"tamagotchi"})
 
 
 def shop_prices_for(user: dict[str, object], restricted_threshold: int) -> dict[str, int]:

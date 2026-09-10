@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from community_bot.aliases import CommandOrAlias, command_or_alias, is_command_trigger, parse_trigger
 from community_bot.audit import classify_status, format_audit_row, parse_moderation_args
-from community_bot.keyboards import admin_panel_keyboard, private_menu_keyboard
+from community_bot.keyboards import admin_panel_keyboard, admin_system_keyboard, private_menu_keyboard
 from community_bot.posting import parse_button_lines, parse_poll_options, render_post
 from community_bot.texts import GROUP_COMMANDS_TEXT, STORE_HELP_TEXT
 from community_bot.updates import latest_update, updates_text
@@ -140,9 +140,9 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 6
+    assert latest.number == 7
     text = updates_text()
-    assert "№6" in text
+    assert "№7" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
@@ -153,8 +153,19 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "menu:updates" not in member_data
     admin_menu = admin_panel_keyboard(["*"])
     admin_buttons = [button for row in admin_menu.inline_keyboard for button in row]
-    assert any(button.callback_data == "admin:updates" for button in admin_buttons)
-    assert any(button.text == "✨ Обновления" for button in admin_buttons)
+    assert any(button.callback_data == "admin:system" for button in admin_buttons)
+    system_menu = admin_system_keyboard(["*"])
+    system_buttons = [button for row in system_menu.inline_keyboard for button in row]
+    assert any(button.callback_data == "admin:updates" for button in system_buttons)
+    assert any(button.text == "✨ Обновления" for button in system_buttons)
+    from community_bot.updates import community_announcement, member_details_text
+
+    pin = community_announcement(latest)
+    assert "Админ" not in pin
+    assert "очередь" not in pin.casefold()
+    details = member_details_text(latest)
+    assert "щит" in details.casefold()
+    assert "админка" not in details.casefold()
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

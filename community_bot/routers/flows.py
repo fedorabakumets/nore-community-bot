@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
@@ -152,6 +152,19 @@ async def flow_cancel_idle(callback: CallbackQuery, state: FSMContext) -> None:
                 await callback.message.edit_reply_markup(reply_markup=None)
             except Exception:
                 pass
+
+
+@router.callback_query(F.data == "updates:dm")
+async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
+    from community_bot.telegraph import member_dm_text
+    from community_bot.updates import latest_update
+
+    try:
+        await bot.send_message(callback.from_user.id, member_dm_text(latest_update()), parse_mode="HTML")
+    except (TelegramBadRequest, TelegramForbiddenError):
+        await callback.answer("Напишите боту /start в личке, затем нажмите снова.", show_alert=True)
+        return
+    await callback.answer("Обновление отправлено в личный диалог с ботом")
 
 
 @router.callback_query(F.data == "g:hide")

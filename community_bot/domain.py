@@ -33,6 +33,12 @@ NEGATIVE_REPUTATION_PHRASES = {
 }
 
 
+STARTING_REPUTATION = 70
+AUTO_REPUTATION_CAP = 89
+REPUTATION_FLOOR = -20
+RESTORE_REP_GAIN = 10
+
+
 @dataclass(frozen=True, slots=True)
 class ReputationTier:
     key: str
@@ -40,16 +46,17 @@ class ReputationTier:
     label: str
     discount: int
     daily_actions: int
+    can_minus: bool
 
 
 def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier:
     if value < restricted_threshold:
-        return ReputationTier("restricted", "🔞", "ограничен", 0, 0)
+        return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False)
     if value >= 90:
-        return ReputationTier("gold", "🥇", "золото", 20, 5)
+        return ReputationTier("gold", "🥇", "золото", 20, 5, True)
     if value >= 70:
-        return ReputationTier("silver", "🥈", "серебро", 10, 3)
-    return ReputationTier("bronze", "🥉", "бронза", 0, 0)
+        return ReputationTier("silver", "🥈", "серебро", 10, 3, True)
+    return ReputationTier("bronze", "🥉", "бронза", 0, 1, False)
 
 
 def discounted_price(base_price: int, discount: int) -> int:

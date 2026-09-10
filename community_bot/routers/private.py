@@ -23,7 +23,7 @@ from aiogram.types import (
 from community_bot.aliases import command_or_alias
 from community_bot.audit import format_audit_log, person_label
 from community_bot.config import Settings
-from community_bot.database import Database
+from community_bot.database import Database, utcnow
 from community_bot.helpers import (
     can_manage_user,
     effective_role,
@@ -39,9 +39,14 @@ from community_bot.helpers import (
 from community_bot.keyboards import (
     STYLE_CLOSE,
     YES_NO_KEYBOARD,
+    admin_chat_keyboard,
     admin_panel_keyboard,
+    admin_people_keyboard,
+    admin_queue_keyboard,
+    admin_system_keyboard,
     admin_user_keyboard,
     admin_users_keyboard,
+    admin_vitrine_keyboard,
     application_review_keyboard,
     automessage_target_keyboard,
     automessages_keyboard,
@@ -107,7 +112,7 @@ async def _private_keyboard(user_id: int, db: Database, settings: Settings):
 
 
 async def _panel_markup(db: Database, settings: Settings, user_id: int):
-    return admin_panel_keyboard(await user_permissions(db, settings, user_id))
+    return admin_panel_keyboard(await user_permissions(db, settings, user_id), await db.dashboard_stats())
 
 
 async def _send_welcome(message: Message, settings: Settings, reply_markup) -> None:
@@ -265,15 +270,14 @@ async def menu_question(
 async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not callback.from_user:
         return
-    from community_bot.keyboards import shop_home_keyboard
-    from community_bot.routers.group import _shop_home_text
+    from community_bot.routers.group import _shop_home_markup, _shop_home_text
 
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
     await callback.message.answer(
         _shop_home_text(user, settings),
         parse_mode="HTML",
-        reply_markup=shop_home_keyboard(),
+        reply_markup=await _shop_home_markup(db),
     )
 
 
@@ -323,9 +327,10 @@ async def _admin_panel_text(db: Database) -> str:
     return (
         "🛡 <b>Админ-панель</b>\n\n"
         f"Пользователей: <b>{stats['users']}</b> · питомцев: <b>{stats['pets']}</b>\n"
-        f"Анкет на проверке: <b>{stats['pending_applications']}</b>\n"
-        f"Платежей на проверке: <b>{stats['pending_orders']}</b>\n"
-        f"Активных игр: <b>{stats['active_games']}</b>"
+        f"Очередь: анкет <b>{stats['pending_applications']}</b> · платежей <b>{stats['pending_orders']}</b>"
+        f" · тикетов <b>{stats.get('open_tickets', 0)}</b>\n"
+        f"Активных игр: <b>{stats['active_games']}</b>\n\n"
+        "Четыре комнаты: очередь, люди, чат, система."
     )
 
 
@@ -350,6 +355,157 @@ async def admin_panel_callback(callback: CallbackQuery, db: Database, settings: 
         await _admin_panel_text(db),
         parse_mode="HTML",
         reply_markup=await _panel_markup(db, settings, callback.from_user.id),
+    )
+
+
+@router.callback_query(F.data == "admin:queue")
+async def admin_queue(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    stats = await db.dashboard_stats()
+    tickets = await db.list_open_tickets(8)
+    lines = [
+        "📋 <b>Очередь</b>",
+        f"Анкет: <b>{stats['pending_applications']}</b> · платежей: <b>{stats['pending_orders']}</b> · "
+        f"тикетов: <b>{stats.get('open_tickets', 0)}</b>",
+        "",
+    ]
+    if tickets:
+        lines.append("Открытые тикеты:")
+        for row in tickets:
+            name = row.get("profile_name") or row.get("telegram_name") or row.get("username") or row["user_id"]
+            lines.append(f"• №{row['id']} · {html.escape(str(name))}")
+    else:
+        lines.append("Открытых тикетов нет.")
+    await callback.answer()
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=admin_queue_keyboard(await user_permissions(db, settings, callback.from_user.id), stats),
+    )
+
+
+@router.callback_query(F.data == "admin:people")
+async def admin_people(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "👤 <b>Люди</b>\n\nПоиск, роли, карточка, заметка и титул недели.",
+        parse_mode="HTML",
+        reply_markup=admin_people_keyboard(await user_permissions(db, settings, callback.from_user.id)),
+    )
+
+
+@router.callback_query(F.data == "admin:chatroom")
+async def admin_chatroom(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "💬 <b>Чат</b>\n\nПост, автосообщения, мут, упоминание, рассылка и флаги.",
+        parse_mode="HTML",
+        reply_markup=admin_chat_keyboard(await user_permissions(db, settings, callback.from_user.id)),
+    )
+
+
+@router.callback_query(F.data == "admin:system")
+async def admin_system(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина магазина и служебные обновления.",
+        parse_mode="HTML",
+        reply_markup=admin_system_keyboard(await user_permissions(db, settings, callback.from_user.id)),
+    )
+
+
+@router.callback_query(F.data == "admin:search")
+async def admin_search_begin(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await state.set_state(AdminFlow.user_value)
+    await state.set_data({"admin_action": "search", "target_user_id": 0})
+    await callback.answer()
+    await callback.message.answer("Имя, @username или Telegram ID:", reply_markup=flow_reply_keyboard())
+
+
+@router.callback_query(F.data.startswith("admin:weekstar:"))
+async def admin_weekstar(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_USERS_EDIT):
+        return
+    user_id = int(callback.data.rsplit(":", 1)[1])
+    if not await db.get_user(user_id):
+        await callback.answer("Пользователь не найден.", show_alert=True)
+        return
+    await db.set_weekly_star(user_id)
+    await callback.answer("Титул недели выдан.", show_alert=True)
+
+
+@router.callback_query(F.data == "admin:vitrine")
+async def admin_vitrine(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    current = await db.get_bot_state("shop_featured_label")
+    await callback.answer()
+    await callback.message.edit_text(
+        "⭐ <b>Витрина</b>\n\n"
+        f"Сейчас: {html.escape(current) if current else 'пусто'}.\n"
+        "Выберите товар, который будет первой кнопкой в магазине.",
+        parse_mode="HTML",
+        reply_markup=admin_vitrine_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:vitrine:"))
+async def admin_vitrine_set(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    key = callback.data.rsplit(":", 1)[1]
+    from community_bot.shop_catalog import ITEM_LABELS, VITRINE_KEYS
+
+    if key == "off":
+        await db.set_bot_state("shop_featured", "")
+        await db.set_bot_state("shop_featured_label", "")
+        await callback.answer("Витрина очищена.")
+    elif key in VITRINE_KEYS:
+        await db.set_bot_state("shop_featured", key)
+        await db.set_bot_state("shop_featured_label", str(ITEM_LABELS[key]))
+        await callback.answer("Витрина обновлена.")
+    else:
+        await callback.answer("Нет такого товара.", show_alert=True)
+        return
+    current = await db.get_bot_state("shop_featured_label")
+    await callback.message.edit_text(
+        f"⭐ <b>Витрина</b>\n\nСейчас: {html.escape(current or 'пусто')}.",
+        parse_mode="HTML",
+        reply_markup=admin_vitrine_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "admin:eventtitle")
+async def admin_eventtitle_begin(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await state.set_state(AdminFlow.user_value)
+    await state.set_data({"admin_action": "eventtitle", "target_user_id": 0})
+    await callback.answer()
+    current = await db.get_bot_state("event_title")
+    await callback.message.answer(
+        f"Текущее название: {html.escape(current or 'не задано')}\nВведите новое (2–80 символов).",
+        parse_mode="HTML",
+        reply_markup=flow_reply_keyboard(),
     )
 
 
@@ -420,18 +576,21 @@ async def admin_health(callback: CallbackQuery, db: Database, settings: Settings
     stats = await db.dashboard_stats()
     database_size = db.path.stat().st_size if db.path.exists() else 0
     enabled = sum(int(row["enabled"]) for row in await db.list_feature_flags())
+    rows = await db.recent_admin_actions(8)
+    minus = sum(1 for row in rows if str(row.get("action") or "") in {"mute", "warn", "kick", "ban"})
     await callback.answer()
     await callback.message.edit_text(
-        "📊 <b>Состояние системы</b>\n\n"
+        "📊 <b>Сводка дня</b>\n\n"
         f"База: <b>{database_size / 1024 / 1024:.2f} МБ</b>\n"
-        f"Пользователей: <b>{stats['users']}</b>\n"
-        f"Питомцев: <b>{stats['pets']}</b>\n"
-        f"Активных игр: <b>{stats['active_games']}</b>\n"
-        f"Включённых функций: <b>{enabled}</b>\n\n"
-        "SQLite WAL включён · игровые состояния сохраняются после перезапуска.",
+        f"Людей: <b>{stats['users']}</b> · питомцев: <b>{stats['pets']}</b>\n"
+        f"Очередь: анкет {stats['pending_applications']} · платежей {stats['pending_orders']} · "
+        f"тикетов {stats.get('open_tickets', 0)}\n"
+        f"Игры сейчас: <b>{stats['active_games']}</b> · функций включено: <b>{enabled}</b>\n"
+        f"Последние модерации в журнале: <b>{minus}</b>\n\n"
+        "Журнал и инактив — соседние кнопки. Размер базы — только ориентир.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="↩️ В панель", callback_data="admin:panel")]]
+            inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="admin:system")]]
         ),
     )
 
@@ -1075,13 +1234,17 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
         await callback.answer("Нельзя редактировать пользователя с равной или более высокой ролью.", show_alert=True)
         return
     name = user["profile_name"] or user["telegram_name"] or user["username"] or f"ID {user_id}"
+    note = str(user.get("moderator_note") or "").strip() or "нет"
     await callback.answer()
     await callback.message.edit_text(
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
         f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
+        f"Репутация: <b>{user['reputation']}</b> · щиты {int(user.get('hate_shields') or 0)}\n"
+        f"Титул: {html.escape(str(user.get('profile_title') or 'нет'))}\n"
         f"Возраст: {user['age'] or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
-        f"Предупреждения: <b>{user['warnings']}</b>\n\n"
+        f"Предупреждения: <b>{user['warnings']}</b>\n"
+        f"Заметка: {html.escape(note)}\n\n"
         "Что изменить?",
         parse_mode="HTML",
         reply_markup=admin_user_keyboard(user_id),
@@ -1110,6 +1273,8 @@ async def admin_begin_user_edit(
         "age": "Введите новый возраст числом от 14 до 120.",
         "avatar": "Отправьте новую фотографию или видео профиля.",
         "warnings": "Введите точное количество предупреждений, 0 или больше.",
+        "rep": "Введите новую репутацию числом от -20 до 100.",
+        "note": "Введите заметку модератора (до 400 символов). «-» чтобы стереть.",
     }
     if action not in prompts:
         await callback.answer("Неизвестное действие.", show_alert=True)
@@ -1126,8 +1291,40 @@ async def admin_save_user_edit(message: Message, state: FSMContext, db: Database
         return
     actor_role = await _admin_role(message.from_user.id, db, settings)
     data = await state.get_data()
-    user_id = int(data["target_user_id"])
+    user_id = int(data.get("target_user_id") or 0)
     action = str(data["admin_action"])
+    if action == "search":
+        if not actor_role:
+            await state.clear()
+            await message.answer("Недостаточно прав.")
+            return
+        query = (message.text or "").strip()
+        if len(query) < 2 and not query.isdigit():
+            await message.answer("Введите имя, @username или Telegram ID.")
+            return
+        users = await db.search_users(query)
+        await state.clear()
+        if not users:
+            await message.answer("Никого не нашла.")
+            return
+        await message.answer(
+            f"🔎 Найдено: {len(users)}",
+            reply_markup=admin_users_keyboard(users),
+        )
+        return
+    if action == "eventtitle":
+        if not actor_role:
+            await state.clear()
+            await message.answer("Недостаточно прав.")
+            return
+        title = (message.text or "").strip()
+        if not 2 <= len(title) <= 80:
+            await message.answer("Название от 2 до 80 символов.")
+            return
+        await db.set_bot_state("event_title", title)
+        await state.clear()
+        await message.answer(f"✅ Мероприятие теперь: {html.escape(title)}", parse_mode="HTML")
+        return
     if not actor_role or not await _can_admin_manage(message.from_user.id, user_id, db, settings):
         await state.clear()
         await message.answer("Недостаточно прав для изменения этого пользователя.")
@@ -1162,6 +1359,29 @@ async def admin_save_user_edit(message: Message, state: FSMContext, db: Database
             return
         await db.set_warnings(user_id, int(message.text))
         result = f"Количество предупреждений установлено: {int(message.text)}."
+    elif action == "rep":
+        raw = (message.text or "").strip()
+        if not raw.lstrip("-").isdigit():
+            await message.answer("Репутация — целое число от -20 до 100.")
+            return
+        value = int(raw)
+        if not -20 <= value <= 100:
+            await message.answer("Репутация должна быть от -20 до 100.")
+            return
+        await db.execute(
+            "UPDATE users SET reputation = ?, updated_at = ? WHERE user_id = ?",
+            (value, utcnow(), user_id),
+        )
+        result = f"Репутация установлена: {value}."
+    elif action == "note":
+        value = (message.text or "").strip()
+        if value == "-":
+            value = ""
+        if len(value) > 400:
+            await message.answer("Заметка до 400 символов.")
+            return
+        await db.update_profile(user_id, "moderator_note", value)
+        result = "Заметка обновлена."
     elif action == "cookies":
         if not message.text or not message.text.isdigit() or int(message.text) > 1_000_000:
             await message.answer("Баланс должен быть числом от 0 до 1 000 000.")

@@ -27,11 +27,14 @@ CREATE TABLE IF NOT EXISTS users (
     custom_status TEXT,
     cookies INTEGER NOT NULL DEFAULT 0 CHECK(cookies >= 0),
     cookie_debt INTEGER NOT NULL DEFAULT 0 CHECK(cookie_debt >= 0),
-    reputation INTEGER NOT NULL DEFAULT 100,
+    reputation INTEGER NOT NULL DEFAULT 70,
     warnings INTEGER NOT NULL DEFAULT 0 CHECK(warnings >= 0),
     hate_immunity_until TEXT,
     profile_private INTEGER NOT NULL DEFAULT 0 CHECK(profile_private IN (0, 1)),
     profile_ornate INTEGER NOT NULL DEFAULT 0 CHECK(profile_ornate IN (0, 1)),
+    profile_title TEXT NOT NULL DEFAULT '',
+    hate_shields INTEGER NOT NULL DEFAULT 0 CHECK(hate_shields >= 0),
+    moderator_note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -208,6 +211,7 @@ CREATE TABLE IF NOT EXISTS pets (
     last_tick_at TEXT NOT NULL,
     last_notice_at TEXT,
     last_talk_at TEXT,
+    guard_used_on TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -302,6 +306,14 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_ornate INTEGER NOT NULL DEFAULT 0")
             if "cookie_debt" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN cookie_debt INTEGER NOT NULL DEFAULT 0")
+            if "profile_title" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN profile_title TEXT NOT NULL DEFAULT ''")
+            if "hate_shields" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN hate_shields INTEGER NOT NULL DEFAULT 0")
+            if "moderator_note" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN moderator_note TEXT NOT NULL DEFAULT ''")
+            if "guard_used_on" not in pet_columns:
+                await db.execute("ALTER TABLE pets ADD COLUMN guard_used_on TEXT")
             audit_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(admin_audit_log)")).fetchall()
             }
@@ -478,6 +490,7 @@ class Database:
             "active_games": "SELECT COUNT(*) AS count FROM party_games WHERE status IN ('lobby', 'active')",
             "pending_orders": "SELECT COUNT(*) AS count FROM cookie_orders WHERE status = 'pending'",
             "pending_applications": "SELECT COUNT(*) AS count FROM applications WHERE status = 'pending'",
+            "open_tickets": "SELECT COUNT(*) AS count FROM tickets WHERE status = 'open'",
         }
         result: dict[str, int] = {}
         for key, query in queries.items():
@@ -507,8 +520,8 @@ class Database:
         async with self.connect() as db:
             await db.execute(
                 """
-                INSERT INTO users(user_id, username, telegram_name, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users(user_id, username, telegram_name, reputation, created_at, updated_at)
+                VALUES (?, ?, ?, 70, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     username=excluded.username,
                     telegram_name=excluded.telegram_name,
@@ -639,6 +652,8 @@ class Database:
             "custom_status",
             "profile_private",
             "profile_ornate",
+            "profile_title",
+            "moderator_note",
         }
         if field not in allowed:
             raise ValueError("Недопустимое поле профиля")
@@ -747,12 +762,34 @@ class Database:
         )
         return int(row["count"]) if row else 0
 
+    async def reputation_action_today_for_target(self, actor_id: int, target_id: int, action_date: date) -> bool:
+        row = await self.fetchone(
+            """
+            SELECT 1 AS ok FROM reputation_actions
+            WHERE actor_id = ? AND target_id = ? AND action_date = ?
+            LIMIT 1
+            """,
+            (actor_id, target_id, action_date.isoformat()),
+        )
+        return bool(row)
+
+    async def consume_hate_shield(self, user_id: int) -> bool:
+        now = utcnow()
+        async with self.connect() as db:
+            cursor = await db.execute(
+                "UPDATE users SET hate_shields = hate_shields - 1, updated_at = ? "
+                "WHERE user_id = ? AND hate_shields > 0",
+                (now, user_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def apply_reputation(self, actor_id: int, target_id: int, delta: int, action_date: date) -> int:
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             await db.execute(
-                "UPDATE users SET reputation = MIN(100, reputation + ?), updated_at = ? WHERE user_id = ?",
+                "UPDATE users SET reputation = MAX(-20, MIN(100, reputation + ?)), updated_at = ? WHERE user_id = ?",
                 (delta, now, target_id),
             )
             await db.execute(
@@ -1001,7 +1038,10 @@ class Database:
                 await db.rollback()
                 return False, "Недостаточно печенек."
             if item == "restore_rep":
-                await db.execute("UPDATE users SET reputation = 100 WHERE user_id = ?", (user_id,))
+                await db.execute(
+                    "UPDATE users SET reputation = MIN(100, reputation + 10) WHERE user_id = ?",
+                    (user_id,),
+                )
             elif item == "reset_limits":
                 await db.execute(
                     "DELETE FROM reputation_actions WHERE actor_id = ? AND action_date = ?",
@@ -1009,6 +1049,11 @@ class Database:
                 )
             elif item == "forgive":
                 await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
+            elif item == "rep_shield":
+                await db.execute(
+                    "UPDATE users SET hate_shields = hate_shields + 1, updated_at = ? WHERE user_id = ?",
+                    (now, user_id),
+                )
             elif item == "private_profile":
                 await db.execute(
                     "UPDATE users SET profile_private = 1, updated_at = ? WHERE user_id = ?",
@@ -1302,7 +1347,7 @@ class Database:
             return True
 
     async def record_activity(self, user_id: int, chat_id: int, rewards_enabled: bool = True) -> tuple[int, bool]:
-        """Count one community message and grant pet supplies every 50 messages."""
+        """Count one community message and grant pet supplies every 120 messages."""
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -1323,7 +1368,7 @@ class Database:
             activity = await cursor.fetchone()
             assert activity is not None
             count = int(activity["message_count"])
-            checkpoint = count // 50
+            checkpoint = count // 120
             rewarded = False
             if checkpoint > int(activity["reward_checkpoint"]):
                 pet_cursor = await db.execute("SELECT 1 FROM pets WHERE user_id = ?", (user_id,))
@@ -1465,7 +1510,7 @@ class Database:
             )
             if cursor.rowcount != 1:
                 await db.rollback()
-                return False, "Нет подходящих припасов. Их дают за каждые 50 сообщений.", None
+                return False, "Нет подходящих припасов. Их дают за каждые 120 сообщений.", None
             await db.commit()
         return True, "ok", await self.get_pet(user_id, settle=False)
 
@@ -1514,6 +1559,45 @@ class Database:
             )
             await db.commit()
             return cursor.rowcount == 1
+
+    async def mark_pet_guard(self, user_id: int, used_on: str) -> None:
+        await self.execute(
+            "UPDATE pets SET guard_used_on = ?, updated_at = ? WHERE user_id = ?",
+            (used_on, utcnow(), user_id),
+        )
+
+    async def search_users(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        needle = f"%{query.strip()}%"
+        if query.strip().isdigit():
+            by_id = await self.fetchone("SELECT * FROM users WHERE user_id = ?", (int(query.strip()),))
+            if by_id:
+                return [by_id]
+        return await self.fetchall(
+            """
+            SELECT * FROM users
+            WHERE telegram_name LIKE ? OR profile_name LIKE ? OR IFNULL(username, '') LIKE ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (needle, needle, needle, limit),
+        )
+
+    async def list_open_tickets(self, limit: int = 15) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT t.*, u.profile_name, u.telegram_name, u.username
+            FROM tickets t
+            JOIN users u ON u.user_id = t.user_id
+            WHERE t.status = 'open'
+            ORDER BY t.updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+    async def set_weekly_star(self, user_id: int) -> None:
+        await self.set_bot_state("weekly_star_user_id", str(user_id))
+        await self.update_profile(user_id, "profile_title", "Титул недели")
 
     async def mark_pet_talk(self, user_id: int) -> None:
         now = utcnow()
@@ -1920,14 +2004,14 @@ class Database:
                 await db.rollback()
                 return []
             await db.execute(
-                "UPDATE users SET reputation = MIN(100, reputation + 5), updated_at = ? WHERE reputation < 100",
+                "UPDATE users SET reputation = MIN(89, reputation + 5), updated_at = ? WHERE reputation < 89",
                 (utcnow(),),
             )
             await db.execute(
                 "INSERT INTO bot_state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, local_date.isoformat()),
             )
-            cursor = await db.execute("SELECT user_id, reputation FROM users WHERE reputation < 100")
+            cursor = await db.execute("SELECT user_id, reputation FROM users WHERE reputation < 89")
             rows = [dict(row) for row in await cursor.fetchall()]
             await db.commit()
             return rows

@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 
 from community_bot.config import Settings, load_settings
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message, user_link
-from community_bot.pets_talk import idle_ping
 from community_bot.routers import (
     cookie_games_router,
     flows_router,
@@ -24,6 +30,7 @@ from community_bot.routers import (
     profile_router,
     wallet_router,
 )
+from community_bot.telegraph import publish_member_update
 from community_bot.updates import community_announcement, latest_update
 
 logger = logging.getLogger(__name__)
@@ -73,11 +80,34 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         return
     if not settings.community_chat_id:
         return
+    url = await publish_member_update(db, item)
+    if url:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", url=url)]]
+        )
+    else:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
+        )
     try:
-        await bot.send_message(settings.community_chat_id, community_announcement(item), parse_mode="HTML")
+        sent = await bot.send_message(
+            settings.community_chat_id,
+            community_announcement(item),
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
     except Exception:
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
+    try:
+        old_pin = await db.get_bot_state("last_announcement_message_id")
+        if old_pin:
+            with contextlib.suppress(Exception):
+                await bot.unpin_chat_message(settings.community_chat_id, int(old_pin))
+        await bot.pin_chat_message(settings.community_chat_id, sent.message_id, disable_notification=True)
+    except Exception:
+        logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
+    await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", str(item.number))
 
 
@@ -173,10 +203,7 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                 last_notice_raw = pet.get("last_notice_at")
                 last_notice = datetime.fromisoformat(str(last_notice_raw)) if last_notice_raw else None
                 hungry_notice_due = sleeping and (not last_notice or now - last_notice >= timedelta(hours=12))
-                cute_ping_due = (
-                    not sleeping and not payout and (not last_notice or now - last_notice >= timedelta(hours=8))
-                )
-                if not payout and not hungry_notice_due and not cute_ping_due:
+                if not payout and not hungry_notice_due:
                     continue
                 owner = await db.get_user(user_id)
                 owner_name = str(
@@ -187,24 +214,17 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                 )
                 mention = user_link(user_id, owner_name)
                 if payout:
-                    dm_text = f"🍪✨ {pet['name']} притащил тебе {payout} 🍪 и смотрит глазами-сердечками 💕"
                     chat_text = (
-                        f"🍪✨ <b>{pet['name']}</b> принёс печеньку хозяину {mention}: "
-                        f"+{payout} 🍪. Малыш гордо несёт добычу по норе!"
-                    )
-                elif hungry_notice_due:
-                    dm_text = (
-                        f"💤🥺 {pet['name']} свернулся калачиком: сытость или вода на нуле. "
-                        "Загляни в /pet, пожалуйста 🫶🌸"
-                    )
-                    chat_text = (
-                        f"💤 <b>{pet['name']}</b> свернулся у {mention} и тихо сопит: нужно покормить или напоить."
+                        f"🍪 <b>{html.escape(str(pet['name']))}</b> принёс печеньку хозяину {mention}: "
+                        f"+{payout} 🍪."
                     )
                 else:
-                    dm_text = idle_ping(pet)
-                    chat_text = f"🐾 <b>{pet['name']}</b> выглянул из норки к {mention}: {idle_ping(pet)}"
-                sent = await send_stored_message(bot, user_id, dm_text, None, None)
-                if settings.community_chat_id and (payout or hungry_notice_due):
+                    chat_text = (
+                        f"💤 <b>{html.escape(str(pet['name']))}</b> свернулся у {mention}: "
+                        "нужно покормить или напоить."
+                    )
+                sent = False
+                if settings.community_chat_id:
                     with contextlib.suppress(Exception):
                         await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
                         sent = True
