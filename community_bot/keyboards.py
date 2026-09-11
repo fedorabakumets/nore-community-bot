@@ -629,7 +629,7 @@ def pet_keyboard() -> InlineKeyboardMarkup:
 FEATURE_META = {
     "games": (
         "🎮 Мини-игры",
-        "Рулетка на мут, блэкджек, кубик и рейс. Выключение прячет игровые команды.",
+        "Рулетка на мут, блэкджек, кубик, рейс и капкан. Выключение прячет игровые команды.",
     ),
     "tamagotchi": (
         "🐾 Тамагочи",
@@ -740,7 +740,10 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
                 ibtn("🃏 Блэкджек 🍪", "cg:pick:bj", STYLE_GO),
                 ibtn("🎲 Кубик 🍪", "cg:pick:dice", STYLE_FUN),
             ],
-            [ibtn("🚀 Рейс 🍪", "cg:pick:crash", STYLE_GO)],
+            [
+                ibtn("🚀 Рейс 🍪", "cg:pick:crash", STYLE_GO),
+                ibtn("🪤 Капкан 🍪", "cg:pick:trap", STYLE_FUN),
+            ],
             [ibtn("📚 Правила", "game:rules:all")],
             [game_hide_button()],
         ]
@@ -814,6 +817,19 @@ def crash_keyboard(game_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ibtn("💰 Забрать", f"cg:cash:{game_id}", STYLE_GO)],
+            [game_hide_button()],
+        ]
+    )
+
+
+def trap_keyboard(game_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("🚪 А", f"cg:door:{game_id}:A", STYLE_FUN),
+                ibtn("🚪 Б", f"cg:door:{game_id}:B", STYLE_GO),
+                ibtn("🚪 В", f"cg:door:{game_id}:C", STYLE_FUN),
+            ],
             [game_hide_button()],
         ]
     )

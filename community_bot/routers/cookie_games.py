@@ -12,6 +12,20 @@ from aiogram.types import CallbackQuery, Message
 from community_bot.aliases import command_or_alias, parse_trigger
 from community_bot.blocks import answer_block, edit_block
 from community_bot.config import Settings
+from community_bot.cookie_logic import (
+    DOOR_LABELS,
+    RANKS,
+    ROLE_LABELS,
+    SUITS,
+    TRAP_DOORS,
+    TRAP_MAX_ROUNDS,
+    apply_trap_round,
+    deal_trap_doors,
+    hand_value,
+    settle_blackjack_pot,
+    split_pot,
+    trap_wait,
+)
 from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
 from community_bot.game_notify import mention_fragment, send_game_finale
@@ -23,6 +37,7 @@ from community_bot.keyboards import (
     cookie_stake_keyboard,
     crash_keyboard,
     games_menu_keyboard,
+    trap_keyboard,
 )
 from community_bot.permissions import PERM_GAMES
 from community_bot.texts import GAMES_HELP_TEXT
@@ -35,13 +50,17 @@ COOKIE_GAMES = {
     "bj": ("🃏", "Блэкджек", 2, 4),
     "dice": ("🎲", "Кубик", 2, 2),
     "crash": ("🚀", "Рейс", 2, 4),
+    "trap": ("🪤", "Капкан", 2, 4),
 }
-COVER_BY_GAME = {"bj": "blackjack", "dice": "dice", "crash": "crash"}
-RANKS = "A23456789TJQK"
-SUITS = "♠♥♦♣"
+COVER_BY_GAME = {"bj": "blackjack", "dice": "dice", "crash": "crash", "trap": "games"}
 TURN_REMIND_AFTER = 45.0
 _CRASH_JOBS: dict[int, asyncio.Task[None]] = {}
 _TURN_JOBS: dict[int, asyncio.Task[None]] = {}
+_TRAP_JOBS: dict[int, asyncio.Task[None]] = {}
+
+
+def _hand_value(cards: list[str]) -> int:
+    return hand_value(cards)
 
 
 def _player_name(player: dict[str, object]) -> str:
@@ -50,24 +69,6 @@ def _player_name(player: dict[str, object]) -> str:
 
 def _card() -> str:
     return f"{secrets.choice(RANKS)}{secrets.choice(SUITS)}"
-
-
-def _hand_value(cards: list[str]) -> int:
-    total = 0
-    aces = 0
-    for card in cards:
-        rank = card[0]
-        if rank == "A":
-            total += 11
-            aces += 1
-        elif rank in {"T", "J", "Q", "K"}:
-            total += 10
-        else:
-            total += int(rank)
-    while total > 21 and aces:
-        total -= 10
-        aces -= 1
-    return total
 
 
 def _cards_text(cards: list[str]) -> str:
@@ -88,7 +89,12 @@ def _lobby_text(game: dict[str, object], players: list[dict[str, object]]) -> st
     elif str(game["game_type"]) == "crash":
         extra = "Множитель растёт. «Забрать» фиксирует выигрыш до срыва.\n"
     elif str(game["game_type"]) == "bj":
-        extra = "Против дилера Норы. Победитель забирает банк без комиссии.\n"
+        extra = "Дилер Норы выбивает слабые руки. Сильнейший, кто обыграл дилера, забирает весь банк.\n"
+    elif str(game["game_type"]) == "trap":
+        extra = (
+            "Три двери: капкан, проход и кладовая. 5 секунд на выбор. "
+            "Последний живой забирает банк.\n"
+        )
     return (
         f"{emoji} <b>{title} на 🍪 · лобби №{game['id']}</b>\n"
         f"{extra}"
@@ -110,6 +116,19 @@ def _cancel_turn_job(game_id: int) -> None:
     task = _TURN_JOBS.pop(game_id, None)
     if task and not task.done():
         task.cancel()
+
+
+def _cancel_trap_job(game_id: int) -> None:
+    task = _TRAP_JOBS.pop(game_id, None)
+    current = asyncio.current_task()
+    if task and not task.done() and task is not current:
+        task.cancel()
+
+
+def _cancel_game_jobs(game_id: int) -> None:
+    _cancel_crash_job(game_id)
+    _cancel_turn_job(game_id)
+    _cancel_trap_job(game_id)
 
 
 async def _schedule_turn_reminder(
@@ -188,11 +207,11 @@ def _crash_point() -> float:
 
 
 def _game_type_from_command(raw: str) -> str | None:
-    mapping = {"blackjack": "bj", "dice": "dice", "crash": "crash"}
+    mapping = {"blackjack": "bj", "dice": "dice", "crash": "crash", "trap": "trap"}
     return mapping.get(raw)
 
 
-@router.message(command_or_alias("cgames", "blackjack", "dice", "crash"))
+@router.message(command_or_alias("cgames", "blackjack", "dice", "crash", "trap"))
 async def cookie_games_command(
     message: Message,
     command: CommandObject,
@@ -229,7 +248,7 @@ async def cookie_games_command(
     except ValueError:
         stake = 0
     if not 1 <= stake <= 500:
-        await message.answer("Ставка — целое число от 1 до 500 🍪. Пример: /blackjack 10 или «рейс 25»")
+        await message.answer("Ставка — целое число от 1 до 500 🍪. Пример: /blackjack 10 или «капкан 25»")
         return
     await register_telegram_user(db, message.from_user)
     game_id, status = await db.create_staked_game(message.chat.id, game_type, message.from_user.id, stake)
@@ -254,8 +273,7 @@ async def cancel_active_game(message: Message, db: Database, settings: Settings)
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
         await message.answer("Отменить может создатель или администратор игр.")
         return
-    _cancel_crash_job(int(game["id"]))
-    _cancel_turn_job(int(game["id"]))
+    _cancel_game_jobs(int(game["id"]))
     await send_game_finale(message, f"❌ Игра №{game['id']} отменена, 🍪 вернулись игрокам.")
 
 
@@ -372,8 +390,7 @@ async def cookie_cancel(callback: CallbackQuery, db: Database, settings: Setting
     if not await db.cancel_party_game(game_id, callback.from_user.id, is_admin):
         await callback.answer("Отменить может создатель или администратор игр.", show_alert=True)
         return
-    _cancel_crash_job(game_id)
-    _cancel_turn_job(game_id)
+    _cancel_game_jobs(game_id)
     await callback.answer("Ставки возвращены.")
     await callback.message.edit_reply_markup(reply_markup=None)
     await send_game_finale(callback.message, f"❌ Игра №{game_id} отменена, 🍪 вернулись игрокам.")
@@ -403,6 +420,9 @@ async def cookie_start(callback: CallbackQuery, db: Database) -> None:
         return
     if kind == "crash":
         await _start_crash(callback, db, game, players)
+        return
+    if kind == "trap":
+        await _start_trap(callback, db, game, players)
         return
     await _start_blackjack(callback, db, game, players)
 
@@ -687,37 +707,37 @@ async def _finish_blackjack(message: Message, db: Database, game_id: int) -> Non
     dealer_bust = dealer_value > 21
     players = await db.list_game_players(game_id)
     stake = int(state["stake"])
+    order = [int(user_id) for user_id in state["order"]]
+    hands = {uid: list(state["hands"][str(uid)]) for uid in order}
+    payouts, tags, champs = settle_blackjack_pot(stake, order, hands, dealer)
     results: list[str] = []
-    winners: list[int] = []
-    pushes: list[int] = []
-    for user_id in state["order"]:
-        uid = int(user_id)
-        value = _hand_value(list(state["hands"][str(uid)]))
-        player = next(item for item in players if int(item["user_id"]) == uid)
-        name = user_link(uid, _player_name(player))
-        if value > 21:
-            results.append(f"• {name}: перебор ({value}) — ставка сгорает")
-        elif dealer_bust or value > dealer_value:
-            winners.append(uid)
-            results.append(f"• {name}: {value} — победа")
-        elif value == dealer_value:
-            pushes.append(uid)
-            results.append(f"• {name}: {value} — ничья, ставка вернётся")
+    by_id = {int(player["user_id"]): player for player in players}
+    for uid in order:
+        value = _hand_value(hands[uid])
+        name = user_link(uid, _player_name(by_id[uid]))
+        tag = tags[uid]
+        if tag == "champ":
+            got = int(payouts.get(uid, 0))
+            if len(champs) > 1:
+                results.append(f"• {name}: {value} — делят банк, <b>{got} 🍪</b>")
+            else:
+                results.append(f"• {name}: {value} — сильнейшая рука, банк <b>{got} 🍪</b>")
+        elif tag == "qualify":
+            results.append(f"• {name}: {value} — обыграл дилера, но банк ушёл к более сильной руке")
+        elif tag == "push":
+            results.append(f"• {name}: {value} — ничья с дилером, ставка вернулась")
+        elif tag == "bust":
+            results.append(f"• {name}: перебор ({value}) — ставка в банке")
         else:
-            results.append(f"• {name}: {value} — дилер выше")
-    pot = stake * len(list(state["order"]))
-    returned = stake * len(pushes)
-    prize_pool = pot - returned
-    payouts: dict[int, int] = {uid: stake for uid in pushes}
-    if winners:
-        share, remainder = divmod(prize_pool, len(winners))
-        for index, uid in enumerate(winners):
-            gross = share + (remainder if index == 0 else 0)
-            payouts[uid] = payouts.get(uid, 0) + gross
-            results.append(f"  ↳ выплата {gross} 🍪")
-    elif not pushes:
-        payouts = {int(user_id): stake for user_id in state["order"]}
-        results.append("\nВсе проиграли дилеру — ставки возвращены, печеньки не сжигаем.")
+            results.append(f"• {name}: {value} — ниже дилера, ставка в банке")
+    if not champs:
+        results.append("\nНикто не обыграл дилера — банк без победителя, ставки вернулись.")
+    elif len(champs) == 1:
+        winner = by_id[champs[0]]
+        results.append(
+            f"\n🏆 {user_link(champs[0], _player_name(winner))} забирает банк "
+            f"<b>{int(payouts[champs[0]])} 🍪</b>."
+        )
     state["phase"] = "done"
     await db.save_party_state(game_id, state)
     await db.payout_staked_game(game_id, payouts)
@@ -806,3 +826,294 @@ async def blackjack_stand(callback: CallbackQuery, db: Database) -> None:
         reply_markup=blackjack_turn_keyboard(game_id),
     )
     await _notify_blackjack_turn(callback.message.bot, db, callback.message.chat.id, state, players, game_id)
+
+
+def _trap_name(players: list[dict[str, object]], user_id: int) -> str:
+    player = next((item for item in players if int(item["user_id"]) == user_id), None)
+    if not player:
+        return str(user_id)
+    return user_link(user_id, _player_name(player))
+
+
+def _arm_trap_round(
+    state: dict[str, object],
+    alive: list[int],
+    shields: dict[int, int],
+    *,
+    bump: bool,
+    log: str = "",
+) -> dict[str, object]:
+    round_no = int(state.get("round") or 0)
+    if bump:
+        round_no += 1
+    round_no = max(1, round_no)
+    return {
+        **state,
+        "phase": "pick",
+        "round": round_no,
+        "alive": alive,
+        "shields": {str(uid): count for uid, count in shields.items() if count > 0},
+        "picks": {},
+        "doors": deal_trap_doors(),
+        "wait": trap_wait(round_no),
+        "log": log,
+    }
+
+
+def _trap_board(state: dict[str, object], players: list[dict[str, object]]) -> str:
+    stake = int(state.get("stake") or 0)
+    order = [int(item) for item in state.get("order") or []]
+    pot = stake * len(order)
+    alive = [int(item) for item in state.get("alive") or []]
+    shields = {int(key): int(value) for key, value in dict(state.get("shields") or {}).items()}
+    picks = dict(state.get("picks") or {})
+    wait = float(state.get("wait") or 5)
+    round_no = int(state.get("round") or 1)
+    chosen = [uid for uid in alive if str(uid) in picks]
+    pending = [uid for uid in alive if str(uid) not in picks]
+    lines = [
+        f"🪤 <b>Капкан · раунд {round_no}/{TRAP_MAX_ROUNDS}</b>",
+        f"Банк: <b>{pot} 🍪</b> · {wait:g} сек на выбор",
+        "",
+    ]
+    log = str(state.get("log") or "").strip()
+    if log:
+        lines.append(log)
+        lines.append("")
+    lines.append("В живых: " + ", ".join(_trap_name(players, uid) for uid in alive))
+    if shields:
+        held = [f"{_trap_name(players, uid)} ×{count}" for uid, count in shields.items() if uid in alive]
+        if held:
+            lines.append("Щит: " + ", ".join(held))
+    if chosen:
+        lines.append("Уже выбрали: " + ", ".join(_trap_name(players, uid) for uid in chosen))
+    if pending:
+        lines.append("Думают: " + ", ".join(_trap_name(players, uid) for uid in pending))
+    lines.append("")
+    lines.append("Три двери. Одна — капкан, одна — проход, одна — кладовая.")
+    lines.append("Кладовая в одиночку даёт щит. Если вломятся двое — обвал, оба вылетают.")
+    lines.append("Последний живой забирает весь банк.")
+    return "\n".join(lines)
+
+
+def _trap_round_log(
+    doors: dict[str, str],
+    picks: dict[str, str],
+    result: dict[str, object],
+    players: list[dict[str, object]],
+) -> str:
+    door_line = " · ".join(
+        f"{DOOR_LABELS[door]} {ROLE_LABELS[doors[door]]}" for door in TRAP_DOORS if door in doors
+    )
+    bits: list[str] = [f"Прошлый раунд: {door_line}."]
+    deaths = dict(result.get("deaths") or {})
+    for uid, reason in deaths.items():
+        name = _trap_name(players, int(uid))
+        if reason == "greed":
+            bits.append(f"{name} — обвал кладовой.")
+        elif reason == "timeout":
+            bits.append(f"{name} не успел.")
+        else:
+            door = picks.get(str(uid), "?")
+            bits.append(f"{name} — капкан ({DOOR_LABELS.get(door, door)}).")
+    for uid in list(result.get("saved") or []):
+        bits.append(f"{_trap_name(players, int(uid))} спас щит.")
+    stash_winner = result.get("stash_winner")
+    if stash_winner:
+        bits.append(f"{_trap_name(players, int(stash_winner))} забрал кладовую и щит.")
+    if result.get("wipe"):
+        bits.append("Все угодили в капкан — Нора даёт переигровку.")
+    return " ".join(bits)
+
+
+async def _finish_trap(
+    message: Message,
+    db: Database,
+    game_id: int,
+    state: dict[str, object],
+    payouts: dict[int, int],
+    finale: str,
+) -> None:
+    state = {**state, "phase": "done"}
+    await db.save_party_state(game_id, state)
+    await db.payout_staked_game(game_id, payouts)
+    _cancel_trap_job(game_id)
+    with suppress(TelegramBadRequest):
+        await message.edit_reply_markup(reply_markup=None)
+    await send_game_finale(message, finale)
+    expire_game_result(message)
+
+
+async def _resolve_trap_round(message: Message, db: Database, game_id: int) -> bool:
+    snapshot = await db.trap_begin_resolve(game_id)
+    if snapshot is None:
+        return False
+    state = dict(snapshot)
+    alive = [int(item) for item in state.get("alive") or []]
+    doors = dict(state.get("doors") or {})
+    picks = dict(state.get("picks") or {})
+    shields = dict(state.get("shields") or {})
+    result = apply_trap_round(alive, picks, doors, shields)
+    players = await db.list_game_players(game_id)
+    stake = int(state.get("stake") or 0)
+    order = [int(item) for item in state.get("order") or []]
+    pot = stake * len(order)
+    log = _trap_round_log(doors, picks, result, players)
+
+    if result["wipe"]:
+        shields_next = {int(key): int(value) for key, value in dict(result["shields"]).items()}
+        round_no = int(state.get("round") or 1)
+        if round_no >= TRAP_MAX_ROUNDS:
+            payouts = split_pot(pot, alive)
+            names = ", ".join(_trap_name(players, uid) for uid in alive)
+            finale = (
+                f"🪤 <b>Капкан</b>\n{log}\n\n"
+                f"Двери так и не выбрали живого. {names} делят банк <b>{pot} 🍪</b>."
+            )
+            await _finish_trap(message, db, game_id, state, payouts, finale)
+            return False
+        next_state = _arm_trap_round(state, alive, shields_next, bump=True, log=log)
+        await db.save_party_state(game_id, next_state)
+        with suppress(TelegramBadRequest):
+            await edit_block(
+                message,
+                _trap_board(next_state, players),
+                parse_mode="HTML",
+                reply_markup=trap_keyboard(game_id),
+            )
+        return True
+
+    survivors = [int(item) for item in list(result["survivors"])]
+    if len(survivors) == 1:
+        winner = survivors[0]
+        finale = (
+            f"🪤 <b>Капкан</b>\n{log}\n\n"
+            f"🏆 {_trap_name(players, winner)} остаётся последним и забирает банк <b>{pot} 🍪</b>."
+        )
+        await _finish_trap(message, db, game_id, state, {winner: pot}, finale)
+        return False
+
+    round_no = int(state.get("round") or 1)
+    if round_no >= TRAP_MAX_ROUNDS or not survivors:
+        payouts = split_pot(pot, survivors or alive)
+        names = ", ".join(_trap_name(players, uid) for uid in (survivors or alive))
+        finale = (
+            f"🪤 <b>Капкан</b>\n{log}\n\n"
+            f"Раунды кончились. {names} делят банк <b>{pot} 🍪</b>."
+        )
+        await _finish_trap(message, db, game_id, state, payouts, finale)
+        return False
+
+    next_state = _arm_trap_round(
+        state,
+        survivors,
+        {int(key): int(value) for key, value in dict(result["shields"]).items()},
+        bump=True,
+        log=log,
+    )
+    await db.save_party_state(game_id, next_state)
+    with suppress(TelegramBadRequest):
+        await edit_block(
+            message,
+            _trap_board(next_state, players),
+            parse_mode="HTML",
+            reply_markup=trap_keyboard(game_id),
+        )
+    return True
+
+
+async def _trap_loop(message: Message, db: Database, game_id: int) -> None:
+    current = asyncio.current_task()
+    try:
+        while True:
+            game = await db.get_party_game(game_id)
+            if not game or game["status"] != "active" or str(game["game_type"]) != "trap":
+                return
+            state = dict(game["state"])
+            if str(state.get("phase") or "") != "pick":
+                return
+            await asyncio.sleep(float(state.get("wait") or 5))
+            keep_going = await _resolve_trap_round(message, db, game_id)
+            if not keep_going:
+                return
+    except asyncio.CancelledError:
+        raise
+    finally:
+        if _TRAP_JOBS.get(game_id) is current:
+            _TRAP_JOBS.pop(game_id, None)
+
+
+def _start_trap_loop(message: Message, db: Database, game_id: int) -> None:
+    _cancel_trap_job(game_id)
+    _TRAP_JOBS[game_id] = asyncio.create_task(_trap_loop(message, db, game_id))
+
+
+async def _start_trap(
+    callback: CallbackQuery,
+    db: Database,
+    game: dict[str, object],
+    players: list[dict[str, object]],
+) -> None:
+    assert callback.message
+    order = [int(player["user_id"]) for player in players]
+    state = _arm_trap_round(
+        {
+            **game["state"],
+            "order": order,
+            "round": 0,
+            "shields": {},
+        },
+        order,
+        {},
+        bump=True,
+    )
+    secrets_by_user = {user_id: {"stake": int(game["state"]["stake"])} for user_id in order}
+    if not await db.start_party_game(int(game["id"]), int(game["creator_id"]), state, secrets_by_user):
+        await callback.answer("Не удалось начать.", show_alert=True)
+        return
+    await callback.answer("Двери закрываются!")
+    await edit_block(
+        callback.message,
+        _trap_board(state, players),
+        parse_mode="HTML",
+        reply_markup=trap_keyboard(int(game["id"])),
+    )
+    _start_trap_loop(callback.message, db, int(game["id"]))
+
+
+@router.callback_query(F.data.startswith("cg:door:"))
+async def trap_pick_door(callback: CallbackQuery, db: Database) -> None:
+    if not callback.data or not callback.message:
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Нет такой двери.", show_alert=True)
+        return
+    game_id = int(parts[2])
+    door = parts[3]
+    ok, text = await db.trap_pick(game_id, callback.from_user.id, door)
+    if not ok:
+        await callback.answer(text, show_alert=True)
+        return
+    label = DOOR_LABELS.get(door, door)
+    await callback.answer(f"Дверь {label}.")
+    game = await db.get_party_game(game_id)
+    if not game:
+        return
+    players = await db.list_game_players(game_id)
+    state = dict(game["state"])
+    alive = [int(item) for item in state.get("alive") or []]
+    picks = dict(state.get("picks") or {})
+    with suppress(TelegramBadRequest):
+        await edit_block(
+            callback.message,
+            _trap_board(state, players),
+            parse_mode="HTML",
+            reply_markup=trap_keyboard(game_id),
+        )
+    if alive and all(str(uid) in picks for uid in alive):
+        _cancel_trap_job(game_id)
+        keep_going = await _resolve_trap_round(callback.message, db, game_id)
+        if keep_going:
+            _start_trap_loop(callback.message, db, game_id)
+

@@ -2066,6 +2066,63 @@ class Database:
             await db.commit()
             return True, "ok", info
 
+    async def trap_pick(self, game_id: int, user_id: int, door: str) -> tuple[bool, str]:
+        if door not in {"A", "B", "C"}:
+            return False, "Нет такой двери."
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "active" or str(game["game_type"]) != "trap":
+                await db.rollback()
+                return False, "Капкан уже закрылся."
+            cursor = await db.execute(
+                "SELECT 1 FROM party_game_players WHERE game_id = ? AND user_id = ?",
+                (game_id, user_id),
+            )
+            if not await cursor.fetchone():
+                await db.rollback()
+                return False, "Вы не в этой партии."
+            state = json.loads(str(game["state_json"]) or "{}")
+            if str(state.get("phase") or "") != "pick":
+                await db.rollback()
+                return False, "Сейчас нельзя выбрать дверь."
+            alive = [int(item) for item in state.get("alive") or []]
+            if user_id not in alive:
+                await db.rollback()
+                return False, "Вы уже выбыли."
+            picks = dict(state.get("picks") or {})
+            picks[str(user_id)] = door
+            state["picks"] = picks
+            await db.execute(
+                "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(state, ensure_ascii=False), now, game_id),
+            )
+            await db.commit()
+            return True, "ok"
+
+    async def trap_begin_resolve(self, game_id: int) -> dict[str, Any] | None:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "active" or str(game["game_type"]) != "trap":
+                await db.rollback()
+                return None
+            state = json.loads(str(game["state_json"]) or "{}")
+            if str(state.get("phase") or "") != "pick":
+                await db.rollback()
+                return None
+            state["phase"] = "resolving"
+            await db.execute(
+                "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(state, ensure_ascii=False), now, game_id),
+            )
+            await db.commit()
+            return state
+
     async def get_party_game(self, game_id: int) -> dict[str, Any] | None:
         row = await self.fetchone("SELECT * FROM party_games WHERE id = ?", (game_id,))
         if row:

@@ -164,6 +164,45 @@ async def test_crash_cashout_pays_full_multiplier(tmp_path: Path) -> None:
     assert again[0] is False
 
 
+async def test_trap_pick_locks_in_and_resolve_is_single_shot(tmp_path: Path) -> None:
+    db = Database(tmp_path / "trap.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="One")
+    await db.ensure_user(2, telegram_name="Two")
+    await db.add_cookies(1, 30, "test")
+    await db.add_cookies(2, 30, "test")
+    game_id, status = await db.create_staked_game(-100, "trap", 1, 10)
+    assert status == "ok" and game_id
+    assert (await db.join_staked_game(game_id, 2, maximum=4))[0] is True
+    started = await db.start_party_game(
+        game_id,
+        1,
+        {
+            "stake": 10,
+            "phase": "pick",
+            "alive": [1, 2],
+            "doors": {"A": "safe", "B": "stash", "C": "trap"},
+            "picks": {},
+            "shields": {},
+        },
+        {1: {"stake": 10}, 2: {"stake": 10}},
+    )
+    assert started is True
+    ok, text = await db.trap_pick(game_id, 1, "A")
+    assert ok is True
+    assert text == "ok"
+    game = await db.get_party_game(game_id)
+    assert game and game["state"]["picks"]["1"] == "A"
+    snapshot = await db.trap_begin_resolve(game_id)
+    assert snapshot is not None
+    assert snapshot["phase"] == "resolving"
+    assert snapshot["picks"]["1"] == "A"
+    again = await db.trap_begin_resolve(game_id)
+    assert again is None
+    late = await db.trap_pick(game_id, 2, "B")
+    assert late[0] is False
+
+
 async def test_freebie_can_only_be_claimed_once(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
     await db.initialize()
