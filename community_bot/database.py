@@ -327,6 +327,29 @@ CREATE TABLE IF NOT EXISTS lottery_entries (
     PRIMARY KEY(lottery_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS cookie_contests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    creator_id INTEGER NOT NULL REFERENCES users(user_id),
+    prize INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    extra_text TEXT NOT NULL DEFAULT '',
+    media_type TEXT,
+    media_file_id TEXT,
+    message_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'open',
+    winner_id INTEGER,
+    created_at TEXT NOT NULL,
+    drawn_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cookie_contest_entries (
+    contest_id INTEGER NOT NULL REFERENCES cookie_contests(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(contest_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS captcha_pending (
     user_id INTEGER NOT NULL,
     chat_id INTEGER NOT NULL,
@@ -767,10 +790,28 @@ class Database:
         )
 
     async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
+        if await self.has_approved_application(user_id):
+            return 0
+        if await self.has_pending_application(user_id):
+            return 0
         return await self.execute(
             "INSERT INTO applications(user_id, answers_json, created_at) VALUES (?, ?, ?)",
             (user_id, json.dumps(answers, ensure_ascii=False), utcnow()),
         )
+
+    async def has_approved_application(self, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 AS ok FROM applications WHERE user_id = ? AND status = 'approved' LIMIT 1",
+            (user_id,),
+        )
+        return bool(row)
+
+    async def has_pending_application(self, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 AS ok FROM applications WHERE user_id = ? AND status = 'pending' LIMIT 1",
+            (user_id,),
+        )
+        return bool(row)
 
     async def get_application(self, application_id: int) -> dict[str, Any] | None:
         row = await self.fetchone(
@@ -2491,6 +2532,133 @@ class Database:
             "SELECT * FROM lotteries WHERE chat_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
             (chat_id,),
         )
+
+    async def create_cookie_contest(
+        self,
+        chat_id: int,
+        creator_id: int,
+        prize: int,
+        body: str,
+        extra_text: str = "",
+        media_type: str | None = None,
+        media_file_id: str | None = None,
+    ) -> tuple[int | None, str]:
+        if prize < 1 or prize > 100_000:
+            return None, "Приз — от 1 до 100 000 🍪."
+        if await self.open_cookie_contest(chat_id):
+            return None, "Уже есть открытый конкурс. Сначала подведите итог или снимите его."
+        contest_id = await self.execute(
+            """
+            INSERT INTO cookie_contests(
+                chat_id, creator_id, prize, body, extra_text, media_type, media_file_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (chat_id, creator_id, prize, body, extra_text, media_type, media_file_id, utcnow()),
+        )
+        return contest_id, "ok"
+
+    async def set_cookie_contest_message(self, contest_id: int, message_id: int) -> None:
+        await self.execute("UPDATE cookie_contests SET message_id = ? WHERE id = ?", (message_id, contest_id))
+
+    async def get_cookie_contest(self, contest_id: int) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM cookie_contests WHERE id = ?", (contest_id,))
+
+    async def open_cookie_contest(self, chat_id: int) -> dict[str, Any] | None:
+        return await self.fetchone(
+            "SELECT * FROM cookie_contests WHERE chat_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        )
+
+    async def cookie_contest_entry_count(self, contest_id: int) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) AS count FROM cookie_contest_entries WHERE contest_id = ?",
+            (contest_id,),
+        )
+        return int(row["count"]) if row else 0
+
+    async def list_cookie_contest_entries(self, contest_id: int, limit: int = 80) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT e.user_id, e.created_at, u.profile_name, u.telegram_name, u.username
+            FROM cookie_contest_entries e
+            JOIN users u ON u.user_id = e.user_id
+            WHERE e.contest_id = ?
+            ORDER BY e.created_at
+            LIMIT ?
+            """,
+            (contest_id, limit),
+        )
+
+    async def join_cookie_contest(self, contest_id: int, user_id: int) -> tuple[bool, str, int]:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM cookie_contests WHERE id = ?", (contest_id,))
+            contest = await cursor.fetchone()
+            if not contest or contest["status"] != "open":
+                await db.rollback()
+                return False, "Конкурс уже закрыт.", 0
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO cookie_contest_entries(contest_id, user_id, created_at) VALUES (?, ?, ?)",
+                (contest_id, user_id, now),
+            )
+            joined = cursor.rowcount == 1
+            cursor = await db.execute(
+                "SELECT COUNT(*) AS count FROM cookie_contest_entries WHERE contest_id = ?",
+                (contest_id,),
+            )
+            count_row = await cursor.fetchone()
+            count = int(count_row["count"]) if count_row else 0
+            await db.commit()
+            if not joined:
+                return False, "Вы уже участвуете.", count
+            return True, "ok", count
+
+    async def draw_cookie_contest(self, contest_id: int) -> tuple[bool, str, dict[str, Any] | None]:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT * FROM cookie_contests WHERE id = ? AND status = 'open'",
+                (contest_id,),
+            )
+            contest = await cursor.fetchone()
+            if not contest:
+                await db.rollback()
+                return False, "Открытого конкурса нет.", None
+            cursor = await db.execute(
+                "SELECT user_id FROM cookie_contest_entries WHERE contest_id = ?",
+                (contest_id,),
+            )
+            players = [int(row["user_id"]) for row in await cursor.fetchall()]
+            if not players:
+                await db.rollback()
+                return False, "Пока никто не нажал «Участвовать».", None
+            winner_id = secrets.choice(players)
+            prize = int(contest["prize"])
+            await db.execute(
+                "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                (prize, now, winner_id),
+            )
+            await db.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                (winner_id, prize, "contest_win", str(contest_id), now),
+            )
+            await db.execute(
+                "UPDATE cookie_contests SET status = 'drawn', winner_id = ?, drawn_at = ? WHERE id = ?",
+                (winner_id, now, contest_id),
+            )
+            await db.commit()
+            return True, "ok", {"winner_id": winner_id, "prize": prize, "players": len(players)}
+
+    async def cancel_cookie_contest(self, contest_id: int) -> bool:
+        async with self.connect() as db:
+            cursor = await db.execute(
+                "UPDATE cookie_contests SET status = 'cancelled' WHERE id = ? AND status = 'open'",
+                (contest_id,),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def start_expedition(self, user_id: int) -> tuple[bool, str, int]:
         pet = await self.get_pet(user_id)

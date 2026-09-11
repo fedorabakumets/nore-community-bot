@@ -18,6 +18,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    User,
 )
 
 from community_bot.aliases import command_or_alias
@@ -26,6 +27,7 @@ from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database, utcnow
 from community_bot.helpers import (
+    application_block_reason,
     can_manage_user,
     effective_role,
     has_permission,
@@ -98,6 +100,8 @@ from community_bot.texts import (
     GROUP_COMMANDS_TEXT,
     REPUTATION_HELP_TEXT,
     STORE_HELP_TEXT,
+    WELCOME_MEMBER_TEXT,
+    WELCOME_PENDING_TEXT,
     WELCOME_TEXT,
 )
 from community_bot.updates import updates_text
@@ -124,20 +128,29 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
     return admin_panel_keyboard(await user_permissions(db, settings, user_id), await db.dashboard_stats())
 
 
-async def _send_welcome(message: Message, settings: Settings, reply_markup) -> None:
+async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
     cover = settings.welcome_cover
-    inline = start_apply_keyboard()
+    user_id = message.from_user.id if message.from_user else 0
+    if await db.has_approved_application(user_id):
+        inline = None
+        text = WELCOME_MEMBER_TEXT
+    elif await db.has_pending_application(user_id):
+        inline = None
+        text = WELCOME_PENDING_TEXT
+    else:
+        inline = start_apply_keyboard()
+        text = WELCOME_TEXT
     if not cover:
-        await message.answer(WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
+        await message.answer(text, reply_markup=inline, parse_mode="HTML")
         await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
         source = FSInputFile(cover)
     try:
-        await message.answer_photo(source, caption=WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
+        await message.answer_photo(source, caption=text, reply_markup=inline, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
-        await message.answer(WELCOME_TEXT, reply_markup=inline, parse_mode="HTML")
+        await message.answer(text, reply_markup=inline, parse_mode="HTML")
     await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
 
 
@@ -204,7 +217,7 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
         return
     await register_telegram_user(db, message.from_user)
     await state.clear()
-    await _send_welcome(message, settings, await _private_keyboard(message.from_user.id, db, settings))
+    await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
 
 
 @router.message(command_or_alias("help", "commands"))
@@ -258,10 +271,7 @@ async def menu_apply(callback: CallbackQuery, state: FSMContext, db: Database) -
     if not callback.message or not callback.from_user:
         return
     await callback.answer()
-    await register_telegram_user(db, callback.from_user)
-    await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
-    await callback.message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    await _start_application(callback.message, state, db, callback.from_user)
 
 
 @router.callback_query(F.data == "menu:question")
@@ -344,7 +354,7 @@ async def _admin_panel_text(db: Database) -> str:
         f"Очередь: анкет <b>{stats['pending_applications']}</b> · платежей <b>{stats['pending_orders']}</b>"
         f" · тикетов <b>{stats.get('open_tickets', 0)}</b>\n"
         f"Активных игр: <b>{stats['active_games']}</b>\n\n"
-        "Четыре комнаты: очередь, люди, чат, система."
+        "Комнаты: очередь, люди, чат, система. Конкурс на печеньки — отдельный блок у владельцев."
     )
 
 
@@ -950,15 +960,25 @@ async def admin_inactive(callback: CallbackQuery, db: Database, settings: Settin
     )
 
 
+async def _start_application(message: Message, state: FSMContext, db: Database, user: User) -> bool:
+    reason = await application_block_reason(db, user.id)
+    if reason:
+        await state.clear()
+        await message.answer(reason)
+        return False
+    await register_telegram_user(db, user)
+    await state.set_state(ApplicationForm.name)
+    await state.set_data({"flow_kind": "application"})
+    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    return True
+
+
 @router.message(command_or_alias("apply"))
 @router.message(F.text == "📝 Заполнить анкету")
 async def begin_application(message: Message, state: FSMContext, db: Database) -> None:
     if not message.from_user:
         return
-    await register_telegram_user(db, message.from_user)
-    await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
-    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    await _start_application(message, state, db, message.from_user)
 
 
 @router.callback_query(F.data == "start:apply")
@@ -966,10 +986,7 @@ async def begin_application_button(callback: CallbackQuery, state: FSMContext, d
     if not callback.message or not callback.from_user:
         return
     await callback.answer()
-    await register_telegram_user(db, callback.from_user)
-    await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
-    await callback.message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    await _start_application(callback.message, state, db, callback.from_user)
 
 
 async def _validate_text(message: Message, minimum: int = 1, maximum: int | None = None) -> str | None:
@@ -1057,6 +1074,12 @@ async def finish_application(
         return
     answers = await state.get_data()
     application_id = await db.create_application(callback.from_user.id, answers)
+    if not application_id:
+        await state.clear()
+        reason = await application_block_reason(db, callback.from_user.id) or "Анкета уже есть."
+        await callback.message.answer(reason)
+        await restore_private_menu(callback.message, db, settings)
+        return
     text = _application_text(application_id, callback.from_user.id, callback.from_user.username, answers)
     for reviewer_id in settings.reviewers:
         await safe_send(

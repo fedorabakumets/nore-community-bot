@@ -21,7 +21,9 @@ TRANSACTION_LABELS = {
     "loan": "Кредит кошелька",
     "loan_repay": "Погашение кредита",
     "debt": "Долг кошелька",
-    "test": "Тест",
+    "lottery": "Розыгрыш",
+    "lottery_win": "Выигрыш розыгрыша",
+    "contest_win": "Приз конкурса",
 }
 
 

@@ -17,7 +17,7 @@ from community_bot.aliases import is_group_command_to_sweep
 from community_bot.helpers import BOT_REPLY_TTL, delete_later
 
 GAME_RESULT_TTL = 60.0
-_GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide", "crash:")
+_GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide", "crash:", "contest:")
 
 logger = logging.getLogger(__name__)
 

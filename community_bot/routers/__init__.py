@@ -1,3 +1,4 @@
+from community_bot.routers.contest import router as contest_router
 from community_bot.routers.cookie_games import router as cookie_games_router
 from community_bot.routers.flows import router as flows_router
 from community_bot.routers.games import router as games_router
@@ -10,6 +11,7 @@ from community_bot.routers.wallet import router as wallet_router
 
 __all__ = [
     "cookie_games_router",
+    "contest_router",
     "flows_router",
     "games_router",
     "group_router",

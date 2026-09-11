@@ -77,9 +77,13 @@ def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
 MAIN_PRIVATE_KEYBOARD = main_private_keyboard()
 
 
-def private_menu_keyboard(show_admin: bool = False) -> InlineKeyboardMarkup:
+def private_menu_keyboard(show_admin: bool = False, *, show_apply: bool = True) -> InlineKeyboardMarkup:
+    top: list[InlineKeyboardButton] = []
+    if show_apply:
+        top.append(ibtn("📝 Анкета", "menu:apply", STYLE_GO))
+    top.append(ibtn("❓ Вопрос", "menu:question"))
     rows = [
-        [ibtn("📝 Анкета", "menu:apply", STYLE_GO), ibtn("❓ Вопрос", "menu:question")],
+        top,
         [ibtn("🛒 Магазин", "menu:shop", STYLE_FUN), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
     ]
     if show_admin:
@@ -129,13 +133,15 @@ def admin_panel_keyboard(
         + int(stats.get("pending_mail") or 0)
     )
     queue_label = f"📋 Очередь ({queue_n})" if queue_n else "📋 Очередь"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [ibtn(queue_label, "admin:queue", STYLE_GO), ibtn("👤 Люди", "admin:people", STYLE_FUN)],
-            [ibtn("💬 Чат", "admin:chatroom"), ibtn("🛠 Система", "admin:system")],
-            [close_btn("ui:close")],
-        ]
-    )
+    permissions = permissions or []
+    rows: list[list[InlineKeyboardButton]] = [
+        [ibtn(queue_label, "admin:queue", STYLE_GO), ibtn("👤 Люди", "admin:people", STYLE_FUN)],
+        [ibtn("💬 Чат", "admin:chatroom"), ibtn("🛠 Система", "admin:system")],
+    ]
+    if _allow(permissions, "contest.cookies"):
+        rows.append([ibtn("🍪 Конкурс на печеньки", "admin:contest", STYLE_FUN)])
+    rows.append([close_btn("ui:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _allow(perms: list[str], key: str) -> bool:

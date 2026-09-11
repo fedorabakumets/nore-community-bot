@@ -48,6 +48,9 @@ ACTION_LABELS: dict[str, str] = {
     "user_avatar": "Аватар",
     "user_warnings": "Предупреждения",
     "restart": "Перезапуск бота",
+    "contest_publish": "Конкурс опубликован",
+    "contest_draw": "Итог конкурса",
+    "contest_cancel": "Конкурс снят",
 }
 
 PUNITIVE_ACTIONS = {"mute", "warn", "kick", "ban"}

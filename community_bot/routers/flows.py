@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.helpers import has_permission, render_profile
+from community_bot.helpers import application_block_reason, has_permission, render_profile
 from community_bot.keyboards import (
     BTN_MENU,
     BTN_PROFILE,
@@ -41,7 +41,12 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
     )
 
 
-async def restart_application(message: Message, state: FSMContext) -> None:
+async def restart_application(message: Message, state: FSMContext, db: Database, user_id: int) -> None:
+    reason = await application_block_reason(db, user_id)
+    if reason:
+        await state.clear()
+        await message.answer(reason)
+        return
     await state.set_state(ApplicationForm.name)
     await state.set_data({"flow_kind": "application"})
     await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
@@ -87,12 +92,17 @@ async def _show_inline_menu(message: Message, db: Database, settings: Settings) 
     if not message.from_user:
         return
     show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
+    show_apply = await application_block_reason(db, message.from_user.id) is None
     await message.answer(
         "📋 <b>Меню НОРЫ</b>\n\n"
-        "Анкета, вопрос модераторам, магазин и тамагочи.\n"
-        "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
+        + (
+            "Анкета, вопрос модераторам, магазин и тамагочи.\n"
+            if show_apply
+            else "Вопрос модераторам, магазин и тамагочи.\n"
+        )
+        + "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
         parse_mode="HTML",
-        reply_markup=private_menu_keyboard(show_admin),
+        reply_markup=private_menu_keyboard(show_admin, show_apply=show_apply),
     )
 
 
@@ -133,7 +143,7 @@ async def flow_callback_control(
     current = await state.get_state()
     await callback.answer()
     if callback.data == "flow:restart" and current and current.startswith("ApplicationForm:"):
-        await restart_application(callback.message, state)
+        await restart_application(callback.message, state, db, callback.from_user.id)
         return
     if callback.data == "flow:restart":
         await callback.message.answer("Здесь можно только отменить.")

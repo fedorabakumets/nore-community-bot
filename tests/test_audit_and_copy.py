@@ -232,6 +232,7 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "/purge 50" in guide
     assert "/botsweep" in guide
     assert "Перезапустить бота" in guide
+    assert "Конкурс на печеньки" in guide
     assert "аварийный выключатель" in guide.casefold()
 
 

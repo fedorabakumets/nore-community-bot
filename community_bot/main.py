@@ -24,6 +24,7 @@ from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHouse
 from community_bot.helpers import send_stored_message, user_link
 from community_bot.restart import relaunch
 from community_bot.routers import (
+    contest_router,
     cookie_games_router,
     flows_router,
     games_router,
@@ -370,6 +371,7 @@ async def main() -> None:
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
     dispatcher.include_router(life_router)
+    dispatcher.include_router(contest_router)
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
 

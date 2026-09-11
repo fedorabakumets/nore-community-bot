@@ -25,6 +25,7 @@ PERM_AUDIT = "audit"
 PERM_GAMES = "games.admin"
 PERM_SEE_PRIVATE = "profile.see_private"
 PERM_PURGE = "mod.purge"
+PERM_CONTEST = "contest.cookies"
 
 PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_ADMIN_PANEL, "Админ-панель"),
@@ -49,6 +50,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_GAMES, "Отмена игр"),
     (PERM_SEE_PRIVATE, "Видеть скрытые профили"),
     (PERM_PURGE, "Чистить сообщения чата"),
+    (PERM_CONTEST, "Конкурс на печеньки"),
 )
 
 PERMISSION_KEYS = [key for key, _ in PERMISSIONS]
@@ -62,7 +64,8 @@ _MODERATOR = [
     PERM_KICK,
     PERM_SEE_PRIVATE,
 ]
-_ADMIN = [key for key in PERMISSION_KEYS if key != PERM_ROLES_EDIT]
+_OWNER_ONLY_DEFAULT = {PERM_ROLES_EDIT, PERM_CONTEST}
+_ADMIN = [key for key in PERMISSION_KEYS if key not in _OWNER_ONLY_DEFAULT]
 
 DEFAULT_STAFF_ROLES: tuple[tuple[str, str, int, list[str], int], ...] = (
     ("member", "Участник", 0, [], 1),

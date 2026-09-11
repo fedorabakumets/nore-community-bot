@@ -167,6 +167,14 @@ async def has_permission(db: Database, settings: Settings, user_id: int, permiss
     return role_has_permission(await user_permissions(db, settings, user_id), permission)
 
 
+async def application_block_reason(db: Database, user_id: int) -> str | None:
+    if await db.has_approved_application(user_id):
+        return "Ты уже проходил анкету — повторно заполнять её нельзя."
+    if await db.has_pending_application(user_id):
+        return "Анкета уже на проверке. Решение придёт в этот чат."
+    return None
+
+
 async def can_manage_user(db: Database, settings: Settings, actor_id: int, target_id: int) -> bool:
     if settings.is_owner(actor_id):
         return True
