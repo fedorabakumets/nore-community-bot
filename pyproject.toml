@@ -11,6 +11,7 @@ dependencies = [
   "aiogram>=3.30,<4",
   "aiosqlite>=0.21,<1",
   "python-dotenv>=1.1,<2",
+  "Pillow>=11,<12",
 ]
 
 [project.optional-dependencies]

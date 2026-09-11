@@ -163,9 +163,11 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
+    assert "Обновление №7" in pin
     details = member_details_text(latest)
     assert "щит" in details.casefold()
     assert "админка" not in details.casefold()
+    assert "Пример." in details
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

@@ -3,6 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+ANNOUNCE_LAYOUT = "photo-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSection:
+    heading: str
+    body: str
+    example: str | None = None
+    image: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class BotUpdate:
@@ -11,6 +21,8 @@ class BotUpdate:
     title: str
     summary: str
     details: tuple[str, ...]
+    teasers: tuple[str, ...] = field(default_factory=tuple)
+    sections: tuple[UpdateSection, ...] = field(default_factory=tuple)
     staff_details: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -91,12 +103,60 @@ UPDATES: tuple[BotUpdate, ...] = (
         number=7,
         slug="living-nora",
         title="Репутация, магазин и тихий тамагочи",
-        summary="Репутацию снова нужно заслуживать, магазин получил титулы и щит, тамагочи больше не пишет в личку.",
+        summary="Репутацию снова нужно заслуживать: новые входят серебром, золото — только за плюсы из чата.",
+        teasers=(
+            "🥈 Новые входят с 70, не с золота. Автохил не поднимает выше 89.",
+            "🛡 В магазине щит на один −реп, плащ на сутки и титулы на карточке.",
+            "🐾 Тамагочи больше не пишет в личку. Пинги голода — только в этот чат.",
+        ),
         details=(
             "Новые участники начинают с серебра (70). Золото — только за плюсы из чата, автохил не выше 89.",
             "Бронза может только +реп (1 раз в день). Минус — с серебра. Одного человека — не чаще раза в сутки.",
             "В магазине: щит на один −реп, плащ на 24 часа, титулы. Еда питомца — обед и поилка.",
             "Тамагочи молчит и не пишет в личку. Пинги — в общий чат. Сытый питомец редко ловит один −реп в день.",
+        ),
+        sections=(
+            UpdateSection(
+                heading="🥈 Репутация снова живая",
+                body=(
+                    "Новые участники входят серебром: 70, не золотом. Каждый день в полночь по Москве "
+                    "репутация поднимается на 5, но не выше 89. Золото (90+) бывает только если вас плюсуют в чате. "
+                    "Бронза может только поддержать (+реп, 1 раз в день). Минус доступен с серебра. "
+                    "Одного человека отмечают не чаще раза в сутки."
+                ),
+                example=(
+                    "Маша только зашла — у неё сразу 70. Коля сидел на 86: утром стало 89, дальше автохил молчит. "
+                    "Чтобы стать золотом, Коле нужен живой «+реп» в чате. Если минусануть того же человека дважды "
+                    "за день, второй раз бот скажет подождать до завтра."
+                ),
+                image="reputation.png",
+            ),
+            UpdateSection(
+                heading="🛡 Магазин: щит, плащ и титулы",
+                body=(
+                    "На полке репутации: щит на один удар −репа, плащ иммунитета на 24 часа и «поднять репутацию +10» "
+                    "(не полный хил до сотни). На профиле — титулы, которые видно всем на карточке. "
+                    "Еда питомца схлопнута до обеда и поилки."
+                ),
+                example=(
+                    "Вас минусанули, щит вспыхнул — репутация на месте, щит сгорел. Следующий минус уже пройдёт, "
+                    "если нет плаща. Купили титул «Ночная сова» — он появляется в профиле и в команде «карточка»."
+                ),
+                image="shop.png",
+            ),
+            UpdateSection(
+                heading="🐾 Тихий тамагочи",
+                body=(
+                    "Питомец больше не разговаривает и не пишет в личку. Если проголодался — пинг в этот чат "
+                    "примерно раз в 12 часов. За каждые 120 сообщений еда и вода тихо падают в инвентарь. "
+                    "Сытый питомец редко (около 15%, раз в сутки) перехватывает один −реп — плюс больше не удваивает."
+                ),
+                example=(
+                    "«Булочка» спит голодная — в чате появится «нужно покормить», не в личке. "
+                    "Кнопки «Поговорить» больше нет: только накормить, напоить и переименовать."
+                ),
+                image="pet.png",
+            ),
         ),
         staff_details=(
             "Админка собрана в четыре комнаты: очередь, люди, чат, система. На очереди виден счётчик анкет и платежей.",
@@ -109,6 +169,10 @@ UPDATES: tuple[BotUpdate, ...] = (
 
 def latest_update() -> BotUpdate:
     return UPDATES[-1]
+
+
+def announcement_key(item: BotUpdate) -> str:
+    return f"{item.number}:{ANNOUNCE_LAYOUT}"
 
 
 def updates_text() -> str:
@@ -128,24 +192,68 @@ def updates_text() -> str:
 
 
 def community_announcement(item: BotUpdate) -> str:
-    return (
-        f"✨ <b>{item.title}</b>\n\n"
-        f"{item.summary}\n\n"
-        "Коротко для участников. Подробности — кнопка ниже."
-    )
+    lines = [
+        f"✨ <b>Обновление №{item.number}</b>",
+        f"<b>{item.title}</b>",
+        "",
+        item.summary,
+    ]
+    if item.teasers:
+        lines.append("")
+        lines.extend(item.teasers)
+    lines.extend(["", "Подробности, примеры и картинки — кнопка ниже."])
+    return "\n".join(lines)
 
 
 def member_details_text(item: BotUpdate) -> str:
-    lines = [f"✨ <b>{item.title}</b>", item.summary, ""]
-    lines.extend(f"• {line}" for line in item.details)
+    lines = [
+        f"✨ <b>Обновление №{item.number}</b>",
+        f"<b>{item.title}</b>",
+        "",
+        item.summary,
+        "",
+    ]
+    if item.sections:
+        for section in item.sections:
+            lines.append(f"<b>{section.heading}</b>")
+            lines.append(section.body)
+            if section.example:
+                lines.append("")
+                lines.append(f"<i>Пример.</i> {section.example}")
+            lines.append("")
+    else:
+        lines.extend(f"• {line}" for line in item.details)
     return "\n".join(lines).strip()
 
 
-def member_details_nodes(item: BotUpdate) -> list[dict[str, Any]]:
+def member_details_nodes(
+    item: BotUpdate,
+    image_urls: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    urls = image_urls or {}
     nodes: list[dict[str, Any]] = [
-        {"tag": "h3", "children": [item.title]},
+        {"tag": "h3", "children": [f"Обновление №{item.number}"]},
+        {"tag": "h4", "children": [item.title]},
         {"tag": "p", "children": [item.summary]},
     ]
-    for line in item.details:
-        nodes.append({"tag": "p", "children": [f"• {line}"]})
+    sections = item.sections or tuple(
+        UpdateSection(heading="", body=line) for line in item.details
+    )
+    for section in sections:
+        if section.heading:
+            nodes.append({"tag": "h4", "children": [section.heading]})
+        image_url = urls.get(section.image or "")
+        if image_url:
+            nodes.append(
+                {
+                    "tag": "figure",
+                    "children": [
+                        {"tag": "img", "attrs": {"src": image_url}},
+                    ],
+                }
+            )
+        if section.body:
+            nodes.append({"tag": "p", "children": [section.body]})
+        if section.example:
+            nodes.append({"tag": "blockquote", "children": [f"Пример. {section.example}"]})
     return nodes

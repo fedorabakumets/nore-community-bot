@@ -156,11 +156,24 @@ async def flow_cancel_idle(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "updates:dm")
 async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
-    from community_bot.telegraph import member_dm_text
-    from community_bot.updates import latest_update
+    from aiogram.types import FSInputFile
 
+    from community_bot.covers import cover_path_for
+    from community_bot.telegraph import member_dm_text
+    from community_bot.updates import community_announcement, latest_update
+
+    item = latest_update()
+    user_id = callback.from_user.id
     try:
-        await bot.send_message(callback.from_user.id, member_dm_text(latest_update()), parse_mode="HTML")
+        cover = cover_path_for(item)
+        if cover:
+            await bot.send_photo(
+                user_id,
+                FSInputFile(cover),
+                caption=community_announcement(item),
+                parse_mode="HTML",
+            )
+        await bot.send_message(user_id, member_dm_text(item), parse_mode="HTML")
     except (TelegramBadRequest, TelegramForbiddenError):
         await callback.answer("Напишите боту /start в личке, затем нажмите снова.", show_alert=True)
         return

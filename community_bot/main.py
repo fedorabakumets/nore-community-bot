@@ -12,11 +12,13 @@ from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
     BotCommandScopeAllPrivateChats,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
 
 from community_bot.config import Settings, load_settings
+from community_bot.covers import cover_path_for
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message, user_link
@@ -31,7 +33,7 @@ from community_bot.routers import (
     wallet_router,
 )
 from community_bot.telegraph import publish_member_update
-from community_bot.updates import community_announcement, latest_update
+from community_bot.updates import announcement_key, community_announcement, latest_update
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,7 @@ async def configure_commands(bot: Bot) -> None:
 async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> None:
     item = latest_update()
     last = await db.get_bot_state("last_announced_update")
-    if last == str(item.number):
+    if last == announcement_key(item):
         return
     if not settings.community_chat_id:
         return
@@ -89,13 +91,24 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         markup = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
         )
+    caption = community_announcement(item)
+    cover = cover_path_for(item)
     try:
-        sent = await bot.send_message(
-            settings.community_chat_id,
-            community_announcement(item),
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
+        if cover:
+            sent = await bot.send_photo(
+                settings.community_chat_id,
+                FSInputFile(cover),
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        else:
+            sent = await bot.send_message(
+                settings.community_chat_id,
+                caption,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
     except Exception:
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
@@ -108,7 +121,7 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
     except Exception:
         logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
-    await db.set_bot_state("last_announced_update", str(item.number))
+    await db.set_bot_state("last_announced_update", announcement_key(item))
 
 
 async def log_community_permissions(bot: Bot, settings: Settings) -> None:
