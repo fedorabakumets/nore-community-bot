@@ -35,6 +35,12 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "freebie": ("халява",),
     "id": ("айди",),
     "card": ("карточка",),
+    "gift": ("подарить",),
+    "report": ("репорт", "жалоба"),
+    "mail": ("почта", "письмо"),
+    "board": ("доска", "таблица"),
+    "lottery": ("розыгрыш", "лотерея"),
+    "lotterydraw": ("розыгрышитог", "итогрозыгрыша"),
     "mute": ("мут",),
     "unmute": ("размут",),
     "warn": ("варн", "пред"),
@@ -53,6 +59,8 @@ MULTIWORD_ALIASES: dict[str, str] = {
     "задать вопрос": "question",
     "заполнить анкету": "apply",
     "отменить игру": "gamecancel",
+    "розыгрыш итог": "lotterydraw",
+    "итог розыгрыша": "lotterydraw",
 }
 
 _PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
@@ -98,6 +106,10 @@ def remainder_args(text: str) -> list[str]:
         return parts[1:] if parts else []
     _, args = parsed
     return args.split() if args else []
+
+
+def remainder_text(text: str) -> str:
+    return " ".join(remainder_args(text))
 
 
 def is_command_trigger(text: str) -> bool:

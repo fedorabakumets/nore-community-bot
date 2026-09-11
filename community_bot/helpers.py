@@ -285,8 +285,14 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
 
 
 async def render_profile(db: Database, settings: Settings, user: dict[str, Any]) -> str:
+    from community_bot.life import achievement_lines
+
     title = await role_title(db, str(user["role"]))
-    return profile_text(user, settings, title)
+    text = profile_text(user, settings, title)
+    extra = achievement_lines(await db.list_achievements(int(user["user_id"])))
+    if extra:
+        return f"{text}\n{extra}"
+    return text
 
 
 async def can_view_profile(db: Database, settings: Settings, actor_id: int, target: dict[str, Any]) -> bool:

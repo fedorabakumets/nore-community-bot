@@ -18,6 +18,7 @@ ITEM_LABELS = {
     "tamagotchi": "Завести тамагочи",
     "pet_meal": "Обед питомцу +40",
     "pet_drink": "Поилка питомцу +50",
+    "season_pack": "Сезонный набор: щит + обед",
 }
 
 BASE_SHOP_PRICES = {
@@ -36,6 +37,7 @@ BASE_SHOP_PRICES = {
     "tamagotchi": 50,
     "pet_meal": 4,
     "pet_drink": 4,
+    "season_pack": 28,
 }
 
 IMMUNITY_HOURS = {
@@ -51,8 +53,8 @@ TITLE_ITEMS = {
 SHOP_CATEGORIES = {
     "pets": {
         "title": "🐾 Тамагочи",
-        "intro": "Питомец и два припаса. Еда за активность приходит тихо, без лички.",
-        "items": ("tamagotchi", "pet_meal", "pet_drink"),
+        "intro": "Питомец, припасы и сезонный набор (щит + обед).",
+        "items": ("tamagotchi", "pet_meal", "pet_drink", "season_pack"),
     },
     "reputation": {
         "title": "🏅 Репутация",
@@ -83,6 +85,20 @@ SHOP_CATEGORIES = {
 PET_SUPPLIES = {
     "pet_meal": ("food", 40, "Обед"),
     "pet_drink": ("water", 50, "Поилка"),
+}
+
+GIFTABLE_ITEMS = {
+    "restore_rep",
+    "reset_limits",
+    "forgive",
+    "rep_shield",
+    "immunity_24h",
+    "title_owl",
+    "title_regular",
+    "title_star",
+    "pet_meal",
+    "pet_drink",
+    "season_pack",
 }
 
 VITRINE_KEYS = tuple(key for key in BASE_SHOP_PRICES if key not in {"tamagotchi"})

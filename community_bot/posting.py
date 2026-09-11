@@ -111,14 +111,23 @@ def parse_poll_options(raw: str) -> tuple[list[str], str | None]:
 
 
 def buttons_markup(buttons: list[dict[str, str]] | None) -> InlineKeyboardMarkup | None:
-    if not buttons:
-        return None
+    return compose_post_markup(buttons, None)
+
+
+def compose_post_markup(
+    buttons: list[dict[str, str]] | None,
+    rsvp_id: str | None = None,
+) -> InlineKeyboardMarkup | None:
     rows: list[list[InlineKeyboardButton]] = []
-    for item in buttons:
+    for item in buttons or []:
         kwargs: dict[str, Any] = {"text": item["text"], "url": item["url"]}
         if item.get("style"):
             kwargs["style"] = item["style"]
         rows.append([InlineKeyboardButton(**kwargs)])
+    if rsvp_id:
+        rows.append([ibtn("Я буду", f"rsvp:{rsvp_id}", STYLE_GO)])
+    if not rows:
+        return None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -157,6 +166,24 @@ def poll_anonymous_keyboard() -> InlineKeyboardMarkup:
             [ibtn("Отмена", "post:cancel", STYLE_CLOSE)],
         ]
     )
+
+
+def rsvp_ask_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("Я буду", "post:rsvp:yes", STYLE_GO),
+                ibtn("Без RSVP", "post:rsvp:no", STYLE_FUN),
+            ],
+            [ibtn("Отмена", "post:cancel", STYLE_CLOSE)],
+        ]
+    )
+
+
+def rsvp_preview_block(event_id: str | None) -> str:
+    if not event_id:
+        return ""
+    return "\n\n✋ <b>RSVP</b> — кнопка «Я буду»"
 
 
 def preview_keyboard() -> InlineKeyboardMarkup:

@@ -18,7 +18,11 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("мут 30m спам") == ("mute", "30m спам")
     assert parse_trigger("баланс") == ("balance", "")
     assert parse_trigger("кошелёк") == ("balance", "")
-    assert parse_trigger("привет") is None
+    assert parse_trigger("розыгрыш итог") == ("lotterydraw", "")
+    assert parse_trigger("подарить щит") == ("gift", "щит")
+    assert parse_trigger("репорт спам") == ("report", "спам")
+    assert parse_trigger("почта") == ("mail", "")
+    assert parse_trigger("доска") == ("board", "")
     assert parse_trigger("/команды") == ("commands", "")
     assert parse_trigger("команды!") == ("commands", "")
     assert parse_trigger("Команды") == ("commands", "")
@@ -115,6 +119,9 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     assert "тамагочи" in STORE_HELP_TEXT.casefold()
     assert "приватный" in STORE_HELP_TEXT.casefold()
     assert "кастомн" in STORE_HELP_TEXT.casefold()
+    for word in ("подарить", "репорт", "почта", "доска", "экспедиция", "витрина", "набор"):
+        assert word in lowered
+    assert "сезонный набор" in STORE_HELP_TEXT.casefold()
 
 
 def test_post_templates_and_buttons() -> None:
@@ -140,9 +147,9 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 7
+    assert latest.number == 8
     text = updates_text()
-    assert "№7" in text
+    assert "№8" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
@@ -158,16 +165,20 @@ def test_updates_are_admin_only_and_numbered() -> None:
     system_buttons = [button for row in system_menu.inline_keyboard for button in row]
     assert any(button.callback_data == "admin:updates" for button in system_buttons)
     assert any(button.text == "✨ Обновления" for button in system_buttons)
-    from community_bot.updates import community_announcement, member_details_text
+    from community_bot.updates import community_announcement, member_details_text, staff_announcement
 
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №7" in pin
+    assert "Обновление №8" in pin
     details = member_details_text(latest)
     assert "щит" in details.casefold()
     assert "админка" not in details.casefold()
     assert "Пример." in details
+    staff = staff_announcement(latest)
+    assert "репорт" in staff.casefold()
+    assert "стоп-слов" in staff.casefold()
+    assert "Админ" not in details
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

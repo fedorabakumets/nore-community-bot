@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import html
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
@@ -27,6 +27,7 @@ from community_bot.routers import (
     flows_router,
     games_router,
     group_router,
+    life_router,
     pets_router,
     private_router,
     profile_router,
@@ -49,6 +50,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Мой тамагочи"),
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
+            BotCommand(command="mail", description="Анонимное письмо в чат"),
             BotCommand(command="help", description="Помощь"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
@@ -68,6 +70,9 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="dice", description="Кости: /dice 10"),
             BotCommand(command="roulette", description="Русская рулетка ответом"),
             BotCommand(command="games", description="Мини-игры и правила"),
+            BotCommand(command="gift", description="Подарить товар ответом"),
+            BotCommand(command="report", description="Репорт ответом на сообщение"),
+            BotCommand(command="board", description="Доска недели"),
             BotCommand(command="gamecancel", description="Отменить текущую игру"),
         ],
         scope=BotCommandScopeAllGroupChats(),
@@ -122,6 +127,19 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", announcement_key(item))
+    await notify_staff_update(bot, db, item)
+
+
+async def notify_staff_update(bot: Bot, db: Database, item) -> None:
+    from community_bot.updates import staff_announcement
+
+    text = staff_announcement(item)
+    if not text:
+        return
+    for user_id in await db.list_panel_user_ids():
+        with contextlib.suppress(Exception):
+            await bot.send_message(user_id, text, parse_mode="HTML")
+        await asyncio.sleep(0.05)
 
 
 async def log_community_permissions(bot: Bot, settings: Settings) -> None:
@@ -227,10 +245,16 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                 )
                 mention = user_link(user_id, owner_name)
                 if payout:
-                    chat_text = (
-                        f"🍪 <b>{html.escape(str(pet['name']))}</b> принёс печеньку хозяину {mention}: "
-                        f"+{payout} 🍪."
-                    )
+                    if pet.get("expedition_done"):
+                        chat_text = (
+                            f"🌲 <b>{html.escape(str(pet['name']))}</b> вернулся из леса к {mention}: "
+                            f"+{payout} 🍪."
+                        )
+                    else:
+                        chat_text = (
+                            f"🍪 <b>{html.escape(str(pet['name']))}</b> принёс печеньку хозяину {mention}: "
+                            f"+{payout} 🍪."
+                        )
                 else:
                     chat_text = (
                         f"💤 <b>{html.escape(str(pet['name']))}</b> свернулся у {mention}: "
@@ -250,6 +274,41 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
         except Exception:
             logger.exception("Ошибка уведомлений тамагочи")
         await asyncio.sleep(1800)
+
+
+async def weekly_board_job(db: Database, settings: Settings, bot: Bot) -> None:
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        days_ahead = (6 - now.weekday()) % 7
+        target = datetime.combine(now.date() + timedelta(days=days_ahead), datetime.min.time(), timezone)
+        target = target.replace(hour=20)
+        if target <= now:
+            target += timedelta(days=7)
+        await asyncio.sleep(max(1, (target - now).total_seconds()))
+        if not settings.community_chat_id:
+            continue
+        week_id = datetime.now(UTC).strftime("%G-W%V")
+        last = await db.get_bot_state("last_weekly_board")
+        if last == week_id:
+            continue
+        from community_bot.routers.life import _format_board
+
+        board = await db.weekly_board(week_id)
+        with contextlib.suppress(Exception):
+            await bot.send_message(settings.community_chat_id, _format_board(week_id, board), parse_mode="HTML")
+        plus = (board.get("plus") or [])
+        if plus:
+            top_id = int(plus[0]["user_id"])
+            await db.set_weekly_star(top_id)
+            from community_bot.life import unlock
+
+            await unlock(db, top_id, "board")
+        for row in (board.get("messages") or [])[:3] + (board.get("plus") or [])[:3]:
+            from community_bot.life import unlock
+
+            await unlock(db, int(row["user_id"]), "board")
+        await db.set_bot_state("last_weekly_board", week_id)
 
 
 async def cookie_loan_job(db: Database, bot: Bot) -> None:
@@ -303,6 +362,7 @@ async def main() -> None:
     dispatcher.include_router(cookie_games_router)
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
+    dispatcher.include_router(life_router)
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
 
@@ -315,14 +375,17 @@ async def main() -> None:
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
+    board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     try:
         await dispatcher.start_polling(bot, db=db, settings=settings, emergency_stop=emergency_stop)
     finally:
-        for task in (reputation_task, scheduled_task, pet_task, loan_task, emergency_task):
+        for task in (reputation_task, scheduled_task, pet_task, loan_task, board_task, emergency_task):
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reputation_task, scheduled_task, pet_task, loan_task, emergency_task)
+            await asyncio.gather(
+                reputation_task, scheduled_task, pet_task, loan_task, board_task, emergency_task
+            )
         await bot.session.close()
 
 

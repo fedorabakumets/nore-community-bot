@@ -47,8 +47,16 @@ def pet_text(pet: dict[str, object]) -> str:
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
         f"🍪 Крошки: <b>{farm_milli}/1000</b> до печеньки\n\n"
+        f"{_expedition_line(pet)}"
         "Покорми или напои — малыш живёт в чате, не в личке."
     )
+
+
+def _expedition_line(pet: dict[str, object]) -> str:
+    until = str(pet.get("expedition_until") or "")
+    if not until:
+        return ""
+    return "🌲 Сейчас в экспедиции. Вернётся с добычей.\n\n"
 
 
 async def send_pet_card(message: Message, pet: dict[str, object]) -> None:
@@ -132,6 +140,9 @@ async def create_pet(message: Message, state: FSMContext, db: Database) -> None:
     if not ok:
         await message.answer(error)
         return
+    from community_bot.life import unlock
+
+    await unlock(db, message.from_user.id, "first_pet")
     pet = await db.get_pet(message.from_user.id, settle=False)
     assert pet is not None
     await message.answer(
@@ -180,6 +191,24 @@ async def rename_pet(message: Message, state: FSMContext, db: Database) -> None:
         return
     await state.clear()
     await message.answer(f"✅ Теперь питомца зовут {html.escape(name)}.", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pet:expedition")
+async def pet_expedition(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    ok, error, _reward = await db.start_expedition(callback.from_user.id)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+    from community_bot.life import unlock
+
+    await unlock(db, callback.from_user.id, "expedition")
+    await callback.answer("Ушёл в лес на 4 часа.")
+    pet = await db.get_pet(callback.from_user.id, settle=False)
+    if pet:
+        await refresh_pet_card(callback.message, pet)
+    await callback.message.answer("🌲 Питомец ушёл в экспедицию на 4 часа. Вернётся с 🍪 — пинг будет в чат.")
 
 
 @router.callback_query(F.data == "pet:shop")

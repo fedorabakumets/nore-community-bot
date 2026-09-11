@@ -41,6 +41,14 @@ class PetFlow(StatesGroup):
     rename = State()
 
 
+class MailboxForm(StatesGroup):
+    text = State()
+
+
+class GiftFlow(StatesGroup):
+    target = State()
+
+
 class AdminFlow(StatesGroup):
     user_value = State()
     broadcast_private = State()
@@ -51,6 +59,7 @@ class AdminFlow(StatesGroup):
     post_poll_ask = State()
     post_poll_question = State()
     post_poll_options = State()
+    post_rsvp_ask = State()
     post_preview = State()
     mention_all = State()
     automessage_content = State()

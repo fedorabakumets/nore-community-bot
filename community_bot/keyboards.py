@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 
 from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
-from community_bot.shop_catalog import ITEM_LABELS, SHOP_CATEGORIES
+from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, SHOP_CATEGORIES
 
 # Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
 STYLE_GO = "success"
@@ -122,7 +122,12 @@ def admin_panel_keyboard(
     stats: dict[str, int] | None = None,
 ) -> InlineKeyboardMarkup:
     stats = stats or {}
-    queue_n = int(stats.get("pending_applications") or 0) + int(stats.get("pending_orders") or 0)
+    queue_n = (
+        int(stats.get("pending_applications") or 0)
+        + int(stats.get("pending_orders") or 0)
+        + int(stats.get("pending_reports") or 0)
+        + int(stats.get("pending_mail") or 0)
+    )
     queue_label = f"📋 Очередь ({queue_n})" if queue_n else "📋 Очередь"
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -146,6 +151,11 @@ def admin_queue_keyboard(permissions: list[str], stats: dict[str, int] | None = 
     if _allow(permissions, "payments"):
         n = int(stats.get("pending_orders") or 0)
         rows.append([ibtn(f"💳 Платежи ({n})" if n else "💳 Платежи", "admin:orders")])
+    if _allow(permissions, "tickets") or _allow(permissions, "admin.panel"):
+        n = int(stats.get("pending_reports") or 0)
+        rows.append([ibtn(f"🚩 Репорты ({n})" if n else "🚩 Репорты", "admin:reports")])
+        n = int(stats.get("pending_mail") or 0)
+        rows.append([ibtn(f"✉️ Почта ({n})" if n else "✉️ Почта", "admin:mail")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -180,10 +190,12 @@ def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
         rows.append(chat_row)
     if _allow(permissions, "chat.post"):
         rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
+        rows.append([ibtn("🎲 Розыгрыш", "admin:lottery")])
     if _allow(permissions, "automessages"):
         rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
     if _allow(permissions, "features"):
         rows.append([ibtn("⚙️ Функции", "admin:features")])
+        rows.append([ibtn("🚫 Стоп-слова", "admin:stopwords")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -198,6 +210,7 @@ def admin_system_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
     if _allow(permissions, "features") or _allow(permissions, "users.edit"):
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
         rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
+        rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -210,6 +223,43 @@ def admin_vitrine_keyboard() -> InlineKeyboardMarkup:
         rows.append([ibtn(str(ITEM_LABELS[key])[:42], f"admin:vitrine:{key}")])
     rows.append([ibtn("✖️ Убрать витрину", "admin:vitrine:off", STYLE_CLOSE)])
     rows.append([back_btn("admin:system")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_reports_keyboard(rows_data: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for row in rows_data:
+        report_id = int(row["id"])
+        rows.append(
+            [
+                ibtn(f"✅ #{report_id}", f"admin:report:ok:{report_id}", STYLE_GO),
+                ibtn("❌", f"admin:report:no:{report_id}", STYLE_CLOSE),
+            ]
+        )
+    rows.append([back_btn("admin:queue")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_mail_keyboard(rows_data: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for row in rows_data:
+        mail_id = int(row["id"])
+        rows.append(
+            [
+                ibtn(f"📢 #{mail_id}", f"admin:mail:ok:{mail_id}", STYLE_GO),
+                ibtn("❌", f"admin:mail:no:{mail_id}", STYLE_CLOSE),
+            ]
+        )
+    rows.append([back_btn("admin:queue")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_stopwords_keyboard(words: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [[ibtn("➕ Добавить слово", "admin:stopword:add", STYLE_GO)]]
+    for row in words:
+        word = str(row["word"])
+        rows.append([ibtn(f"🗑 {word}", f"admin:stopword:del:{row['id']}", STYLE_CLOSE)])
+    rows.append([back_btn("admin:chatroom")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -451,7 +501,10 @@ def shop_category_keyboard(category: str, prices: dict[str, int]) -> InlineKeybo
             price = prices.get(key, 0)
             if price <= 0:
                 continue
-            rows.append([ibtn(f"{ITEM_LABELS[key]} — {price} 🍪", f"shop:{key}", style)])
+            row = [ibtn(f"{ITEM_LABELS[key]} — {price} 🍪", f"shop:{key}", style)]
+            if key in GIFTABLE_ITEMS:
+                row.append(ibtn("🎁", f"shop:g:{key}", STYLE_FUN))
+            rows.append(row)
     rows.append([back_btn("shop:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -548,6 +601,7 @@ def pet_keyboard() -> InlineKeyboardMarkup:
                 ibtn("🍗 Накормить", "pet:use:food", STYLE_GO),
                 ibtn("💧 Напоить", "pet:use:water", STYLE_FUN),
             ],
+            [ibtn("🌲 Экспедиция · 4 ч", "pet:expedition", STYLE_FUN)],
             [ibtn("✏️ Переименовать", "pet:rename"), ibtn("🛒 Магазин", "pet:shop", STYLE_GO)],
             [close_btn("ui:close")],
         ]
@@ -595,6 +649,14 @@ FEATURE_META = {
     "raid_mode": (
         "🚨 Рейд-режим",
         "Первые два сообщения новых участников удаляются, пока режим включён.",
+    ),
+    "word_filter": (
+        "🚫 Стоп-слова",
+        "Удаляет сообщения со словами из списка. Список правите в комнате «Чат».",
+    ),
+    "join_captcha": (
+        "🤖 Капча на вход",
+        "Новый человек должен нажать кнопку «Я человек», иначе писать нельзя.",
     ),
 }
 

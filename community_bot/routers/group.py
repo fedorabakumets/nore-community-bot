@@ -134,6 +134,10 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                     event.chat.id,
                     flags.get("activity_rewards", True),
                 )
+                if activity_count >= 100:
+                    from community_bot.life import unlock
+
+                    await unlock(db, event.from_user.id, "messages_100")
                 if rewarded and flags.get("activity_rewards", True):
                     pass
                 chat_admin = await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
@@ -151,6 +155,13 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                 contains_link = any(marker in text.casefold() for marker in ("http://", "https://", "t.me/"))
                 if member and flags.get("link_filter") and contains_link:
                     blocked_reason = "Ссылки сейчас запрещены настройками чата."
+                if member and flags.get("word_filter") and text:
+                    words = [str(row["word"]) for row in await db.list_stop_words()]
+                    from community_bot.life import matches_stop_word
+
+                    hit = matches_stop_word(text, words)
+                    if hit:
+                        blocked_reason = "Слово из стоп-листа."
                 has_media = bool(
                     event.photo
                     or event.video
@@ -472,6 +483,10 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     if not ok or new_value is None:
         await callback.answer(text, show_alert=True)
         return
+    if delta > 0:
+        from community_bot.life import unlock
+
+        await unlock(db, callback.from_user.id, "first_plus")
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
     await callback.answer("Питомец вмешался!" if pet_line and "перехватил" in pet_line else text[:180])
     extra = f"\n{pet_line}" if pet_line else ""
@@ -621,6 +636,9 @@ async def warn_member(message: Message, db: Database, settings: Settings) -> Non
         return
     reason = " ".join(remainder_args(message.text or ""))
     warnings = await db.add_warning(int(target["user_id"]))
+    from community_bot.routers.life import apply_warn_ladder
+
+    ladder = await apply_warn_ladder(message.bot, message, int(target["user_id"]), warnings)
     await db.log_admin_action(
         message.from_user.id,
         "warn",
@@ -633,7 +651,7 @@ async def warn_member(message: Message, db: Database, settings: Settings) -> Non
     note = f" · {reason}" if reason else " · без причины"
     await _respond(
         message,
-        f"⚠️ {_target_display(target)} получает предупреждение. Всего: {warnings}.{note}",
+        f"⚠️ {_target_display(target)} получает предупреждение. Всего: {warnings}.{note}{ladder}",
         parse_mode="HTML",
     )
 
@@ -743,8 +761,27 @@ def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
 
 
 async def _shop_home_markup(db: Database):
+    from community_bot.life import vitrine_active
+
     key = await db.get_bot_state("shop_featured")
     label = await db.get_bot_state("shop_featured_label")
+    stock = await db.get_bot_state("shop_featured_stock")
+    until = await db.get_bot_state("shop_featured_until")
+    if key and not vitrine_active(stock, until):
+        await db.set_bot_state("shop_featured", "")
+        await db.set_bot_state("shop_featured_label", "")
+        key, label = "", None
+    elif key and label:
+        extra = []
+        if stock and stock not in {"", "0"}:
+            extra.append(f"ещё {stock}")
+        if until:
+            try:
+                extra.append("до " + datetime.fromisoformat(until).strftime("%H:%M"))
+            except ValueError:
+                pass
+        if extra:
+            label = f"{label} · {' · '.join(extra)}"
     return shop_home_keyboard(featured_key=key, featured_label=label if key else None)
 
 
@@ -976,6 +1013,7 @@ async def buy_shop_item(
         or not callback.message
         or callback.data in {"shop:buy_cookies", "shop:home", "shop:close"}
         or callback.data.startswith("shop:cat:")
+        or callback.data.startswith("shop:g:")
     ):
         return
     item = callback.data.split(":", 1)[1]
@@ -1036,6 +1074,10 @@ async def buy_shop_item(
             await callback.answer(error, show_alert=True)
             return
         await callback.answer("Питомец доволен!")
+        await db.consume_vitrine(item)
+        from community_bot.life import unlock
+
+        await unlock(db, callback.from_user.id, "shop_first")
         await callback.message.answer(f"✅ {label}: +{gain} к шкале. Списано {price} 🍪.")
         return
     if item == "custom_status":
@@ -1057,6 +1099,10 @@ async def buy_shop_item(
             return
         hours = IMMUNITY_HOURS[item]
         await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=hours))
+        await db.consume_vitrine(item)
+        from community_bot.life import unlock
+
+        await unlock(db, callback.from_user.id, "shop_first")
         await callback.answer("Покупка выполнена.")
         await callback.message.answer(f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪.")
         return
@@ -1066,6 +1112,10 @@ async def buy_shop_item(
             await callback.answer(error, show_alert=True)
             return
         await db.update_profile(callback.from_user.id, "profile_title", TITLE_ITEMS[item])
+        await db.consume_vitrine(item)
+        from community_bot.life import unlock
+
+        await unlock(db, callback.from_user.id, "shop_first")
         await callback.answer("Титул надет.")
         await callback.message.answer(f"✅ Титул «{html.escape(TITLE_ITEMS[item])}». Списано {price} 🍪.")
         return
@@ -1106,7 +1156,12 @@ async def buy_shop_item(
         "support": "Спасибо за поддержку проекта!",
         "private_profile": "Профиль скрыт от чужих. Открыть снова можно кнопкой на своей карточке.",
         "ornate_profile": "Кастомное оформление профиля включено.",
+        "season_pack": "Сезонный набор: щит и обед питомцу.",
     }
+    await db.consume_vitrine(item)
+    from community_bot.life import unlock
+
+    await unlock(db, callback.from_user.id, "shop_first")
     await callback.answer("Покупка выполнена.")
     await callback.message.answer(f"✅ {labels[item]} Списано {price} 🍪.")
 
@@ -1503,6 +1558,10 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
     if not ok or new_value is None:
         await message.reply(text)
         return
+    if delta > 0:
+        from community_bot.life import unlock
+
+        await unlock(db, message.from_user.id, "first_plus")
     target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
     extra = f"\n{pet_line}" if pet_line else ""
     await message.reply(

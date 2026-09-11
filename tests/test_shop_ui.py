@@ -13,6 +13,7 @@ def test_start_apply_button_is_green() -> None:
 def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
     assert "pets" in SHOP_CATEGORIES
     assert "reputation" in SHOP_CATEGORIES
+    assert "season_pack" in SHOP_CATEGORIES["pets"]["items"]
     assert "tamagotchi" in SHOP_CATEGORIES["pets"]["items"]
     assert "pet_meal" in SHOP_CATEGORIES["pets"]["items"]
     assert "forgive" in SHOP_CATEGORIES["reputation"]["items"]
