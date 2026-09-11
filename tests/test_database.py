@@ -117,24 +117,51 @@ async def test_set_cookies_records_exact_balance(tmp_path: Path) -> None:
     assert (await db.get_user(1))["cookies"] == 100  # type: ignore[index]
 
 
-async def test_roulette_is_atomic_and_applies_non_gold_commission(tmp_path: Path) -> None:
+async def test_roulette_is_free_mute_game_without_cookie_moves(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
     await db.initialize()
     await db.ensure_user(1, telegram_name="One")
     await db.ensure_user(2, telegram_name="Two")
     await db.add_cookies(1, 20, "test")
     await db.add_cookies(2, 20, "test")
-    await db.execute("UPDATE users SET reputation = 80 WHERE user_id = 1")
-    game_id = await db.create_roulette(-100, 1, 2)
+    game_id = await db.create_roulette(-100, 1, 2, stake=0)
 
     ok, _, result = await db.settle_roulette(game_id, opponent_id=2, winner_id=1)
     replay = await db.settle_roulette(game_id, opponent_id=2, winner_id=1)
 
     assert ok is True
-    assert result and result["payout"] == 8
+    assert result and result["payout"] == 0
+    assert result["winner_id"] == 1
+    assert result["loser_id"] == 2
     assert replay[0] is False
-    assert (await db.get_user(1))["cookies"] == 28  # type: ignore[index]
-    assert (await db.get_user(2))["cookies"] == 10  # type: ignore[index]
+    assert (await db.get_user(1))["cookies"] == 20  # type: ignore[index]
+    assert (await db.get_user(2))["cookies"] == 20  # type: ignore[index]
+
+
+async def test_crash_cashout_applies_reputation_commission(tmp_path: Path) -> None:
+    db = Database(tmp_path / "crash.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="One")
+    await db.ensure_user(2, telegram_name="Two")
+    await db.add_cookies(1, 30, "test")
+    await db.add_cookies(2, 30, "test")
+    await db.execute("UPDATE users SET reputation = 100 WHERE user_id = 1")
+    game_id, status = await db.create_staked_game(-100, "crash", 1, 10)
+    assert status == "ok" and game_id
+    ok, _ = await db.join_staked_game(game_id, 2, maximum=4)
+    assert ok is True
+    started = await db.start_party_game(
+        game_id,
+        1,
+        {"stake": 10, "phase": "flight", "multiplier": 2.0, "cashed": {}},
+        {1: {"stake": 10}, 2: {"stake": 10}},
+    )
+    assert started is True
+    ok, _, info = await db.crash_cashout(game_id, 1)
+    assert ok is True
+    assert info and info["net"] == 18 and info["percent"] == 10
+    again = await db.crash_cashout(game_id, 1)
+    assert again[0] is False
 
 
 async def test_freebie_can_only_be_claimed_once(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from community_bot.domain import (
     reputation_tier,
     transfer_amount,
     transfer_commission_percent,
+    win_after_commission,
 )
 
 
@@ -51,3 +52,9 @@ def test_transfer_commission_by_tier() -> None:
     assert transfer_commission_percent(100) == 10
     assert transfer_commission_percent(80) == 20
     assert transfer_commission_percent(50) == 30
+
+
+def test_win_after_commission_matches_transfer_rates() -> None:
+    assert win_after_commission(100, 95) == (90, 10)
+    assert win_after_commission(100, 80) == (80, 20)
+    assert win_after_commission(100, 40) == (70, 30)

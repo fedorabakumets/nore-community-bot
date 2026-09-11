@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 from community_bot.aliases import CommandOrAlias, command_or_alias, is_command_trigger, parse_trigger
-from community_bot.audit import classify_status, format_audit_row, parse_moderation_args
+from community_bot.audit import (
+    classify_status,
+    format_audit_row,
+    parse_moderation_args,
+    parse_punitive_args,
+    parse_warn_args,
+)
 from community_bot.keyboards import admin_panel_keyboard, admin_system_keyboard, private_menu_keyboard
 from community_bot.posting import parse_button_lines, parse_poll_options, render_post
 from community_bot.texts import GROUP_COMMANDS_TEXT, STORE_HELP_TEXT
@@ -13,7 +19,9 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("команды") == ("commands", "")
     assert parse_trigger("Профиль") == ("profile", "")
     assert parse_trigger("магазин") == ("shop", "")
-    assert parse_trigger("блэкджек 10") == ("blackjack", "10")
+    assert parse_trigger("кубик 25") == ("dice", "25")
+    assert parse_trigger("рейс 10") == ("crash", "10")
+    assert parse_trigger("чистить бота 30 уборка") == ("botsweep", "30 уборка")
     assert parse_trigger("купить печеньки") == ("buycookies", "")
     assert parse_trigger("мут 30m спам") == ("mute", "30m спам")
     assert parse_trigger("баланс") == ("balance", "")
@@ -87,6 +95,29 @@ def test_moderation_status_red_yellow_green() -> None:
     assert classify_status("chat_mute") == "yellow"
 
 
+def test_punitive_args_require_duration_and_reason() -> None:
+    duration, reason, error = parse_punitive_args("/mute 30m флуд", need_duration=True)
+    assert error is None
+    assert duration is not None and duration.total_seconds() == 30 * 60
+    assert reason == "флуд"
+    _, _, error = parse_punitive_args("мут флуд", need_duration=True)
+    assert error
+    _, reason, error = parse_punitive_args("/kick реклама", need_duration=False)
+    assert error is None
+    assert reason == "реклама"
+    duration, reason, error = parse_punitive_args("/ban навсегда скам", need_duration=True, allow_permanent=True)
+    assert error is None
+    assert reason == "скам"
+    from community_bot.domain import is_permanent_duration
+
+    assert duration is not None and is_permanent_duration(duration)
+    mute_duration, reason, error = parse_warn_args("/warn 2h токсик")
+    assert error is None
+    assert mute_duration is not None and reason == "токсик"
+    _, reason, error = parse_warn_args("варн спам ссылками")
+    assert error is None and reason == "спам ссылками"
+
+
 def test_audit_row_shows_name_not_raw_id() -> None:
     text = format_audit_row(
         {
@@ -114,8 +145,12 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     assert "«магазин»" in GROUP_COMMANDS_TEXT
     assert "«обновления»" not in GROUP_COMMANDS_TEXT
     assert "/updates" not in lowered
-    for leaked in ("/mute", "/warn", "/kick", "/ban", "/unban", "/givecookies", "/role"):
+    for leaked in ("/mute", "/warn", "/kick", "/ban", "/unban", "/givecookies", "/role", "/purge", "/botsweep"):
         assert leaked not in lowered
+    assert "контрабанд" not in lowered
+    assert "рулетка" in lowered
+    assert "кубик" in lowered
+    assert "рейс" in lowered
     assert "тамагочи" in STORE_HELP_TEXT.casefold()
     assert "приватный" in STORE_HELP_TEXT.casefold()
     assert "кастомн" in STORE_HELP_TEXT.casefold()
@@ -147,7 +182,7 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 8
+    assert latest.number == 9
     text = updates_text()
     assert "№8" in text
     assert "админ" in text.casefold()
@@ -164,21 +199,34 @@ def test_updates_are_admin_only_and_numbered() -> None:
     system_menu = admin_system_keyboard(["*"])
     system_buttons = [button for row in system_menu.inline_keyboard for button in row]
     assert any(button.callback_data == "admin:updates" for button in system_buttons)
+    assert any(button.callback_data == "admin:staffguide" for button in system_buttons)
     assert any(button.text == "✨ Обновления" for button in system_buttons)
+    from community_bot.keyboards import games_menu_keyboard
+    from community_bot.staff_guide import staff_guide_text
     from community_bot.updates import community_announcement, member_details_text, staff_announcement
 
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №8" in pin
+    assert "Обновление №9" in pin
     details = member_details_text(latest)
-    assert "щит" in details.casefold()
+    assert "рулетка" in details.casefold()
+    assert "рейс" in details.casefold()
     assert "админка" not in details.casefold()
     assert "Пример." in details
     staff = staff_announcement(latest)
-    assert "репорт" in staff.casefold()
-    assert "стоп-слов" in staff.casefold()
+    assert "справка" in staff.casefold()
+    assert "/purge" in staff
     assert "Админ" not in details
+    labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
+    assert "рулетка" in labels
+    assert "кубик" in labels
+    assert "рейс" in labels
+    assert "контрабанд" not in labels
+    guide = staff_guide_text()
+    assert "/mute 30m" in guide
+    assert "/purge 50" in guide
+    assert "/botsweep" in guide
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

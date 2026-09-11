@@ -333,6 +333,14 @@ CREATE TABLE IF NOT EXISTS captcha_pending (
     created_at TEXT NOT NULL,
     PRIMARY KEY(user_id, chat_id)
 );
+
+CREATE TABLE IF NOT EXISTS bot_chat_messages (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bot_chat_messages_created ON bot_chat_messages(chat_id, created_at);
 """
 
 DEFAULT_FEATURE_FLAGS = {
@@ -644,6 +652,14 @@ class Database:
                     """,
                     (slug, name, rank, dump_permissions(perms), is_system, now),
                 )
+                if is_system:
+                    await db.execute(
+                        """
+                        UPDATE staff_roles SET name = ?, rank = ?, permissions_json = ?
+                        WHERE slug = ? AND is_system = 1
+                        """,
+                        (name, rank, dump_permissions(perms), slug),
+                    )
             await db.commit()
 
     async def list_staff_roles(self) -> list[dict[str, Any]]:
@@ -1389,45 +1405,41 @@ class Database:
             if winner_id not in players:
                 await db.rollback()
                 return False, "Некорректный победитель.", None
-            cursor = await db.execute(
-                "SELECT user_id, cookies, reputation FROM users WHERE user_id IN (?, ?)",
-                players,
-            )
-            users = {int(row["user_id"]): row for row in await cursor.fetchall()}
-            stake = int(game["stake"])
-            if len(users) != 2 or any(int(users[player]["cookies"]) < stake for player in players):
-                await db.rollback()
-                return False, f"У обоих игроков должно быть минимум {stake} 🍪.", None
             loser_id = players[1] if winner_id == players[0] else players[0]
-            payout = stake if int(users[winner_id]["reputation"]) >= 90 else stake * 80 // 100
-            await db.execute(
-                "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ?",
-                (stake, now, loser_id),
-            )
-            await db.execute(
-                "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
-                (payout, now, winner_id),
-            )
             await db.execute(
                 """
                 UPDATE roulette_games
-                SET status = 'completed', winner_id = ?, payout = ?, completed_at = ?
+                SET status = 'completed', winner_id = ?, payout = 0, completed_at = ?
                 WHERE id = ?
                 """,
-                (winner_id, payout, now, game_id),
-            )
-            await db.execute(
-                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                (loser_id, -stake, "roulette", f"game:{game_id}:lost", now),
-            )
-            await db.execute(
-                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                (winner_id, payout, "roulette", f"game:{game_id}:won", now),
+                (winner_id, now, game_id),
             )
             await db.commit()
             result = dict(game)
-            result.update({"winner_id": winner_id, "loser_id": loser_id, "payout": payout})
+            result.update({"winner_id": winner_id, "loser_id": loser_id, "payout": 0})
             return True, "ok", result
+
+    async def remember_bot_message(self, chat_id: int, message_id: int) -> None:
+        await self.execute(
+            "INSERT OR REPLACE INTO bot_chat_messages(chat_id, message_id, created_at) VALUES (?, ?, ?)",
+            (chat_id, message_id, utcnow()),
+        )
+
+    async def recent_bot_message_ids(self, chat_id: int, limit: int = 50) -> list[int]:
+        rows = await self.fetchall(
+            "SELECT message_id FROM bot_chat_messages WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?",
+            (chat_id, limit),
+        )
+        return [int(row["message_id"]) for row in rows]
+
+    async def forget_bot_messages(self, chat_id: int, message_ids: list[int]) -> None:
+        if not message_ids:
+            return
+        placeholders = ",".join("?" for _ in message_ids)
+        await self.execute(
+            f"DELETE FROM bot_chat_messages WHERE chat_id = ? AND message_id IN ({placeholders})",
+            (chat_id, *message_ids),
+        )
 
     async def claim_freebie(self, user_id: int, amount: int) -> bool:
         now = utcnow()
@@ -1974,6 +1986,49 @@ class Database:
                 (now, now, game_id),
             )
             await db.commit()
+
+    async def crash_cashout(self, game_id: int, user_id: int) -> tuple[bool, str, dict[str, Any] | None]:
+        from community_bot.domain import win_after_commission
+
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "active" or str(game["game_type"]) != "crash":
+                await db.rollback()
+                return False, "Рейс уже не в воздухе.", None
+            cursor = await db.execute(
+                "SELECT 1 FROM party_game_players WHERE game_id = ? AND user_id = ?",
+                (game_id, user_id),
+            )
+            if not await cursor.fetchone():
+                await db.rollback()
+                return False, "Вы не в этом рейсе.", None
+            state = json.loads(str(game["state_json"]) or "{}")
+            if str(state.get("phase") or "") != "flight":
+                await db.rollback()
+                return False, "Рейс уже не в воздухе.", None
+            cashed = dict(state.get("cashed") or {})
+            if str(user_id) in cashed:
+                await db.rollback()
+                return False, "Уже забрали.", None
+            cursor = await db.execute("SELECT reputation FROM users WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            reputation = int(row["reputation"]) if row else 0
+            multiplier = float(state.get("multiplier") or 1)
+            stake = int(state.get("stake") or 0)
+            gross = max(0, int(stake * multiplier))
+            net, percent = win_after_commission(gross, reputation)
+            info = {"mult": multiplier, "gross": gross, "net": net, "percent": percent}
+            cashed[str(user_id)] = info
+            state["cashed"] = cashed
+            await db.execute(
+                "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(state, ensure_ascii=False), now, game_id),
+            )
+            await db.commit()
+            return True, "ok", info
 
     async def get_party_game(self, game_id: int) -> dict[str, Any] | None:
         row = await self.fetchone("SELECT * FROM party_games WHERE id = ?", (game_id,))

@@ -16,8 +16,8 @@ from aiogram.types import CallbackQuery, Message, TelegramObject
 from community_bot.aliases import is_group_command_to_sweep
 from community_bot.helpers import BOT_REPLY_TTL, delete_later
 
-GAME_RESULT_TTL = 120.0
-_GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide")
+GAME_RESULT_TTL = 60.0
+_GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide", "crash:")
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,10 @@ class EphemeralSendMiddleware(BaseRequestMiddleware):
     ) -> TelegramType:
         result = await make_request(bot, method)
         _schedule(result)
+        if isinstance(result, Message) and result.chat.type in {"group", "supergroup"}:
+            db = getattr(bot, "community_db", None)
+            if db is not None:
+                _track(asyncio.create_task(db.remember_bot_message(result.chat.id, result.message_id)))
         return result
 
 

@@ -17,6 +17,7 @@ from aiogram.types import (
 
 from community_bot.aliases import command_or_alias, remainder_args, remainder_text
 from community_bot.audit import person_label
+from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
@@ -225,7 +226,7 @@ async def mail_save(message: Message, state: FSMContext, db: Database) -> None:
 async def show_board(message: Message, db: Database) -> None:
     week_id = datetime.now(UTC).strftime("%G-W%V")
     board = await db.weekly_board(week_id)
-    await message.answer(_format_board(week_id, board), parse_mode="HTML")
+    await answer_block(message, "events", _format_board(week_id, board), parse_mode="HTML")
 
 
 def _format_board(week_id: str, board: dict) -> str:

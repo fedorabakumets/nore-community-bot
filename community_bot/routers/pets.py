@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from community_bot.aliases import command_or_alias
+from community_bot.blocks import cover_file
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
@@ -65,6 +66,13 @@ async def send_pet_card(message: Message, pet: dict[str, object]) -> None:
     if photo:
         try:
             await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+            return
+        except TelegramBadRequest:
+            pass
+    cover = cover_file("pet")
+    if cover:
+        try:
+            await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
             return
         except TelegramBadRequest:
             pass

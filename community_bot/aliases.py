@@ -26,9 +26,12 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "games": ("игры",),
     "cgames": ("печенеигры",),
     "blackjack": ("блэкджек",),
-    "dice": ("кости",),
+    "dice": ("кости", "кубик"),
     "roulette": ("рулетка",),
     "gamecancel": ("отменитьигру",),
+    "crash": ("рейс", "взлёт", "взлет"),
+    "purge": ("чистить", "очистить", "пурж"),
+    "botsweep": ("чиститьбота", "убратьбота"),
     "transfer": ("трансфер",),
     "balance": ("баланс", "кошелек", "кошелёк"),
     "updates": ("обновления", "обновление"),
@@ -61,6 +64,8 @@ MULTIWORD_ALIASES: dict[str, str] = {
     "отменить игру": "gamecancel",
     "розыгрыш итог": "lotterydraw",
     "итог розыгрыша": "lotterydraw",
+    "чистить бота": "botsweep",
+    "убрать бота": "botsweep",
 }
 
 _PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)

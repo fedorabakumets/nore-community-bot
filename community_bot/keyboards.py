@@ -204,6 +204,7 @@ def admin_system_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [ibtn("📊 Сводка дня", "admin:health")],
         [ibtn("✨ Обновления", "admin:updates", STYLE_FUN)],
+        [ibtn("📚 Справка админки", "admin:staffguide", STYLE_GO)],
     ]
     if _allow(permissions, "audit"):
         rows.append([ibtn("🧾 Журнал", "admin:audit")])
@@ -611,7 +612,7 @@ def pet_keyboard() -> InlineKeyboardMarkup:
 FEATURE_META = {
     "games": (
         "🎮 Мини-игры",
-        "Лобби, блэкджек, кости, рулетка и ролевые игры в чате. Выключение прячет игровые команды.",
+        "Рулетка на мут, блэкджек, кубик и рейс. Выключение прячет игровые команды.",
     ),
     "tamagotchi": (
         "🐾 Тамагочи",
@@ -717,14 +718,13 @@ def feature_reset_keyboard() -> InlineKeyboardMarkup:
 def games_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn("🧳 Контрабанда", "game:new:smuggle", STYLE_FUN)],
-            [ibtn("🧩 Сбой протокола", "game:new:protocol", STYLE_FUN)],
-            [ibtn("☢️ Аукцион убежища", "game:new:bunker", STYLE_GO)],
+            [ibtn("🔫 Рулетка · мут 30 мин", "game:pick:roulette", STYLE_CLOSE)],
             [
                 ibtn("🃏 Блэкджек 🍪", "cg:pick:bj", STYLE_GO),
-                ibtn("🎲 Кости 🍪", "cg:pick:dice", STYLE_FUN),
+                ibtn("🎲 Кубик 🍪", "cg:pick:dice", STYLE_FUN),
             ],
-            [ibtn("📚 Подробные правила", "game:rules:all")],
+            [ibtn("🚀 Рейс 🍪", "cg:pick:crash", STYLE_GO)],
+            [ibtn("📚 Правила", "game:rules:all")],
             [game_hide_button()],
         ]
     )
@@ -788,6 +788,15 @@ def blackjack_turn_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("🃏 Взять", f"cg:hit:{game_id}", STYLE_FUN),
                 ibtn("✋ Хватит", f"cg:stand:{game_id}", STYLE_GO),
             ],
+            [game_hide_button()],
+        ]
+    )
+
+
+def crash_keyboard(game_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("💰 Забрать", f"cg:cash:{game_id}", STYLE_GO)],
             [game_hide_button()],
         ]
     )

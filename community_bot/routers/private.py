@@ -22,6 +22,7 @@ from aiogram.types import (
 
 from community_bot.aliases import command_or_alias
 from community_bot.audit import format_audit_log, person_label
+from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database, utcnow
 from community_bot.helpers import (
@@ -38,6 +39,7 @@ from community_bot.helpers import (
 )
 from community_bot.keyboards import (
     STYLE_CLOSE,
+    STYLE_GO,
     YES_NO_KEYBOARD,
     admin_chat_keyboard,
     admin_mail_keyboard,
@@ -85,6 +87,7 @@ from community_bot.permissions import (
     slugify_role,
 )
 from community_bot.routers.flows import restore_private_menu
+from community_bot.staff_guide import staff_guide_text
 from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, TicketForm
 from community_bot.texts import (
     APPLICATION_INTRO,
@@ -206,8 +209,11 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
 async def help_command(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
-    await message.answer(
+    await answer_block(
+        message,
+        "commands",
         GROUP_COMMANDS_TEXT,
+        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
         parse_mode="HTML",
         reply_markup=await _private_keyboard(message.from_user.id, db, settings),
     )
@@ -215,12 +221,12 @@ async def help_command(message: Message, db: Database, settings: Settings) -> No
 
 @router.message(command_or_alias("store"))
 async def private_store(message: Message) -> None:
-    await message.answer(STORE_HELP_TEXT, parse_mode="HTML")
+    await answer_block(message, "shop", STORE_HELP_TEXT, parse_mode="HTML")
 
 
 @router.message(command_or_alias("reputation"))
 async def private_reputation(message: Message) -> None:
-    await message.answer(REPUTATION_HELP_TEXT, parse_mode="HTML")
+    await answer_block(message, "reputation", REPUTATION_HELP_TEXT, parse_mode="HTML")
 
 
 @router.message(command_or_alias("updates"))
@@ -278,7 +284,9 @@ async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -
 
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await callback.message.answer(
+    await answer_block(
+        callback.message,
+        "shop",
         _shop_home_text(user, settings),
         parse_mode="HTML",
         reply_markup=await _shop_home_markup(db),
@@ -343,7 +351,9 @@ async def _admin_panel_text(db: Database) -> str:
 async def admin_panel(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
         return
-    await message.answer(
+    await answer_block(
+        message,
+        "admin",
         await _admin_panel_text(db),
         parse_mode="HTML",
         reply_markup=await _panel_markup(db, settings, message.from_user.id),
@@ -550,13 +560,48 @@ async def admin_system(callback: CallbackQuery, db: Database, settings: Settings
         return
     await callback.answer()
     await callback.message.edit_text(
-        "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина магазина и служебные обновления.",
+        "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина, залог RSVP, обновления и справка админки.",
         parse_mode="HTML",
         reply_markup=admin_system_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
 
 
-@router.callback_query(F.data == "admin:search")
+@router.callback_query(F.data == "admin:staffguide")
+async def admin_staff_guide(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer()
+    url = await db.get_bot_state("staff_guide_url")
+    back = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="↩️ Назад", callback_data="admin:system", style=STYLE_CLOSE)]]
+    )
+    if url:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Открыть Telegraph", url=url, style=STYLE_GO)],
+                [InlineKeyboardButton(text="↩️ Назад", callback_data="admin:system", style=STYLE_CLOSE)],
+            ]
+        )
+        await answer_block(
+            callback.message,
+            "admin",
+            "📚 <b>Справка админки</b>\nПолный разбор штабных команд с примерами. Участники эту страницу не видят.",
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        return
+    text = staff_guide_text()
+    await answer_block(
+        callback.message,
+        "admin",
+        "📚 <b>Справка админки</b>\nTelegraph недоступен — полный текст ниже.",
+        parse_mode="HTML",
+        reply_markup=back,
+    )
+    remaining = text
+    while remaining:
+        chunk, remaining = remaining[:3500], remaining[3500:]
+        await callback.message.answer(chunk, parse_mode="HTML")
 async def admin_search_begin(
     callback: CallbackQuery,
     state: FSMContext,

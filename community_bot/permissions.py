@@ -24,6 +24,7 @@ PERM_AUTOMESSAGES = "automessages"
 PERM_AUDIT = "audit"
 PERM_GAMES = "games.admin"
 PERM_SEE_PRIVATE = "profile.see_private"
+PERM_PURGE = "mod.purge"
 
 PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_ADMIN_PANEL, "Админ-панель"),
@@ -47,6 +48,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_AUDIT, "Журнал"),
     (PERM_GAMES, "Отмена игр"),
     (PERM_SEE_PRIVATE, "Видеть скрытые профили"),
+    (PERM_PURGE, "Чистить сообщения чата"),
 )
 
 PERMISSION_KEYS = [key for key, _ in PERMISSIONS]

@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from community_bot.aliases import command_or_alias
+from community_bot.blocks import cover_file
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
@@ -50,6 +51,12 @@ async def send_profile_card(
                 parse_mode="HTML",
                 reply_markup=markup,
             )
+        except TelegramBadRequest:
+            pass
+    cover = cover_file("profile")
+    if cover:
+        try:
+            return await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
         except TelegramBadRequest:
             pass
     return await message.answer(text, parse_mode="HTML", reply_markup=markup)

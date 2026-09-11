@@ -6,6 +6,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
 from community_bot.aliases import command_or_alias
+from community_bot.blocks import answer_block, edit_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import reputation_tier, transfer_commission_percent
@@ -82,7 +83,7 @@ async def send_wallet(message: Message, db: Database, settings: Settings) -> Non
     can_borrow = loan is None and int(user.get("cookie_debt") or 0) == 0
     text = await wallet_text(db, settings, user)
     with keep_in_chat():
-        await message.answer(text, parse_mode="HTML", reply_markup=wallet_keyboard(can_borrow))
+        await answer_block(message, "wallet", text, parse_mode="HTML", reply_markup=wallet_keyboard(can_borrow))
 
 
 @router.message(command_or_alias("balance"))
@@ -99,7 +100,8 @@ async def wallet_home(callback: CallbackQuery, db: Database, settings: Settings)
     loan = await db.get_active_loan(callback.from_user.id)
     can_borrow = loan is None and int(user.get("cookie_debt") or 0) == 0
     await callback.answer()
-    await callback.message.edit_text(
+    await edit_block(
+        callback.message,
         await wallet_text(db, settings, user),
         parse_mode="HTML",
         reply_markup=wallet_keyboard(can_borrow),
@@ -126,7 +128,9 @@ async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings)
         return
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await callback.message.answer(
+    await answer_block(
+        callback.message,
+        "shop",
         _shop_home_text(user, settings),
         parse_mode="HTML",
         reply_markup=await _shop_home_markup(db),
@@ -137,7 +141,7 @@ async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings)
 async def wallet_help(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await callback.message.answer(WALLET_HELP_TEXT, parse_mode="HTML")
+        await answer_block(callback.message, "wallet", WALLET_HELP_TEXT, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "wallet:loan")

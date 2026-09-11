@@ -33,7 +33,7 @@ from community_bot.routers import (
     profile_router,
     wallet_router,
 )
-from community_bot.telegraph import publish_member_update
+from community_bot.telegraph import publish_member_update, publish_staff_guide
 from community_bot.updates import announcement_key, community_announcement, latest_update
 
 logger = logging.getLogger(__name__)
@@ -65,11 +65,11 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="store", description="Магазин и оплата"),
             BotCommand(command="shop", description="Магазин"),
             BotCommand(command="pet", description="Открыть тамагочи"),
-            BotCommand(command="cgames", description="Игры на печеньки 2–4 игрока"),
+            BotCommand(command="games", description="Мини-игры: рулетка, блэкджек, кубик, рейс"),
             BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
-            BotCommand(command="dice", description="Кости: /dice 10"),
-            BotCommand(command="roulette", description="Русская рулетка ответом"),
-            BotCommand(command="games", description="Мини-игры и правила"),
+            BotCommand(command="dice", description="Кубик 1 на 1: /dice 10"),
+            BotCommand(command="crash", description="Рейс на 🍪: /crash 10"),
+            BotCommand(command="roulette", description="Рулетка на мут 30 мин"),
             BotCommand(command="gift", description="Подарить товар ответом"),
             BotCommand(command="report", description="Репорт ответом на сообщение"),
             BotCommand(command="board", description="Доска недели"),
@@ -352,6 +352,7 @@ async def main() -> None:
             await db.set_role(moderator_id, "moderator")
 
     bot = Bot(settings.bot_token)
+    bot.community_db = db  # type: ignore[attr-defined]
     patch_bot_ephemeral(bot)
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
@@ -369,6 +370,7 @@ async def main() -> None:
     await configure_commands(bot)
     await log_community_permissions(bot, settings)
     await announce_latest_update(bot, db, settings)
+    await publish_staff_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))

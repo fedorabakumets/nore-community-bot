@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from community_bot.domain import parse_duration
+from community_bot.domain import format_duration, parse_duration, parse_duration_or_permanent
 
 STATUS_GREEN = "green"
 STATUS_YELLOW = "yellow"
@@ -21,6 +21,8 @@ ACTION_LABELS: dict[str, str] = {
     "kick": "Кик",
     "ban": "Бан",
     "unban": "Разбан",
+    "purge": "Очистка чата",
+    "botsweep": "Очистка сообщений бота",
     "delete_message": "Удаление сообщения",
     "give_cookies": "Начисление 🍪",
     "set_cookies": "Установка баланса 🍪",
@@ -121,6 +123,57 @@ def parse_moderation_args(text: str) -> tuple[timedelta, str, bool]:
     if duration:
         return duration, " ".join(args[1:]).strip(), True
     return timedelta(hours=1), " ".join(args).strip(), False
+
+
+def parse_punitive_args(
+    text: str,
+    *,
+    need_duration: bool,
+    allow_permanent: bool = False,
+) -> tuple[timedelta | None, str, str | None]:
+    from community_bot.aliases import remainder_args
+
+    args = remainder_args(text)
+    if need_duration:
+        if not args:
+            hint = "30m флуд" if not allow_permanent else "7d мошенничество (или навсегда)"
+            return None, "", f"Нужны время и причина. Пример: {hint}"
+        duration = parse_duration_or_permanent(args[0]) if allow_permanent else parse_duration(args[0])
+        if not duration:
+            extra = " либо «навсегда»" if allow_permanent else ""
+            return None, "", f"Первым укажите время: 10m, 2h, 1d{extra}."
+        reason = " ".join(args[1:]).strip()
+        if len(reason) < 2:
+            return None, "", "После времени напишите причину — минимум два символа."
+        return duration, reason, None
+    reason = " ".join(args).strip()
+    if len(reason) < 2:
+        return None, "", "Нужна причина — минимум два символа."
+    return None, reason, None
+
+
+def parse_warn_args(text: str) -> tuple[timedelta | None, str, str | None]:
+    from community_bot.aliases import remainder_args
+
+    args = remainder_args(text)
+    if not args:
+        return None, "", "Нужна причина. Пример: /warn спам или /warn 2h токсик"
+    duration = parse_duration(args[0])
+    if duration:
+        reason = " ".join(args[1:]).strip()
+        if len(reason) < 2:
+            return None, "", "После времени напишите причину — минимум два символа."
+        return duration, reason, None
+    reason = " ".join(args).strip()
+    if len(reason) < 2:
+        return None, "", "Нужна причина — минимум два символа."
+    return None, reason, None
+
+
+def duration_label(delta: timedelta | None) -> str:
+    if delta is None:
+        return ""
+    return format_duration(delta)
 
 
 def _when(iso: str) -> str:
