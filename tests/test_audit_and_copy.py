@@ -201,6 +201,10 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert any(button.callback_data == "admin:updates" for button in system_buttons)
     assert any(button.callback_data == "admin:staffguide" for button in system_buttons)
     assert any(button.text == "✨ Обновления" for button in system_buttons)
+    assert all(button.callback_data != "admin:restart" for button in system_buttons)
+    owner_system = admin_system_keyboard(["*"], is_owner=True)
+    owner_buttons = [button for row in owner_system.inline_keyboard for button in row]
+    assert any(button.callback_data == "admin:restart" for button in owner_buttons)
     from community_bot.keyboards import games_menu_keyboard
     from community_bot.staff_guide import staff_guide_text
     from community_bot.updates import community_announcement, member_details_text, staff_announcement
@@ -227,6 +231,8 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "/mute 30m" in guide
     assert "/purge 50" in guide
     assert "/botsweep" in guide
+    assert "Перезапустить бота" in guide
+    assert "аварийный выключатель" in guide.casefold()
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

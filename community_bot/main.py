@@ -22,6 +22,7 @@ from community_bot.covers import cover_path_for
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message, user_link
+from community_bot.restart import relaunch
 from community_bot.routers import (
     cookie_games_router,
     flows_router,
@@ -220,6 +221,11 @@ async def emergency_stop_job(dispatcher: Dispatcher, emergency_stop: asyncio.Eve
     await dispatcher.stop_polling()
 
 
+async def restart_stop_job(dispatcher: Dispatcher, restart_stop: asyncio.Event) -> None:
+    await restart_stop.wait()
+    await dispatcher.stop_polling()
+
+
 async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> None:
     while True:
         try:
@@ -373,22 +379,47 @@ async def main() -> None:
     await publish_staff_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
+    restart_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
+    restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
-        await dispatcher.start_polling(bot, db=db, settings=settings, emergency_stop=emergency_stop)
+        await dispatcher.start_polling(
+            bot,
+            db=db,
+            settings=settings,
+            emergency_stop=emergency_stop,
+            restart_stop=restart_stop,
+        )
     finally:
-        for task in (reputation_task, scheduled_task, pet_task, loan_task, board_task, emergency_task):
+        for task in (
+            reputation_task,
+            scheduled_task,
+            pet_task,
+            loan_task,
+            board_task,
+            emergency_task,
+            restart_task,
+        ):
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(
-                reputation_task, scheduled_task, pet_task, loan_task, board_task, emergency_task
+                reputation_task,
+                scheduled_task,
+                pet_task,
+                loan_task,
+                board_task,
+                emergency_task,
+                restart_task,
             )
         await bot.session.close()
+    if restart_stop.is_set() and await db.get_bot_state("emergency_disabled") != "1":
+        logger.info("owner restart: relaunching in-place, sqlite and settings preserved")
+        relaunch()
 
 
 def run() -> None:

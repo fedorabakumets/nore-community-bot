@@ -200,7 +200,7 @@ def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_system_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
+def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [ibtn("📊 Сводка дня", "admin:health")],
         [ibtn("✨ Обновления", "admin:updates", STYLE_FUN)],
@@ -212,8 +212,19 @@ def admin_system_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
         rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
+    if is_owner:
+        rows.append([ibtn("🔄 Перезапустить бота", "admin:restart", STYLE_CLOSE)])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_restart_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("Да, перезапустить", "admin:restart:yes", STYLE_CLOSE)],
+            [ibtn("Не надо", "admin:restart:no")],
+        ]
+    )
 
 
 def admin_vitrine_keyboard() -> InlineKeyboardMarkup:

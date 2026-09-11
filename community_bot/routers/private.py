@@ -47,6 +47,7 @@ from community_bot.keyboards import (
     admin_people_keyboard,
     admin_queue_keyboard,
     admin_reports_keyboard,
+    admin_restart_keyboard,
     admin_stopwords_keyboard,
     admin_system_keyboard,
     admin_user_keyboard,
@@ -86,6 +87,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     slugify_role,
 )
+from community_bot.restart import play_countdown, try_begin
 from community_bot.routers.flows import restore_private_menu
 from community_bot.staff_guide import staff_guide_text
 from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, TicketForm
@@ -554,16 +556,96 @@ async def admin_chatroom(callback: CallbackQuery, db: Database, settings: Settin
     )
 
 
+def _system_text(*, is_owner: bool) -> str:
+    text = "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина, залог RSVP, обновления и справка админки."
+    if is_owner:
+        text += "\n\nКнопка перезапуска внизу. Отсчёт уйдёт в чат, настройки не сбросятся."
+    return text
+
+
+async def _show_system(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    is_owner = settings.is_owner(callback.from_user.id)
+    await callback.message.edit_text(
+        _system_text(is_owner=is_owner),
+        parse_mode="HTML",
+        reply_markup=admin_system_keyboard(
+            await user_permissions(db, settings, callback.from_user.id),
+            is_owner=is_owner,
+        ),
+    )
+
+
 @router.callback_query(F.data == "admin:system")
 async def admin_system(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
     await callback.answer()
+    await _show_system(callback, db, settings)
+
+
+@router.callback_query(F.data == "admin:restart")
+async def admin_restart_ask(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    if not settings.is_owner(callback.from_user.id):
+        await callback.answer("Только владелец.", show_alert=True)
+        return
+    await callback.answer()
     await callback.message.edit_text(
-        "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина, залог RSVP, обновления и справка админки.",
+        "🔄 <b>Перезапуск</b>\n\n"
+        "В чат сообщества уйдёт отсчёт, затем бот поднимется заново в этом же процессе.\n\n"
+        "Не сбросится: роли, флаги, печеньки, журнал, витрина, RSVP и закреп.\n"
+        "Это не аварийный выключатель — бот не выйдет из чатов и не заблокируется.",
         parse_mode="HTML",
-        reply_markup=admin_system_keyboard(await user_permissions(db, settings, callback.from_user.id)),
+        reply_markup=admin_restart_keyboard(),
     )
+
+
+@router.callback_query(F.data == "admin:restart:no")
+async def admin_restart_cancel(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    await callback.answer("Отменено")
+    await _show_system(callback, db, settings)
+
+
+@router.callback_query(F.data == "admin:restart:yes")
+async def admin_restart_confirm(
+    callback: CallbackQuery,
+    bot: Bot,
+    db: Database,
+    settings: Settings,
+    restart_stop: asyncio.Event,
+) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    if not settings.is_owner(callback.from_user.id):
+        await callback.answer("Только владелец.", show_alert=True)
+        return
+    if not try_begin():
+        await callback.answer("Перезапуск уже идёт.", show_alert=True)
+        return
+    await db.log_admin_action(
+        callback.from_user.id,
+        "restart",
+        str(settings.community_chat_id or ""),
+        "in-place exec, state preserved",
+        reason="перезапуск без сброса",
+        actor_name=callback.from_user.full_name,
+        status="green",
+    )
+    await callback.answer("Отсчёт ушёл в чат")
+    with contextlib.suppress(TelegramBadRequest):
+        await callback.message.edit_text(
+            "🔄 Отсчёт в чате сообщества. Настройки на месте — бот сейчас вернётся.",
+            parse_mode="HTML",
+        )
+    owner_name = callback.from_user.full_name
+    chat_id = settings.community_chat_id or callback.from_user.id
+    message_id = await play_countdown(bot, chat_id, owner_name=owner_name)
+    if message_id is None and chat_id != callback.from_user.id:
+        await play_countdown(bot, callback.from_user.id, owner_name=owner_name)
+    restart_stop.set()
 
 
 @router.callback_query(F.data == "admin:staffguide")

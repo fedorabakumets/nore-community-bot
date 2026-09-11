@@ -47,6 +47,7 @@ ACTION_LABELS: dict[str, str] = {
     "user_age": "Возраст",
     "user_avatar": "Аватар",
     "user_warnings": "Предупреждения",
+    "restart": "Перезапуск бота",
 }
 
 PUNITIVE_ACTIONS = {"mute", "warn", "kick", "ban"}
