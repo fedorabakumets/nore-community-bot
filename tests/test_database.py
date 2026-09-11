@@ -138,14 +138,14 @@ async def test_roulette_is_free_mute_game_without_cookie_moves(tmp_path: Path) -
     assert (await db.get_user(2))["cookies"] == 20  # type: ignore[index]
 
 
-async def test_crash_cashout_applies_reputation_commission(tmp_path: Path) -> None:
+async def test_crash_cashout_pays_full_multiplier(tmp_path: Path) -> None:
     db = Database(tmp_path / "crash.db")
     await db.initialize()
     await db.ensure_user(1, telegram_name="One")
     await db.ensure_user(2, telegram_name="Two")
     await db.add_cookies(1, 30, "test")
     await db.add_cookies(2, 30, "test")
-    await db.execute("UPDATE users SET reputation = 100 WHERE user_id = 1")
+    await db.execute("UPDATE users SET reputation = 40 WHERE user_id = 1")
     game_id, status = await db.create_staked_game(-100, "crash", 1, 10)
     assert status == "ok" and game_id
     ok, _ = await db.join_staked_game(game_id, 2, maximum=4)
@@ -159,7 +159,7 @@ async def test_crash_cashout_applies_reputation_commission(tmp_path: Path) -> No
     assert started is True
     ok, _, info = await db.crash_cashout(game_id, 1)
     assert ok is True
-    assert info and info["net"] == 18 and info["percent"] == 10
+    assert info and info["net"] == 20 and info["percent"] == 0
     again = await db.crash_cashout(game_id, 1)
     assert again[0] is False
 

@@ -2029,8 +2029,6 @@ class Database:
             await db.commit()
 
     async def crash_cashout(self, game_id: int, user_id: int) -> tuple[bool, str, dict[str, Any] | None]:
-        from community_bot.domain import win_after_commission
-
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -2054,14 +2052,11 @@ class Database:
             if str(user_id) in cashed:
                 await db.rollback()
                 return False, "Уже забрали.", None
-            cursor = await db.execute("SELECT reputation FROM users WHERE user_id = ?", (user_id,))
-            row = await cursor.fetchone()
-            reputation = int(row["reputation"]) if row else 0
             multiplier = float(state.get("multiplier") or 1)
             stake = int(state.get("stake") or 0)
             gross = max(0, int(stake * multiplier))
-            net, percent = win_after_commission(gross, reputation)
-            info = {"mult": multiplier, "gross": gross, "net": net, "percent": percent}
+            net = gross
+            info = {"mult": multiplier, "gross": gross, "net": net, "percent": 0}
             cashed[str(user_id)] = info
             state["cashed"] = cashed
             await db.execute(

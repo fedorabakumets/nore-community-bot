@@ -14,7 +14,7 @@ from community_bot.audit import person_label
 from community_bot.blocks import answer_block
 from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
-from community_bot.game_notify import notify_game_event, send_game_finale
+from community_bot.game_notify import send_game_finale
 from community_bot.helpers import register_telegram_user, resolve_reply_target, user_link
 from community_bot.keyboards import games_menu_keyboard, roulette_invite_keyboard
 from community_bot.texts import GAMES_HELP_TEXT
@@ -71,7 +71,7 @@ async def game_pick_roulette(callback: CallbackQuery) -> None:
 
 
 @router.message(command_or_alias("roulette"))
-async def roulette_invite(message: Message, db: Database, bot: Bot) -> None:
+async def roulette_invite(message: Message, db: Database) -> None:
     if not message.from_user:
         return
     if not await db.feature_enabled("games"):
@@ -87,7 +87,7 @@ async def roulette_invite(message: Message, db: Database, bot: Bot) -> None:
     if int(target["user_id"]) == message.from_user.id:
         await message.answer("Нельзя сыграть с самим собой.")
         return
-    challenger = await register_telegram_user(db, message.from_user)
+    await register_telegram_user(db, message.from_user)
     game_id = await db.create_roulette(message.chat.id, message.from_user.id, int(target["user_id"]), 0)
     with keep_in_chat():
         await answer_block(
@@ -99,13 +99,6 @@ async def roulette_invite(message: Message, db: Database, bot: Bot) -> None:
             parse_mode="HTML",
             reply_markup=roulette_invite_keyboard(game_id),
         )
-    await notify_game_event(
-        bot,
-        message.chat.id,
-        [challenger, target],
-        f"🔫 Рулетка №{game_id}: на кону мут {ROULETTE_MUTE_MINUTES} мин.",
-        f"🔫 Рулетка №{game_id}: примите вызов в чате.",
-    )
 
 
 @router.callback_query(F.data.startswith("roulette:"))
@@ -157,10 +150,3 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
         f"Отлетел: {user_link(int(loser['user_id']), loser_name)} — мут {ROULETTE_MUTE_MINUTES} мин.",
     )
     expire_game_result(callback.message)
-    await notify_game_event(
-        bot,
-        callback.message.chat.id,
-        [winner, loser],
-        f"🔫 Рулетка №{game_id}: мут у {loser_name}.",
-        f"🔫 Рулетка №{game_id} сыграна. Проигравший в муте {ROULETTE_MUTE_MINUTES} мин.",
-    )

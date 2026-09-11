@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Sequence
 from typing import Any
 
-from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import Message
 
 from community_bot.ephemeral import expire_game_result, keep_in_chat
@@ -23,33 +19,6 @@ def mention_fragment(player: dict[str, object]) -> str:
     if username:
         return f"@{username}"
     return user_link(int(player["user_id"]), name)
-
-
-def mentions_line(players: Sequence[dict[str, object]]) -> str:
-    return " ".join(mention_fragment(player) for player in players)
-
-
-async def notify_game_event(
-    bot: Bot,
-    chat_id: int,
-    players: Sequence[dict[str, object]],
-    group_text: str,
-    dm_text: str,
-) -> None:
-    if not players:
-        return
-    tagged = f"{group_text}\n\n{mentions_line(players)}"
-    with keep_in_chat():
-        with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
-            await bot.send_message(
-                chat_id,
-                tagged,
-                parse_mode="HTML",
-                reply_markup=game_hide_keyboard(),
-            )
-    for player in players:
-        with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
-            await bot.send_message(int(player["user_id"]), dm_text, parse_mode="HTML")
 
 
 async def send_game_finale(target: Message, text: str, **kwargs: Any) -> Message:

@@ -233,7 +233,13 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "/botsweep" in guide
     assert "Перезапустить бота" in guide
     assert "Конкурс на печеньки" in guide
+    assert "без комиссии репутации" in guide
     assert "аварийный выключатель" in guide.casefold()
+    from community_bot.texts import GAMES_HELP_TEXT
+
+    assert "без комиссии" in GAMES_HELP_TEXT.casefold()
+    assert "комиссии репутации" not in GAMES_HELP_TEXT
+    assert "банк минус комиссия" not in GAMES_HELP_TEXT
 
 
 async def test_command_or_alias_matches_bare_russian_words() -> None:

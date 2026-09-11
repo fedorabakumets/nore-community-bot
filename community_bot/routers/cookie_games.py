@@ -13,9 +13,8 @@ from community_bot.aliases import command_or_alias, parse_trigger
 from community_bot.blocks import answer_block, edit_block
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import win_after_commission
 from community_bot.ephemeral import expire_game_result, keep_in_chat
-from community_bot.game_notify import notify_game_event, send_game_finale
+from community_bot.game_notify import mention_fragment, send_game_finale
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import (
     COOKIE_STAKE_CHOICES,
@@ -40,7 +39,9 @@ COOKIE_GAMES = {
 COVER_BY_GAME = {"bj": "blackjack", "dice": "dice", "crash": "crash"}
 RANKS = "A23456789TJQK"
 SUITS = "♠♥♦♣"
+TURN_REMIND_AFTER = 45.0
 _CRASH_JOBS: dict[int, asyncio.Task[None]] = {}
+_TURN_JOBS: dict[int, asyncio.Task[None]] = {}
 
 
 def _player_name(player: dict[str, object]) -> str:
@@ -83,11 +84,11 @@ def _lobby_text(game: dict[str, object], players: list[dict[str, object]]) -> st
     names = "\n".join(f"• {user_link(int(player['user_id']), _player_name(player))}" for player in players)
     extra = ""
     if str(game["game_type"]) == "dice":
-        extra = "Один кубик, большее число забирает банк минус комиссия победителя.\n"
+        extra = "Один кубик, большее число забирает весь банк.\n"
     elif str(game["game_type"]) == "crash":
         extra = "Множитель растёт. «Забрать» фиксирует выигрыш до срыва.\n"
     elif str(game["game_type"]) == "bj":
-        extra = "Против дилера Норы. Выигрыш после комиссии репутации.\n"
+        extra = "Против дилера Норы. Победитель забирает банк без комиссии.\n"
     return (
         f"{emoji} <b>{title} на 🍪 · лобби №{game['id']}</b>\n"
         f"{extra}"
@@ -105,8 +106,49 @@ async def _admin_cancel(db: Database, settings: Settings, user_id: int) -> bool:
     return await has_permission(db, settings, user_id, PERM_GAMES)
 
 
-async def _alert(bot: Bot, chat_id: int, players: list[dict[str, object]], group_text: str, dm_text: str) -> None:
-    await notify_game_event(bot, chat_id, players, group_text, dm_text)
+def _cancel_turn_job(game_id: int) -> None:
+    task = _TURN_JOBS.pop(game_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _schedule_turn_reminder(
+    bot: Bot,
+    db: Database,
+    chat_id: int,
+    game_id: int,
+    player: dict[str, object],
+) -> None:
+    user_id = int(player["user_id"])
+    _cancel_turn_job(game_id)
+
+    async def _wait() -> None:
+        current = asyncio.current_task()
+        try:
+            await asyncio.sleep(TURN_REMIND_AFTER)
+            game = await db.get_party_game(game_id)
+            if not game or game["status"] != "active" or str(game["game_type"]) != "bj":
+                return
+            state = dict(game["state"])
+            order = [int(item) for item in state["order"]]
+            turn = int(state["turn"])
+            if turn >= len(order) or order[turn] != user_id:
+                return
+            with keep_in_chat():
+                with suppress(TelegramBadRequest):
+                    await bot.send_message(
+                        chat_id,
+                        f"⏳ {mention_fragment(player)}, партия ждёт ваш ход в блэкджеке.\n"
+                        "Возьмите карту или остановитесь на столе.",
+                        parse_mode="HTML",
+                    )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if _TURN_JOBS.get(game_id) is current:
+                _TURN_JOBS.pop(game_id, None)
+
+    _TURN_JOBS[game_id] = asyncio.create_task(_wait())
 
 
 async def _publish_lobby(
@@ -198,13 +240,6 @@ async def cookie_games_command(
     players = await db.list_game_players(game_id)
     assert game is not None
     await _publish_lobby(message, game, players, new=True)
-    await _alert(
-        message.bot,
-        message.chat.id,
-        players,
-        f"🍪 Лобби №{game_id} открыто. Ставка {int(game['state']['stake'])} 🍪.",
-        f"🍪 Вас ждут в лобби №{game_id}. Ставка {int(game['state']['stake'])} 🍪 уже списана.",
-    )
 
 
 @router.message(command_or_alias("gamecancel"))
@@ -215,20 +250,13 @@ async def cancel_active_game(message: Message, db: Database, settings: Settings)
     if not game:
         await message.answer("Сейчас нет открытой партии на печеньки.")
         return
-    players = await db.list_game_players(int(game["id"]))
     is_admin = await _admin_cancel(db, settings, message.from_user.id)
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
         await message.answer("Отменить может создатель или администратор игр.")
         return
     _cancel_crash_job(int(game["id"]))
+    _cancel_turn_job(int(game["id"]))
     await send_game_finale(message, f"❌ Игра №{game['id']} отменена, 🍪 вернулись игрокам.")
-    await _alert(
-        message.bot,
-        message.chat.id,
-        players,
-        f"❌ Игра №{game['id']} отменена, ставки возвращены.",
-        f"❌ Лобби №{game['id']} отменено. Ваша ставка возвращена.",
-    )
 
 
 @router.callback_query(F.data == "cg:home")
@@ -265,7 +293,7 @@ async def cookie_pick_game(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("cg:new:"))
-async def cookie_new_game(callback: CallbackQuery, db: Database, bot: Bot) -> None:
+async def cookie_new_game(callback: CallbackQuery, db: Database) -> None:
     if not callback.data or not callback.message:
         return
     if not await db.feature_enabled("games"):
@@ -291,17 +319,10 @@ async def cookie_new_game(callback: CallbackQuery, db: Database, bot: Bot) -> No
     assert game is not None
     await callback.answer("Лобби создано, ставка списана.")
     await _publish_lobby(callback.message, game, players, new=True)
-    await _alert(
-        bot,
-        callback.message.chat.id,
-        players,
-        f"🍪 Лобби №{game_id} открыто. Ставка {stake} 🍪.",
-        f"🍪 Вас ждут в лобби №{game_id}. Ставка {stake} 🍪 уже списана.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:join:"))
-async def cookie_join(callback: CallbackQuery, db: Database, bot: Bot) -> None:
+async def cookie_join(callback: CallbackQuery, db: Database) -> None:
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
@@ -319,18 +340,10 @@ async def cookie_join(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     game = await db.get_party_game(game_id)
     assert game is not None
     await _publish_lobby(callback.message, game, players, new=False)
-    joiner = _player_name(next(player for player in players if int(player["user_id"]) == callback.from_user.id))
-    await _alert(
-        bot,
-        callback.message.chat.id,
-        players,
-        f"🍪 {joiner} вошёл в лобби №{game_id}.",
-        f"🍪 {joiner} присоединился к лобби №{game_id}. Ставка списана.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:stake:"))
-async def cookie_change_stake(callback: CallbackQuery, db: Database, bot: Bot) -> None:
+async def cookie_change_stake(callback: CallbackQuery, db: Database) -> None:
     if not callback.data or not callback.message:
         return
     _, _, raw_game_id, raw_stake = callback.data.split(":")
@@ -348,37 +361,23 @@ async def cookie_change_stake(callback: CallbackQuery, db: Database, bot: Bot) -
     assert game is not None
     await callback.answer(f"Ставка теперь {stake} 🍪.")
     await _publish_lobby(callback.message, game, players, new=False)
-    await _alert(
-        bot,
-        callback.message.chat.id,
-        players,
-        f"🍪 Ставка в лобби №{game_id} теперь {stake} 🍪. Печеньки пересчитаны.",
-        f"🍪 Ставка в лобби №{game_id} изменена на {stake} 🍪. Баланс пересчитан.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:cancel:"))
-async def cookie_cancel(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+async def cookie_cancel(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
-    players = await db.list_game_players(game_id)
     is_admin = await _admin_cancel(db, settings, callback.from_user.id)
     if not await db.cancel_party_game(game_id, callback.from_user.id, is_admin):
         await callback.answer("Отменить может создатель или администратор игр.", show_alert=True)
         return
     _cancel_crash_job(game_id)
+    _cancel_turn_job(game_id)
     await callback.answer("Ставки возвращены.")
     await callback.message.edit_reply_markup(reply_markup=None)
     await send_game_finale(callback.message, f"❌ Игра №{game_id} отменена, 🍪 вернулись игрокам.")
     expire_game_result(callback.message)
-    await _alert(
-        bot,
-        callback.message.chat.id,
-        players,
-        f"❌ Игра №{game_id} отменена, ставки возвращены.",
-        f"❌ Лобби №{game_id} отменено. Ваша ставка возвращена.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:start:"))
@@ -428,15 +427,12 @@ async def _start_dice(
     payouts: dict[int, int] = {}
     if len(winners) > 1:
         payouts = {int(player["user_id"]): stake for player in players}
-        lines.append("\nНичья — ставки вернулись без комиссии.")
+        lines.append("\nНичья — ставки вернулись.")
     else:
         winner = winners[0]
-        stored = await db.get_user(int(winner["user_id"]))
-        net, percent = win_after_commission(pot, int(stored["reputation"]) if stored else 0)
-        payouts[int(winner["user_id"])] = net
+        payouts[int(winner["user_id"])] = pot
         lines.append(
-            f"\n🏆 Банк <b>{pot} 🍪</b> забирает {user_link(int(winner['user_id']), _player_name(winner))} "
-            f"— <b>{net} 🍪</b> после комиссии {percent}%."
+            f"\n🏆 Банк <b>{pot} 🍪</b> забирает {user_link(int(winner['user_id']), _player_name(winner))}."
         )
     await db.save_party_state(int(game["id"]), {**game["state"], "phase": "done", "rolls": [item[0] for item in rolls]})
     await db.payout_staked_game(int(game["id"]), payouts)
@@ -444,13 +440,6 @@ async def _start_dice(
     await callback.message.edit_reply_markup(reply_markup=None)
     await send_game_finale(callback.message, "\n".join(lines))
     expire_game_result(callback.message)
-    await _alert(
-        callback.message.bot,
-        callback.message.chat.id,
-        players,
-        f"🎲 Кубик №{game['id']} сыгран.",
-        f"🎲 Итог кубика №{game['id']}. Смотрите чат.",
-    )
 
 
 async def _crash_board(state: dict[str, object], players: list[dict[str, object]], crashed: bool = False) -> str:
@@ -469,9 +458,7 @@ async def _crash_board(state: dict[str, object], players: list[dict[str, object]
         info = cashed.get(str(uid))
         name = user_link(uid, _player_name(player))
         if info:
-            lines.append(
-                f"• {name}: забрал ×{float(info['mult']):.2f} → <b>{int(info['net'])} 🍪</b> (−{int(info['percent'])}%)"
-            )
+            lines.append(f"• {name}: забрал ×{float(info['mult']):.2f} → <b>{int(info['net'])} 🍪</b>")
         else:
             flying.append(name)
     if flying and not crashed:
@@ -507,16 +494,9 @@ async def _finish_crash(message: Message, db: Database, game_id: int, crash_at: 
     await send_game_finale(
         message,
         f"💥 <b>Рейс сорвался на ×{crash_at:.2f}</b>\n"
-        + ("Кто успел — забрал после комиссии. Кто нет — ставка сгорела."),
+        + ("Кто успел — забрал выигрыш. Кто нет — ставка сгорела."),
     )
     expire_game_result(message)
-    await _alert(
-        message.bot,
-        message.chat.id,
-        players,
-        f"🚀 Рейс №{game_id} сорвался на ×{crash_at:.2f}.",
-        f"🚀 Итог рейса №{game_id}. Смотрите выплату в чате.",
-    )
 
 
 async def _crash_loop(message: Message, db: Database, game_id: int, crash_at: float) -> None:
@@ -585,13 +565,6 @@ async def _start_crash(
     )
     task = asyncio.create_task(_crash_loop(callback.message, db, int(game["id"]), crash_at))
     _CRASH_JOBS[int(game["id"])] = task
-    await _alert(
-        callback.message.bot,
-        callback.message.chat.id,
-        players,
-        f"🚀 Рейс №{game['id']} взлетел. Забирайте, пока не сорвался.",
-        f"🚀 Рейс №{game['id']} в воздухе. Жмите «Забрать» в чате.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:cash:"))
@@ -648,20 +621,7 @@ async def _start_blackjack(
         reply_markup=blackjack_turn_keyboard(int(game["id"])),
     )
     current = next(player for player in players if int(player["user_id"]) == order[0])
-    await _alert(
-        callback.message.bot,
-        callback.message.chat.id,
-        players,
-        f"🃏 Блэкджек №{game['id']} начался. Первый ход: {_player_name(current)}.",
-        f"🃏 Блэкджек №{game['id']} начался. Карты на столе в чате.",
-    )
-    await notify_game_event(
-        callback.message.bot,
-        callback.message.chat.id,
-        [current],
-        f"👉 {_player_name(current)}, ваш ход в блэкджеке.",
-        "👉 Сейчас ваш ход в блэкджеке: взять карту или остановиться.",
-    )
+    await _schedule_turn_reminder(callback.message.bot, db, callback.message.chat.id, int(game["id"]), current)
 
 
 def _blackjack_board(state: dict[str, object], players: list[dict[str, object]], hide_dealer: bool) -> str:
@@ -696,6 +656,7 @@ def _blackjack_board(state: dict[str, object], players: list[dict[str, object]],
 
 async def _notify_blackjack_turn(
     bot: Bot,
+    db: Database,
     chat_id: int,
     state: dict[str, object],
     players: list[dict[str, object]],
@@ -704,17 +665,13 @@ async def _notify_blackjack_turn(
     order = [int(item) for item in state["order"]]
     turn = int(state["turn"])
     if turn >= len(order):
+        _cancel_turn_job(game_id)
         return
     current = next((player for player in players if int(player["user_id"]) == order[turn]), None)
     if not current:
+        _cancel_turn_job(game_id)
         return
-    await notify_game_event(
-        bot,
-        chat_id,
-        [current],
-        f"👉 {_player_name(current)}, ваш ход в блэкджеке №{game_id}.",
-        "👉 Сейчас ваш ход в блэкджеке: взять карту или остановиться.",
-    )
+    await _schedule_turn_reminder(bot, db, chat_id, game_id, current)
 
 
 async def _finish_blackjack(message: Message, db: Database, game_id: int) -> None:
@@ -756,16 +713,15 @@ async def _finish_blackjack(message: Message, db: Database, game_id: int) -> Non
         share, remainder = divmod(prize_pool, len(winners))
         for index, uid in enumerate(winners):
             gross = share + (remainder if index == 0 else 0)
-            stored = await db.get_user(uid)
-            net, percent = win_after_commission(gross, int(stored["reputation"]) if stored else 0)
-            payouts[uid] = payouts.get(uid, 0) + net
-            results.append(f"  ↳ выплата {net} 🍪 после комиссии {percent}%")
+            payouts[uid] = payouts.get(uid, 0) + gross
+            results.append(f"  ↳ выплата {gross} 🍪")
     elif not pushes:
         payouts = {int(user_id): stake for user_id in state["order"]}
         results.append("\nВсе проиграли дилеру — ставки возвращены, печеньки не сжигаем.")
     state["phase"] = "done"
     await db.save_party_state(game_id, state)
     await db.payout_staked_game(game_id, payouts)
+    _cancel_turn_job(game_id)
     dealer_text = f"{_cards_text(dealer)} · <b>{dealer_value}</b>" + (" — перебор" if dealer_bust else "")
     with suppress(TelegramBadRequest):
         await message.edit_reply_markup(reply_markup=None)
@@ -775,13 +731,6 @@ async def _finish_blackjack(message: Message, db: Database, game_id: int) -> Non
         f"Дилер: {dealer_text}\n\n" + "\n".join(results),
     )
     expire_game_result(message)
-    await _alert(
-        message.bot,
-        message.chat.id,
-        players,
-        f"🃏 Блэкджек №{game_id} завершён. Смотрите итог в чате.",
-        f"🃏 Итог блэкджека №{game_id} готов. Загляните в чат за выплатой.",
-    )
 
 
 @router.callback_query(F.data.startswith("cg:hit:"))
@@ -811,10 +760,15 @@ async def blackjack_hit(callback: CallbackQuery, db: Database) -> None:
         if int(state["turn"]) >= len(order):
             await _finish_blackjack(callback.message, db, game_id)
             return
-        await _notify_blackjack_turn(callback.message.bot, callback.message.chat.id, state, players, game_id)
+        await _notify_blackjack_turn(
+            callback.message.bot, db, callback.message.chat.id, state, players, game_id
+        )
     else:
         await db.save_party_state(game_id, state)
         await callback.answer("Ещё карта.")
+        await _notify_blackjack_turn(
+            callback.message.bot, db, callback.message.chat.id, state, players, game_id
+        )
     await edit_block(
         callback.message,
         _blackjack_board(state, players, hide_dealer=True),
@@ -851,4 +805,4 @@ async def blackjack_stand(callback: CallbackQuery, db: Database) -> None:
         parse_mode="HTML",
         reply_markup=blackjack_turn_keyboard(game_id),
     )
-    await _notify_blackjack_turn(callback.message.bot, callback.message.chat.id, state, players, game_id)
+    await _notify_blackjack_turn(callback.message.bot, db, callback.message.chat.id, state, players, game_id)
