@@ -57,7 +57,7 @@ SUPPORT_PRICE=0
 RESTRICTED_REPUTATION_THRESHOLD=0
 TIMEZONE=Europe/Moscow
 COOKIE_PRICE_RUB=10
-SBP_PAYMENT_URL=
+SBP_PAYMENT_URL=https://www.sberbank.com/sms/pbpn?requisiteNumber=79533571508
 FREEBIE_CHANNEL_ID=0
 FREEBIE_CHANNEL_URL=
 ```
@@ -66,13 +66,13 @@ FREEBIE_CHANNEL_URL=
 - `OWNER_ID` — Telegram ID нового владельца.
 - `MODERATOR_IDS` — ID модераторов через запятую.
 - `COMMUNITY_CHAT_ID` — ID группы, обычно начинается с `-100`.
-- `SBP_PAYMENT_URL` — СБП-ссылка нового продавца.
+- `SBP_PAYMENT_URL` — СБП-ссылка. По умолчанию перевод на `79533571508`.
 - `FREEBIE_CHANNEL_ID` и `FREEBIE_CHANNEL_URL` — ID и ссылка канала для бонуса.
 - `WELCOME_COVER` принимает Telegram `file_id`, URL или путь к файлу внутри контейнера.
 - `RESTRICTED_REPUTATION_THRESHOLD=70` блокирует общение ниже 70; `0` ограничивает только отрицательную репутацию.
 
-Пока `SBP_PAYMENT_URL` или `FREEBIE_CHANNEL_URL` пусты, соответствующая функция покажет понятное сообщение
-о незавершённой настройке и не создаст невалидную Telegram-кнопку.
+Пока `FREEBIE_CHANNEL_URL` пуст, халява покажет понятное сообщение о незавершённой настройке
+и не создаст невалидную Telegram-кнопку.
 
 ## Запуск на новом VPS
 

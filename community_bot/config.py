@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+DEFAULT_SBP_PAYMENT_URL = "https://www.sberbank.com/sms/pbpn?requisiteNumber=79533571508"
+
 
 def _as_int(name: str, default: int = 0) -> int:
     raw = os.getenv(name, str(default)).strip()
@@ -70,7 +72,7 @@ def load_settings() -> Settings:
         restricted_reputation_threshold=_as_int("RESTRICTED_REPUTATION_THRESHOLD"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip(),
         cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 10)),
-        sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip(),
+        sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip() or DEFAULT_SBP_PAYMENT_URL,
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),
         community_invite_url=os.getenv(
