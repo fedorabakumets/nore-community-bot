@@ -37,7 +37,7 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
     await message.answer(
-        "Это личный кабинет. Снизу: синее «Меню», зелёный «Магазин», прозрачный «Кошелёк» и красный «Тикет».",
+        "Можно открыть профиль, магазин, кошелёк или написать тикет.",
         reply_markup=main_private_keyboard(),
     )
 
@@ -99,9 +99,8 @@ async def _show_inline_menu(message: Message, db: Database, settings: Settings) 
     await answer_block(
         message,
         "cabinet",
-        "📋 <b>Личный кабинет НОРЫ</b>\n\n"
-        "Профиль, верификация, уведомления, магазин и тикет.\n"
-        "Снизу: синее «Меню», зелёный «Магазин», прозрачный «Кошелёк», красный «Тикет».",
+        "📋 <b>Меню</b>\n\n"
+        "Профиль, верификация, уведомления, магазин, тамагочи, кошелёк и тикет.",
         parse_mode="HTML",
         reply_markup=private_menu_keyboard(show_admin, show_apply=show_apply),
     )
@@ -250,7 +249,4 @@ async def shop_close(callback: CallbackQuery) -> None:
 
 
 def with_flow_prompt(text: str) -> str:
-    return (
-        f"{text}\n\nСнизу — синее «Меню», зелёный «Магазин», прозрачный «Кошелёк» и красный «Тикет», "
-        "они всегда работают."
-    )
+    return text

@@ -1054,7 +1054,7 @@ async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, setting
     )
     if callback.message.chat.type == "private":
         await callback.message.answer(
-            "Чтобы выйти — зелёный «Профиль» или синее «Меню» снизу.",
+            "Чтобы отменить оплату, напишите /close или откройте меню.",
             reply_markup=flow_reply_keyboard(),
         )
 

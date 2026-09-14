@@ -132,35 +132,35 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
 async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
     cover = settings.welcome_cover
     user_id = message.from_user.id if message.from_user else 0
+    apply_markup = None
     if await db.has_approved_application(user_id):
-        inline = None
         text = WELCOME_MEMBER_TEXT
     elif await db.has_pending_application(user_id):
-        inline = None
         text = WELCOME_PENDING_TEXT
     else:
-        inline = start_apply_keyboard()
+        apply_markup = start_apply_keyboard()
         text = WELCOME_TEXT
+    first_markup = apply_markup or reply_markup
     if not cover:
-        await message.answer(text, reply_markup=inline, parse_mode="HTML")
-        await message.answer(
-            "Это личный кабинет. Снизу всегда: синее «Меню», зелёный «Магазин», "
-            "прозрачный «Кошелёк» и красный «Тикет».",
-            reply_markup=reply_markup,
-        )
+        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
+        if apply_markup:
+            await message.answer(
+                "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
+                reply_markup=reply_markup,
+            )
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
         source = FSInputFile(cover)
     try:
-        await message.answer_photo(source, caption=text, reply_markup=inline, parse_mode="HTML")
+        await message.answer_photo(source, caption=text, reply_markup=first_markup, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
-        await message.answer(text, reply_markup=inline, parse_mode="HTML")
-    await message.answer(
-        "Это личный кабинет. Снизу всегда: синее «Меню», зелёный «Магазин», "
-        "прозрачный «Кошелёк» и красный «Тикет».",
-        reply_markup=reply_markup,
-    )
+        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
+    if apply_markup:
+        await message.answer(
+            "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
+            reply_markup=reply_markup,
+        )
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
@@ -2527,9 +2527,9 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
     await answer_block(
         message,
         "ticket",
-        f"🎫 <b>Личный кабинет · тикет №{ticket_id}</b>\n"
+        f"🎫 <b>Тикет №{ticket_id}</b>\n"
         "Отправьте вопрос, фото или файл. Все следующие сообщения попадут модераторам.\n"
-        "Снизу — кнопки кабинета, либо команда /close.",
+        "Закрыть тикет: /close.",
         parse_mode="HTML",
         reply_markup=flow_reply_keyboard(),
     )

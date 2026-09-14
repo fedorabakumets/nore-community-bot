@@ -127,7 +127,7 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
     markup = flow_reply_keyboard() if callback.message.chat.type == "private" else None
     await callback.message.answer(
         f"Вы выбрали {emoji} {label}. Как его назвать? До 24 символов.\n"
-        "Снизу можно отменить.",
+        "Чтобы отменить, откройте меню.",
         reply_markup=markup,
     )
 

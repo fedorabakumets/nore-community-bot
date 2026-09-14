@@ -131,3 +131,29 @@ async def test_wallet_table_lists_cookies_and_fee() -> None:
     assert "Долг" in text
     assert "Итого" in text
     assert "Комиссия" in text
+
+
+def test_private_copy_describes_blocks_not_button_colors() -> None:
+    from community_bot.texts import (
+        APPLICATION_INTRO,
+        GROUP_COMMANDS_TEXT,
+        STORE_HELP_TEXT,
+        WELCOME_MEMBER_TEXT,
+        WELCOME_PENDING_TEXT,
+        WELCOME_TEXT,
+    )
+
+    blob = "\n".join(
+        [
+            WELCOME_TEXT,
+            WELCOME_PENDING_TEXT,
+            WELCOME_MEMBER_TEXT,
+            APPLICATION_INTRO,
+            GROUP_COMMANDS_TEXT,
+            STORE_HELP_TEXT,
+        ]
+    ).casefold()
+    assert "синее" not in blob
+    assert "прозрачный" not in blob
+    assert "зелёный «магазин»" not in blob
+    assert "красный «тикет»" not in blob

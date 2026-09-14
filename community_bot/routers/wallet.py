@@ -87,7 +87,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
         "</pre>"
     )
     lines = [
-        "💼 <b>Личный кабинет · кошелёк</b>",
+        "💼 <b>Кошелёк</b>",
         "",
         table,
         "",
