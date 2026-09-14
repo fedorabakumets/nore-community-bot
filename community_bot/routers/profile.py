@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from community_bot.aliases import command_or_alias
-from community_bot.blocks import answer_block, cover_file
+from community_bot.blocks import cover_file, replace_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
@@ -16,12 +16,12 @@ from community_bot.helpers import (
     resolve_reply_target,
 )
 from community_bot.keyboards import (
+    compact_profile_keyboard,
     flow_reply_keyboard,
     profile_keyboard,
     public_profile_keyboard,
-    verification_keyboard,
 )
-from community_bot.profile_fill import notices_text, verification_text
+from community_bot.profile_fill import cabinet_profile_text
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 
@@ -35,8 +35,22 @@ async def send_profile_card(
     *,
     editable: bool,
     text: str,
-) -> Message:
+    replace: bool = False,
+) -> Message | None:
     user_id = int(user["user_id"])
+    private_chat = getattr(message.chat, "type", None) == "private"
+    if editable and private_chat:
+        text = cabinet_profile_text(user)
+        markup = compact_profile_keyboard(user)
+        if replace:
+            return await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
+        cover = cover_file("profile")
+        if cover:
+            try:
+                return await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
+            except TelegramBadRequest:
+                pass
+        return await message.answer(text, parse_mode="HTML", reply_markup=markup)
     markup = (
         profile_keyboard(user_id, bool(user.get("profile_private")))
         if editable
@@ -164,7 +178,7 @@ async def edit_profile_bio(message: Message, state: FSMContext, db: Database, se
         return
     await db.update_profile(message.from_user.id, "profile_bio", text)
     await state.clear()
-    await message.answer("Описание сохранено. Откройте «Верификация» — шкала обновится.")
+    await message.answer("Описание сохранено.")
     if message.chat.type == "private":
         await restore_private_menu(message, db, settings)
 
@@ -196,30 +210,41 @@ async def edit_profile_avatar(message: Message, state: FSMContext, db: Database,
 
 
 @router.callback_query(F.data == "menu:verify")
-async def menu_verify(callback: CallbackQuery, db: Database) -> None:
+async def menu_verify(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await send_profile_card(callback.message, user, settings, editable=True, text="", replace=True)
+
+
+@router.callback_query(F.data == "p:rules")
+async def profile_rules(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    user = await register_telegram_user(db, callback.from_user)
+    await callback.answer()
+    await replace_block(
         callback.message,
-        "verify",
-        verification_text(user),
+        "profile",
+        "Пять блоков профиля: имя, возраст, увлечения, описание и фото.\n"
+        "Без 100% репутация не выше серебра. Подробности — /commands.",
         parse_mode="HTML",
-        reply_markup=verification_keyboard(),
+        reply_markup=compact_profile_keyboard(user),
     )
 
 
-@router.callback_query(F.data == "menu:notices")
-async def menu_notices(callback: CallbackQuery, db: Database) -> None:
+@router.callback_query(F.data == "p:warn")
+async def profile_warn(callback: CallbackQuery, db: Database) -> None:
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await replace_block(
         callback.message,
-        "notify",
-        notices_text(user),
+        "profile",
+        "Предупреждение за пустое описание выдано всем при обновлении.\n"
+        "Оно навсегда: заполнение описания шкалу поднимает, предупреждение не снимает.",
         parse_mode="HTML",
-        reply_markup=verification_keyboard(),
+        reply_markup=compact_profile_keyboard(user),
     )

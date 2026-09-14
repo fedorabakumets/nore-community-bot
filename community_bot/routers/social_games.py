@@ -563,6 +563,9 @@ async def _finish_mafia(
     await db.complete_party_game(game_id)
     await send_game_finale(message, "\n".join(lines))
     expire_game_result(message)
+    from community_bot.notify import emit_many
+
+    await emit_many(message.bot, db, [int(player["user_id"]) for player in players], "games", "🕶 Мафия окончена.")
 
 
 @router.callback_query(F.data.startswith("maf:"))
@@ -794,6 +797,9 @@ async def _finish_bunker(
     await db.complete_party_game(game_id)
     await send_game_finale(message, text)
     expire_game_result(message)
+    from community_bot.notify import emit_many
+
+    await emit_many(message.bot, db, [int(player["user_id"]) for player in players], "games", "🛡 Бункер закрыт.")
 
 
 @router.callback_query(F.data.startswith("bk:open:"))

@@ -187,10 +187,10 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 10
+    assert latest.number == 11
     text = updates_text()
+    assert "№11" in text
     assert "№10" in text
-    assert "№8" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
@@ -218,11 +218,11 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №10" in pin
+    assert "Обновление №11" in pin
     details = member_details_text(latest)
+    assert "кабинет" in details.casefold()
+    assert "уведомлен" in details.casefold()
     assert "мафия" in details.casefold()
-    assert "бункер" in details.casefold()
-    assert "верификац" in details.casefold()
     assert "админка" not in details.casefold()
     assert "Пример." in details
     staff = staff_announcement(latest)

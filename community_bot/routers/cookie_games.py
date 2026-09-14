@@ -80,6 +80,12 @@ def _cover(game_type: str) -> str:
     return COVER_BY_GAME.get(game_type, "games")
 
 
+async def _emit_game(bot: Bot, db: Database, players: list[dict[str, object]], text: str) -> None:
+    from community_bot.notify import emit_many
+
+    await emit_many(bot, db, [int(player["user_id"]) for player in players], "games", text)
+
+
 def _lobby_text(game: dict[str, object], players: list[dict[str, object]]) -> str:
     emoji, title, minimum, maximum = COOKIE_GAMES[str(game["game_type"])]
     stake = int((game.get("state") or {}).get("stake") or 0)
@@ -491,6 +497,7 @@ async def _start_dice(
     await callback.message.edit_reply_markup(reply_markup=None)
     await send_game_finale(callback.message, "\n".join(lines))
     expire_game_result(callback.message)
+    await _emit_game(callback.message.bot, db, players, "🎲 Кубик · партия окончена.")
 
 
 async def _crash_board(state: dict[str, object], players: list[dict[str, object]], crashed: bool = False) -> str:
@@ -548,6 +555,7 @@ async def _finish_crash(message: Message, db: Database, game_id: int, crash_at: 
         + ("Кто успел — забрал выигрыш. Кто нет — ставка сгорела."),
     )
     expire_game_result(message)
+    await _emit_game(message.bot, db, players, "🚀 Рейс · партия окончена.")
 
 
 async def _crash_loop(message: Message, db: Database, game_id: int, crash_at: float) -> None:
@@ -616,6 +624,7 @@ async def _start_crash(
     )
     task = asyncio.create_task(_crash_loop(callback.message, db, int(game["id"]), crash_at))
     _CRASH_JOBS[int(game["id"])] = task
+    await _emit_game(callback.message.bot, db, players, "🚀 Рейс начался.")
 
 
 @router.callback_query(F.data.startswith("cg:cash:"))
@@ -673,6 +682,16 @@ async def _start_blackjack(
     )
     current = next(player for player in players if int(player["user_id"]) == order[0])
     await _schedule_turn_reminder(callback.message.bot, db, callback.message.chat.id, int(game["id"]), current)
+    await _emit_game(callback.message.bot, db, players, "🃏 Блэкджек начался.")
+    from community_bot.notify import emit
+
+    await emit(
+        callback.message.bot,
+        db,
+        int(current["user_id"]),
+        "games",
+        "🃏 Блэкджек · ваш ход.",
+    )
 
 
 def _blackjack_board(state: dict[str, object], players: list[dict[str, object]], hide_dealer: bool) -> str:
@@ -723,6 +742,9 @@ async def _notify_blackjack_turn(
         _cancel_turn_job(game_id)
         return
     await _schedule_turn_reminder(bot, db, chat_id, game_id, current)
+    from community_bot.notify import emit
+
+    await emit(bot, db, int(current["user_id"]), "games", "🃏 Блэкджек · ваш ход.")
 
 
 async def _finish_blackjack(message: Message, db: Database, game_id: int) -> None:
@@ -782,6 +804,7 @@ async def _finish_blackjack(message: Message, db: Database, game_id: int) -> Non
         f"Дилер: {dealer_text}\n\n" + "\n".join(results),
     )
     expire_game_result(message)
+    await _emit_game(message.bot, db, players, "🃏 Блэкджек · партия окончена.")
 
 
 @router.callback_query(F.data.startswith("cg:hit:"))
@@ -973,6 +996,8 @@ async def _finish_trap(
         await message.edit_reply_markup(reply_markup=None)
     await send_game_finale(message, finale)
     expire_game_result(message)
+    players = await db.list_game_players(game_id)
+    await _emit_game(message.bot, db, players, "🪤 Капкан · партия окончена.")
 
 
 async def _resolve_trap_round(message: Message, db: Database, game_id: int) -> bool:
@@ -1110,6 +1135,7 @@ async def _start_trap(
         reply_markup=trap_keyboard(int(game["id"])),
     )
     _start_trap_loop(callback.message, db, int(game["id"]))
+    await _emit_game(callback.message.bot, db, players, "🪤 Капкан начался.")
 
 
 @router.callback_query(F.data.startswith("cg:door:"))

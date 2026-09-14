@@ -549,6 +549,10 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
         f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
         parse_mode="HTML",
     )
+    if pet_line and "перехватил" in pet_line:
+        from community_bot.notify import emit
+
+        await emit(bot, db, target_id, "pet", pet_line)
     if new_value < settings.restricted_reputation_threshold:
         try:
             await bot.restrict_chat_member(
@@ -1205,7 +1209,8 @@ async def buy_shop_item(
 
         label = ITEM_LABELS.get(item, item)
         await callback.answer()
-        await callback.message.answer(
+        await edit_block(
+            callback.message,
             f"🛒 <b>Подтверждение покупки</b>\n"
             f"{html.escape(label)}\n"
             f"Цена: <b>{price} 🍪</b>\n"
@@ -1254,11 +1259,19 @@ async def buy_shop_item(
             await callback.answer(error, show_alert=True)
             return
         await callback.answer("Питомец доволен!")
-        await db.consume_vitrine(item)
+        from community_bot.notify import vitrine_consumed
+
+        await vitrine_consumed(bot, db, item)
         from community_bot.life import unlock
 
         await unlock(db, callback.from_user.id, "shop_first")
-        await callback.message.answer(f"✅ {label}: +{gain} к шкале. Списано {price} 🍪.")
+        fresh = await db.get_user(callback.from_user.id) or user
+        await edit_block(
+            callback.message,
+            _shop_home_text(fresh, settings),
+            parse_mode="HTML",
+            reply_markup=await _shop_home_markup(db),
+        )
         return
     if item == "custom_status":
         if int(user["cookies"]) < price:
@@ -1279,12 +1292,20 @@ async def buy_shop_item(
             return
         hours = IMMUNITY_HOURS[item]
         await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=hours))
-        await db.consume_vitrine(item)
+        from community_bot.notify import vitrine_consumed
+
+        await vitrine_consumed(bot, db, item)
         from community_bot.life import unlock
 
         await unlock(db, callback.from_user.id, "shop_first")
         await callback.answer("Покупка выполнена.")
-        await callback.message.answer(f"✅ Иммунитет от −репа включён на {hours} ч. Списано {price} 🍪.")
+        fresh = await db.get_user(callback.from_user.id) or user
+        await edit_block(
+            callback.message,
+            _shop_home_text(fresh, settings),
+            parse_mode="HTML",
+            reply_markup=await _shop_home_markup(db),
+        )
         return
     if item in TITLE_ITEMS:
         ok, error = await db.buy_item(callback.from_user.id, item, price)
@@ -1292,12 +1313,20 @@ async def buy_shop_item(
             await callback.answer(error, show_alert=True)
             return
         await db.update_profile(callback.from_user.id, "profile_title", TITLE_ITEMS[item])
-        await db.consume_vitrine(item)
+        from community_bot.notify import vitrine_consumed
+
+        await vitrine_consumed(bot, db, item)
         from community_bot.life import unlock
 
         await unlock(db, callback.from_user.id, "shop_first")
         await callback.answer("Титул надет.")
-        await callback.message.answer(f"✅ Титул «{html.escape(TITLE_ITEMS[item])}». Списано {price} 🍪.")
+        fresh = await db.get_user(callback.from_user.id) or user
+        await edit_block(
+            callback.message,
+            _shop_home_text(fresh, settings),
+            parse_mode="HTML",
+            reply_markup=await _shop_home_markup(db),
+        )
         return
     if item == "private_profile" and user.get("profile_private"):
         await callback.answer("Профиль уже скрыт.", show_alert=True)
@@ -1338,12 +1367,20 @@ async def buy_shop_item(
         "ornate_profile": "Кастомное оформление профиля включено.",
         "season_pack": "Сезонный набор: щит и обед питомцу.",
     }
-    await db.consume_vitrine(item)
+    from community_bot.notify import vitrine_consumed
+
+    await vitrine_consumed(bot, db, item)
     from community_bot.life import unlock
 
     await unlock(db, callback.from_user.id, "shop_first")
-    await callback.answer("Покупка выполнена.")
-    await callback.message.answer(f"✅ {labels[item]} Списано {price} 🍪.")
+    await callback.answer(labels.get(item, "Покупка выполнена."))
+    fresh = await db.get_user(callback.from_user.id) or user
+    await edit_block(
+        callback.message,
+        _shop_home_text(fresh, settings),
+        parse_mode="HTML",
+        reply_markup=await _shop_home_markup(db),
+    )
 
 
 @router.message(FlexiblePurchase.amount)
@@ -1645,6 +1682,10 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
         parse_mode="HTML",
     )
+    if pet_line and "перехватил" in pet_line:
+        from community_bot.notify import emit
+
+        await emit(bot, db, int(target["user_id"]), "pet", pet_line)
     if new_value < settings.restricted_reputation_threshold:
         try:
             await bot.restrict_chat_member(

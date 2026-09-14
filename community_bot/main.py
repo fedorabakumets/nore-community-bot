@@ -30,6 +30,7 @@ from community_bot.routers import (
     games_router,
     group_router,
     life_router,
+    notices_router,
     pets_router,
     private_router,
     profile_router,
@@ -276,7 +277,18 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                     with contextlib.suppress(Exception):
                         await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
                         sent = True
-                if sent:
+                pet_name = html.escape(str(pet["name"]))
+                if payout:
+                    if pet.get("expedition_done"):
+                        dm_text = f"🌲 <b>{pet_name}</b> вернулся из леса: +{payout} 🍪."
+                    else:
+                        dm_text = f"🍪 <b>{pet_name}</b> принёс печеньку: +{payout} 🍪."
+                else:
+                    dm_text = f"💤 <b>{pet_name}</b> свернулся: нужно покормить или напоить."
+                from community_bot.notify import emit
+
+                dm_sent = await emit(bot, db, user_id, "pet", dm_text)
+                if sent or dm_sent:
                     await db.execute(
                         "UPDATE pets SET last_notice_at = ?, updated_at = ? WHERE user_id = ?",
                         (now.isoformat(), now.isoformat(), user_id),
@@ -320,6 +332,27 @@ async def weekly_board_job(db: Database, settings: Settings, bot: Bot) -> None:
 
             await unlock(db, int(row["user_id"]), "board")
         await db.set_bot_state("last_weekly_board", week_id)
+
+
+async def notify_digest_job(db: Database, bot: Bot, settings: Settings) -> None:
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        target = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep(max(1, (target - now).total_seconds()))
+        day = datetime.now(timezone).date().isoformat()
+        last = await db.get_bot_state("notify_digest_day")
+        if last == day:
+            continue
+        from community_bot.notify import deliver_digests
+
+        try:
+            await deliver_digests(bot, db)
+            await db.set_bot_state("notify_digest_day", day)
+        except Exception:
+            logger.exception("Ошибка дайджеста уведомлений")
 
 
 async def cookie_loan_job(db: Database, bot: Bot) -> None:
@@ -370,6 +403,7 @@ async def main() -> None:
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)
+    dispatcher.include_router(notices_router)
     dispatcher.include_router(wallet_router)
     dispatcher.include_router(cookie_games_router)
     dispatcher.include_router(social_games_router)
@@ -390,6 +424,7 @@ async def main() -> None:
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
+    digest_task = asyncio.create_task(notify_digest_job(db, bot, settings))
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
@@ -407,6 +442,7 @@ async def main() -> None:
             reputation_task,
             scheduled_task,
             pet_task,
+            digest_task,
             loan_task,
             board_task,
             emergency_task,
@@ -418,6 +454,7 @@ async def main() -> None:
                 reputation_task,
                 scheduled_task,
                 pet_task,
+                digest_task,
                 loan_task,
                 board_task,
                 emergency_task,

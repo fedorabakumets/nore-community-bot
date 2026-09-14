@@ -175,7 +175,7 @@ def test_member_announcement_omits_staff() -> None:
     pin = community_announcement(item)
     details = member_details_text(item)
     nodes = str(member_details_nodes(item))
-    assert "Обновление №10" in pin
+    assert "Обновление №11" in pin
     assert len(pin) <= 1024
     assert "Админ" not in pin
     assert "четыре комнаты" not in details.casefold()
@@ -183,7 +183,7 @@ def test_member_announcement_omits_staff() -> None:
     assert "личный кабинет" in details.casefold() or "кабинет" in details.casefold()
     assert "мафия" in details.casefold()
     assert "Пример." in details
-    assert "Обновление №10" in details
+    assert "Обновление №11" in details
     from community_bot.updates import staff_announcement
 
     staff = staff_announcement(item)
@@ -300,9 +300,9 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Обновление №10" in sent[0].text
+    assert "Обновление №11" in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "10:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "11:photo-v1"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -321,7 +321,7 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "10:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "11:photo-v1"
 
 
 def test_update_cover_renders_number(tmp_path) -> None:

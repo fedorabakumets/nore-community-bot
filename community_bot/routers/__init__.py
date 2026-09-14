@@ -4,6 +4,7 @@ from community_bot.routers.flows import router as flows_router
 from community_bot.routers.games import router as games_router
 from community_bot.routers.group import router as group_router
 from community_bot.routers.life import router as life_router
+from community_bot.routers.notices import router as notices_router
 from community_bot.routers.pets import router as pets_router
 from community_bot.routers.private import router as private_router
 from community_bot.routers.profile import router as profile_router
@@ -17,6 +18,7 @@ __all__ = [
     "games_router",
     "group_router",
     "life_router",
+    "notices_router",
     "pets_router",
     "private_router",
     "profile_router",

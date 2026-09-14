@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Any
 
 from community_bot.domain import AUTO_REPUTATION_CAP
@@ -64,6 +65,19 @@ def profile_notices(user: dict[str, Any]) -> list[str]:
             "Репутацию нельзя поднять выше серебра, пока карточка не будет на 100%."
         )
     return notices
+
+
+def cabinet_profile_text(user: dict[str, Any]) -> str:
+    percent = profile_fill_percent(user)
+    name = str(user.get("profile_name") or user.get("telegram_name") or user.get("user_id") or "")
+    lines = [
+        f"<b>Профиль</b> · {html.escape(name)} · {percent}%",
+        f"<code>{progress_bar(percent)}</code>",
+        f"{percent}% заполнения. Без 100% репутация не выше серебра.",
+    ]
+    if int(user.get("bio_warning") or 0):
+        lines.append("Предупреждение за описание — навсегда.")
+    return "\n".join(lines)
 
 
 def verification_text(user: dict[str, Any]) -> str:

@@ -14,9 +14,15 @@ def test_apply_hidden_when_requested() -> None:
         for row in private_menu_keyboard(show_apply=False).inline_keyboard
         for button in row
     ]
-    assert "menu:apply" in shown
+    assert "menu:apply" not in shown
     assert "menu:apply" not in hidden
-    assert "menu:question" in hidden
+    assert "menu:question" not in hidden
+    assert "menu:shop" not in shown
+    assert "menu:wallet" not in shown
+    assert "menu:verify" not in shown
+    assert "menu:profile" in shown
+    assert "menu:pet" in shown
+    assert "menu:notices" in shown
 
 
 def test_contest_button_only_with_permission() -> None:

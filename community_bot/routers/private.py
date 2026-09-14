@@ -292,7 +292,7 @@ async def menu_profile(callback: CallbackQuery, db: Database, settings: Settings
     user = await register_telegram_user(db, callback.from_user)
     text = await render_profile(db, settings, user)
     await callback.answer()
-    await send_profile_card(callback.message, user, settings, editable=True, text=text)
+    await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True)
 
 
 @router.callback_query(F.data == "menu:wallet")
@@ -343,7 +343,7 @@ async def menu_pet(callback: CallbackQuery, db: Database) -> None:
     from community_bot.routers.pets import _show_pet
 
     await callback.answer()
-    await _show_pet(callback.message, db, callback.from_user.id)
+    await _show_pet(callback.message, db, callback.from_user.id, replace=True)
 
 
 @router.callback_query(F.data == "menu:admin")
@@ -1739,6 +1739,14 @@ async def admin_save_user_edit(
             extra.append(f"{hours} ч")
         suffix = f" ({', '.join(extra)})" if extra else " без лимита"
         await message.answer(f"⭐ Витрина: {html.escape(label or '')}{suffix}.", parse_mode="HTML")
+        from community_bot.notify import fanout
+
+        await fanout(
+            message.bot,
+            db,
+            "shop",
+            f"⭐ Новая витрина: {html.escape(label or '')}{suffix}.",
+        )
         return
     if action == "rsvpstake":
         if not actor_role:
@@ -2348,6 +2356,12 @@ async def admin_post_send(
     await state.clear()
     await callback.answer("Опубликовано")
     await callback.message.answer("✅ Пост ушёл в чат сообщества.")
+    from community_bot.notify import fanout
+
+    preview = html_text.strip().replace("\n", " ")
+    if len(preview) > 180:
+        preview = preview[:177] + "…"
+    await fanout(bot, db, "events", f"📣 Новый пост студии.\n{preview}" if preview else "📣 Новый пост студии.")
 
 
 @router.callback_query(F.data == "admin:mention")
@@ -2524,12 +2538,19 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
                 parse_mode="HTML",
                 reply_markup=ticket_keyboard(ticket_id),
             )
+        body = (
+            f"🎫 <b>Тикет №{ticket_id}</b>\n"
+            "Открыт. Пишите сюда. Закроет стафф или /close."
+        )
+    else:
+        body = (
+            f"🎫 <b>Тикет №{ticket_id}</b>\n"
+            "Уже открыт. Напишите сюда — дойдёт до стаффа. /close — закрыть."
+        )
     await answer_block(
         message,
         "ticket",
-        f"🎫 <b>Тикет №{ticket_id}</b>\n"
-        "Отправьте вопрос, фото или файл. Все следующие сообщения попадут модераторам.\n"
-        "Закрыть тикет: /close.",
+        body,
         parse_mode="HTML",
         reply_markup=flow_reply_keyboard(),
     )

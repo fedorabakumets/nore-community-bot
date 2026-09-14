@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import answer_block, edit_block
@@ -21,7 +21,7 @@ from community_bot.economy import (
 )
 from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import register_telegram_user
-from community_bot.keyboards import wallet_keyboard, wallet_loan_confirm_keyboard
+from community_bot.keyboards import back_btn, close_btn, wallet_keyboard, wallet_loan_confirm_keyboard
 from community_bot.routers.group import _shop_home_markup, _shop_home_text
 from community_bot.texts import WALLET_HELP_TEXT
 
@@ -147,20 +147,26 @@ async def wallet_history(callback: CallbackQuery, db: Database) -> None:
     rows = await db.list_transactions(callback.from_user.id, 12)
     await callback.answer()
     if not rows:
-        await callback.message.answer("📜 Пока нет движений по кошельку.")
-        return
-    lines = ["📜 <b>История печенек</b>", ""]
-    lines.extend(transaction_line(row) for row in rows)
-    await callback.message.answer("\n".join(lines), parse_mode="HTML", reply_markup=wallet_keyboard(True))
+        text = "📜 Пока нет движений по кошельку."
+    else:
+        text = "📜 <b>История печенек</b>\n\n" + "\n".join(transaction_line(row) for row in rows)
+    await edit_block(
+        callback.message,
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("wallet:home"), close_btn("ui:close")]]),
+    )
 
 
 @router.callback_query(F.data == "wallet:shop")
 async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message:
         return
+    from community_bot.blocks import replace_block
+
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await replace_block(
         callback.message,
         "shop",
         _shop_home_text(user, settings),
@@ -173,7 +179,24 @@ async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings)
 async def wallet_help(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await answer_block(callback.message, "wallet", WALLET_HELP_TEXT, parse_mode="HTML")
+        await edit_block(
+            callback.message,
+            WALLET_HELP_TEXT,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("wallet:home"), close_btn("ui:close")]]),
+        )
+
+
+@router.callback_query(F.data == "wallet:send")
+async def wallet_send_hint(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await edit_block(
+            callback.message,
+            "💸 <b>Перевод</b>\nВ личке цели нет. В чате ответом на человека: <code>перевести 10</code>.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("wallet:home"), close_btn("ui:close")]]),
+        )
 
 
 @router.callback_query(F.data == "wallet:loan")
@@ -187,7 +210,8 @@ async def wallet_loan_ask(callback: CallbackQuery, db: Database, settings: Setti
     repay = loan_repay_amount(LOAN_PRINCIPAL, interest)
     await callback.answer()
     if callback.message:
-        await callback.message.answer(
+        await edit_block(
+            callback.message,
             f"💳 Взять <b>{LOAN_PRINCIPAL} 🍪</b> в долг?\n"
             f"Ставка <b>{interest}%</b> по вашему уровню. Через {LOAN_DAYS} дней спишется "
             f"<b>{repay} 🍪</b> (недостающее уйдёт в минус кошелька).",
@@ -210,7 +234,8 @@ async def wallet_loan_yes(callback: CallbackQuery, db: Database, settings: Setti
     user = await db.get_user(callback.from_user.id)
     assert user is not None
     await callback.answer("Кредит зачислен.")
-    await callback.message.edit_text(
+    await edit_block(
+        callback.message,
         f"✅ На кошелёк пришло {loan['principal']} 🍪.\n"
         f"Вернуть {loan['due_amount']} 🍪 до {str(loan['due_at'])[:16].replace('T', ' ')} UTC.\n\n"
         + await wallet_text(db, settings, user),

@@ -98,7 +98,9 @@ async def _deliver_shop(
                     target_id,
                     permissions=_full_chat_permissions(),
                 )
-    await db.consume_vitrine(item)
+    from community_bot.notify import vitrine_consumed
+
+    await vitrine_consumed(bot, db, item)
     if buyer_id != target_id:
         await unlock(db, buyer_id, "gift_first")
     await unlock(db, buyer_id, "shop_first")
@@ -312,6 +314,16 @@ async def rsvp_join(callback: CallbackQuery, db: Database) -> None:
         return
     extra = f" Залог {stake} 🍪." if stake else ""
     await callback.answer(f"Вы в списке.{extra}")
+    title = (await db.get_bot_state("event_title")) or "событие"
+    from community_bot.notify import emit
+
+    await emit(
+        callback.bot,
+        db,
+        callback.from_user.id,
+        "events",
+        f"🎟 RSVP на {html.escape(title)}.{extra}",
+    )
 
 
 @router.chat_join_request()

@@ -82,16 +82,22 @@ def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
 MAIN_PRIVATE_KEYBOARD = main_private_keyboard()
 
 
-def private_menu_keyboard(show_admin: bool = False, *, show_apply: bool = True) -> InlineKeyboardMarkup:
-    top: list[InlineKeyboardButton] = []
-    if show_apply:
-        top.append(ibtn("📝 Анкета", "menu:apply", STYLE_GO))
-    top.append(ibtn("👤 Профиль", "menu:profile", STYLE_FUN))
+def private_menu_keyboard(
+    show_admin: bool = False,
+    *,
+    unread: int = 0,
+    show_apply: bool = False,
+) -> InlineKeyboardMarkup:
+    del show_apply
+    notices = "🔔 Уведомления"
+    if unread:
+        notices = f"🔔 Уведомления ({unread})"
     rows = [
-        top,
-        [ibtn("🪪 Верификация", "menu:verify", STYLE_GO), ibtn("🔔 Уведомления", "menu:notices")],
-        [ibtn("🛒 Магазин", "menu:shop", STYLE_GO), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
-        [ibtn("🎫 Тикет", "menu:question", STYLE_CLOSE), ibtn("💼 Кошелёк", "menu:wallet")],
+        [
+            ibtn("👤 Профиль", "menu:profile", STYLE_FUN),
+            ibtn("🐾 Питомец", "menu:pet", STYLE_FUN),
+        ],
+        [ibtn(notices, "menu:notices")],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
@@ -455,14 +461,42 @@ def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMa
             ibtn("Описание", f"profile:bio:{user_id}", STYLE_FUN),
         ],
         [ibtn("Аватар", f"profile:avatar:{user_id}")],
-        [
-            ibtn("🪪 Верификация", "menu:verify", STYLE_GO),
-            ibtn("🔔 Уведомления", "menu:notices"),
-        ],
     ]
     if is_private:
         rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
     rows.append([close_btn("ui:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def compact_profile_keyboard(user: dict[str, object]) -> InlineKeyboardMarkup:
+    from community_bot.profile_fill import profile_block_states
+
+    user_id = int(user["user_id"])
+    filled = {field: done for field, _label, done in profile_block_states(user)}
+
+    def mark(label: str, field: str, data: str, style: str | None = None) -> InlineKeyboardButton:
+        suffix = " ✓" if filled.get(field) else ""
+        return ibtn(f"{label}{suffix}", data, style)
+
+    rows = [
+        [
+            mark("Имя", "profile_name", f"profile:name:{user_id}"),
+            mark("Возраст", "age", f"profile:age:{user_id}"),
+        ],
+        [
+            mark("Увлечения", "hobbies", f"profile:hobbies:{user_id}"),
+            mark("О себе", "profile_bio", f"profile:bio:{user_id}", STYLE_FUN),
+        ],
+        [
+            mark("Фото", "avatar_file_id", f"profile:avatar:{user_id}"),
+            ibtn("Правила", "p:rules"),
+        ],
+    ]
+    if int(user.get("bio_warning") or 0):
+        rows.append([ibtn("Почему предупреждение", "p:warn")])
+    if user.get("profile_private"):
+        rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
+    rows.append([back_btn("menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -484,11 +518,7 @@ def public_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
 def verification_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                ibtn("👤 Профиль", "menu:profile", STYLE_FUN),
-                ibtn("🔔 Уведомления", "menu:notices"),
-            ],
-            [ibtn("🪪 Верификация", "menu:verify", STYLE_GO)],
+            [ibtn("👤 Профиль", "menu:profile", STYLE_FUN)],
             [close_btn("ui:close")],
         ]
     )
@@ -947,7 +977,10 @@ def wallet_keyboard(can_borrow: bool) -> InlineKeyboardMarkup:
                 ibtn("📜 История", "wallet:history", STYLE_FUN),
                 ibtn("🛒 Пополнить", "wallet:shop", STYLE_GO),
             ],
-            [ibtn(loan_label, "wallet:loan", STYLE_GO if can_borrow else None)],
+            [
+                ibtn("💸 Перевести", "wallet:send"),
+                ibtn(loan_label, "wallet:loan", STYLE_GO if can_borrow else None),
+            ],
             [ibtn("❓ Помощь по кошельку", "wallet:help")],
             [close_btn("ui:close")],
         ]

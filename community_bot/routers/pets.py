@@ -92,10 +92,19 @@ async def refresh_pet_card(target: Message, pet: dict[str, object]) -> None:
         await send_pet_card(target, pet)
 
 
-async def _show_pet(message: Message, db: Database, user_id: int) -> None:
+async def _show_pet(message: Message, db: Database, user_id: int, *, replace: bool = False) -> None:
     pet = await db.get_pet(user_id)
     if not pet:
-        await message.answer("У вас пока нет тамагочи. Откройте /shop → 🐾 Тамагочи.")
+        text = "У вас пока нет тамагочи. Откройте магазин снизу."
+        if replace:
+            from community_bot.blocks import replace_block
+
+            await replace_block(message, "pet", text, parse_mode="HTML")
+            return
+        await message.answer(text)
+        return
+    if replace:
+        await refresh_pet_card(message, pet)
         return
     await send_pet_card(message, pet)
 

@@ -89,21 +89,40 @@ async def _show_own_profile(message: Message, db: Database, settings: Settings) 
     await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
-async def _show_inline_menu(message: Message, db: Database, settings: Settings) -> None:
+async def _show_inline_menu(
+    message: Message,
+    db: Database,
+    settings: Settings,
+    *,
+    replace: bool = False,
+) -> None:
     if not message.from_user:
         return
-    from community_bot.blocks import answer_block
+    from community_bot.blocks import answer_block, replace_block
 
     show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
-    show_apply = await application_block_reason(db, message.from_user.id) is None
+    unread = await db.notify_unread_count(message.from_user.id)
+    markup = private_menu_keyboard(show_admin, unread=unread)
+    text = "📋 <b>Меню</b>\nПрофиль, питомец, уведомления. Снизу — магазин, кошелёк и тикет."
+    if replace:
+        await replace_block(message, "cabinet", text, parse_mode="HTML", reply_markup=markup)
+        return
     await answer_block(
         message,
         "cabinet",
-        "📋 <b>Меню</b>\n\n"
-        "Профиль, верификация, уведомления, магазин, тамагочи, кошелёк и тикет.",
+        text,
         parse_mode="HTML",
-        reply_markup=private_menu_keyboard(show_admin, show_apply=show_apply),
+        reply_markup=markup,
     )
+
+
+@router.callback_query(F.data == "menu:home")
+async def menu_home(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message:
+        await callback.answer()
+        return
+    await callback.answer()
+    await _show_inline_menu(callback.message, db, settings, replace=True)
 
 
 @router.message(F.chat.type == "private", F.text.in_({BTN_MENU, BTN_SHOP, BTN_WALLET, BTN_TICKET}))

@@ -121,6 +121,25 @@ CREATE TABLE IF NOT EXISTS bot_state (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS notify_prefs (
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    channel TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0, 1)),
+    digest INTEGER NOT NULL DEFAULT 0 CHECK(digest IN (0, 1)),
+    PRIMARY KEY (user_id, channel)
+);
+
+CREATE TABLE IF NOT EXISTS notify_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    channel TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read INTEGER NOT NULL DEFAULT 0 CHECK(read IN (0, 1)),
+    delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_notify_inbox_user ON notify_inbox(user_id, read, delivered, id);
+
 CREATE TABLE IF NOT EXISTS cookie_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(user_id),
@@ -2810,25 +2829,147 @@ class Database:
             await db.commit()
             return cursor.rowcount == 1
 
-    async def consume_vitrine(self, item: str) -> None:
+    async def consume_vitrine(self, item: str) -> bool:
         featured = await self.get_bot_state("shop_featured")
         if featured != item:
-            return
+            return False
         raw = await self.get_bot_state("shop_featured_stock")
         if not raw or raw == "0":
-            return
+            return False
         try:
             stock = int(raw)
         except ValueError:
-            return
+            return False
         stock -= 1
         if stock <= 0:
             await self.set_bot_state("shop_featured", "")
             await self.set_bot_state("shop_featured_label", "")
             await self.set_bot_state("shop_featured_stock", "")
             await self.set_bot_state("shop_featured_until", "")
-            return
+            return True
         await self.set_bot_state("shop_featured_stock", str(stock))
+        return False
+
+    async def notify_channel_on(self, user_id: int, channel: str) -> bool:
+        row = await self.fetchone(
+            "SELECT enabled FROM notify_prefs WHERE user_id = ? AND channel = ?",
+            (user_id, channel),
+        )
+        return bool(row and int(row["enabled"]))
+
+    async def notify_digest_on(self, user_id: int, channel: str) -> bool:
+        row = await self.fetchone(
+            "SELECT digest FROM notify_prefs WHERE user_id = ? AND channel = ?",
+            (user_id, channel),
+        )
+        return bool(row and int(row["digest"]))
+
+    async def notify_prefs_map(self, user_id: int) -> dict[str, dict[str, int]]:
+        rows = await self.fetchall(
+            "SELECT channel, enabled, digest FROM notify_prefs WHERE user_id = ?",
+            (user_id,),
+        )
+        return {
+            str(row["channel"]): {"enabled": int(row["enabled"]), "digest": int(row["digest"])}
+            for row in rows
+        }
+
+    async def notify_toggle_enabled(self, user_id: int, channel: str) -> bool:
+        row = await self.fetchone(
+            "SELECT enabled FROM notify_prefs WHERE user_id = ? AND channel = ?",
+            (user_id, channel),
+        )
+        if not row:
+            await self.execute(
+                "INSERT INTO notify_prefs(user_id, channel, enabled, digest) VALUES (?, ?, 1, 0)",
+                (user_id, channel),
+            )
+            return True
+        enabled = 0 if int(row["enabled"]) else 1
+        await self.execute(
+            "UPDATE notify_prefs SET enabled = ? WHERE user_id = ? AND channel = ?",
+            (enabled, user_id, channel),
+        )
+        return bool(enabled)
+
+    async def notify_toggle_digest(self, user_id: int, channel: str) -> bool:
+        row = await self.fetchone(
+            "SELECT digest FROM notify_prefs WHERE user_id = ? AND channel = ?",
+            (user_id, channel),
+        )
+        if not row:
+            await self.execute(
+                "INSERT INTO notify_prefs(user_id, channel, enabled, digest) VALUES (?, ?, 0, 1)",
+                (user_id, channel),
+            )
+            return True
+        digest = 0 if int(row["digest"]) else 1
+        await self.execute(
+            "UPDATE notify_prefs SET digest = ? WHERE user_id = ? AND channel = ?",
+            (digest, user_id, channel),
+        )
+        return bool(digest)
+
+    async def notify_unread_count(self, user_id: int) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) AS n FROM notify_inbox WHERE user_id = ? AND read = 0",
+            (user_id,),
+        )
+        return int(row["n"]) if row else 0
+
+    async def notify_list_unread(self, user_id: int, limit: int = 8) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT id, channel, text, created_at
+            FROM notify_inbox
+            WHERE user_id = ? AND read = 0
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        )
+
+    async def notify_mark_read_all(self, user_id: int) -> None:
+        await self.execute("UPDATE notify_inbox SET read = 1 WHERE user_id = ? AND read = 0", (user_id,))
+
+    async def notify_inbox_add(self, user_id: int, channel: str, text: str) -> int:
+        return await self.execute(
+            """
+            INSERT INTO notify_inbox(user_id, channel, text, created_at, read, delivered)
+            VALUES (?, ?, ?, ?, 0, 0)
+            """,
+            (user_id, channel, text, utcnow()),
+        )
+
+    async def notify_mark_delivered(self, inbox_id: int) -> None:
+        await self.execute("UPDATE notify_inbox SET delivered = 1 WHERE id = ?", (inbox_id,))
+
+    async def notify_mark_delivered_ids(self, inbox_ids: list[int]) -> None:
+        if not inbox_ids:
+            return
+        placeholders = ",".join("?" for _ in inbox_ids)
+        await self.execute(
+            f"UPDATE notify_inbox SET delivered = 1, read = 1 WHERE id IN ({placeholders})",
+            tuple(inbox_ids),
+        )
+
+    async def list_channel_subscribers(self, channel: str) -> list[int]:
+        rows = await self.fetchall(
+            "SELECT user_id FROM notify_prefs WHERE channel = ? AND enabled = 1",
+            (channel,),
+        )
+        return [int(row["user_id"]) for row in rows]
+
+    async def notify_pending_digest(self) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT i.id, i.user_id, i.channel, i.text, i.created_at
+            FROM notify_inbox i
+            JOIN notify_prefs p ON p.user_id = i.user_id AND p.channel = i.channel
+            WHERE i.delivered = 0 AND p.enabled = 1 AND p.digest = 1
+            ORDER BY i.user_id, i.id
+            """
+        )
 
     async def list_panel_user_ids(self) -> list[int]:
         from community_bot.permissions import PERM_ADMIN_PANEL, role_has_permission
