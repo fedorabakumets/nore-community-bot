@@ -7,6 +7,7 @@ from community_bot.routers.life import router as life_router
 from community_bot.routers.pets import router as pets_router
 from community_bot.routers.private import router as private_router
 from community_bot.routers.profile import router as profile_router
+from community_bot.routers.social_games import router as social_games_router
 from community_bot.routers.wallet import router as wallet_router
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "pets_router",
     "private_router",
     "profile_router",
+    "social_games_router",
     "wallet_router",
 ]

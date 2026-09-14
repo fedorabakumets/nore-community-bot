@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
 COVERS = Path(__file__).resolve().parent.parent / "assets" / "covers"
 CAPTION_LIMIT = 1024
@@ -24,6 +24,23 @@ BLOCK_FILES = {
     "admin": "admin.jpg",
     "reputation": "reputation.jpg",
     "pet": "pet.jpg",
+    "mafia": "mafia.jpg",
+    "mafia_night": "mafia_night.jpg",
+    "mafia_day": "mafia_day.jpg",
+    "mafia_court": "mafia_court.jpg",
+    "role_mafia": "role_mafia.jpg",
+    "role_civilian": "role_civilian.jpg",
+    "role_doctor": "role_doctor.jpg",
+    "role_sheriff": "role_sheriff.jpg",
+    "bunker": "bunker.jpg",
+    "bunker_weather": "bunker_weather.jpg",
+    "bunker_external": "bunker_external.jpg",
+    "bunker_meeting": "bunker_meeting.jpg",
+    "bunker_card": "bunker_card.jpg",
+    "cabinet": "cabinet.jpg",
+    "ticket": "ticket.jpg",
+    "verify": "verify.jpg",
+    "notify": "notify.jpg",
 }
 
 
@@ -74,3 +91,17 @@ async def edit_block(message: Message, text: str, **kwargs: Any) -> Message | No
         return await message.edit_text(text, **kwargs)
     except TelegramBadRequest:
         return await message.answer(text, **kwargs)
+
+
+async def replace_block(message: Message, block: str, text: str, **kwargs: Any) -> Message | None:
+    path = cover_path(block)
+    caption = text[:CAPTION_LIMIT]
+    markup = kwargs.get("reply_markup")
+    parse_mode = kwargs.get("parse_mode")
+    if path:
+        try:
+            media = InputMediaPhoto(media=FSInputFile(path), caption=caption, parse_mode=parse_mode)
+            return await message.edit_media(media=media, reply_markup=markup)
+        except (TelegramBadRequest, OSError):
+            pass
+    return await edit_block(message, text, **kwargs)

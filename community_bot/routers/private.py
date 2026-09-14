@@ -34,6 +34,7 @@ from community_bot.helpers import (
     media_from_message,
     rank_of_user,
     register_telegram_user,
+    render_profile,
     role_title,
     safe_send,
     user_link,
@@ -142,7 +143,11 @@ async def _send_welcome(message: Message, db: Database, settings: Settings, repl
         text = WELCOME_TEXT
     if not cover:
         await message.answer(text, reply_markup=inline, parse_mode="HTML")
-        await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
+        await message.answer(
+            "Это личный кабинет. Снизу всегда: синее «Меню», зелёный «Магазин», "
+            "прозрачный «Кошелёк» и красный «Тикет».",
+            reply_markup=reply_markup,
+        )
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
@@ -151,7 +156,11 @@ async def _send_welcome(message: Message, db: Database, settings: Settings, repl
         await message.answer_photo(source, caption=text, reply_markup=inline, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
         await message.answer(text, reply_markup=inline, parse_mode="HTML")
-    await message.answer("Главное меню — кнопки внизу.", reply_markup=reply_markup)
+    await message.answer(
+        "Это личный кабинет. Снизу всегда: синее «Меню», зелёный «Магазин», "
+        "прозрачный «Кошелёк» и красный «Тикет».",
+        reply_markup=reply_markup,
+    )
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
@@ -272,6 +281,28 @@ async def menu_apply(callback: CallbackQuery, state: FSMContext, db: Database) -
         return
     await callback.answer()
     await _start_application(callback.message, state, db, callback.from_user)
+
+
+@router.callback_query(F.data == "menu:profile")
+async def menu_profile(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.from_user:
+        return
+    from community_bot.routers.profile import send_profile_card
+
+    user = await register_telegram_user(db, callback.from_user)
+    text = await render_profile(db, settings, user)
+    await callback.answer()
+    await send_profile_card(callback.message, user, settings, editable=True, text=text)
+
+
+@router.callback_query(F.data == "menu:wallet")
+async def menu_wallet(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.from_user:
+        return
+    from community_bot.routers.wallet import send_wallet
+
+    await callback.answer()
+    await send_wallet(callback.message, db, settings)
 
 
 @router.callback_query(F.data == "menu:question")
@@ -2493,10 +2524,13 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
                 parse_mode="HTML",
                 reply_markup=ticket_keyboard(ticket_id),
             )
-    await message.answer(
-        f"🎫 Тикет №{ticket_id} открыт. Отправьте вопрос, фото или файл. "
-        "Все следующие сообщения попадут модераторам.\n"
-        "Снизу — «Отмена», либо команда /close.",
+    await answer_block(
+        message,
+        "ticket",
+        f"🎫 <b>Личный кабинет · тикет №{ticket_id}</b>\n"
+        "Отправьте вопрос, фото или файл. Все следующие сообщения попадут модераторам.\n"
+        "Снизу — кнопки кабинета, либо команда /close.",
+        parse_mode="HTML",
         reply_markup=flow_reply_keyboard(),
     )
 

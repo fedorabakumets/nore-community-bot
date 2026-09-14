@@ -67,6 +67,7 @@ from community_bot.keyboards import (
     public_profile_keyboard,
     sbp_payment_keyboard,
     shop_category_keyboard,
+    shop_confirm_keyboard,
     shop_home_keyboard,
     transfer_keyboard,
 )
@@ -926,7 +927,7 @@ def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
         f"🛒 <b>Магазин NORA</b>\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
-        "Откройте полку и нажмите товар — покупка списывается сразу. "
+        "Откройте полку — у каждого товара цена в 🍪. Покупка только после подтверждения. "
         "В чате этот экран не исчезает через 30 секунд."
     )
 
@@ -1178,7 +1179,9 @@ async def buy_shop_item(
         or callback.data.startswith("shop:g:")
     ):
         return
-    item = callback.data.split(":", 1)[1]
+    raw = callback.data
+    confirmed = raw.startswith("shop:ok:")
+    item = raw.split(":", 2)[2] if confirmed else raw.split(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
     prices = await _shop_prices(user, settings)
     if item in {"event_pass", "support"}:
@@ -1197,6 +1200,21 @@ async def buy_shop_item(
         await callback.answer("Товар временно недоступен.", show_alert=True)
         return
     price = prices[item]
+    if not confirmed:
+        from community_bot.shop_catalog import ITEM_LABELS
+
+        label = ITEM_LABELS.get(item, item)
+        await callback.answer()
+        await callback.message.answer(
+            f"🛒 <b>Подтверждение покупки</b>\n"
+            f"{html.escape(label)}\n"
+            f"Цена: <b>{price} 🍪</b>\n"
+            f"Баланс: <b>{int(user['cookies'])} 🍪</b>\n\n"
+            "Нажмите «Купить», чтобы списать печеньки.",
+            parse_mode="HTML",
+            reply_markup=shop_confirm_keyboard(item, price),
+        )
+        return
     if item == "video_avatar":
         if not await db.feature_enabled("profile_video"):
             await callback.answer("Видео-профили временно выключены.", show_alert=True)

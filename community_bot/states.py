@@ -23,6 +23,7 @@ class ProfileEdit(StatesGroup):
     name = State()
     age = State()
     hobbies = State()
+    bio = State()
     avatar = State()
     video_avatar = State()
     custom_status = State()

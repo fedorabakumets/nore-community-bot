@@ -17,9 +17,11 @@ STYLE_CLOSE = "danger"
 
 FLOW_CANCEL = "❌ Отмена"
 FLOW_RESTART = "🔄 Начать заново"
-BTN_PROFILE = "👤 Профиль"
-BTN_WALLET = "💼 Кошелёк"
 BTN_MENU = "📋 Меню"
+BTN_SHOP = "🛒 Магазин"
+BTN_WALLET = "💼 Кошелёк"
+BTN_TICKET = "🎫 Тикет"
+BTN_PROFILE = "👤 Профиль"
 
 
 def ibtn(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
@@ -68,7 +70,10 @@ def flow_reply_keyboard() -> ReplyKeyboardMarkup:
 def main_private_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     del is_admin
     return ReplyKeyboardMarkup(
-        keyboard=[[kbtn(BTN_PROFILE, STYLE_GO), kbtn(BTN_WALLET, STYLE_FUN), kbtn(BTN_MENU, STYLE_FUN)]],
+        keyboard=[
+            [kbtn(BTN_MENU, STYLE_FUN), kbtn(BTN_SHOP, STYLE_GO)],
+            [kbtn(BTN_WALLET), kbtn(BTN_TICKET, STYLE_CLOSE)],
+        ],
         resize_keyboard=True,
         is_persistent=True,
     )
@@ -81,10 +86,12 @@ def private_menu_keyboard(show_admin: bool = False, *, show_apply: bool = True) 
     top: list[InlineKeyboardButton] = []
     if show_apply:
         top.append(ibtn("📝 Анкета", "menu:apply", STYLE_GO))
-    top.append(ibtn("❓ Вопрос", "menu:question"))
+    top.append(ibtn("👤 Профиль", "menu:profile", STYLE_FUN))
     rows = [
         top,
-        [ibtn("🛒 Магазин", "menu:shop", STYLE_FUN), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
+        [ibtn("🪪 Верификация", "menu:verify", STYLE_GO), ibtn("🔔 Уведомления", "menu:notices")],
+        [ibtn("🛒 Магазин", "menu:shop", STYLE_GO), ibtn("🐾 Тамагочи", "menu:pet", STYLE_FUN)],
+        [ibtn("🎫 Тикет", "menu:question", STYLE_CLOSE), ibtn("💼 Кошелёк", "menu:wallet")],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
@@ -445,7 +452,12 @@ def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMa
         ],
         [
             ibtn("Увлечения", f"profile:hobbies:{user_id}"),
-            ibtn("Аватар", f"profile:avatar:{user_id}"),
+            ibtn("Описание", f"profile:bio:{user_id}", STYLE_FUN),
+        ],
+        [ibtn("Аватар", f"profile:avatar:{user_id}")],
+        [
+            ibtn("🪪 Верификация", "menu:verify", STYLE_GO),
+            ibtn("🔔 Уведомления", "menu:notices"),
         ],
     ]
     if is_private:
@@ -465,6 +477,19 @@ def public_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("💌 Обнять", f"profile_action:hug:{user_id}", STYLE_FUN),
                 ibtn("🍪 Перевести", f"profile_action:transfer:{user_id}", STYLE_FUN),
             ],
+        ]
+    )
+
+
+def verification_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("👤 Профиль", "menu:profile", STYLE_FUN),
+                ibtn("🔔 Уведомления", "menu:notices"),
+            ],
+            [ibtn("🪪 Верификация", "menu:verify", STYLE_GO)],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -521,10 +546,19 @@ def shop_category_keyboard(category: str, prices: dict[str, int]) -> InlineKeybo
                 continue
             row = [ibtn(f"{ITEM_LABELS[key]} — {price} 🍪", f"shop:{key}", style)]
             if key in GIFTABLE_ITEMS:
-                row.append(ibtn("🎁", f"shop:g:{key}", STYLE_FUN))
+                row.append(ibtn(f"🎁 {price} 🍪", f"shop:g:{key}", STYLE_FUN))
             rows.append(row)
     rows.append([back_btn("shop:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def shop_confirm_keyboard(item: str, price: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn(f"✅ Купить за {price} 🍪", f"shop:ok:{item}", STYLE_GO)],
+            [back_btn("shop:home"), close_btn("shop:close")],
+        ]
+    )
 
 
 def shop_keyboard(prices: dict[str, int]) -> InlineKeyboardMarkup:
@@ -629,7 +663,7 @@ def pet_keyboard() -> InlineKeyboardMarkup:
 FEATURE_META = {
     "games": (
         "🎮 Мини-игры",
-        "Рулетка на мут, блэкджек, кубик, рейс и капкан. Выключение прячет игровые команды.",
+        "Рулетка, печеньки, мафия и бункер. Выключение прячет игровые команды.",
     ),
     "tamagotchi": (
         "🐾 Тамагочи",
@@ -744,6 +778,10 @@ def games_menu_keyboard() -> InlineKeyboardMarkup:
                 ibtn("🚀 Рейс 🍪", "cg:pick:crash", STYLE_GO),
                 ibtn("🪤 Капкан 🍪", "cg:pick:trap", STYLE_FUN),
             ],
+            [
+                ibtn("🕶 Мафия", "sg:pick:mafia", STYLE_CLOSE),
+                ibtn("🛡 Бункер", "sg:pick:bunker", STYLE_FUN),
+            ],
             [ibtn("📚 Правила", "game:rules:all")],
             [game_hide_button()],
         ]
@@ -833,6 +871,48 @@ def trap_keyboard(game_id: int) -> InlineKeyboardMarkup:
             [game_hide_button()],
         ]
     )
+
+
+def social_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("➕ Войти", f"sg:join:{game_id}", STYLE_GO)],
+            [
+                ibtn("▶️ Начать", f"sg:start:{game_id}", STYLE_FUN),
+                ibtn("❌ Отмена", f"sg:cancel:{game_id}", STYLE_CLOSE),
+            ],
+            [game_hide_button()],
+        ]
+    )
+
+
+def _player_button_name(player: dict[str, object]) -> str:
+    raw = player.get("profile_name") or player.get("telegram_name") or player.get("username") or player["user_id"]
+    return str(raw)[:32]
+
+
+def social_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn(_player_button_name(player), f"sg:vote:{game_id}:{int(player['user_id'])}", STYLE_CLOSE)]
+        for player in players
+    ]
+    rows.append([game_hide_button()])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def mafia_target_keyboard(game_id: int, action: str, players: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn(_player_button_name(player), f"maf:{action}:{game_id}:{int(player['user_id'])}", STYLE_FUN)]
+        for player in players
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def bunker_reveal_keyboard(game_id: int, keys: list[str]) -> InlineKeyboardMarkup:
+    from community_bot.social_data import REVEAL_LABELS
+
+    rows = [[ibtn(REVEAL_LABELS.get(key, key), f"bk:open:{game_id}:{key}", STYLE_GO)] for key in keys]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def game_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:

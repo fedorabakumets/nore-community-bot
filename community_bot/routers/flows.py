@@ -11,7 +11,8 @@ from community_bot.database import Database
 from community_bot.helpers import application_block_reason, has_permission, render_profile
 from community_bot.keyboards import (
     BTN_MENU,
-    BTN_PROFILE,
+    BTN_SHOP,
+    BTN_TICKET,
     BTN_WALLET,
     flow_reply_keyboard,
     main_private_keyboard,
@@ -36,7 +37,7 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
     await message.answer(
-        "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
+        "Это личный кабинет. Снизу: синее «Меню», зелёный «Магазин», прозрачный «Кошелёк» и красный «Тикет».",
         reply_markup=main_private_keyboard(),
     )
 
@@ -91,22 +92,22 @@ async def _show_own_profile(message: Message, db: Database, settings: Settings) 
 async def _show_inline_menu(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
+    from community_bot.blocks import answer_block
+
     show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
     show_apply = await application_block_reason(db, message.from_user.id) is None
-    await message.answer(
-        "📋 <b>Меню НОРЫ</b>\n\n"
-        + (
-            "Анкета, вопрос модераторам, магазин и тамагочи.\n"
-            if show_apply
-            else "Вопрос модераторам, магазин и тамагочи.\n"
-        )
-        + "Снизу всегда зелёный «Профиль», синий «Кошелёк» и синее «Меню».",
+    await answer_block(
+        message,
+        "cabinet",
+        "📋 <b>Личный кабинет НОРЫ</b>\n\n"
+        "Профиль, верификация, уведомления, магазин и тикет.\n"
+        "Снизу: синее «Меню», зелёный «Магазин», прозрачный «Кошелёк», красный «Тикет».",
         parse_mode="HTML",
         reply_markup=private_menu_keyboard(show_admin, show_apply=show_apply),
     )
 
 
-@router.message(F.chat.type == "private", F.text.in_({BTN_PROFILE, BTN_MENU, BTN_WALLET}))
+@router.message(F.chat.type == "private", F.text.in_({BTN_MENU, BTN_SHOP, BTN_WALLET, BTN_TICKET}))
 async def persistent_nav(
     message: Message,
     state: FSMContext,
@@ -119,13 +120,29 @@ async def persistent_nav(
     if ticket_id:
         await db.close_ticket(int(ticket_id))
         await message.answer(f"Тикет №{ticket_id} закрыт, чтобы открыть это меню.")
-    if message.text == BTN_PROFILE:
-        await _show_own_profile(message, db, settings)
-        return
     if message.text == BTN_WALLET:
         from community_bot.routers.wallet import send_wallet
 
         await send_wallet(message, db, settings)
+        return
+    if message.text == BTN_SHOP:
+        from community_bot.blocks import answer_block
+        from community_bot.helpers import register_telegram_user
+        from community_bot.routers.group import _shop_home_markup, _shop_home_text
+
+        user = await register_telegram_user(db, message.from_user)
+        await answer_block(
+            message,
+            "shop",
+            _shop_home_text(user, settings),
+            parse_mode="HTML",
+            reply_markup=await _shop_home_markup(db),
+        )
+        return
+    if message.text == BTN_TICKET:
+        from community_bot.routers.private import open_ticket
+
+        await open_ticket(message, state, db, settings, message.bot)
         return
     await _show_inline_menu(message, db, settings)
 
@@ -233,4 +250,7 @@ async def shop_close(callback: CallbackQuery) -> None:
 
 
 def with_flow_prompt(text: str) -> str:
-    return f"{text}\n\nСнизу — зелёный «Профиль», синий «Кошелёк» и синее «Меню», они всегда работают."
+    return (
+        f"{text}\n\nСнизу — синее «Меню», зелёный «Магазин», прозрачный «Кошелёк» и красный «Тикет», "
+        "они всегда работают."
+    )

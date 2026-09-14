@@ -33,6 +33,7 @@ from community_bot.routers import (
     pets_router,
     private_router,
     profile_router,
+    social_games_router,
     wallet_router,
 )
 from community_bot.telegraph import publish_member_update, publish_staff_guide
@@ -72,6 +73,8 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="dice", description="Кубик 1 на 1: /dice 10"),
             BotCommand(command="crash", description="Рейс на 🍪: /crash 10"),
             BotCommand(command="trap", description="Капкан на 🍪: /trap 10"),
+            BotCommand(command="mafia", description="Мафия: роли в личку"),
+            BotCommand(command="bunker", description="Бункер: досье в личку"),
             BotCommand(command="roulette", description="Рулетка на мут 30 мин"),
             BotCommand(command="gift", description="Подарить товар ответом"),
             BotCommand(command="report", description="Репорт ответом на сообщение"),
@@ -369,6 +372,7 @@ async def main() -> None:
     dispatcher.include_router(profile_router)
     dispatcher.include_router(wallet_router)
     dispatcher.include_router(cookie_games_router)
+    dispatcher.include_router(social_games_router)
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
     dispatcher.include_router(life_router)

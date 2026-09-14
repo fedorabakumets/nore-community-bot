@@ -19,6 +19,7 @@ from community_bot.permissions import (
     parse_permissions,
     role_has_permission,
 )
+from community_bot.profile_fill import profile_fill_percent
 
 BOT_REPLY_TTL = 30.0
 logger = logging.getLogger(__name__)
@@ -226,6 +227,11 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
     ]
     if user["custom_status"]:
         lines.append(f"💬 <i>«{html.escape(str(user['custom_status']))}»</i>")
+    bio = str(user.get("profile_bio") or "").strip()
+    if bio:
+        lines.append(f"📝 {html.escape(bio)}")
+    elif int(user.get("bio_warning") or 0):
+        lines.append("⚠️ Нет описания — действует вечное предупреждение.")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
     title = str(user.get("profile_title") or "").strip()
@@ -243,6 +249,7 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
             f"🏷 <b>Уровень:</b> {tier.emoji} {tier.label} · скидка {tier.discount}%",
             f"<code>{progress}</code>",
             f"🍪 <b>Печеньки:</b> {user['cookies']}",
+            f"🪪 <b>Верификация:</b> {profile_fill_percent(user)}%",
             f"⚠️ <b>Предупреждения:</b> {user['warnings']}",
         ]
     )
@@ -268,6 +275,12 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     lock = "  🔒 скрыт от чужих глаз\n" if user.get("profile_private") else ""
     title = str(user.get("profile_title") or "").strip()
     title_line = f"  🏷  {html.escape(title)}\n" if title else ""
+    bio = str(user.get("profile_bio") or "").strip()
+    bio_line = (
+        f"  📝  {html.escape(bio)}\n"
+        if bio
+        else ("  ⚠️  нет описания — вечное предупреждение\n" if int(user.get("bio_warning") or 0) else "")
+    )
     return (
         "✧･ﾟ: *✧･ﾟ:*  <b>Ｎ Ｏ Ｒ Ａ</b>  *:･ﾟ✧*:･ﾟ✧\n"
         "\n"
@@ -278,6 +291,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         "╰─━━━━━━━━━━━━━━━━━─╯\n"
         f"{lock}"
         f"{title_line}"
+        f"{bio_line}"
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"
         f"  🎂  {age}     🍪  {user['cookies']}\n"
@@ -287,6 +301,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         f"  <code>{progress}</code>\n"
         f"  ❖ {tier.label} · скидка {tier.discount}%\n"
         f"  ⚠️  предупреждения: {user['warnings']}\n"
+        f"  🪪  верификация {profile_fill_percent(user)}%\n"
         "\n"
         "· · · ☽ ✦ ❋ ✦ ☾ · · ·"
     )

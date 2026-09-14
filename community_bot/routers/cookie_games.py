@@ -28,6 +28,7 @@ from community_bot.cookie_logic import (
 )
 from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
+from community_bot.game_anim import decorate, edit_lobby_now, start_lobby_anim, stop_lobby_anim
 from community_bot.game_notify import mention_fragment, send_game_finale
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.keyboards import (
@@ -129,6 +130,7 @@ def _cancel_game_jobs(game_id: int) -> None:
     _cancel_crash_job(game_id)
     _cancel_turn_job(game_id)
     _cancel_trap_job(game_id)
+    stop_lobby_anim(game_id)
 
 
 async def _schedule_turn_reminder(
@@ -170,26 +172,49 @@ async def _schedule_turn_reminder(
     _TURN_JOBS[game_id] = asyncio.create_task(_wait())
 
 
+async def _render_cookie_lobby(db: Database, game_id: int, frame: int) -> str:
+    game = await db.get_party_game(game_id)
+    if not game:
+        return "Лобби закрыто."
+    players = await db.list_game_players(game_id)
+    return decorate(_lobby_text(game, players), frame)
+
+
 async def _publish_lobby(
     target: Message,
     game: dict[str, object],
     players: list[dict[str, object]],
     *,
     new: bool,
+    db: Database | None = None,
 ) -> None:
-    text = _lobby_text(game, players)
+    text = decorate(_lobby_text(game, players), 0)
     markup = _lobby_markup(game)
     if new:
         with keep_in_chat():
-            await answer_block(
+            sent = await answer_block(
                 target,
                 _cover(str(game["game_type"])),
                 text,
                 parse_mode="HTML",
                 reply_markup=markup,
             )
+        if db is not None:
+            start_lobby_anim(
+                sent,
+                int(game["id"]),
+                lambda frame, gid=int(game["id"]): _render_cookie_lobby(db, gid, frame),
+                lambda g=game: _lobby_markup(g),
+            )
         return
-    await edit_block(target, text, parse_mode="HTML", reply_markup=markup)
+    await edit_lobby_now(target, int(game["id"]), text, markup)
+    if db is not None:
+        start_lobby_anim(
+            target,
+            int(game["id"]),
+            lambda frame, gid=int(game["id"]): _render_cookie_lobby(db, gid, frame),
+            lambda g=game: cookie_lobby_keyboard(int(g["id"]), int((g.get("state") or {}).get("stake") or 10)),
+        )
 
 
 def _cancel_crash_job(game_id: int) -> None:
@@ -258,7 +283,7 @@ async def cookie_games_command(
     game = await db.get_party_game(game_id)
     players = await db.list_game_players(game_id)
     assert game is not None
-    await _publish_lobby(message, game, players, new=True)
+    await _publish_lobby(message, game, players, new=True, db=db)
 
 
 @router.message(command_or_alias("gamecancel"))
@@ -274,7 +299,12 @@ async def cancel_active_game(message: Message, db: Database, settings: Settings)
         await message.answer("Отменить может создатель или администратор игр.")
         return
     _cancel_game_jobs(int(game["id"]))
-    await send_game_finale(message, f"❌ Игра №{game['id']} отменена, 🍪 вернулись игрокам.")
+    from community_bot.routers.social_games import cancel_social_jobs
+
+    cancel_social_jobs(int(game["id"]))
+    stake = int((game.get("state") or {}).get("stake") or 0)
+    extra = ", 🍪 вернулись игрокам" if stake else ""
+    await send_game_finale(message, f"❌ Игра №{game['id']} отменена{extra}.")
 
 
 @router.callback_query(F.data == "cg:home")
@@ -336,7 +366,7 @@ async def cookie_new_game(callback: CallbackQuery, db: Database) -> None:
     players = await db.list_game_players(game_id)
     assert game is not None
     await callback.answer("Лобби создано, ставка списана.")
-    await _publish_lobby(callback.message, game, players, new=True)
+    await _publish_lobby(callback.message, game, players, new=True, db=db)
 
 
 @router.callback_query(F.data.startswith("cg:join:"))
@@ -357,7 +387,7 @@ async def cookie_join(callback: CallbackQuery, db: Database) -> None:
     players = await db.list_game_players(game_id)
     game = await db.get_party_game(game_id)
     assert game is not None
-    await _publish_lobby(callback.message, game, players, new=False)
+    await _publish_lobby(callback.message, game, players, new=False, db=db)
 
 
 @router.callback_query(F.data.startswith("cg:stake:"))
@@ -378,7 +408,7 @@ async def cookie_change_stake(callback: CallbackQuery, db: Database) -> None:
     players = await db.list_game_players(game_id)
     assert game is not None
     await callback.answer(f"Ставка теперь {stake} 🍪.")
-    await _publish_lobby(callback.message, game, players, new=False)
+    await _publish_lobby(callback.message, game, players, new=False, db=db)
 
 
 @router.callback_query(F.data.startswith("cg:cancel:"))
@@ -414,6 +444,7 @@ async def cookie_start(callback: CallbackQuery, db: Database) -> None:
     if not minimum <= len(players) <= maximum:
         await callback.answer(f"Нужно от {minimum} до {maximum} игроков.", show_alert=True)
         return
+    _cancel_game_jobs(game_id)
     kind = str(game["game_type"])
     if kind == "dice":
         await _start_dice(callback, db, game, players)

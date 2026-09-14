@@ -23,6 +23,8 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("рейс 10") == ("crash", "10")
     assert parse_trigger("капкан 10") == ("trap", "10")
     assert parse_trigger("налёт 25") == ("trap", "25")
+    assert parse_trigger("мафия") == ("mafia", "")
+    assert parse_trigger("бункер") == ("bunker", "")
     assert parse_trigger("чистить бота 30 уборка") == ("botsweep", "30 уборка")
     assert parse_trigger("купить печеньки") == ("buycookies", "")
     assert parse_trigger("мут 30m спам") == ("mute", "30m спам")
@@ -185,8 +187,9 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 9
+    assert latest.number == 10
     text = updates_text()
+    assert "№10" in text
     assert "№8" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
@@ -215,21 +218,24 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №9" in pin
+    assert "Обновление №10" in pin
     details = member_details_text(latest)
-    assert "рулетка" in details.casefold()
-    assert "рейс" in details.casefold()
+    assert "мафия" in details.casefold()
+    assert "бункер" in details.casefold()
+    assert "верификац" in details.casefold()
     assert "админка" not in details.casefold()
     assert "Пример." in details
     staff = staff_announcement(latest)
     assert "справка" in staff.casefold()
-    assert "/purge" in staff
+    assert "bio_warning" in staff
     assert "Админ" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
     assert "рулетка" in labels
     assert "кубик" in labels
     assert "рейс" in labels
     assert "капкан" in labels
+    assert "мафия" in labels
+    assert "бункер" in labels
     assert "контрабанд" not in labels
     guide = staff_guide_text()
     assert "/mute 30m" in guide
@@ -238,11 +244,15 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "Перезапустить бота" in guide
     assert "Конкурс на печеньки" in guide
     assert "Капкан" in guide
+    assert "Мафия" in guide
+    assert "Бункер" in guide
     assert "сильнейший" in guide.casefold()
     assert "аварийный выключатель" in guide.casefold()
     from community_bot.texts import GAMES_HELP_TEXT
 
     assert "капкан" in GAMES_HELP_TEXT.casefold()
+    assert "мафия" in GAMES_HELP_TEXT.casefold()
+    assert "бункер" in GAMES_HELP_TEXT.casefold()
     assert "комиссии репутации" not in GAMES_HELP_TEXT
     assert "банк минус комиссия" not in GAMES_HELP_TEXT
 

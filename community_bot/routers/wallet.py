@@ -42,6 +42,14 @@ def _due_label(due_at: str) -> str:
         return due_at[:16].replace("T", " ")
 
 
+def _pad(text: str, width: int, *, right: bool = False) -> str:
+    text = str(text)
+    if len(text) >= width:
+        return text[:width]
+    pad = " " * (width - len(text))
+    return pad + text if right else text + pad
+
+
 async def wallet_text(db: Database, settings: Settings, user: dict[str, object]) -> str:
     user_id = int(user["user_id"])
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
@@ -51,19 +59,43 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
     pet = await db.get_pet(user_id)
     loan = await db.get_active_loan(user_id)
     debt = int(user.get("cookie_debt") or 0)
+    cookies = int(user["cookies"])
     net = wallet_net(user)
+    farm = "нет питомца"
+    if pet:
+        hunger = int(pet["hunger"])
+        thirst = int(pet["thirst"])
+        if hunger == 0 or thirst == 0 or int(pet.get("sleeping") or 0):
+            farm = "спит"
+        else:
+            average = (hunger + thirst) // 2
+            milli = 50 if average >= 70 else 34 if average >= 35 else 17
+            farm = f"{milli * 24 / 1000:.1f}/сут"
+    table = (
+        "<pre>"
+        "┌──────────────┬────────────┐\n"
+        f"│ {_pad('Печеньки', 12)} │ {_pad(str(cookies) + ' 🍪', 10, right=True)} │\n"
+        f"│ {_pad('Долг', 12)} │ {_pad(str(debt) + ' 🍪', 10, right=True)} │\n"
+        f"│ {_pad('Итого', 12)} │ {_pad(str(net) + ' 🍪', 10, right=True)} │\n"
+        f"│ {_pad('Комиссия', 12)} │ {_pad(str(percent) + ' %', 10, right=True)} │\n"
+        f"│ {_pad('Кредит', 12)} │ {_pad(str(LOAN_PRINCIPAL) + ' 🍪', 10, right=True)} │\n"
+        f"│ {_pad('Ставка', 12)} │ {_pad(str(interest) + ' %', 10, right=True)} │\n"
+        f"│ {_pad('Репутация', 12)} │ {_pad(str(int(user['reputation'])) + ' %', 10, right=True)} │\n"
+        f"│ {_pad('Уровень', 12)} │ {_pad(tier.label, 10, right=True)} │\n"
+        f"│ {_pad('Фарм', 12)} │ {_pad(farm, 10, right=True)} │\n"
+        "└──────────────┴────────────┘"
+        "</pre>"
+    )
     lines = [
-        "💼 <b>Кошелёк Норы</b>",
+        "💼 <b>Личный кабинет · кошелёк</b>",
         "",
-        f"Печеньки: <b>{int(user['cookies'])} 🍪</b>",
+        table,
+        "",
+        f"Уровень: {tier.emoji} {tier.label} · комиссия переводов <b>{percent}%</b>.",
+        f"Кредит 100 🍪: ставка <b>{interest}%</b>, к возврату {repay} 🍪 через {LOAN_DAYS} дней.",
+        "",
+        pet_farm_rate_line(pet),
     ]
-    if debt:
-        lines.append(f"Долг: <b>−{debt} 🍪</b>")
-        lines.append(f"Итого: <b>{net} 🍪</b>")
-    lines.append(f"Уровень: {tier.emoji} {tier.label} · комиссия переводов <b>{percent}%</b>")
-    lines.append(f"Кредит 100 🍪: ставка <b>{interest}%</b>, к возврату {repay} 🍪 через {LOAN_DAYS} дней.")
-    lines.append("")
-    lines.append(pet_farm_rate_line(pet))
     if loan:
         lines.append("")
         lines.append(
@@ -71,7 +103,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
             f"(осталось {_due_label(str(loan['due_at']))})."
         )
     lines.append("")
-    lines.append("История, пополнение и кредит — кнопками ниже.")
+    lines.append("Итого = печеньки минус долг. История, пополнение и кредит — кнопками ниже.")
     return "\n".join(lines)
 
 

@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from community_bot.aliases import command_or_alias
-from community_bot.blocks import cover_file
+from community_bot.blocks import answer_block, cover_file
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
@@ -15,7 +15,13 @@ from community_bot.helpers import (
     render_profile,
     resolve_reply_target,
 )
-from community_bot.keyboards import flow_reply_keyboard, profile_keyboard, public_profile_keyboard
+from community_bot.keyboards import (
+    flow_reply_keyboard,
+    profile_keyboard,
+    public_profile_keyboard,
+    verification_keyboard,
+)
+from community_bot.profile_fill import notices_text, verification_text
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 
@@ -108,6 +114,7 @@ async def edit_profile(callback: CallbackQuery, state: FSMContext, db: Database)
         "name": (ProfileEdit.name, "Введите имя (до 50 символов)."),
         "age": (ProfileEdit.age, "Введите возраст числом от 14 до 120."),
         "hobbies": (ProfileEdit.hobbies, "Расскажите об увлечениях (до 500 символов)."),
+        "bio": (ProfileEdit.bio, "Напишите описание профиля (до 280 символов). Это блок верификации."),
         "avatar": (ProfileEdit.avatar, "Отправьте фотографию для аватара."),
     }
     if field not in prompts:
@@ -149,6 +156,19 @@ async def edit_profile_age(message: Message, state: FSMContext, db: Database, se
         await restore_private_menu(message, db, settings)
 
 
+@router.message(ProfileEdit.bio)
+async def edit_profile_bio(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    text = (message.text or "").strip()
+    if not message.from_user or not 1 <= len(text) <= 280:
+        await message.answer("Описание — от 1 до 280 символов.")
+        return
+    await db.update_profile(message.from_user.id, "profile_bio", text)
+    await state.clear()
+    await message.answer("Описание сохранено. Откройте «Верификация» — шкала обновится.")
+    if message.chat.type == "private":
+        await restore_private_menu(message, db, settings)
+
+
 @router.message(ProfileEdit.hobbies)
 async def edit_profile_hobbies(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     text = (message.text or "").strip()
@@ -173,3 +193,33 @@ async def edit_profile_avatar(message: Message, state: FSMContext, db: Database,
     await message.answer("Аватар обновлён.")
     if message.chat.type == "private":
         await restore_private_menu(message, db, settings)
+
+
+@router.callback_query(F.data == "menu:verify")
+async def menu_verify(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    user = await register_telegram_user(db, callback.from_user)
+    await callback.answer()
+    await answer_block(
+        callback.message,
+        "verify",
+        verification_text(user),
+        parse_mode="HTML",
+        reply_markup=verification_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "menu:notices")
+async def menu_notices(callback: CallbackQuery, db: Database) -> None:
+    if not callback.message:
+        return
+    user = await register_telegram_user(db, callback.from_user)
+    await callback.answer()
+    await answer_block(
+        callback.message,
+        "notify",
+        notices_text(user),
+        parse_mode="HTML",
+        reply_markup=verification_keyboard(),
+    )

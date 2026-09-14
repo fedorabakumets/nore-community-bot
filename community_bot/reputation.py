@@ -47,4 +47,14 @@ async def change_community_reputation(
     else:
         sign = "+" if applied > 0 else ""
         text = f"Репутация изменена на {sign}{applied}, теперь {new_value}."
+        from community_bot.profile_fill import profile_is_complete, reputation_cap
+
+        if applied > 0 and new_value <= int(target["reputation"]) and not profile_is_complete(target):
+            extra = ((extra + "\n") if extra else "") + (
+                f"Карточка не на 100% — репутацию нельзя поднять выше {reputation_cap(target)} (серебро)."
+            )
+        elif applied > 0 and new_value < int(target["reputation"]) + applied and not profile_is_complete(target):
+            extra = ((extra + "\n") if extra else "") + (
+                "Упёрлись в потолок серебра: сначала заполните профиль на 100%."
+            )
     return True, text, new_value, extra

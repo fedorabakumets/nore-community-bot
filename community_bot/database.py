@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS users (
     profile_title TEXT NOT NULL DEFAULT '',
     hate_shields INTEGER NOT NULL DEFAULT 0 CHECK(hate_shields >= 0),
     moderator_note TEXT NOT NULL DEFAULT '',
+    profile_bio TEXT NOT NULL DEFAULT '',
+    bio_warning INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -425,6 +427,10 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN hate_shields INTEGER NOT NULL DEFAULT 0")
             if "moderator_note" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN moderator_note TEXT NOT NULL DEFAULT ''")
+            if "profile_bio" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN profile_bio TEXT NOT NULL DEFAULT ''")
+            if "bio_warning" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN bio_warning INTEGER NOT NULL DEFAULT 1")
             if "guard_used_on" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN guard_used_on TEXT")
             if "expedition_until" not in pet_columns:
@@ -781,6 +787,7 @@ class Database:
             "profile_ornate",
             "profile_title",
             "moderator_note",
+            "profile_bio",
         }
         if field not in allowed:
             raise ValueError("Недопустимое поле профиля")
@@ -930,12 +937,25 @@ class Database:
             return cursor.rowcount == 1
 
     async def apply_reputation(self, actor_id: int, target_id: int, delta: int, action_date: date) -> int:
+        from community_bot.profile_fill import reputation_cap
+
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (target_id,))
+            target_row = await cursor.fetchone()
+            if not target_row:
+                await db.rollback()
+                raise ValueError("Пользователь не найден")
+            current = int(target_row["reputation"])
+            if delta > 0:
+                cap = reputation_cap(dict(target_row))
+                nxt = current if current >= cap else min(cap, current + delta)
+            else:
+                nxt = max(-20, current + delta)
             await db.execute(
-                "UPDATE users SET reputation = MAX(-20, MIN(100, reputation + ?)), updated_at = ? WHERE user_id = ?",
-                (delta, now, target_id),
+                "UPDATE users SET reputation = ?, updated_at = ? WHERE user_id = ?",
+                (nxt, now, target_id),
             )
             await db.execute(
                 """
@@ -944,12 +964,8 @@ class Database:
                 """,
                 (actor_id, target_id, delta, action_date.isoformat(), now),
             )
-            cursor = await db.execute("SELECT reputation FROM users WHERE user_id = ?", (target_id,))
-            row = await cursor.fetchone()
             await db.commit()
-            if not row:
-                raise ValueError("Пользователь не найден")
-            return int(row["reputation"])
+            return nxt
 
     async def create_transfer(self, sender_id: int, receiver_id: int, amount: int) -> int:
         return await self.execute(
@@ -1193,9 +1209,16 @@ class Database:
 
     async def _apply_shop_effect(self, db: aiosqlite.Connection, user_id: int, item: str, now: str) -> None:
         if item == "restore_rep":
+            from community_bot.profile_fill import reputation_cap
+
+            cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            current = int(row["reputation"]) if row else 0
+            cap = reputation_cap(dict(row) if row else {})
+            nxt = current if current >= cap else min(cap, current + 10)
             await db.execute(
-                "UPDATE users SET reputation = MIN(100, reputation + 10) WHERE user_id = ?",
-                (user_id,),
+                "UPDATE users SET reputation = ? WHERE user_id = ?",
+                (nxt, user_id),
             )
         elif item == "reset_limits":
             await db.execute(
@@ -2065,6 +2088,41 @@ class Database:
             )
             await db.commit()
             return True, "ok", info
+
+    async def set_nested_state(self, game_id: int, path: list[str], value: Any) -> dict[str, Any] | None:
+        if not path:
+            return None
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT * FROM party_games WHERE id = ?", (game_id,))
+            game = await cursor.fetchone()
+            if not game or game["status"] != "active":
+                await db.rollback()
+                return None
+            state = json.loads(str(game["state_json"]) or "{}")
+            cursor_obj: Any = state
+            for key in path[:-1]:
+                child = cursor_obj.get(key)
+                if not isinstance(child, dict):
+                    child = {}
+                    cursor_obj[key] = child
+                cursor_obj = child
+            cursor_obj[path[-1]] = value
+            await db.execute(
+                "UPDATE party_games SET state_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(state, ensure_ascii=False), now, game_id),
+            )
+            await db.commit()
+            return state
+
+    async def complete_party_game(self, game_id: int) -> None:
+        now = utcnow()
+        await self.execute(
+            "UPDATE party_games SET status = 'completed', updated_at = ?, completed_at = ? "
+            "WHERE id = ? AND status IN ('lobby', 'active')",
+            (now, now, game_id),
+        )
 
     async def trap_pick(self, game_id: int, user_id: int, door: str) -> tuple[bool, str]:
         if door not in {"A", "B", "C"}:
