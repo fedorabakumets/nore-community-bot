@@ -9,13 +9,14 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY community_bot ./community_bot
 COPY assets ./assets
-COPY data ./data
-RUN pip install .
-
-RUN useradd --create-home --uid 10001 botuser \
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN pip install . \
+    && useradd --create-home --uid 10001 botuser \
     && mkdir -p /app/data \
+    && chmod +x /app/docker-entrypoint.sh \
     && chown -R botuser:botuser /app
 
-USER botuser
-
+# Stay root so a Railway volume mounted at /app/data is writable, then drop privileges.
+USER root
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python", "-m", "community_bot.main"]
