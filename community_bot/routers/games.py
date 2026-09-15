@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import CallbackQuery, ChatPermissions, Message
+from aiogram.types import CallbackQuery, ChatPermissions, InlineKeyboardMarkup, Message
 
 from community_bot.aliases import command_or_alias
 from community_bot.audit import person_label
@@ -16,8 +16,9 @@ from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
 from community_bot.game_notify import send_game_finale
 from community_bot.helpers import register_telegram_user, resolve_reply_target, user_link
-from community_bot.keyboards import games_menu_keyboard, roulette_invite_keyboard
+from community_bot.keyboards import close_btn, games_menu_keyboard, roulette_invite_keyboard
 from community_bot.texts import GAMES_HELP_TEXT
+from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="games")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
@@ -36,13 +37,15 @@ async def games_hub(message: Message, db: Database) -> None:
         await message.answer("Мини-игры временно выключены администрацией.")
         return
     with keep_in_chat():
-        await answer_block(
+        sent = await answer_block(
             message,
             "games",
             GAMES_HELP_TEXT,
             parse_mode="HTML",
             reply_markup=games_menu_keyboard(),
         )
+        if message.from_user:
+            await bind_ui_owner(db, sent, message.from_user.id, "games")
 
 
 @router.callback_query(F.data == "game:rules:all")
@@ -67,6 +70,7 @@ async def game_pick_roulette(callback: CallbackQuery) -> None:
             "roulette",
             "🔫 <b>Рулетка</b>\nОтветьте «рулетка» на человека. Бесплатно, 50/50, проигравший в муте 30 минут.",
             parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[close_btn("ui:close")]]),
         )
 
 

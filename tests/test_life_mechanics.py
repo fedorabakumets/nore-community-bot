@@ -38,13 +38,13 @@ def test_public_update_omits_staff_and_has_member_copy() -> None:
     item = latest_update()
     pin = community_announcement(item)
     staff = staff_announcement(item)
-    assert item.number == 11
-    assert "Обновление №11" in pin
+    assert item.number == 12
+    assert "Обновление №12" in pin
     assert "Админское" not in pin
-    assert "кабинет" in pin.casefold()
+    assert "магазин" in pin.casefold()
     assert "Витрина после выбора" not in pin
-    assert "Админское обновление №11" in staff
-    assert "справка" in staff.casefold()
+    assert "Админское обновление №12" in staff
+    assert "пустое описание" in staff.casefold() or "bio_auto_warn" in staff
     assert len(pin) <= 1024
 
 
@@ -170,4 +170,4 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
     public = [text for chat_id, text in dms if chat_id == -100]
     assert staff_texts and "Админское" in staff_texts[0]
     assert public and "Админское" not in public[0]
-    assert "Обновление №11" in public[0]
+    assert "Обновление №12" in public[0]

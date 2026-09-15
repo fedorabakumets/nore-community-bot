@@ -38,6 +38,7 @@ from community_bot.routers import (
     wallet_router,
 )
 from community_bot.telegraph import publish_member_update, publish_staff_guide
+from community_bot.ui_owner import UiOwnerMiddleware
 from community_bot.updates import announcement_key, community_announcement, latest_update
 
 logger = logging.getLogger(__name__)
@@ -257,14 +258,18 @@ async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> N
                 )
                 mention = user_link(user_id, owner_name)
                 if payout:
+                    words = {}
+                    from community_bot.pets_talk import pet_pronouns
+
+                    words = pet_pronouns(str(pet.get("species") or ""))
                     if pet.get("expedition_done"):
                         chat_text = (
-                            f"🌲 <b>{html.escape(str(pet['name']))}</b> вернулся из леса к {mention}: "
+                            f"🌲 <b>{html.escape(str(pet['name']))}</b> {words['returned']} из леса к {mention}: "
                             f"+{payout} 🍪."
                         )
                     else:
                         chat_text = (
-                            f"🍪 <b>{html.escape(str(pet['name']))}</b> принёс печеньку хозяину {mention}: "
+                            f"🍪 <b>{html.escape(str(pet['name']))}</b> {words['brought']} печеньку хозяину {mention}: "
                             f"+{payout} 🍪."
                         )
                 else:
@@ -400,6 +405,7 @@ async def main() -> None:
     patch_bot_ephemeral(bot)
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
+    dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)

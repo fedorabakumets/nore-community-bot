@@ -52,17 +52,10 @@ def bio_is_filled(user: dict[str, Any]) -> bool:
 
 def profile_notices(user: dict[str, Any]) -> list[str]:
     notices: list[str] = []
-    if int(user.get("bio_warning") or 0):
-        if bio_is_filled(user):
-            notices.append(
-                "⚠️ Вечное предупреждение получено за пустое описание. Сейчас описание заполнено."
-            )
-        else:
-            notices.append("⚠️ Вечное предупреждение: описание профиля не заполнено.")
     if profile_fill_percent(user) < 100:
         notices.append(
             f"🪪 Профиль заполнен на {profile_fill_percent(user)}%. "
-            "Репутацию нельзя поднять выше серебра, пока карточка не будет на 100%."
+            "Репутацию нельзя поднять выше бронзы, пока карточка не будет на 100%."
         )
     return notices
 
@@ -73,10 +66,8 @@ def cabinet_profile_text(user: dict[str, Any]) -> str:
     lines = [
         f"<b>Профиль</b> · {html.escape(name)} · {percent}%",
         f"<code>{progress_bar(percent)}</code>",
-        f"{percent}% заполнения. Без 100% репутация не выше серебра.",
+        f"{percent}% заполнения. Без 100% репутация не выше бронзы.",
     ]
-    if int(user.get("bio_warning") or 0):
-        lines.append("Предупреждение за описание — навсегда.")
     return "\n".join(lines)
 
 
@@ -98,7 +89,7 @@ def verification_text(user: dict[str, Any]) -> str:
     if percent >= 100:
         lines.append("Карточка полная — репутацию можно поднимать до золота.")
     else:
-        lines.append("Пока карточка не на 100%, репутация не поднимается выше серебра (89).")
+        lines.append("Пока карточка не на 100%, репутация не поднимается выше бронзы (69).")
     return "\n".join(lines)
 
 

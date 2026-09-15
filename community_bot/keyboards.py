@@ -8,6 +8,7 @@ from aiogram.types import (
 )
 
 from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
+from community_bot.pet_cosmetics import COSMETIC_ITEMS, COSMETIC_ORDER
 from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, SHOP_CATEGORIES
 
 # Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
@@ -37,11 +38,11 @@ def kbtn(text: str, style: str | None = None) -> KeyboardButton:
 
 
 def close_btn(data: str = "ui:close") -> InlineKeyboardButton:
-    return ibtn("❌ Закрыть", data, STYLE_CLOSE)
+    return ibtn("✖️ Закрыть", data, STYLE_CLOSE)
 
 
 def game_hide_button() -> InlineKeyboardButton:
-    return ibtn("✖️ Скрыть", "g:hide", STYLE_CLOSE)
+    return ibtn("✖️ Закрыть", "g:hide", STYLE_CLOSE)
 
 
 def game_hide_keyboard() -> InlineKeyboardMarkup:
@@ -461,6 +462,7 @@ def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMa
             ibtn("Описание", f"profile:bio:{user_id}", STYLE_FUN),
         ],
         [ibtn("Аватар", f"profile:avatar:{user_id}")],
+        [ibtn("⚠️ Варны", "p:warns")],
     ]
     if is_private:
         rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
@@ -491,12 +493,11 @@ def compact_profile_keyboard(user: dict[str, object]) -> InlineKeyboardMarkup:
             mark("Фото", "avatar_file_id", f"profile:avatar:{user_id}"),
             ibtn("Правила", "p:rules"),
         ],
+        [ibtn("⚠️ Варны", "p:warns")],
     ]
-    if int(user.get("bio_warning") or 0):
-        rows.append([ibtn("Почему предупреждение", "p:warn")])
     if user.get("profile_private"):
         rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
-    rows.append([back_btn("menu:home")])
+    rows.append([back_btn("menu:home"), close_btn("ui:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -511,6 +512,7 @@ def public_profile_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("💌 Обнять", f"profile_action:hug:{user_id}", STYLE_FUN),
                 ibtn("🍪 Перевести", f"profile_action:transfer:{user_id}", STYLE_FUN),
             ],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -553,8 +555,9 @@ def shop_home_keyboard(featured_key: str | None = None, featured_label: str | No
             ],
             [
                 ibtn("✨ Профиль", "shop:cat:profile"),
-                ibtn("🎟 Мероприятия", "shop:cat:extra"),
+                ibtn("🎨 Кастомизация", "shop:cat:cosmetics", STYLE_FUN),
             ],
+            [ibtn("🎟 Мероприятия", "shop:cat:extra")],
             [ibtn("🍪 Купить печеньки", "shop:buy_cookies", STYLE_GO)],
             [close_btn("shop:close")],
         ]
@@ -562,11 +565,33 @@ def shop_home_keyboard(featured_key: str | None = None, featured_label: str | No
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def shop_category_keyboard(category: str, prices: dict[str, int]) -> InlineKeyboardMarkup:
+def shop_category_keyboard(
+    category: str,
+    prices: dict[str, int],
+    *,
+    owned: set[str] | None = None,
+    equipped: set[str] | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
+    owned = owned or set()
+    equipped = equipped or set()
     if category == "extra":
         rows.append([ibtn("🎟 Оплата мероприятия · 🍪", "shop:event_pass", STYLE_FUN)])
         rows.append([ibtn("💚 Поддержать развитие · 🍪", "shop:support", STYLE_GO)])
+    elif category == "cosmetics":
+        for key in COSMETIC_ORDER:
+            price = prices.get(key, 0)
+            label = str(ITEM_LABELS.get(key) or COSMETIC_ITEMS[key]["label"])
+            if key in owned:
+                wear = "Снять" if key in equipped else "Надеть"
+                rows.append(
+                    [
+                        ibtn(f"{label} · {'надет' if key in equipped else 'в шкафу'}", f"shop:eq:{key}", STYLE_GO),
+                        ibtn(wear, f"shop:eq:{key}", STYLE_FUN),
+                    ]
+                )
+            else:
+                rows.append([ibtn(f"{label} — {prices.get(key, 0)} 🍪", f"shop:{key}", STYLE_GO)])
     else:
         meta = SHOP_CATEGORIES[category]
         style = STYLE_GO if category == "pets" else STYLE_FUN if category == "reputation" else None
@@ -634,7 +659,6 @@ def roulette_invite_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("🎯 Играть", f"roulette:accept:{game_id}", STYLE_GO),
                 ibtn("Отказаться", f"roulette:decline:{game_id}", STYLE_CLOSE),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -644,6 +668,7 @@ def freebie_keyboard(channel_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📣 Подписаться", url=channel_url, style=STYLE_FUN)],
             [ibtn("✅ Проверить подписку", "freebie:check", STYLE_GO)],
+            [close_btn("ui:close")],
         ]
     )
 
@@ -684,6 +709,7 @@ def pet_keyboard() -> InlineKeyboardMarkup:
                 ibtn("💧 Напоить", "pet:use:water", STYLE_FUN),
             ],
             [ibtn("🌲 Экспедиция · 4 ч", "pet:expedition", STYLE_FUN)],
+            [ibtn("🎨 Кастомизация", "pet:custom", STYLE_FUN)],
             [ibtn("✏️ Переименовать", "pet:rename"), ibtn("🛒 Магазин", "pet:shop", STYLE_GO)],
             [close_btn("ui:close")],
         ]
@@ -864,7 +890,6 @@ def cookie_lobby_keyboard(game_id: int, current_stake: int = 10) -> InlineKeyboa
                 ibtn("▶️ Начать", f"cg:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"cg:cancel:{game_id}", STYLE_CLOSE),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -876,7 +901,6 @@ def blackjack_turn_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("🃏 Взять", f"cg:hit:{game_id}", STYLE_FUN),
                 ibtn("✋ Хватит", f"cg:stand:{game_id}", STYLE_GO),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -885,7 +909,6 @@ def crash_keyboard(game_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ibtn("💰 Забрать", f"cg:cash:{game_id}", STYLE_GO)],
-            [game_hide_button()],
         ]
     )
 
@@ -898,7 +921,6 @@ def trap_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("🚪 Б", f"cg:door:{game_id}:B", STYLE_GO),
                 ibtn("🚪 В", f"cg:door:{game_id}:C", STYLE_FUN),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -911,7 +933,6 @@ def social_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("▶️ Начать", f"sg:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"sg:cancel:{game_id}", STYLE_CLOSE),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -926,7 +947,6 @@ def social_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inli
         [ibtn(_player_button_name(player), f"sg:vote:{game_id}:{int(player['user_id'])}", STYLE_CLOSE)]
         for player in players
     ]
-    rows.append([game_hide_button()])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -953,7 +973,6 @@ def game_lobby_keyboard(game_id: int) -> InlineKeyboardMarkup:
                 ibtn("▶️ Начать", f"game:start:{game_id}", STYLE_FUN),
                 ibtn("❌ Отмена", f"game:cancel:{game_id}", STYLE_CLOSE),
             ],
-            [game_hide_button()],
         ]
     )
 
@@ -965,7 +984,6 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
             player.get("profile_name") or player.get("telegram_name") or player.get("username") or player["user_id"]
         )
         rows.append([ibtn(f"🗳 {name[:38]}", f"game:vote:{game_id}:{player['user_id']}", STYLE_FUN)])
-    rows.append([game_hide_button()])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

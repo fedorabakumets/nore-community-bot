@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     custom_status TEXT,
     cookies INTEGER NOT NULL DEFAULT 0 CHECK(cookies >= 0),
     cookie_debt INTEGER NOT NULL DEFAULT 0 CHECK(cookie_debt >= 0),
-    reputation INTEGER NOT NULL DEFAULT 70,
+    reputation INTEGER NOT NULL DEFAULT 69,
     warnings INTEGER NOT NULL DEFAULT 0 CHECK(warnings >= 0),
     hate_immunity_until TEXT,
     profile_private INTEGER NOT NULL DEFAULT 0 CHECK(profile_private IN (0, 1)),
@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS users (
     hate_shields INTEGER NOT NULL DEFAULT 0 CHECK(hate_shields >= 0),
     moderator_note TEXT NOT NULL DEFAULT '',
     profile_bio TEXT NOT NULL DEFAULT '',
-    bio_warning INTEGER NOT NULL DEFAULT 1,
+    bio_warning INTEGER NOT NULL DEFAULT 0,
+    bio_auto_warn INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -385,6 +386,35 @@ CREATE TABLE IF NOT EXISTS bot_chat_messages (
     PRIMARY KEY(chat_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bot_chat_messages_created ON bot_chat_messages(chat_id, created_at);
+
+CREATE TABLE IF NOT EXISTS pet_cosmetics (
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    item TEXT NOT NULL,
+    equipped INTEGER NOT NULL DEFAULT 0 CHECK(equipped IN (0, 1)),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, item)
+);
+
+CREATE TABLE IF NOT EXISTS ui_owners (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'ui',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(chat_id, message_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_offers (
+    event_id TEXT PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    button_text TEXT NOT NULL,
+    price INTEGER NOT NULL CHECK(price >= 0),
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 DEFAULT_FEATURE_FLAGS = {
@@ -449,7 +479,9 @@ class Database:
             if "profile_bio" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_bio TEXT NOT NULL DEFAULT ''")
             if "bio_warning" not in columns:
-                await db.execute("ALTER TABLE users ADD COLUMN bio_warning INTEGER NOT NULL DEFAULT 1")
+                await db.execute("ALTER TABLE users ADD COLUMN bio_warning INTEGER NOT NULL DEFAULT 0")
+            if "bio_auto_warn" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN bio_auto_warn INTEGER NOT NULL DEFAULT 0")
             if "guard_used_on" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN guard_used_on TEXT")
             if "expedition_until" not in pet_columns:
@@ -477,6 +509,8 @@ class Database:
                     (key, enabled, now),
                 )
             await db.commit()
+        await self.reset_incomplete_reputation_to_bronze()
+        await self.sync_all_bio_auto_warns()
 
     async def fetchone(self, query: str, parameters: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         async with self.connect() as db:
@@ -660,20 +694,25 @@ class Database:
         )
 
     async def ensure_user(self, user_id: int, username: str | None = None, telegram_name: str = "") -> dict[str, Any]:
+        from community_bot.domain import STARTING_REPUTATION
+
         now = utcnow()
         async with self.connect() as db:
             await db.execute(
                 """
                 INSERT INTO users(user_id, username, telegram_name, reputation, created_at, updated_at)
-                VALUES (?, ?, ?, 70, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     username=excluded.username,
                     telegram_name=excluded.telegram_name,
                     updated_at=excluded.updated_at
                 """,
-                (user_id, username, telegram_name, now, now),
+                (user_id, username, telegram_name, STARTING_REPUTATION, now, now),
             )
             await db.commit()
+        user = await self.get_user(user_id)
+        assert user is not None
+        await self.sync_bio_auto_warn(user_id)
         user = await self.get_user(user_id)
         assert user is not None
         return user
@@ -686,6 +725,193 @@ class Database:
             "UPDATE users SET role = ?, updated_at = ? WHERE user_id = ?",
             (role, utcnow(), user_id),
         )
+
+    async def reset_incomplete_reputation_to_bronze(self) -> int:
+        from community_bot.domain import AUTO_REPUTATION_CAP
+
+        now = utcnow()
+        async with self.connect() as db:
+            cursor = await db.execute(
+                """
+                UPDATE users SET reputation = ?, updated_at = ?
+                WHERE reputation > ?
+                  AND (
+                    TRIM(COALESCE(profile_name, '')) = ''
+                    OR age IS NULL OR age < 14 OR age > 120
+                    OR TRIM(COALESCE(hobbies, '')) = ''
+                    OR TRIM(COALESCE(profile_bio, '')) = ''
+                    OR TRIM(COALESCE(avatar_file_id, '')) = ''
+                  )
+                """,
+                (AUTO_REPUTATION_CAP, now, AUTO_REPUTATION_CAP),
+            )
+            await db.commit()
+            return int(cursor.rowcount or 0)
+
+    async def sync_all_bio_auto_warns(self) -> None:
+        for user in await self.list_all_users():
+            await self.sync_bio_auto_warn(int(user["user_id"]))
+
+    async def sync_bio_auto_warn(self, user_id: int) -> str | None:
+        from community_bot.audit import SYSTEM_ACTOR_ID
+        from community_bot.profile_fill import bio_is_filled
+
+        user = await self.get_user(user_id)
+        if not user:
+            return None
+        state = int(user.get("bio_auto_warn") or 0)
+        filled = bio_is_filled(user)
+        now = utcnow()
+        if filled and state == 0:
+            await self.execute(
+                "UPDATE users SET bio_auto_warn = 2, updated_at = ? WHERE user_id = ?",
+                (now, user_id),
+            )
+            return None
+        if filled and state == 1:
+            await self.remove_warning(user_id)
+            await self.execute(
+                "UPDATE users SET bio_auto_warn = 2, updated_at = ? WHERE user_id = ?",
+                (now, user_id),
+            )
+            await self.log_admin_action(
+                SYSTEM_ACTOR_ID,
+                "unwarn",
+                str(user_id),
+                "bio_filled",
+                reason="Описание профиля заполнено",
+                actor_name="Система",
+            )
+            return "cleared"
+        if (not filled) and state == 0:
+            await self.add_warning(user_id)
+            await self.execute(
+                "UPDATE users SET bio_auto_warn = 1, updated_at = ? WHERE user_id = ?",
+                (now, user_id),
+            )
+            await self.log_admin_action(
+                SYSTEM_ACTOR_ID,
+                "warn",
+                str(user_id),
+                "bio_empty",
+                reason="Не заполнено описание профиля",
+                actor_name="Система",
+            )
+            return "issued"
+        return None
+
+    async def list_user_warns(self, user_id: int) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT * FROM admin_audit_log
+            WHERE action = 'warn' AND target = ?
+            ORDER BY id DESC
+            """,
+            (str(user_id),),
+        )
+
+    async def bind_ui_owner(self, chat_id: int, message_id: int, user_id: int, kind: str = "ui") -> None:
+        await self.execute(
+            """
+            INSERT INTO ui_owners(chat_id, message_id, user_id, kind, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id, message_id) DO UPDATE SET user_id=excluded.user_id, kind=excluded.kind
+            """,
+            (chat_id, message_id, user_id, kind, utcnow()),
+        )
+
+    async def get_ui_owner(self, chat_id: int, message_id: int) -> int | None:
+        row = await self.fetchone(
+            "SELECT user_id FROM ui_owners WHERE chat_id = ? AND message_id = ?",
+            (chat_id, message_id),
+        )
+        return int(row["user_id"]) if row else None
+
+    async def pet_cosmetic_sets(self, user_id: int) -> tuple[set[str], set[str]]:
+        rows = await self.fetchall(
+            "SELECT item, equipped FROM pet_cosmetics WHERE user_id = ?",
+            (user_id,),
+        )
+        owned = {str(row["item"]) for row in rows}
+        equipped = {str(row["item"]) for row in rows if int(row["equipped"] or 0)}
+        return owned, equipped
+
+    async def equipped_cosmetics(self, user_id: int) -> list[str]:
+        _owned, equipped = await self.pet_cosmetic_sets(user_id)
+        from community_bot.pet_cosmetics import COSMETIC_ORDER
+
+        return [item for item in COSMETIC_ORDER if item in equipped]
+
+    async def grant_pet_cosmetic(self, user_id: int, item: str, *, equip: bool = True) -> None:
+        now = utcnow()
+        await self.execute(
+            """
+            INSERT INTO pet_cosmetics(user_id, item, equipped, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, item) DO NOTHING
+            """,
+            (user_id, item, 1 if equip else 0, now),
+        )
+        if equip:
+            await self.execute(
+                "UPDATE pet_cosmetics SET equipped = 1 WHERE user_id = ? AND item = ?",
+                (user_id, item),
+            )
+
+    async def toggle_pet_cosmetic(self, user_id: int, item: str) -> tuple[bool, str]:
+        from community_bot.pet_cosmetics import COSMETIC_ITEMS
+
+        if item not in COSMETIC_ITEMS:
+            return False, "Нет такого предмета."
+        row = await self.fetchone(
+            "SELECT equipped FROM pet_cosmetics WHERE user_id = ? AND item = ?",
+            (user_id, item),
+        )
+        if not row:
+            return False, "Сначала купите этот предмет."
+        nxt = 0 if int(row["equipped"] or 0) else 1
+        await self.execute(
+            "UPDATE pet_cosmetics SET equipped = ? WHERE user_id = ? AND item = ?",
+            (nxt, user_id, item),
+        )
+        return True, "снят" if nxt == 0 else "надет"
+
+    async def save_event_offer(
+        self,
+        event_id: str,
+        chat_id: int,
+        message_id: int,
+        button_text: str,
+        price: int,
+        created_by: int,
+        title: str = "",
+        body: str = "",
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO event_offers(
+                event_id, chat_id, message_id, button_text, price, title, body, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+                chat_id=excluded.chat_id,
+                message_id=excluded.message_id,
+                button_text=excluded.button_text,
+                price=excluded.price,
+                title=excluded.title,
+                body=excluded.body
+            """,
+            (event_id, chat_id, message_id, button_text, price, title, body, created_by, utcnow()),
+        )
+
+    async def get_event_offer(self, event_id: str) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM event_offers WHERE event_id = ?", (event_id,))
+
+    async def has_event_rsvp(self, event_id: str, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 AS ok FROM event_rsvps WHERE event_id = ? AND user_id = ?",
+            (event_id, user_id),
+        )
+        return bool(row)
 
     async def _seed_staff_roles(self) -> None:
         from community_bot.permissions import DEFAULT_STAFF_ROLES, dump_permissions
@@ -814,6 +1040,19 @@ class Database:
             f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?",
             (value, utcnow(), user_id),
         )
+        if field in {"profile_bio", "profile_name", "age", "hobbies", "avatar_file_id"}:
+            if field == "profile_bio":
+                await self.sync_bio_auto_warn(user_id)
+            user = await self.get_user(user_id)
+            if user:
+                from community_bot.domain import AUTO_REPUTATION_CAP
+                from community_bot.profile_fill import profile_is_complete
+
+                if not profile_is_complete(user) and int(user["reputation"]) > AUTO_REPUTATION_CAP:
+                    await self.execute(
+                        "UPDATE users SET reputation = ?, updated_at = ? WHERE user_id = ?",
+                        (AUTO_REPUTATION_CAP, utcnow(), user_id),
+                    )
 
     async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
         if await self.has_approved_application(user_id):
@@ -1274,6 +1513,18 @@ class Database:
                 "UPDATE pets SET thirst = MIN(100, thirst + 50), sleeping = 0, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
             )
+        else:
+            from community_bot.pet_cosmetics import COSMETIC_ITEMS
+
+            if item in COSMETIC_ITEMS:
+                await db.execute(
+                    """
+                    INSERT INTO pet_cosmetics(user_id, item, equipped, created_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT(user_id, item) DO UPDATE SET equipped = 1
+                    """,
+                    (user_id, item, now),
+                )
 
     async def set_immunity(self, user_id: int, until: datetime) -> None:
         await self.execute(
@@ -1660,11 +1911,15 @@ class Database:
                 except ValueError:
                     on_expedition = False
             if hours and not on_expedition:
-                average = (int(pet["hunger"]) + int(pet["thirst"])) // 2
-                rate = 300 if average >= 70 else 200 if average >= 35 else 100
-                if int(pet["hunger"]) == 0 or int(pet["thirst"]) == 0:
-                    rate = 0
-                hourly_rate = {100: 17, 200: 34, 300: 50}.get(rate, 0)
+                from community_bot.pet_cosmetics import COSMETIC_ORDER, pet_hourly_milli
+
+                cursor = await db.execute(
+                    "SELECT item FROM pet_cosmetics WHERE user_id = ? AND equipped = 1",
+                    (user_id,),
+                )
+                equipped = {str(row["item"]) for row in await cursor.fetchall()}
+                equipped_list = [item for item in COSMETIC_ORDER if item in equipped]
+                hourly_rate = pet_hourly_milli(pet, equipped_list)
                 earned_milli = hours * hourly_rate
                 farm_total = int(pet["farm_milli"]) + earned_milli
                 payout, farm_milli = divmod(farm_total, 1000)
@@ -2369,6 +2624,9 @@ class Database:
             return True
 
     async def restore_daily_reputation(self, local_date: date) -> list[dict[str, Any]]:
+        from community_bot.domain import AUTO_REPUTATION_CAP, DAILY_REPUTATION_CAP
+        from community_bot.profile_fill import profile_is_complete
+
         key = "last_reputation_restore"
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -2377,18 +2635,27 @@ class Database:
             if state and state["value"] == local_date.isoformat():
                 await db.rollback()
                 return []
-            await db.execute(
-                "UPDATE users SET reputation = MIN(89, reputation + 5), updated_at = ? WHERE reputation < 89",
-                (utcnow(),),
-            )
+            cursor = await db.execute("SELECT * FROM users")
+            changed: list[dict[str, Any]] = []
+            now = utcnow()
+            for raw in await cursor.fetchall():
+                user = dict(raw)
+                current = int(user["reputation"])
+                cap = DAILY_REPUTATION_CAP if profile_is_complete(user) else AUTO_REPUTATION_CAP
+                if current >= cap:
+                    continue
+                nxt = min(cap, current + 5)
+                await db.execute(
+                    "UPDATE users SET reputation = ?, updated_at = ? WHERE user_id = ?",
+                    (nxt, now, int(user["user_id"])),
+                )
+                changed.append({"user_id": int(user["user_id"]), "reputation": nxt})
             await db.execute(
                 "INSERT INTO bot_state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, local_date.isoformat()),
             )
-            cursor = await db.execute("SELECT user_id, reputation FROM users WHERE reputation < 89")
-            rows = [dict(row) for row in await cursor.fetchall()]
             await db.commit()
-            return rows
+            return changed
 
     async def iso_week_id(self) -> str:
         return datetime.now(UTC).strftime("%G-W%V")
@@ -2501,7 +2768,7 @@ class Database:
             )
             if await cursor.fetchone():
                 await db.rollback()
-                return False, "Вы уже отметились."
+                return False, "Вы уже оплатили участие." if stake > 0 else "Вы уже отметились."
             if stake > 0:
                 cursor = await db.execute(
                     "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
@@ -2793,14 +3060,20 @@ class Database:
         pet = await self.get_pet(user_id)
         if not pet:
             return False, "Сначала заведите тамагочи.", 0
+        if int(pet.get("sleeping") or 0) or int(pet.get("hunger") or 0) < 40:
+            from community_bot.pets_talk import pet_pronouns
+
+            words = pet_pronouns(str(pet.get("species") or ""))
+            return False, f"В лес отправляют сытого бодрого {words['pet_acc']}.", 0
         if pet.get("expedition_until"):
             try:
                 if datetime.fromisoformat(str(pet["expedition_until"])) > datetime.now(UTC):
-                    return False, "Питомец ещё в лесу.", 0
+                    from community_bot.pets_talk import pet_pronouns
+
+                    words = pet_pronouns(str(pet.get("species") or ""))
+                    return False, f"{words['he'].capitalize()} ещё в лесу.", 0
             except ValueError:
                 pass
-        if int(pet.get("sleeping") or 0) or int(pet.get("hunger") or 0) < 40:
-            return False, "В лес отправляют сытого бодрого питомца.", 0
         reward = 4 + secrets.randbelow(5)
         until = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
         hunger = max(10, int(pet["hunger"]) - 25)

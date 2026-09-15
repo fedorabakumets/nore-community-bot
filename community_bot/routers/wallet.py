@@ -57,6 +57,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
     interest = loan_interest_percent(int(user["reputation"]), settings.restricted_reputation_threshold)
     repay = loan_repay_amount(LOAN_PRINCIPAL, interest)
     pet = await db.get_pet(user_id)
+    equipped = await db.equipped_cosmetics(user_id) if pet else []
     loan = await db.get_active_loan(user_id)
     debt = int(user.get("cookie_debt") or 0)
     cookies = int(user["cookies"])
@@ -68,8 +69,9 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
         if hunger == 0 or thirst == 0 or int(pet.get("sleeping") or 0):
             farm = "спит"
         else:
-            average = (hunger + thirst) // 2
-            milli = 50 if average >= 70 else 34 if average >= 35 else 17
+            from community_bot.pet_cosmetics import pet_hourly_milli
+
+            milli = pet_hourly_milli(pet, equipped)
             farm = f"{milli * 24 / 1000:.1f}/сут"
     table = (
         "<pre>"

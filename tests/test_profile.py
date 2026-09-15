@@ -24,7 +24,7 @@ def test_profile_card_keeps_role_and_custom_status_separate() -> None:
     assert "Администратор" in text
     assert "На стиле" in text
     assert "95/100" in text
-    assert "скидка 20%" in text
+    assert "скидка 10%" in text
     assert "██████████" in text
 
 

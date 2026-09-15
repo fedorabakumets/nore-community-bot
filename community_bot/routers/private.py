@@ -292,7 +292,7 @@ async def menu_profile(callback: CallbackQuery, db: Database, settings: Settings
     user = await register_telegram_user(db, callback.from_user)
     text = await render_profile(db, settings, user)
     await callback.answer()
-    await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True)
+    await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 
 
 @router.callback_query(F.data == "menu:wallet")
@@ -2330,9 +2330,10 @@ async def admin_post_send(
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
     markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"))
     poll = data.get("post_poll")
+    sent = None
     try:
         if html_text.strip() or data.get("post_file_id"):
-            await send_studio_post(
+            sent = await send_studio_post(
                 bot,
                 settings.community_chat_id,
                 html_text or " ",
@@ -2353,15 +2354,118 @@ async def admin_post_send(
         actor_name=callback.from_user.full_name,
         reason=str(data.get("post_template") or "пост"),
     )
-    await state.clear()
+    template = str(data.get("post_template") or "")
+    event_id = str(data.get("post_rsvp") or "")
     await callback.answer("Опубликовано")
-    await callback.message.answer("✅ Пост ушёл в чат сообщества.")
     from community_bot.notify import fanout
 
     preview = html_text.strip().replace("\n", " ")
     if len(preview) > 180:
         preview = preview[:177] + "…"
     await fanout(bot, db, "events", f"📣 Новый пост студии.\n{preview}" if preview else "📣 Новый пост студии.")
+    if template == "event" and sent is not None:
+        from community_bot.posting import pay_ask_keyboard
+
+        if not event_id:
+            event_id = f"e{int(datetime.now(UTC).timestamp())}"
+        await state.set_state(AdminFlow.post_pay_ask)
+        await state.set_data(
+            {
+                "pay_chat_id": int(sent.chat.id),
+                "pay_message_id": int(sent.message_id),
+                "pay_event_id": event_id,
+                "pay_body": html_text,
+                "pay_buttons": list(data.get("post_buttons") or []),
+                "pay_rsvp": data.get("post_rsvp"),
+                "flow_kind": "event_pay",
+            }
+        )
+        await callback.message.answer(
+            "✅ Пост ушёл в чат сообщества.\nДобавить под ним кнопку оплаты участия?",
+            reply_markup=pay_ask_keyboard(),
+        )
+        return
+    await state.clear()
+    await callback.message.answer("✅ Пост ушёл в чат сообщества.")
+
+
+@router.callback_query(F.data == "post:pay:no")
+async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Ок, пост без кнопки оплаты.")
+
+
+@router.callback_query(F.data == "post:pay:yes")
+async def admin_post_pay_yes(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFlow.post_pay_text)
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer("Введите текст кнопки, например «Купить билет».")
+
+
+@router.message(AdminFlow.post_pay_ask)
+async def admin_post_pay_ask_text(message: Message) -> None:
+    await message.answer("Нажмите кнопку: добавить оплату или оставить пост как есть.")
+
+
+@router.message(AdminFlow.post_pay_text)
+async def admin_post_pay_text(message: Message, state: FSMContext, db: Database) -> None:
+    text = (message.text or "").strip()
+    if not 1 <= len(text) <= 64:
+        await message.answer("Текст кнопки — от 1 до 64 символов.")
+        return
+    await state.update_data(pay_button_text=text)
+    await state.set_state(AdminFlow.post_pay_price)
+    stake = await db.get_bot_state("rsvp_stake")
+    hint = f" Сейчас залог RSVP: {stake} 🍪." if (stake or "").isdigit() and int(stake) > 0 else ""
+    await message.answer(f"Сколько печенек стоит участие? Целое число.{hint}")
+
+
+@router.message(AdminFlow.post_pay_price)
+async def admin_post_pay_price(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
+    if not message.from_user or not message.text or not message.text.isdigit():
+        await message.answer("Введите цену целым числом печенек.")
+        return
+    price = int(message.text)
+    if not 1 <= price <= 1_000_000:
+        await message.answer("Цена — от 1 до 1 000 000 🍪.")
+        return
+    data = await state.get_data()
+    event_id = str(data.get("pay_event_id") or "")
+    chat_id = int(data.get("pay_chat_id") or 0)
+    message_id = int(data.get("pay_message_id") or 0)
+    button_text = str(data.get("pay_button_text") or "Оплатить участие")
+    if not event_id or not chat_id or not message_id:
+        await state.clear()
+        await message.answer("Не удалось привязать кнопку к посту.")
+        return
+    from community_bot.posting import compose_post_markup
+
+    await db.save_event_offer(
+        event_id,
+        chat_id,
+        message_id,
+        button_text,
+        price,
+        message.from_user.id,
+        title="Мероприятие",
+        body=str(data.get("pay_body") or ""),
+    )
+    markup = compose_post_markup(
+        list(data.get("pay_buttons") or []),
+        data.get("pay_rsvp"),
+        pay=(button_text, event_id),
+    )
+    try:
+        await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
+    except TelegramBadRequest:
+        await state.clear()
+        await message.answer("Пост опубликован, но кнопку под ним отредактировать не удалось.")
+        return
+    await state.clear()
+    await message.answer(f"✅ Кнопка «{html.escape(button_text)}» добавлена. Участие стоит {price} 🍪.")
 
 
 @router.callback_query(F.data == "admin:mention")

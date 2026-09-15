@@ -35,7 +35,7 @@ def test_shop_home_has_red_close_and_green_cookies() -> None:
 def test_shop_prices_apply_gold_discount() -> None:
     prices = shop_prices_for({"reputation": 95}, 0)
     assert prices["immunity_24h"] < 18
-    assert prices["forgive"] == 40
+    assert prices["forgive"] == 45
 
 
 def test_pet_aftercare_mentions_name() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file, replace_block
@@ -11,19 +11,22 @@ from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.helpers import (
     can_view_profile,
+    format_warn_entry,
     register_telegram_user,
     render_profile,
     resolve_reply_target,
 )
 from community_bot.keyboards import (
+    close_btn,
     compact_profile_keyboard,
     flow_reply_keyboard,
+    ibtn,
     profile_keyboard,
     public_profile_keyboard,
 )
-from community_bot.profile_fill import cabinet_profile_text
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
+from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="profile")
 
@@ -36,50 +39,50 @@ async def send_profile_card(
     editable: bool,
     text: str,
     replace: bool = False,
+    db: Database | None = None,
 ) -> Message | None:
     user_id = int(user["user_id"])
-    private_chat = getattr(message.chat, "type", None) == "private"
-    if editable and private_chat:
-        text = cabinet_profile_text(user)
-        markup = compact_profile_keyboard(user)
-        if replace:
-            return await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
-        cover = cover_file("profile")
-        if cover:
-            try:
-                return await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
-            except TelegramBadRequest:
-                pass
-        return await message.answer(text, parse_mode="HTML", reply_markup=markup)
     markup = (
         profile_keyboard(user_id, bool(user.get("profile_private")))
         if editable
         else public_profile_keyboard(user_id)
     )
+    sent: Message | None = None
+    if replace:
+        sent = await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
+        if db and message.from_user:
+            await bind_ui_owner(db, sent or message, message.from_user.id, "profile")
+        return sent
     if user.get("avatar_file_id"):
         try:
             if user.get("avatar_media_type") == "video":
-                return await message.answer_video(
+                sent = await message.answer_video(
                     str(user["avatar_file_id"]),
                     caption=text,
                     parse_mode="HTML",
                     reply_markup=markup,
                 )
-            return await message.answer_photo(
-                str(user["avatar_file_id"]),
-                caption=text,
-                parse_mode="HTML",
-                reply_markup=markup,
-            )
+            else:
+                sent = await message.answer_photo(
+                    str(user["avatar_file_id"]),
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
         except TelegramBadRequest:
-            pass
-    cover = cover_file("profile")
-    if cover:
-        try:
-            return await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
-        except TelegramBadRequest:
-            pass
-    return await message.answer(text, parse_mode="HTML", reply_markup=markup)
+            sent = None
+    if sent is None:
+        cover = cover_file("profile")
+        if cover:
+            try:
+                sent = await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
+            except TelegramBadRequest:
+                sent = None
+    if sent is None:
+        sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
+    if db and message.from_user:
+        await bind_ui_owner(db, sent, message.from_user.id, "profile")
+    return sent
 
 
 @router.message(command_or_alias("profile"))
@@ -98,7 +101,7 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
         await message.answer("🔒 Этот профиль скрыт.")
         return
     text = await render_profile(db, settings, target)
-    await send_profile_card(message, target, settings, editable=editable, text=text)
+    await send_profile_card(message, target, settings, editable=editable, text=text, db=db)
 
 
 @router.callback_query(F.data.startswith("profile:"))
@@ -214,8 +217,9 @@ async def menu_verify(callback: CallbackQuery, db: Database, settings: Settings)
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
+    text = await render_profile(db, settings, user)
     await callback.answer()
-    await send_profile_card(callback.message, user, settings, editable=True, text="", replace=True)
+    await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 
 
 @router.callback_query(F.data == "p:rules")
@@ -228,23 +232,29 @@ async def profile_rules(callback: CallbackQuery, db: Database) -> None:
         callback.message,
         "profile",
         "Пять блоков профиля: имя, возраст, увлечения, описание и фото.\n"
-        "Без 100% репутация не выше серебра. Подробности — /commands.",
+        "Без 100% репутация не выше бронзы. Подробности — /commands.",
         parse_mode="HTML",
         reply_markup=compact_profile_keyboard(user),
     )
 
 
-@router.callback_query(F.data == "p:warn")
-async def profile_warn(callback: CallbackQuery, db: Database) -> None:
+@router.callback_query(F.data == "p:warns")
+async def profile_warns(callback: CallbackQuery, db: Database) -> None:
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
+    rows = await db.list_user_warns(callback.from_user.id)
+    active = max(0, int(user.get("warnings") or 0))
+    rows = rows[:active]
     await callback.answer()
-    await replace_block(
-        callback.message,
-        "profile",
-        "Предупреждение за пустое описание выдано всем при обновлении.\n"
-        "Оно навсегда: заполнение описания шкалу поднимает, предупреждение не снимает.",
-        parse_mode="HTML",
-        reply_markup=compact_profile_keyboard(user),
+    if not rows:
+        body = "⚠️ <b>Варны</b>\n\nПока пусто — предупреждений нет."
+    else:
+        parts = [format_warn_entry(row, index) for index, row in enumerate(rows, start=1)]
+        body = "⚠️ <b>Варны</b>\n\n" + "\n\n".join(parts)
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("↩️ К профилю", "menu:profile"), close_btn("ui:close")],
+        ]
     )
+    await replace_block(callback.message, "profile", body, parse_mode="HTML", reply_markup=markup)

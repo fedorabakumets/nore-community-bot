@@ -83,9 +83,18 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
-from community_bot.shop_catalog import IMMUNITY_HOURS, PET_SUPPLIES, SHOP_CATEGORIES, TITLE_ITEMS, shop_prices_for
+from community_bot.pet_cosmetics import COSMETIC_ITEMS
+from community_bot.shop_catalog import (
+    IMMUNITY_HOURS,
+    PET_SUPPLIES,
+    SHOP_CATEGORIES,
+    TITLE_ITEMS,
+    item_discount,
+    shop_prices_for,
+)
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
 from community_bot.texts import GROUP_COMMANDS_TEXT, REPUTATION_HELP_TEXT, STORE_HELP_TEXT
+from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="community")
 
@@ -754,6 +763,8 @@ async def warn_member(message: Message, db: Database, settings: Settings, bot: B
 
     ladder = await apply_warn_ladder(bot, message, int(target["user_id"]), warnings)
     details = f"всего {warnings}{mute_note}"
+    if message.reply_to_message:
+        details = f"{details}|src:{message.chat.id}:{message.reply_to_message.message_id}"
     await db.log_admin_action(
         message.from_user.id,
         "warn",
@@ -968,13 +979,14 @@ async def show_shop(message: Message, db: Database, settings: Settings) -> None:
         return
     user = await register_telegram_user(db, message.from_user)
     with keep_in_chat():
-        await answer_block(
+        sent = await answer_block(
             message,
             "shop",
             _shop_home_text(user, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )
+        await bind_ui_owner(db, sent, message.from_user.id, "shop")
 
 
 @router.callback_query(F.data == "shop:home")
@@ -1002,7 +1014,10 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
     if category == "extra":
         event_title = (await db.get_bot_state("event_title")) or "текущее мероприятие"
         title = "🎟 Мероприятия"
-        intro = f"Сейчас: <b>{html.escape(event_title)}</b>. Введите сумму в печеньках — скидка уровня применится сама."
+        intro = (
+            f"Сейчас: <b>{html.escape(event_title)}</b>. "
+            "Скидка репутации на мероприятия не действует — цена как указано."
+        )
     elif category in SHOP_CATEGORIES:
         title = str(SHOP_CATEGORIES[category]["title"])
         intro = str(SHOP_CATEGORIES[category]["intro"])
@@ -1011,11 +1026,15 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
         return
     text = f"{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
     await callback.answer()
+    owned: set[str] = set()
+    equipped: set[str] = set()
+    if category == "cosmetics":
+        owned, equipped = await db.pet_cosmetic_sets(callback.from_user.id)
     await edit_block(
         callback.message,
         text,
         parse_mode="HTML",
-        reply_markup=shop_category_keyboard(category, prices),
+        reply_markup=shop_category_keyboard(category, prices, owned=owned, equipped=equipped),
     )
 
 
@@ -1167,6 +1186,28 @@ async def review_cookie_order(callback: CallbackQuery, db: Database, settings: S
         )
 
 
+@router.callback_query(F.data.startswith("shop:eq:"))
+async def shop_equip_cosmetic(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.data or not callback.message:
+        return
+    item = callback.data.rsplit(":", 1)[1]
+    ok, status = await db.toggle_pet_cosmetic(callback.from_user.id, item)
+    if not ok:
+        await callback.answer(status, show_alert=True)
+        return
+    await callback.answer(f"Предмет {status}.")
+    user = await register_telegram_user(db, callback.from_user)
+    prices = await _shop_prices(user, settings)
+    owned, equipped = await db.pet_cosmetic_sets(callback.from_user.id)
+    meta = SHOP_CATEGORIES["cosmetics"]
+    await edit_block(
+        callback.message,
+        f"{meta['title']}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{meta['intro']}",
+        parse_mode="HTML",
+        reply_markup=shop_category_keyboard("cosmetics", prices, owned=owned, equipped=equipped),
+    )
+
+
 @router.callback_query(F.data.startswith("shop:"))
 async def buy_shop_item(
     callback: CallbackQuery,
@@ -1179,6 +1220,7 @@ async def buy_shop_item(
         not callback.data
         or not callback.message
         or callback.data in {"shop:buy_cookies", "shop:home", "shop:close"}
+        or callback.data.startswith("shop:eq:")
         or callback.data.startswith("shop:cat:")
         or callback.data.startswith("shop:g:")
     ):
@@ -1190,16 +1232,26 @@ async def buy_shop_item(
     prices = await _shop_prices(user, settings)
     if item in {"event_pass", "support"}:
         tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
+        discount = item_discount(item, tier.discount)
         await state.set_state(FlexiblePurchase.amount)
-        await state.set_data({"flex_item": item, "flex_discount": tier.discount})
+        await state.set_data({"flex_item": item, "flex_discount": discount})
         label = "оплаты мероприятия" if item == "event_pass" else "поддержки развития"
+        extra = (
+            "Скидка репутации на мероприятия не действует."
+            if item == "event_pass"
+            else f"Ваша скидка уровня — {discount}%; итог бот покажет перед списанием."
+        )
         await callback.answer()
         await callback.message.answer(
-            f"Введите желаемую сумму для {label} в печеньках. "
-            f"Ваша скидка уровня — {tier.discount}%; итог бот покажет перед списанием.",
+            f"Введите желаемую сумму для {label} в печеньках. {extra}",
             reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
         )
         return
+    if item in COSMETIC_ITEMS:
+        owned, _equipped = await db.pet_cosmetic_sets(callback.from_user.id)
+        if item in owned:
+            await callback.answer("Этот предмет уже куплен. Надеть или снять можно в кастомизации.", show_alert=True)
+            return
     if item not in prices:
         await callback.answer("Товар временно недоступен.", show_alert=True)
         return
@@ -1366,6 +1418,9 @@ async def buy_shop_item(
         "private_profile": "Профиль скрыт от чужих. Открыть снова можно кнопкой на своей карточке.",
         "ornate_profile": "Кастомное оформление профиля включено.",
         "season_pack": "Сезонный набор: щит и обед питомцу.",
+        "pet_hat": "Шапочка куплена и надета — фото питомца обновится в /pet.",
+        "pet_scarf": "Шарфик куплен и надет — фото питомца обновится в /pet.",
+        "pet_glasses": "Очки куплены и надеты — фото питомца обновится в /pet.",
     }
     from community_bot.notify import vitrine_consumed
 
@@ -1409,10 +1464,16 @@ async def finish_flexible_purchase(
         return
     label = "Оплата мероприятия" if item == "event_pass" else "Поддержка развития"
     await state.clear()
-    await message.answer(
-        f"✅ {label}: выбрано {base_amount} 🍪, скидка {discount}%, списано <b>{price} 🍪</b>.",
-        parse_mode="HTML",
-    )
+    if item == "event_pass":
+        await message.answer(
+            f"✅ {label}: списано <b>{price} 🍪</b>. Скидка репутации на мероприятия не действует.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            f"✅ {label}: выбрано {base_amount} 🍪, скидка {discount}%, списано <b>{price} 🍪</b>.",
+            parse_mode="HTML",
+        )
     for owner_id in settings.owner_ids:
         await safe_send(
             bot,

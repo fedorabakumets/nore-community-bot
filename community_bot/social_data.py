@@ -100,8 +100,13 @@ REVEAL_LABELS = {
 
 
 def deal_mafia_roles(n: int) -> list[str]:
-    if n < MAFIA_MIN:
+    if n < 1:
         raise ValueError("too few")
+    if n < MAFIA_MIN:
+        pool = ["mafia", "doctor", "sheriff", "civilian"]
+        roles = (pool + ["civilian"] * n)[:n]
+        secrets.SystemRandom().shuffle(roles)
+        return roles
     if n <= 6:
         mafia = 1
     elif n <= 9:

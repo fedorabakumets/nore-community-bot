@@ -88,6 +88,11 @@ def canonical_command(token: str) -> str | None:
     return _ALIAS_TO_COMMAND.get(cleaned)
 
 
+# Bare aliases that must match the whole message, not the first word.
+# Slash commands like /shop still accept arguments.
+_EXACT_TEXT_COMMANDS = {"shop"}
+
+
 def parse_trigger(text: str) -> tuple[str, str] | None:
     """Return (canonical_command, args) if the message starts with a command or alias."""
     raw = (text or "").strip()
@@ -99,11 +104,18 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
             return command, raw[len(alias) :].strip()
     first, _, rest = raw.partition(" ")
     token = first
-    if token[:1] in _SLASH_PREFIXES:
+    slash = token[:1] in _SLASH_PREFIXES
+    if slash:
         token = token.lstrip(_SLASH_PREFIXES).split("@", 1)[0]
     command = canonical_command(token)
     if not command:
         return None
+    if command in _EXACT_TEXT_COMMANDS and not slash:
+        body = _PUNCT.sub("", raw).casefold()
+        allowed = {command, *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ()))}
+        if body not in allowed:
+            return None
+        return command, ""
     return command, rest.strip()
 
 

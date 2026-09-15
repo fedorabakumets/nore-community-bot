@@ -326,6 +326,95 @@ async def rsvp_join(callback: CallbackQuery, db: Database) -> None:
     )
 
 
+@router.callback_query(F.data.startswith("evpay:"))
+async def event_pay_open(callback: CallbackQuery, db: Database) -> None:
+    if not callback.data or not callback.message:
+        return
+    event_id = callback.data.split(":", 1)[1]
+    offer = await db.get_event_offer(event_id)
+    if not offer:
+        await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
+        return
+    if await db.has_event_rsvp(event_id, callback.from_user.id):
+        await callback.answer("Вы уже в списке участников.", show_alert=True)
+        return
+    price = int(offer["price"])
+    from community_bot.ephemeral import keep_in_chat
+    from community_bot.posting import event_pay_keyboard
+
+    body = str(offer.get("body") or "").strip() or "Мероприятие сообщества."
+    text = (
+        f"🎟 <b>{html.escape(str(offer.get('title') or 'Мероприятие'))}</b>\n"
+        f"{body}\n\n"
+        f"Участие: <b>{price} 🍪</b>. Скидка репутации не действует."
+    )
+    await callback.answer()
+    with keep_in_chat():
+        await callback.message.answer(
+            text[:3500],
+            parse_mode="HTML",
+            reply_markup=event_pay_keyboard(event_id, price),
+        )
+
+
+@router.callback_query(F.data.startswith("evpaygo:"))
+async def event_pay_confirm(callback: CallbackQuery, db: Database) -> None:
+    if not callback.data or not callback.message:
+        return
+    event_id = callback.data.split(":", 1)[1]
+    offer = await db.get_event_offer(event_id)
+    if not offer:
+        await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
+        return
+    if await db.has_event_rsvp(event_id, callback.from_user.id):
+        await callback.answer("Вы уже оплатили участие.", show_alert=True)
+        return
+    price = int(offer["price"])
+    from community_bot.posting import event_pay_confirm_keyboard
+
+    await callback.answer()
+    await callback.message.answer(
+        f"Вы действительно хотите оплатить участие в мероприятии за {price} печенек?",
+        reply_markup=event_pay_confirm_keyboard(event_id),
+    )
+
+
+@router.callback_query(F.data.startswith("evpayyes:"))
+async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
+    if not callback.data or not callback.message:
+        return
+    event_id = callback.data.split(":", 1)[1]
+    offer = await db.get_event_offer(event_id)
+    if not offer:
+        await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
+        return
+    if await db.has_event_rsvp(event_id, callback.from_user.id):
+        await callback.answer("Вы уже оплатили участие.", show_alert=True)
+        return
+    price = int(offer["price"])
+    ok, error = await db.add_rsvp(event_id, callback.from_user.id, price)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+    await callback.answer("Участие оплачено.")
+    try:
+        await callback.message.edit_text(
+            f"✅ Участие оплачено: списано {price} 🍪.",
+            reply_markup=None,
+        )
+    except Exception:
+        await callback.message.answer(f"✅ Участие оплачено: списано {price} 🍪.")
+    from community_bot.notify import emit
+
+    await emit(
+        callback.bot,
+        db,
+        callback.from_user.id,
+        "events",
+        f"🎟 Оплачено участие за {price} 🍪.",
+    )
+
+
 @router.chat_join_request()
 async def captcha_join_request(event: ChatJoinRequest, db: Database, bot: Bot) -> None:
     if not await db.feature_enabled("join_captcha"):

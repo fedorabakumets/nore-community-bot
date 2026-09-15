@@ -17,9 +17,9 @@ def test_empty_profile_is_capped_at_silver() -> None:
         "bio_warning": 1,
     }
     assert profile_fill_percent(user) == 0
-    assert reputation_cap(user) == 89
+    assert reputation_cap(user) == 69
     notices = profile_notices(user)
-    assert any("вечное предупреждение" in line.casefold() for line in notices)
+    assert any("бронзы" in line.casefold() for line in notices)
 
 
 def test_full_profile_unlocks_gold_and_shows_blocks() -> None:
@@ -39,7 +39,7 @@ def test_full_profile_unlocks_gold_and_shows_blocks() -> None:
     assert "Описание" in text
     assert "20%" in text
     notices = profile_notices(user)
-    assert any("сейчас описание заполнено" in line.casefold() for line in notices)
+    assert notices == []
 
 
 def test_shop_buttons_always_show_cookie_price_and_confirm() -> None:
@@ -78,18 +78,18 @@ async def test_reputation_plus_stops_at_silver_until_profile_complete(tmp_path) 
     await db.initialize()
     await db.ensure_user(1, telegram_name="Plus")
     await db.ensure_user(2, telegram_name="Empty")
-    await db.execute("UPDATE users SET reputation = 87 WHERE user_id = 2")
+    await db.execute("UPDATE users SET reputation = 64 WHERE user_id = 2")
     nxt = await db.apply_reputation(1, 2, 5, date(2026, 9, 14))
-    assert nxt == 89
+    assert nxt == 69
     gold = await db.get_user(2)
-    assert int(gold["bio_warning"]) == 1
+    assert int(gold["bio_auto_warn"]) == 1
     await db.update_profile(2, "profile_name", "Маша")
     await db.update_profile(2, "age", 20)
     await db.update_profile(2, "hobbies", "игры")
     await db.update_profile(2, "profile_bio", "описание")
     await db.update_profile(2, "avatar_file_id", "photo")
     nxt = await db.apply_reputation(1, 2, 5, date(2026, 9, 15))
-    assert nxt == 94
+    assert nxt == 74
 
 
 async def test_already_gold_is_not_cut_down(tmp_path) -> None:
@@ -123,6 +123,9 @@ async def test_wallet_table_lists_cookies_and_fee() -> None:
 
         async def get_active_loan(self, user_id: int):
             return None
+
+        async def equipped_cosmetics(self, user_id: int):
+            return []
 
     text = await wallet_text(DummyDb(), SimpleNamespace(restricted_reputation_threshold=0), user)
     assert "<pre>" in text

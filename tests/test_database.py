@@ -63,13 +63,18 @@ async def test_shop_purchase_requires_balance(tmp_path: Path) -> None:
     assert "Недостаточно" in message
     user = await db.get_user(1)
     assert user is not None
-    assert int(user["reputation"]) == 70
+    assert int(user["reputation"]) == 69
 
 
 async def test_restore_rep_adds_ten_not_full(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
     await db.initialize()
     await db.ensure_user(1, telegram_name="One")
+    await db.update_profile(1, "profile_name", "Имя")
+    await db.update_profile(1, "age", 20)
+    await db.update_profile(1, "hobbies", "чат")
+    await db.update_profile(1, "profile_bio", "описание")
+    await db.update_profile(1, "avatar_file_id", "file")
     await db.execute("UPDATE users SET reputation = 60, cookies = 50 WHERE user_id = 1")
     ok, _ = await db.buy_item(1, "restore_rep", 20)
     assert ok is True
@@ -340,16 +345,16 @@ async def test_staked_game_can_change_stake(tmp_path: Path) -> None:
     assert (await db.update_staked_game_stake(game_id, 2, 50))[0] is False
 
 
-async def test_new_users_start_at_silver_and_daily_restore_caps(tmp_path: Path) -> None:
+async def test_new_users_start_at_bronze_and_daily_restore_caps(tmp_path: Path) -> None:
     db = Database(tmp_path / "rep.db")
     await db.initialize()
     await db.ensure_user(1, telegram_name="New")
     await db.ensure_user(2, telegram_name="Gold")
     user = await db.get_user(1)
     assert user is not None
-    assert int(user["reputation"]) == 70
-    await db.execute("UPDATE users SET reputation = 86 WHERE user_id = 1")
+    assert int(user["reputation"]) == 69
+    await db.execute("UPDATE users SET reputation = 64 WHERE user_id = 1")
     await db.execute("UPDATE users SET reputation = 100 WHERE user_id = 2")
     await db.restore_daily_reputation(datetime.now(UTC).date())
-    assert int((await db.get_user(1))["reputation"]) == 89  # type: ignore[index]
+    assert int((await db.get_user(1))["reputation"]) == 69  # type: ignore[index]
     assert int((await db.get_user(2))["reputation"]) == 100  # type: ignore[index]

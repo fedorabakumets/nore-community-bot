@@ -19,6 +19,13 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("команды") == ("commands", "")
     assert parse_trigger("Профиль") == ("profile", "")
     assert parse_trigger("магазин") == ("shop", "")
+    assert parse_trigger("Магазин") == ("shop", "")
+    assert parse_trigger("/shop") == ("shop", "")
+    assert parse_trigger("/shop extra") == ("shop", "extra")
+    assert parse_trigger("Магазин где купить?") is None
+    assert parse_trigger("Магазин, привет") is None
+    assert parse_trigger("Магазин сегодня работает?") is None
+    assert parse_trigger("В магазине...") is None
     assert parse_trigger("кубик 25") == ("dice", "25")
     assert parse_trigger("рейс 10") == ("crash", "10")
     assert parse_trigger("капкан 10") == ("trap", "10")
@@ -187,10 +194,10 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 11
+    assert latest.number == 12
     text = updates_text()
+    assert "№12" in text
     assert "№11" in text
-    assert "№10" in text
     assert "админ" in text.casefold()
     assert "Написать боту" not in text
     member_menu = private_menu_keyboard()
@@ -218,17 +225,14 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №11" in pin
+    assert "Обновление №12" in pin
     details = member_details_text(latest)
-    assert "кабинет" in details.casefold()
-    assert "уведомлен" in details.casefold()
-    assert "мафия" in details.casefold()
+    assert "тамагочи" in details.casefold()
+    assert "магазин" in details.casefold()
     assert "админка" not in details.casefold()
-    assert "Пример." in details
     staff = staff_announcement(latest)
-    assert "справка" in staff.casefold()
-    assert "bio_warning" in staff
-    assert "Админ" not in details
+    assert "bio_auto_warn" in staff or "системный warn" in staff.casefold() or "пустое описание" in staff.casefold()
+    assert "Админка" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
     assert "рулетка" in labels
     assert "кубик" in labels

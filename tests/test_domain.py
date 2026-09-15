@@ -15,12 +15,14 @@ def test_reputation_tiers_do_not_overlap() -> None:
     assert reputation_tier(100).key == "gold"
     assert reputation_tier(90).daily_actions == 5
     assert reputation_tier(89).key == "silver"
-    assert reputation_tier(70).discount == 10
+    assert reputation_tier(70).discount == 5
     assert reputation_tier(69).key == "bronze"
     assert reputation_tier(69).daily_actions == 1
     assert reputation_tier(69).can_minus is False
     assert reputation_tier(70).can_minus is True
     assert reputation_tier(-1).key == "restricted"
+    assert reputation_tier(95).discount == 10
+    assert reputation_tier(40).discount == 2
 
 
 def test_discount_rounds_up() -> None:

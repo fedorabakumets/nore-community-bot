@@ -117,6 +117,7 @@ def buttons_markup(buttons: list[dict[str, str]] | None) -> InlineKeyboardMarkup
 def compose_post_markup(
     buttons: list[dict[str, str]] | None,
     rsvp_id: str | None = None,
+    pay: tuple[str, str] | None = None,
 ) -> InlineKeyboardMarkup | None:
     rows: list[list[InlineKeyboardButton]] = []
     for item in buttons or []:
@@ -126,6 +127,8 @@ def compose_post_markup(
         rows.append([InlineKeyboardButton(**kwargs)])
     if rsvp_id:
         rows.append([ibtn("Я буду", f"rsvp:{rsvp_id}", STYLE_GO)])
+    if pay:
+        rows.append([ibtn(pay[0][:64], f"evpay:{pay[1]}", STYLE_GO)])
     if not rows:
         return None
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -180,10 +183,33 @@ def rsvp_ask_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def rsvp_preview_block(event_id: str | None) -> str:
-    if not event_id:
-        return ""
-    return "\n\n✋ <b>RSVP</b> — кнопка «Я буду»"
+def pay_ask_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                ibtn("Да, кнопку оплаты", "post:pay:yes", STYLE_GO),
+                ibtn("Нет, без кнопки", "post:pay:no", STYLE_FUN),
+            ],
+        ]
+    )
+
+
+def event_pay_keyboard(event_id: str, price: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn(f"Оплатить {price} 🍪", f"evpaygo:{event_id}", STYLE_GO)],
+            [ibtn("✖️ Закрыть", "ui:close", STYLE_CLOSE)],
+        ]
+    )
+
+
+def event_pay_confirm_keyboard(event_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("Да, оплатить", f"evpayyes:{event_id}", STYLE_GO)],
+            [ibtn("Отмена", "ui:close", STYLE_CLOSE)],
+        ]
+    )
 
 
 def preview_keyboard() -> InlineKeyboardMarkup:
@@ -231,22 +257,21 @@ async def send_studio_post(
     media_type: str | None,
     file_id: str | None,
     markup: InlineKeyboardMarkup | None,
-) -> None:
+) -> Any:
     kwargs: dict[str, Any] = {"parse_mode": "HTML", "reply_markup": markup}
     if media_type == "photo" and file_id:
-        await bot.send_photo(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    elif media_type == "video" and file_id:
-        await bot.send_video(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    elif media_type == "animation" and file_id:
-        await bot.send_animation(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    elif media_type == "document" and file_id:
-        await bot.send_document(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    elif media_type == "audio" and file_id:
-        await bot.send_audio(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    elif media_type == "voice" and file_id:
-        await bot.send_voice(chat_id, file_id, caption=html_text[:1024], **kwargs)
-    else:
-        await bot.send_message(chat_id, html_text, **kwargs)
+        return await bot.send_photo(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    if media_type == "video" and file_id:
+        return await bot.send_video(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    if media_type == "animation" and file_id:
+        return await bot.send_animation(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    if media_type == "document" and file_id:
+        return await bot.send_document(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    if media_type == "audio" and file_id:
+        return await bot.send_audio(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    if media_type == "voice" and file_id:
+        return await bot.send_voice(chat_id, file_id, caption=html_text[:1024], **kwargs)
+    return await bot.send_message(chat_id, html_text, **kwargs)
 
 
 async def send_studio_poll(bot: Any, chat_id: int, poll: dict[str, Any]) -> None:

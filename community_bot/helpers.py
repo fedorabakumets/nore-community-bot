@@ -29,6 +29,49 @@ async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
     return await db.ensure_user(user.id, user.username, user.full_name)
 
 
+def lobby_count_ok(count: int, minimum: int, maximum: int, staff: bool) -> bool:
+    if count < 1 or count > maximum:
+        return False
+    if staff:
+        return True
+    return minimum <= count <= maximum
+
+
+def telegram_message_link(chat_id: int, message_id: int) -> str:
+    raw = str(chat_id)
+    if raw.startswith("-100"):
+        return f"https://t.me/c/{raw[4:]}/{message_id}"
+    return f"https://t.me/c/{abs(chat_id)}/{message_id}"
+
+
+def parse_warn_source(details: str) -> tuple[int, int] | None:
+    for part in str(details or "").split("|"):
+        part = part.strip()
+        if part.startswith("src:"):
+            bits = part.split(":")
+            if len(bits) == 3 and bits[1].lstrip("-").isdigit() and bits[2].isdigit():
+                return int(bits[1]), int(bits[2])
+    return None
+
+
+def format_warn_entry(row: dict[str, Any], index: int) -> str:
+    when = str(row.get("created_at") or "")[:16].replace("T", " ")
+    reason = html.escape(str(row.get("reason") or "без причины"))
+    actor = html.escape(str(row.get("actor_name") or row.get("actor_display") or "неизвестно"))
+    if int(row.get("actor_id") or 0) == 0:
+        actor = "Система"
+    lines = [
+        f"<b>#{index}</b> · {html.escape(when)}",
+        f"Причина: {reason}",
+        f"Выдал: {actor}",
+    ]
+    source = parse_warn_source(str(row.get("details") or ""))
+    if source:
+        link = telegram_message_link(source[0], source[1])
+        lines.append(f'<a href="{link}">Сообщение</a>')
+    return "\n".join(lines)
+
+
 def user_link(user_id: int, name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{html.escape(name)}</a>'
 
@@ -230,8 +273,6 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
     bio = str(user.get("profile_bio") or "").strip()
     if bio:
         lines.append(f"📝 {html.escape(bio)}")
-    elif int(user.get("bio_warning") or 0):
-        lines.append("⚠️ Нет описания — действует вечное предупреждение.")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
     title = str(user.get("profile_title") or "").strip()
@@ -276,11 +317,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     title = str(user.get("profile_title") or "").strip()
     title_line = f"  🏷  {html.escape(title)}\n" if title else ""
     bio = str(user.get("profile_bio") or "").strip()
-    bio_line = (
-        f"  📝  {html.escape(bio)}\n"
-        if bio
-        else ("  ⚠️  нет описания — вечное предупреждение\n" if int(user.get("bio_warning") or 0) else "")
-    )
+    bio_line = f"  📝  {html.escape(bio)}\n" if bio else ""
     return (
         "✧･ﾟ: *✧･ﾟ:*  <b>Ｎ Ｏ Ｒ Ａ</b>  *:･ﾟ✧*:･ﾟ✧\n"
         "\n"

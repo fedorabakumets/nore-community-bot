@@ -33,8 +33,9 @@ NEGATIVE_REPUTATION_PHRASES = {
 }
 
 
-STARTING_REPUTATION = 70
-AUTO_REPUTATION_CAP = 89
+STARTING_REPUTATION = 69
+AUTO_REPUTATION_CAP = 69
+DAILY_REPUTATION_CAP = 89
 REPUTATION_FLOOR = -20
 RESTORE_REP_GAIN = 10
 
@@ -53,10 +54,10 @@ def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier
     if value < restricted_threshold:
         return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False)
     if value >= 90:
-        return ReputationTier("gold", "🥇", "золото", 20, 5, True)
+        return ReputationTier("gold", "🥇", "золото", 10, 5, True)
     if value >= 70:
-        return ReputationTier("silver", "🥈", "серебро", 10, 3, True)
-    return ReputationTier("bronze", "🥉", "бронза", 0, 1, False)
+        return ReputationTier("silver", "🥈", "серебро", 5, 3, True)
+    return ReputationTier("bronze", "🥉", "бронза", 2, 1, False)
 
 
 def discounted_price(base_price: int, discount: int) -> int:

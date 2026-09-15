@@ -227,44 +227,34 @@ async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data == "g:hide")
 async def game_hide(callback: CallbackQuery) -> None:
-    await callback.answer("Скрыто")
+    await callback.answer("Закрыто")
+    await _delete_callback_message(callback)
+
+
+async def _delete_callback_message(callback: CallbackQuery) -> None:
     if not callback.message:
         return
     try:
         await callback.message.delete()
-    except (TelegramBadRequest, TelegramForbiddenError):
-        try:
-            await callback.message.edit_reply_markup(reply_markup=None)
-        except (TelegramBadRequest, TelegramForbiddenError, AttributeError):
-            pass
+        return
+    except (TelegramBadRequest, TelegramForbiddenError, AttributeError):
+        pass
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except (TelegramBadRequest, TelegramForbiddenError, AttributeError):
+        pass
 
 
 @router.callback_query(F.data == "ui:close")
 async def ui_close(callback: CallbackQuery) -> None:
     await callback.answer("Закрыто")
-    if not callback.message:
-        return
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
+    await _delete_callback_message(callback)
 
 
 @router.callback_query(F.data == "shop:close")
 async def shop_close(callback: CallbackQuery) -> None:
-    await callback.answer("Магазин закрыт")
-    if not callback.message:
-        return
-    try:
-        await callback.message.edit_text("🛒 Магазин закрыт.")
-    except Exception:
-        try:
-            await callback.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
+    await callback.answer("Закрыто")
+    await _delete_callback_message(callback)
 
 
 def with_flow_prompt(text: str) -> str:

@@ -31,14 +31,13 @@ def test_cabinet_profile_is_short_and_has_fields() -> None:
     assert profile_fill_percent(user) == 40
     text = cabinet_profile_text(user)
     assert "40%" in text
-    assert "серебра" in text
-    assert "Предупреждение" in text
-    assert "синее" not in text.casefold()
+    assert "бронзы" in text
     markup = compact_profile_keyboard(user)
     labels = [button.text for row in markup.inline_keyboard for button in row]
     assert any(text.startswith("Имя") and "✓" in text for text in labels)
     assert any("Возраст" in text and "✓" in text for text in labels)
-    assert any("Почему предупреждение" in text for text in labels)
+    assert any("Варны" in text for text in labels)
+    assert not any("Почему предупреждение" in text for text in labels)
 
 
 async def test_notify_default_off_and_digest(tmp_path) -> None:

@@ -17,14 +17,14 @@ from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
 from community_bot.game_anim import decorate, start_lobby_anim, stop_lobby_anim
 from community_bot.game_notify import mention_fragment, send_game_finale
-from community_bot.helpers import has_permission, register_telegram_user, user_link
+from community_bot.helpers import has_permission, lobby_count_ok, register_telegram_user, user_link
 from community_bot.keyboards import (
     bunker_reveal_keyboard,
     mafia_target_keyboard,
     social_lobby_keyboard,
     social_vote_keyboard,
 )
-from community_bot.permissions import PERM_GAMES
+from community_bot.permissions import PERM_ADMIN_PANEL, PERM_GAMES
 from community_bot.social_data import (
     BUNKER_CAPACITY,
     BUNKER_MAX,
@@ -280,7 +280,7 @@ async def social_cancel(callback: CallbackQuery, db: Database, settings: Setting
 
 
 @router.callback_query(F.data.startswith("sg:start:"))
-async def social_start(callback: CallbackQuery, db: Database, bot: Bot) -> None:
+async def social_start(callback: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
     if not callback.data or not callback.message:
         return
     game_id = int(callback.data.rsplit(":", 1)[1])
@@ -288,12 +288,15 @@ async def social_start(callback: CallbackQuery, db: Database, bot: Bot) -> None:
     if not game or game["status"] != "lobby" or game["game_type"] not in SOCIAL:
         await callback.answer("Лобби уже закрыто.", show_alert=True)
         return
-    if callback.from_user.id != int(game["creator_id"]):
-        await callback.answer("Начать может только создатель.", show_alert=True)
-        return
     players = await db.list_game_players(game_id)
     minimum, maximum = SOCIAL[str(game["game_type"])][2], SOCIAL[str(game["game_type"])][3]
-    if not minimum <= len(players) <= maximum:
+    staff = await has_permission(db, settings, callback.from_user.id, PERM_ADMIN_PANEL) or await has_permission(
+        db, settings, callback.from_user.id, PERM_GAMES
+    )
+    if callback.from_user.id != int(game["creator_id"]) and not staff:
+        await callback.answer("Начать может только создатель.", show_alert=True)
+        return
+    if not lobby_count_ok(len(players), minimum, maximum, staff):
         await callback.answer(f"Нужно от {minimum} до {maximum} игроков.", show_alert=True)
         return
     kind = str(game["game_type"])

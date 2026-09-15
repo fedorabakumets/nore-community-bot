@@ -169,27 +169,28 @@ def test_pet_keyboard_has_no_talk() -> None:
 
 
 def test_member_announcement_omits_staff() -> None:
-    from community_bot.updates import community_announcement, latest_update, member_details_nodes, member_details_text
+    from community_bot.updates import (
+        community_announcement,
+        latest_update,
+        member_details_nodes,
+        member_details_text,
+        staff_announcement,
+    )
 
     item = latest_update()
     pin = community_announcement(item)
     details = member_details_text(item)
     nodes = str(member_details_nodes(item))
-    assert "Обновление №11" in pin
+    staff = staff_announcement(item)
+    assert "Обновление №12" in pin
     assert len(pin) <= 1024
     assert "Админ" not in pin
     assert "четыре комнаты" not in details.casefold()
     assert "Админка" not in nodes
-    assert "личный кабинет" in details.casefold() or "кабинет" in details.casefold()
-    assert "мафия" in details.casefold()
-    assert "Пример." in details
-    assert "Обновление №11" in details
-    from community_bot.updates import staff_announcement
-
-    staff = staff_announcement(item)
-    assert "справка" in staff.casefold()
+    assert "магазин" in details.casefold() or "тамагочи" in details.casefold()
+    assert "мафия" in staff.casefold() or "мини-игры" in details.casefold()
     assert staff not in pin
-    assert "bio_warning" in staff or "вечное" in staff.casefold()
+    assert "пустое описание" in staff.casefold() or "bio_auto_warn" in staff
 
 
 async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
@@ -208,6 +209,12 @@ async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
     today = date(2026, 9, 11)
 
     await db.execute("UPDATE users SET reputation = 60 WHERE user_id = 1")
+    for user_id in (2, 3):
+        await db.update_profile(user_id, "profile_name", "Имя")
+        await db.update_profile(user_id, "age", 20)
+        await db.update_profile(user_id, "hobbies", "чат")
+        await db.update_profile(user_id, "profile_bio", "описание")
+        await db.update_profile(user_id, "avatar_file_id", "file")
     actor = await db.get_user(1)
     target = await db.get_user(2)
     ok, text, _, _ = await change_community_reputation(db, settings, actor, target, -5, today)
@@ -216,7 +223,7 @@ async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
 
     ok, _, new_value, _ = await change_community_reputation(db, settings, actor, target, 5, today)
     assert ok is True
-    assert new_value == 75
+    assert new_value == 74
 
     await db.execute("UPDATE users SET reputation = 80 WHERE user_id = 1")
     actor = await db.get_user(1)
@@ -226,7 +233,7 @@ async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
     assert "сегодня" in msg.casefold()
     ok, _, new_value, _ = await change_community_reputation(db, settings, actor, other, 5, today)
     assert ok is True
-    assert new_value == 75
+    assert new_value == 74
 
 
 async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:
@@ -243,6 +250,7 @@ async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:
     await db.add_cookies(2, 20, "test")
     ok, _ = await db.buy_item(2, "rep_shield", 12)
     assert ok is True
+    await db.execute("UPDATE users SET reputation = 80 WHERE user_id = 1")
     settings = SimpleNamespace(restricted_reputation_threshold=0)
     actor = await db.get_user(1)
     target = await db.get_user(2)
@@ -251,7 +259,7 @@ async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:
     )
     assert ok is True
     assert extra and "Щит" in extra
-    assert new_value == 70
+    assert new_value == 69
     assert int((await db.get_user(2))["hate_shields"]) == 0
 
 
@@ -300,9 +308,9 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Обновление №11" in sent[0].text
+    assert "Обновление №12" in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "11:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "12:photo-v1"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -321,7 +329,7 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "11:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "12:photo-v1"
 
 
 def test_update_cover_renders_number(tmp_path) -> None:

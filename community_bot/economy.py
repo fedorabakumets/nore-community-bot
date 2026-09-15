@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from community_bot.domain import transfer_commission_percent
+from community_bot.pet_cosmetics import pet_hourly_milli
 
 LOAN_PRINCIPAL = 100
 LOAN_DAYS = 7
@@ -14,6 +15,7 @@ TRANSACTION_LABELS = {
     "subscription_freebie": "Халява",
     "pet_farm": "Фарм тамагочи",
     "pet_shop": "Магазин питомца",
+    "rsvp": "Мероприятие",
     "cookie_game_stake": "Ставка в игре",
     "cookie_game_win": "Выигрыш в игре",
     "cookie_game_refund": "Возврат ставки",
@@ -43,19 +45,22 @@ def loan_repay_amount(principal: int, interest_percent: int) -> int:
     return principal + (principal * interest_percent + 99) // 100
 
 
-def pet_farm_rate_line(pet: dict[str, object] | None) -> str:
+def pet_farm_rate_line(pet: dict[str, object] | None, equipped: list[str] | tuple[str, ...] | set[str] = ()) -> str:
     if not pet:
         return "Тамагочи нет — фарм 🍪 выключен. Завести можно в магазине."
     hunger = int(pet["hunger"])
     thirst = int(pet["thirst"])
     if hunger == 0 or thirst == 0 or int(pet.get("sleeping") or 0):
         return f"💤 {pet['name']} спит от голода или жажды и сейчас не фармит."
-    average = (hunger + thirst) // 2
-    milli_per_hour = 50 if average >= 70 else 34 if average >= 35 else 17
+    milli_per_hour = pet_hourly_milli(pet, equipped)
     per_day = milli_per_hour * 24 / 1000
+    from community_bot.pet_cosmetics import cosmetic_bonus_milli
+
+    add = cosmetic_bonus_milli(equipped)
+    extra = f", кастом +{add}/ч" if add else ""
     return (
         f"🐾 {pet['name']} фармит ≈ <b>{per_day:.1f} 🍪/сутки</b> "
-        f"({milli_per_hour}/1000 🍪 в час). Сытость {hunger}, жажда {thirst}."
+        f"({milli_per_hour}/1000 🍪 в час{extra}). Сытость {hunger}, жажда {thirst}."
     )
 
 
