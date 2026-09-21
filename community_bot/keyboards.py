@@ -8,7 +8,6 @@ from aiogram.types import (
 )
 
 from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
-from community_bot.pet_cosmetics import COSMETIC_ITEMS, COSMETIC_ORDER
 from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, SHOP_CATEGORIES
 
 # Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
@@ -151,6 +150,7 @@ def admin_panel_keyboard(
     rows: list[list[InlineKeyboardButton]] = [
         [ibtn(queue_label, "admin:queue", STYLE_GO), ibtn("👤 Люди", "admin:people", STYLE_FUN)],
         [ibtn("💬 Чат", "admin:chatroom"), ibtn("🛠 Система", "admin:system")],
+        [ibtn("🛠 Управление магазином", "ashop:home", STYLE_GO)],
     ]
     if _allow(permissions, "contest.cookies"):
         rows.append([ibtn("🍪 Конкурс на печеньки", "admin:contest", STYLE_FUN)])
@@ -229,6 +229,7 @@ def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> 
     if _allow(permissions, "audit"):
         rows.append([ibtn("🧾 Журнал", "admin:audit")])
     if _allow(permissions, "features") or _allow(permissions, "users.edit"):
+        rows.append([ibtn("🛠 Управление магазином", "ashop:home", STYLE_GO)])
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
         rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
@@ -543,20 +544,25 @@ def profile_transfer_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def shop_home_keyboard(featured_key: str | None = None, featured_label: str | None = None) -> InlineKeyboardMarkup:
+def shop_home_keyboard(
+    categories: list[dict[str, object]] | None = None,
+    featured_key: str | None = None,
+    featured_label: str | None = None,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if featured_key and featured_label:
         rows.append([ibtn(f"⭐ {featured_label}", f"shop:{featured_key}", STYLE_GO)])
+    cats = categories or []
+    pair: list[InlineKeyboardButton] = []
+    for row in cats:
+        pair.append(ibtn(str(row["title"])[:28], f"shop:cat:{row['slug']}", STYLE_FUN))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
     rows.extend(
         [
-            [
-                ibtn("🐾 Тамагочи", "shop:cat:pets", STYLE_GO),
-                ibtn("🏅 Репутация", "shop:cat:reputation", STYLE_FUN),
-            ],
-            [
-                ibtn("✨ Профиль", "shop:cat:profile"),
-                ibtn("🎨 Кастомизация", "shop:cat:cosmetics", STYLE_FUN),
-            ],
             [ibtn("🎟 Мероприятия", "shop:cat:extra")],
             [ibtn("🍪 Купить печеньки", "shop:buy_cookies", STYLE_GO)],
             [close_btn("shop:close")],
@@ -569,39 +575,28 @@ def shop_category_keyboard(
     category: str,
     prices: dict[str, int],
     *,
-    owned: set[str] | None = None,
-    equipped: set[str] | None = None,
+    items: list[dict[str, object]] | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    owned = owned or set()
-    equipped = equipped or set()
     if category == "extra":
         rows.append([ibtn("🎟 Оплата мероприятия · 🍪", "shop:event_pass", STYLE_FUN)])
         rows.append([ibtn("💚 Поддержать развитие · 🍪", "shop:support", STYLE_GO)])
-    elif category == "cosmetics":
-        for key in COSMETIC_ORDER:
-            price = prices.get(key, 0)
-            label = str(ITEM_LABELS.get(key) or COSMETIC_ITEMS[key]["label"])
-            if key in owned:
-                wear = "Снять" if key in equipped else "Надеть"
-                rows.append(
-                    [
-                        ibtn(f"{label} · {'надет' if key in equipped else 'в шкафу'}", f"shop:eq:{key}", STYLE_GO),
-                        ibtn(wear, f"shop:eq:{key}", STYLE_FUN),
-                    ]
-                )
-            else:
-                rows.append([ibtn(f"{label} — {prices.get(key, 0)} 🍪", f"shop:{key}", STYLE_GO)])
     else:
-        meta = SHOP_CATEGORIES[category]
-        style = STYLE_GO if category == "pets" else STYLE_FUN if category == "reputation" else None
-        for key in meta["items"]:
-            price = prices.get(key, 0)
-            if price <= 0:
+        catalog = items
+        if catalog is None:
+            catalog = [
+                {"sku": sku, "title": ITEM_LABELS.get(sku, sku)}
+                for sku in SHOP_CATEGORIES.get(category, {}).get("items", ())
+            ]
+        for item in catalog:
+            sku = str(item["sku"])
+            price = prices.get(sku)
+            if price is None or int(price) <= 0:
                 continue
-            row = [ibtn(f"{ITEM_LABELS[key]} — {price} 🍪", f"shop:{key}", style)]
-            if key in GIFTABLE_ITEMS:
-                row.append(ibtn(f"🎁 {price} 🍪", f"shop:g:{key}", STYLE_FUN))
+            title = str(item.get("title") or ITEM_LABELS.get(sku) or sku)
+            row = [ibtn(f"{title} — {price} 🍪", f"shop:{sku}", STYLE_GO)]
+            if sku in GIFTABLE_ITEMS:
+                row.append(ibtn(f"🎁 {price} 🍪", f"shop:g:{sku}", STYLE_FUN))
             rows.append(row)
     rows.append([back_btn("shop:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -701,15 +696,21 @@ def pet_species_keyboard(price: int) -> InlineKeyboardMarkup:
     )
 
 
-def pet_keyboard() -> InlineKeyboardMarkup:
+def pet_keyboard(pet: dict[str, object] | None = None, timezone: str = "Europe/Moscow") -> InlineKeyboardMarkup:
+    until = str((pet or {}).get("expedition_until") or "")
+    if until:
+        from community_bot.expedition import remaining_label
+
+        expedition = ibtn(f"🗺 В экспедиции · {remaining_label(until, timezone)}", "pet:expedition", STYLE_FUN)
+    else:
+        expedition = ibtn("🗺 Отправить в экспедицию", "pet:expedition", STYLE_GO)
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 ibtn("🍗 Накормить", "pet:use:food", STYLE_GO),
                 ibtn("💧 Напоить", "pet:use:water", STYLE_FUN),
             ],
-            [ibtn("🌲 Экспедиция · 4 ч", "pet:expedition", STYLE_FUN)],
-            [ibtn("🎨 Кастомизация", "pet:custom", STYLE_FUN)],
+            [expedition],
             [ibtn("✏️ Переименовать", "pet:rename"), ibtn("🛒 Магазин", "pet:shop", STYLE_GO)],
             [close_btn("ui:close")],
         ]
@@ -723,7 +724,7 @@ FEATURE_META = {
     ),
     "tamagotchi": (
         "🐾 Тамагочи",
-        "Питомцы, фарм печенек и магазин припасов. Не влияет на уже существующих питомцев в базе.",
+        "Талисман сообщества и экспедиции за редкими находками. Не влияет на уже существующих питомцев в базе.",
     ),
     "profile_video": (
         "🎬 Видео-профили",

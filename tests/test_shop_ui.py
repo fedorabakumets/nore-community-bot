@@ -11,6 +11,7 @@ def test_start_apply_button_is_green() -> None:
 
 
 def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
+    assert "cosmetics" not in SHOP_CATEGORIES
     assert "pets" in SHOP_CATEGORIES
     assert "reputation" in SHOP_CATEGORIES
     assert "season_pack" in SHOP_CATEGORIES["pets"]["items"]
@@ -33,7 +34,9 @@ def test_shop_home_has_red_close_and_green_cookies() -> None:
 
 
 def test_shop_prices_apply_gold_discount() -> None:
-    prices = shop_prices_for({"reputation": 95}, 0)
+    from community_bot.shop_catalog import SAMPLE_SHOP_PRICES
+
+    prices = shop_prices_for({"reputation": 95}, 0, SAMPLE_SHOP_PRICES)
     assert prices["immunity_24h"] < 18
     assert prices["forgive"] == 45
 

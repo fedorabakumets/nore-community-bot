@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from community_bot.domain import transfer_commission_percent
-from community_bot.pet_cosmetics import pet_hourly_milli
 
 LOAN_PRINCIPAL = 100
 LOAN_DAYS = 7
@@ -14,6 +13,7 @@ TRANSACTION_LABELS = {
     "roulette": "Рулетка",
     "subscription_freebie": "Халява",
     "pet_farm": "Фарм тамагочи",
+    "pet_expedition": "Экспедиция тамагочи",
     "pet_shop": "Магазин питомца",
     "rsvp": "Мероприятие",
     "cookie_game_stake": "Ставка в игре",
@@ -45,23 +45,22 @@ def loan_repay_amount(principal: int, interest_percent: int) -> int:
     return principal + (principal * interest_percent + 99) // 100
 
 
-def pet_farm_rate_line(pet: dict[str, object] | None, equipped: list[str] | tuple[str, ...] | set[str] = ()) -> str:
+def pet_status_line(pet: dict[str, object] | None) -> str:
     if not pet:
-        return "Тамагочи нет — фарм 🍪 выключен. Завести можно в магазине."
-    hunger = int(pet["hunger"])
-    thirst = int(pet["thirst"])
-    if hunger == 0 or thirst == 0 or int(pet.get("sleeping") or 0):
-        return f"💤 {pet['name']} спит от голода или жажды и сейчас не фармит."
-    milli_per_hour = pet_hourly_milli(pet, equipped)
-    per_day = milli_per_hour * 24 / 1000
-    from community_bot.pet_cosmetics import cosmetic_bonus_milli
-
-    add = cosmetic_bonus_milli(equipped)
-    extra = f", кастом +{add}/ч" if add else ""
+        return "Тамагочи нет. Завести можно в магазине — это талисман, который ищет редкие вещи."
+    name = str(pet.get("name") or "Тамагочи")
+    until = str(pet.get("expedition_until") or "")
+    if until:
+        return f"🗺 {name} сейчас в экспедиции и ищет редкие находки."
     return (
-        f"🐾 {pet['name']} фармит ≈ <b>{per_day:.1f} 🍪/сутки</b> "
-        f"({milli_per_hour}/1000 🍪 в час{extra}). Сытость {hunger}, жажда {thirst}."
+        f"🐾 {name} — талисман сообщества. Печеньки он приносит только из экспедиции "
+        f"(раз в 24 часа), сам по себе не фармит."
     )
+
+
+def pet_farm_rate_line(pet: dict[str, object] | None, equipped: list[str] | tuple[str, ...] | set[str] = ()) -> str:
+    del equipped
+    return pet_status_line(pet)
 
 
 def transaction_line(row: dict[str, object]) -> str:

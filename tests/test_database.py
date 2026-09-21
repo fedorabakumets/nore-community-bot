@@ -256,9 +256,10 @@ async def test_pet_purchase_activity_rewards_and_fractional_farm(tmp_path: Path)
         (yesterday,),
     )
     settled = await db.settle_pet(1)
-    assert settled and settled["payout"] == 1
-    assert settled["farm_milli"] == 200
-    assert (await db.get_user(1))["cookies"] == 51  # type: ignore[index]
+    assert settled and int(settled["payout"]) == 0
+    assert int(settled["earned_milli"]) == 0
+    assert (await db.get_user(1))["cookies"] == 50  # type: ignore[index]
+    assert int(settled["hunger"]) < 100
 
 
 async def test_feature_toggle_is_persistent_and_audited(tmp_path: Path) -> None:

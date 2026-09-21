@@ -83,13 +83,13 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
-from community_bot.pet_cosmetics import COSMETIC_ITEMS
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
-    SHOP_CATEGORIES,
     TITLE_ITEMS,
     item_discount,
+    item_label,
+    shop_header_lines,
     shop_prices_for,
 )
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
@@ -932,14 +932,15 @@ async def admin_set_status(message: Message, db: Database, settings: Settings) -
     await _respond(message, "Кастомный статус установлен.")
 
 
-async def _shop_prices(user: dict[str, object], settings: Settings) -> dict[str, int]:
-    return shop_prices_for(user, settings.restricted_reputation_threshold)
+async def _shop_prices(db: Database, user: dict[str, object], settings: Settings) -> dict[str, int]:
+    return shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
 
 
-def _shop_home_text(user: dict[str, object], settings: Settings) -> str:
+async def _shop_home_text(db: Database, user: dict[str, object], settings: Settings) -> str:
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
+    header = shop_header_lines(await db.shop_header())
     return (
-        f"🛒 <b>Магазин NORA</b>\n"
+        f"{header}🛒 <b>Магазин NORA</b>\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
         "Откройте полку — у каждого товара цена в 🍪. Покупка только после подтверждения. "
@@ -969,7 +970,8 @@ async def _shop_home_markup(db: Database):
                 pass
         if extra:
             label = f"{label} · {' · '.join(extra)}"
-    return shop_home_keyboard(featured_key=key, featured_label=label if key else None)
+    categories = await db.list_shop_categories(enabled_only=True)
+    return shop_home_keyboard(categories, featured_key=key, featured_label=label if key else None)
 
 
 @router.message(command_or_alias("shop"))
@@ -982,7 +984,7 @@ async def show_shop(message: Message, db: Database, settings: Settings) -> None:
         sent = await answer_block(
             message,
             "shop",
-            _shop_home_text(user, settings),
+            await _shop_home_text(db, user, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )
@@ -998,7 +1000,7 @@ async def shop_home(callback: CallbackQuery, db: Database, settings: Settings) -
     markup = await _shop_home_markup(db)
     await edit_block(
         callback.message,
-        _shop_home_text(user, settings),
+        await _shop_home_text(db, user, settings),
         parse_mode="HTML",
         reply_markup=markup,
     )
@@ -1010,7 +1012,8 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
         return
     category = callback.data.rsplit(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
-    prices = await _shop_prices(user, settings)
+    prices = await _shop_prices(db, user, settings)
+    header = shop_header_lines(await db.shop_header())
     if category == "extra":
         event_title = (await db.get_bot_state("event_title")) or "текущее мероприятие"
         title = "🎟 Мероприятия"
@@ -1018,23 +1021,22 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
             f"Сейчас: <b>{html.escape(event_title)}</b>. "
             "Скидка репутации на мероприятия не действует — цена как указано."
         )
-    elif category in SHOP_CATEGORIES:
-        title = str(SHOP_CATEGORIES[category]["title"])
-        intro = str(SHOP_CATEGORIES[category]["intro"])
+        items: list[dict[str, object]] = []
     else:
-        await callback.answer("Нет такой полки.", show_alert=True)
-        return
-    text = f"{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
+        cat = await db.get_shop_category(category)
+        if not cat or not int(cat.get("enabled") or 0):
+            await callback.answer("Нет такой полки.", show_alert=True)
+            return
+        title = str(cat["title"])
+        intro = str(cat.get("description") or "")
+        items = await db.list_shop_items(category, enabled_only=True, priced_only=True)
+    text = f"{header}{title}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{intro}"
     await callback.answer()
-    owned: set[str] = set()
-    equipped: set[str] = set()
-    if category == "cosmetics":
-        owned, equipped = await db.pet_cosmetic_sets(callback.from_user.id)
     await edit_block(
         callback.message,
         text,
         parse_mode="HTML",
-        reply_markup=shop_category_keyboard(category, prices, owned=owned, equipped=equipped),
+        reply_markup=shop_category_keyboard(category, prices, items=items),
     )
 
 
@@ -1186,28 +1188,6 @@ async def review_cookie_order(callback: CallbackQuery, db: Database, settings: S
         )
 
 
-@router.callback_query(F.data.startswith("shop:eq:"))
-async def shop_equip_cosmetic(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.data or not callback.message:
-        return
-    item = callback.data.rsplit(":", 1)[1]
-    ok, status = await db.toggle_pet_cosmetic(callback.from_user.id, item)
-    if not ok:
-        await callback.answer(status, show_alert=True)
-        return
-    await callback.answer(f"Предмет {status}.")
-    user = await register_telegram_user(db, callback.from_user)
-    prices = await _shop_prices(user, settings)
-    owned, equipped = await db.pet_cosmetic_sets(callback.from_user.id)
-    meta = SHOP_CATEGORIES["cosmetics"]
-    await edit_block(
-        callback.message,
-        f"{meta['title']}\nБаланс: <b>{user['cookies']} 🍪</b>\n\n{meta['intro']}",
-        parse_mode="HTML",
-        reply_markup=shop_category_keyboard("cosmetics", prices, owned=owned, equipped=equipped),
-    )
-
-
 @router.callback_query(F.data.startswith("shop:"))
 async def buy_shop_item(
     callback: CallbackQuery,
@@ -1220,16 +1200,18 @@ async def buy_shop_item(
         not callback.data
         or not callback.message
         or callback.data in {"shop:buy_cookies", "shop:home", "shop:close"}
-        or callback.data.startswith("shop:eq:")
         or callback.data.startswith("shop:cat:")
         or callback.data.startswith("shop:g:")
     ):
+        return
+    if callback.data.startswith("shop:eq:") or callback.data.startswith("shop:look:"):
+        await callback.answer("Этот товар больше не продаётся.", show_alert=True)
         return
     raw = callback.data
     confirmed = raw.startswith("shop:ok:")
     item = raw.split(":", 2)[2] if confirmed else raw.split(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
-    prices = await _shop_prices(user, settings)
+    prices = await _shop_prices(db, user, settings)
     if item in {"event_pass", "support"}:
         tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
         discount = item_discount(item, tier.discount)
@@ -1247,24 +1229,25 @@ async def buy_shop_item(
             reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
         )
         return
-    if item in COSMETIC_ITEMS:
-        owned, _equipped = await db.pet_cosmetic_sets(callback.from_user.id)
-        if item in owned:
-            await callback.answer("Этот предмет уже куплен. Надеть или снять можно в кастомизации.", show_alert=True)
-            return
+    catalog_item = await db.get_shop_item(item)
+    if catalog_item and not int(catalog_item.get("enabled") or 0):
+        await callback.answer("Товар выключен.", show_alert=True)
+        return
     if item not in prices:
         await callback.answer("Товар временно недоступен.", show_alert=True)
         return
     price = prices[item]
     if not confirmed:
-        from community_bot.shop_catalog import ITEM_LABELS
-
-        label = ITEM_LABELS.get(item, item)
+        label = item_label(item, str((catalog_item or {}).get("title") or ""))
+        description = str((catalog_item or {}).get("description") or "").strip()
+        header = shop_header_lines(await db.shop_header())
+        extra = f"\n{html.escape(description)}\n" if description else ""
         await callback.answer()
         await edit_block(
             callback.message,
-            f"🛒 <b>Подтверждение покупки</b>\n"
+            f"{header}🛒 <b>Подтверждение покупки</b>\n"
             f"{html.escape(label)}\n"
+            f"{extra}"
             f"Цена: <b>{price} 🍪</b>\n"
             f"Баланс: <b>{int(user['cookies'])} 🍪</b>\n\n"
             "Нажмите «Купить», чтобы списать печеньки.",
@@ -1320,7 +1303,7 @@ async def buy_shop_item(
         fresh = await db.get_user(callback.from_user.id) or user
         await edit_block(
             callback.message,
-            _shop_home_text(fresh, settings),
+            await _shop_home_text(db, fresh, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )
@@ -1354,7 +1337,7 @@ async def buy_shop_item(
         fresh = await db.get_user(callback.from_user.id) or user
         await edit_block(
             callback.message,
-            _shop_home_text(fresh, settings),
+            await _shop_home_text(db, fresh, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )
@@ -1375,7 +1358,7 @@ async def buy_shop_item(
         fresh = await db.get_user(callback.from_user.id) or user
         await edit_block(
             callback.message,
-            _shop_home_text(fresh, settings),
+            await _shop_home_text(db, fresh, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )
@@ -1418,9 +1401,6 @@ async def buy_shop_item(
         "private_profile": "Профиль скрыт от чужих. Открыть снова можно кнопкой на своей карточке.",
         "ornate_profile": "Кастомное оформление профиля включено.",
         "season_pack": "Сезонный набор: щит и обед питомцу.",
-        "pet_hat": "Шапочка куплена и надета — фото питомца обновится в /pet.",
-        "pet_scarf": "Шарфик куплен и надет — фото питомца обновится в /pet.",
-        "pet_glasses": "Очки куплены и надеты — фото питомца обновится в /pet.",
     }
     from community_bot.notify import vitrine_consumed
 
@@ -1432,7 +1412,7 @@ async def buy_shop_item(
     fresh = await db.get_user(callback.from_user.id) or user
     await edit_block(
         callback.message,
-        _shop_home_text(fresh, settings),
+        await _shop_home_text(db, fresh, settings),
         parse_mode="HTML",
         reply_markup=await _shop_home_markup(db),
     )

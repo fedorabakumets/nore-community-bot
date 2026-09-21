@@ -154,3 +154,8 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
         f"Отлетел: {user_link(int(loser['user_id']), loser_name)} — мут {ROULETTE_MUTE_MINUTES} мин.",
     )
     expire_game_result(callback.message)
+
+
+@router.callback_query(F.data.regexp(r"^game:(join|start|cancel|vote):"))
+async def stale_game_buttons(callback: CallbackQuery) -> None:
+    await callback.answer("Эта партия уже неактуальна. Откройте игры заново командой «игры».", show_alert=True)

@@ -128,7 +128,10 @@ async def gift_command(
         await state.set_data({"gift_item": item})
         await message.answer("Ответьте на сообщение человека или пришлите @username / ID.")
         return
-    prices = shop_prices_for(buyer, settings.restricted_reputation_threshold)
+    prices = shop_prices_for(buyer, settings.restricted_reputation_threshold, await db.priced_shop_map())
+    if item not in prices:
+        await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
+        return
     ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
     if not ok:
         await message.answer(error)
@@ -161,7 +164,10 @@ async def gift_target_text(message: Message, state: FSMContext, db: Database, se
         return
     await state.clear()
     buyer = await register_telegram_user(db, message.from_user)
-    prices = shop_prices_for(buyer, settings.restricted_reputation_threshold)
+    prices = shop_prices_for(buyer, settings.restricted_reputation_threshold, await db.priced_shop_map())
+    if item not in prices:
+        await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
+        return
     ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
     await message.answer(error if not ok else f"🎁 Подарок «{ITEM_LABELS.get(item, item)}» доставлен.")
 
@@ -245,7 +251,7 @@ def _format_board(week_id: str, board: dict) -> str:
         f"🏆 <b>Доска недели {html.escape(week_id)}</b>\n\n"
         f"<b>Голос чата</b> (сообщения)\n{lines(board.get('messages') or [], 'messages')}\n\n"
         f"<b>Кого плюсовали</b>\n{lines(board.get('plus') or [], 'score')}\n\n"
-        f"<b>Фарм питомцев</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
+        f"<b>Находки тамагочи</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
     )
 
 

@@ -152,7 +152,7 @@ async def persistent_nav(
         await answer_block(
             message,
             "shop",
-            _shop_home_text(user, settings),
+            await _shop_home_text(db, user, settings),
             parse_mode="HTML",
             reply_markup=await _shop_home_markup(db),
         )

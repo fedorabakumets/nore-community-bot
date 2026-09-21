@@ -330,20 +330,20 @@ async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -
     await answer_block(
         callback.message,
         "shop",
-        _shop_home_text(user, settings),
+        await _shop_home_text(db, user, settings),
         parse_mode="HTML",
         reply_markup=await _shop_home_markup(db),
     )
 
 
 @router.callback_query(F.data == "menu:pet")
-async def menu_pet(callback: CallbackQuery, db: Database) -> None:
+async def menu_pet(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not callback.from_user:
         return
     from community_bot.routers.pets import _show_pet
 
     await callback.answer()
-    await _show_pet(callback.message, db, callback.from_user.id, replace=True)
+    await _show_pet(callback.message, db, callback.from_user.id, settings, replace=True)
 
 
 @router.callback_query(F.data == "menu:admin")
@@ -725,6 +725,9 @@ async def admin_staff_guide(callback: CallbackQuery, db: Database, settings: Set
     while remaining:
         chunk, remaining = remaining[:3500], remaining[3500:]
         await callback.message.answer(chunk, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "admin:search")
 async def admin_search_begin(
     callback: CallbackQuery,
     state: FSMContext,

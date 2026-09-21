@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import html
 import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -21,7 +20,7 @@ from community_bot.config import Settings, load_settings
 from community_bot.covers import cover_path_for
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
-from community_bot.helpers import send_stored_message, user_link
+from community_bot.helpers import send_stored_message
 from community_bot.restart import relaunch
 from community_bot.routers import (
     contest_router,
@@ -34,6 +33,7 @@ from community_bot.routers import (
     pets_router,
     private_router,
     profile_router,
+    shop_admin_router,
     social_games_router,
     wallet_router,
 )
@@ -234,74 +234,25 @@ async def restart_stop_job(dispatcher: Dispatcher, restart_stop: asyncio.Event) 
 
 
 async def pet_notifications_job(db: Database, bot: Bot, settings: Settings) -> None:
+    from community_bot.expedition import ExpeditionLoot, announce_expedition_result, parse_loot
+
     while True:
         try:
-            for stored_pet in await db.list_pets():
-                user_id = int(stored_pet["user_id"])
-                pet = await db.settle_pet(user_id)
-                if not pet:
-                    continue
-                payout = int(pet.get("payout", 0))
-                sleeping = bool(int(pet["sleeping"]))
-                now = datetime.now(tz=ZoneInfo("UTC"))
-                last_notice_raw = pet.get("last_notice_at")
-                last_notice = datetime.fromisoformat(str(last_notice_raw)) if last_notice_raw else None
-                hungry_notice_due = sleeping and (not last_notice or now - last_notice >= timedelta(hours=12))
-                if not payout and not hungry_notice_due:
-                    continue
-                owner = await db.get_user(user_id)
-                owner_name = str(
-                    (owner or {}).get("profile_name")
-                    or (owner or {}).get("telegram_name")
-                    or (owner or {}).get("username")
-                    or user_id
+            for stored in await db.list_due_expeditions():
+                await db.settle_pet(int(stored["user_id"]))
+            pending = await db.list_pending_expedition_notices()
+            for pet in pending:
+                loot = ExpeditionLoot.from_mapping(pet.get("expedition_loot")) or parse_loot(
+                    str(pet.get("expedition_loot") or "")
                 )
-                mention = user_link(user_id, owner_name)
-                if payout:
-                    words = {}
-                    from community_bot.pets_talk import pet_pronouns
-
-                    words = pet_pronouns(str(pet.get("species") or ""))
-                    if pet.get("expedition_done"):
-                        chat_text = (
-                            f"🌲 <b>{html.escape(str(pet['name']))}</b> {words['returned']} из леса к {mention}: "
-                            f"+{payout} 🍪."
-                        )
-                    else:
-                        chat_text = (
-                            f"🍪 <b>{html.escape(str(pet['name']))}</b> {words['brought']} печеньку хозяину {mention}: "
-                            f"+{payout} 🍪."
-                        )
-                else:
-                    chat_text = (
-                        f"💤 <b>{html.escape(str(pet['name']))}</b> свернулся у {mention}: "
-                        "нужно покормить или напоить."
-                    )
-                sent = False
-                if settings.community_chat_id:
-                    with contextlib.suppress(Exception):
-                        await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
-                        sent = True
-                pet_name = html.escape(str(pet["name"]))
-                if payout:
-                    if pet.get("expedition_done"):
-                        dm_text = f"🌲 <b>{pet_name}</b> вернулся из леса: +{payout} 🍪."
-                    else:
-                        dm_text = f"🍪 <b>{pet_name}</b> принёс печеньку: +{payout} 🍪."
-                else:
-                    dm_text = f"💤 <b>{pet_name}</b> свернулся: нужно покормить или напоить."
-                from community_bot.notify import emit
-
-                dm_sent = await emit(bot, db, user_id, "pet", dm_text)
-                if sent or dm_sent:
-                    await db.execute(
-                        "UPDATE pets SET last_notice_at = ?, updated_at = ? WHERE user_id = ?",
-                        (now.isoformat(), now.isoformat(), user_id),
-                    )
+                if loot is None:
+                    await db.claim_expedition_notice(int(pet["user_id"]))
+                    continue
+                await announce_expedition_result(bot, db, settings, int(pet["user_id"]), pet, loot)
                 await asyncio.sleep(0.05)
         except Exception:
             logger.exception("Ошибка уведомлений тамагочи")
-        await asyncio.sleep(1800)
+        await asyncio.sleep(60)
 
 
 async def weekly_board_job(db: Database, settings: Settings, bot: Bot) -> None:
@@ -417,6 +368,7 @@ async def main() -> None:
     dispatcher.include_router(pets_router)
     dispatcher.include_router(life_router)
     dispatcher.include_router(contest_router)
+    dispatcher.include_router(shop_admin_router)
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
 
