@@ -16,7 +16,13 @@ from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.keyboards import STYLE_CLOSE, STYLE_FUN, STYLE_GO, back_btn, close_btn, flow_reply_keyboard, ibtn
 from community_bot.permissions import PERM_FEATURES, PERM_USERS_EDIT, slugify_role
-from community_bot.shop_catalog import shop_header_lines
+from community_bot.shop_catalog import (
+    cookie_pack_label,
+    cookie_rate_line,
+    cookie_shop_member_text,
+    parse_cookie_packs,
+    shop_header_lines,
+)
 from community_bot.states import ShopAdminFlow
 
 router = Router(name="shop_admin")
@@ -42,6 +48,7 @@ def _home_keyboard() -> InlineKeyboardMarkup:
             [ibtn("📦 Товары", "ashop:items", STYLE_GO), ibtn("📁 Категории", "ashop:cats", STYLE_FUN)],
             [ibtn("➕ Создать товар", "ashop:newitem", STYLE_GO), ibtn("➕ Создать категорию", "ashop:newcat")],
             [ibtn("📝 Шапка магазина", "ashop:header", STYLE_FUN)],
+            [ibtn("🍪 Покупка печенек", "ashop:cookies", STYLE_GO)],
             [ibtn("📋 Предпросмотр", "ashop:preview")],
             [back_btn("admin:panel"), close_btn("ui:close")],
         ]
@@ -112,6 +119,36 @@ def _cat_keyboard(category: dict[str, Any]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _cookies_keyboard(shop: dict[str, Any]) -> InlineKeyboardMarkup:
+    enabled = bool(shop.get("enabled"))
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ibtn("Выключить" if enabled else "Включить", "ashop:cktog", STYLE_GO if not enabled else STYLE_CLOSE)],
+            [ibtn("💱 Курс", "ashop:ckedit:rate"), ibtn("📦 Пакеты", "ashop:ckedit:packs")],
+            [ibtn("✏️ Заголовок", "ashop:ckedit:title"), ibtn("📝 Текст", "ashop:ckedit:intro")],
+            [ibtn("🔘 Кнопка в магазине", "ashop:ckedit:button")],
+            [ibtn("📋 Предпросмотр блока", "ashop:ckpreview")],
+            [back_btn("ashop:home")],
+        ]
+    )
+
+
+def _cookie_shop_preview(shop: dict[str, Any]) -> str:
+    status = "включён" if shop.get("enabled") else "выключен"
+    rate = int(shop.get("rate_rub") or 1)
+    packs = [int(item) for item in shop.get("packs") or []]
+    pack_lines = "\n".join(f"• {cookie_pack_label(amount, rate)}" for amount in packs) or "• пакетов нет"
+    return (
+        f"🍪 <b>Покупка печенек</b>\n"
+        f"Сейчас: <b>{status}</b>.\n"
+        f"{cookie_rate_line(rate)}\n\n"
+        f"Кнопка: <b>{html.escape(str(shop.get('button') or ''))}</b>\n"
+        f"Заголовок: {html.escape(str(shop.get('title') or ''))}\n"
+        f"{html.escape(str(shop.get('intro') or '') or 'без текста')}\n\n"
+        f"<b>Пакеты</b>\n{pack_lines}"
+    )
+
+
 def _header_keyboard(header: dict[str, Any]) -> InlineKeyboardMarkup:
     enabled = bool(header.get("enabled"))
     return InlineKeyboardMarkup(
@@ -146,9 +183,9 @@ async def _show_home(message: Message) -> None:
     await edit_or_answer(
         message,
         "🛠 <b>Управление магазином</b>\n\n"
-        "Товары, категории, цены, картинки и шапка магазина. "
-        "Изменения сразу видны участникам, код менять не нужно.\n\n"
-        "📦 Товары · 📁 Категории · ➕ создание · ✏️ правка · 🗑 удаление · "
+        "Товары, категории, цены, картинки, шапка и блок покупки печенек. "
+        "Курс 🍪 и пакеты СБП правятся здесь же — изменения сразу видны участникам.\n\n"
+        "📦 Товары · 📁 Категории · 🍪 печеньки · ➕ создание · ✏️ правка · 🗑 удаление · "
         "💰 цены · 🖼 картинки · 📝 описания · 🔄 порядок · 👁 активность · 📋 предпросмотр.",
         _home_keyboard(),
     )
@@ -644,6 +681,128 @@ async def shop_admin_header_preview(callback: CallbackQuery, db: Database, setti
     await callback.answer()
     if callback.message:
         await callback.message.answer("📋 Предпросмотр шапки:\n\n" + preview, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "ashop:cookies")
+async def shop_admin_cookies(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _allowed(callback, db, settings):
+        return
+    shop = await db.cookie_shop()
+    await callback.answer()
+    await edit_or_answer(callback.message, _cookie_shop_preview(shop), _cookies_keyboard(shop))
+
+
+@router.callback_query(F.data == "ashop:cktog")
+async def shop_admin_cookies_toggle(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not await _allowed(callback, db, settings):
+        return
+    shop = await db.cookie_shop()
+    await db.set_cookie_shop(enabled=not bool(shop.get("enabled")))
+    await callback.answer("Готово.")
+    await shop_admin_cookies(callback, db, settings)
+
+
+@router.callback_query(F.data.startswith("ashop:ckedit:"))
+async def shop_admin_cookies_edit(
+    callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings
+) -> None:
+    if not callback.message or not callback.data or not await _allowed(callback, db, settings):
+        return
+    field = callback.data.rsplit(":", 1)[1]
+    prompts = {
+        "rate": "Сколько рублей стоит 1 печенька? Целое число, например 1.",
+        "title": "Заголовок блока покупки печенек:",
+        "intro": "Текст под курсом. «-» чтобы очистить.",
+        "button": "Подпись кнопки в магазине, например: 🍪 Купить печеньки",
+        "packs": "Пакеты — целые числа печенек через запятую.\nНапример: 10, 50, 100\nРубли посчитаются по курсу.",
+    }
+    states = {
+        "rate": ShopAdminFlow.cookie_rate,
+        "title": ShopAdminFlow.cookie_title,
+        "intro": ShopAdminFlow.cookie_intro,
+        "button": ShopAdminFlow.cookie_button,
+        "packs": ShopAdminFlow.cookie_packs,
+    }
+    if field not in states:
+        await callback.answer("Неизвестное поле.", show_alert=True)
+        return
+    await state.set_state(states[field])
+    await state.set_data({"flow_kind": "shop_admin"})
+    await callback.answer()
+    await callback.message.answer(prompts[field], reply_markup=flow_reply_keyboard())
+
+
+@router.message(ShopAdminFlow.cookie_rate)
+async def shop_admin_cookie_rate(message: Message, state: FSMContext, db: Database) -> None:
+    raw = (message.text or "").strip()
+    if not re.fullmatch(r"\d{1,5}", raw) or int(raw) < 1:
+        await message.answer("Введите целое число от 1.")
+        return
+    await db.set_cookie_shop(rate_rub=int(raw))
+    await state.clear()
+    shop = await db.cookie_shop()
+    await message.answer(f"Курс сохранён: {cookie_rate_line(int(shop['rate_rub']))}.")
+
+
+@router.message(ShopAdminFlow.cookie_title)
+async def shop_admin_cookie_title(message: Message, state: FSMContext, db: Database) -> None:
+    title = (message.text or "").strip()
+    if not 2 <= len(title) <= 60:
+        await message.answer("Заголовок от 2 до 60 символов.")
+        return
+    await db.set_cookie_shop(title=title)
+    await state.clear()
+    await message.answer("Заголовок блока сохранён.")
+
+
+@router.message(ShopAdminFlow.cookie_intro)
+async def shop_admin_cookie_intro(message: Message, state: FSMContext, db: Database) -> None:
+    text = "" if (message.text or "").strip() == "-" else (message.text or "").strip()
+    await db.set_cookie_shop(intro=text[:500])
+    await state.clear()
+    await message.answer("Текст блока сохранён.")
+
+
+@router.message(ShopAdminFlow.cookie_button)
+async def shop_admin_cookie_button(message: Message, state: FSMContext, db: Database) -> None:
+    button = (message.text or "").strip()
+    if not 2 <= len(button) <= 40:
+        await message.answer("Подпись кнопки от 2 до 40 символов.")
+        return
+    await db.set_cookie_shop(button=button)
+    await state.clear()
+    await message.answer("Кнопка магазина обновлена.")
+
+
+@router.message(ShopAdminFlow.cookie_packs)
+async def shop_admin_cookie_packs(message: Message, state: FSMContext, db: Database) -> None:
+    packs = parse_cookie_packs(message.text or "")
+    if not packs:
+        await message.answer("Нужны целые числа через запятую, например: 10, 50, 100.")
+        return
+    await db.set_cookie_shop(packs=packs)
+    await state.clear()
+    shop = await db.cookie_shop()
+    rate = int(shop["rate_rub"])
+    labels = ", ".join(cookie_pack_label(int(amount), rate) for amount in shop["packs"])
+    await message.answer(f"Пакеты сохранены: {labels}.")
+
+
+@router.callback_query(F.data == "ashop:ckpreview")
+async def shop_admin_cookies_preview(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not await _allowed(callback, db, settings):
+        return
+    from community_bot.keyboards import cookie_packages_keyboard
+
+    shop = await db.cookie_shop()
+    header = shop_header_lines(await db.shop_header())
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "📋 Предпросмотр блока:\n\n" + cookie_shop_member_text(shop, header),
+            parse_mode="HTML",
+            reply_markup=cookie_packages_keyboard(shop),
+        )
 
 
 @router.callback_query(F.data == "ashop:preview")

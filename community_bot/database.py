@@ -849,7 +849,13 @@ class Database:
         return int(row["user_id"]) if row else None
 
     async def _seed_shop_catalog(self) -> None:
-        from community_bot.shop_catalog import DEFAULT_SHOP_HEADER, REMOVED_COSMETIC_SKUS, SEED_CATEGORIES, SEED_ITEMS
+        from community_bot.shop_catalog import (
+            DEFAULT_COOKIE_SHOP,
+            DEFAULT_SHOP_HEADER,
+            REMOVED_COSMETIC_SKUS,
+            SEED_CATEGORIES,
+            SEED_ITEMS,
+        )
 
         now = utcnow()
         async with self.connect() as db:
@@ -889,6 +895,12 @@ class Database:
                 await db.execute(
                     "INSERT INTO bot_state(key, value) VALUES (?, ?)",
                     ("shop_header", json.dumps(DEFAULT_SHOP_HEADER, ensure_ascii=False)),
+                )
+            cookies = await db.execute("SELECT value FROM bot_state WHERE key = 'cookie_shop'")
+            if not await cookies.fetchone():
+                await db.execute(
+                    "INSERT INTO bot_state(key, value) VALUES (?, ?)",
+                    ("cookie_shop", json.dumps(DEFAULT_COOKIE_SHOP, ensure_ascii=False)),
                 )
             await db.commit()
 
@@ -1121,6 +1133,29 @@ class Database:
         header["text"] = str(header.get("text") or "")
         await self.set_bot_state("shop_header", json.dumps(header, ensure_ascii=False))
         return header
+
+    async def cookie_shop(self) -> dict[str, Any]:
+        from community_bot.shop_catalog import DEFAULT_COOKIE_SHOP, normalize_cookie_shop
+
+        raw = await self.get_bot_state("cookie_shop")
+        if not raw:
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        if not isinstance(data, dict):
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        return normalize_cookie_shop(data)
+
+    async def set_cookie_shop(self, **fields: Any) -> dict[str, Any]:
+        from community_bot.shop_catalog import normalize_cookie_shop
+
+        shop = await self.cookie_shop()
+        shop.update(fields)
+        shop = normalize_cookie_shop(shop)
+        await self.set_bot_state("cookie_shop", json.dumps(shop, ensure_ascii=False))
+        return shop
 
     async def priced_shop_map(self) -> dict[str, int]:
         items = await self.list_shop_items(enabled_only=True, priced_only=True)
@@ -1484,7 +1519,12 @@ class Database:
             (sender_id, receiver_id, amount, utcnow()),
         )
 
-    async def complete_transfer(self, transfer_id: int, sender_id: int) -> tuple[bool, str, int]:
+    async def complete_transfer(
+        self,
+        transfer_id: int,
+        sender_id: int,
+        restricted_threshold: int = 0,
+    ) -> tuple[bool, str, int]:
         from community_bot.domain import transfer_commission_percent
 
         now = utcnow()
@@ -1504,7 +1544,7 @@ class Database:
             if not sender:
                 await db.rollback()
                 return False, "Отправитель не найден.", 0
-            percent = transfer_commission_percent(int(sender["reputation"]))
+            percent = transfer_commission_percent(int(sender["reputation"]), restricted_threshold)
             receiver_amount = amount * (100 - percent) // 100
             if receiver_amount <= 0:
                 await db.rollback()

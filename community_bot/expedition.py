@@ -50,8 +50,9 @@ class ExpeditionLoot:
         if self.title:
             return self.title
         if self.kind == "cookies":
-            noun = "печенька" if self.amount == 1 else "печеньки" if self.amount < 5 else "печенек"
-            return f"{self.amount} {noun} 🍪"
+            from community_bot.domain import cookies_phrase
+
+            return f"{cookies_phrase(self.amount)} 🍪"
         if self.sku:
             return self.sku
         return "награда"
@@ -129,13 +130,10 @@ def result_text(
     returned = species_words.get("returned") or "вернулся"
     prize = html.escape(loot.label())
     who = f" к {mention}" if mention else ""
-    cookies_line = ""
-    if loot.kind == "cookies" and loot.amount:
-        cookies_line = f"\nНайдено печенек: <b>{loot.amount}</b> 🍪."
     return (
         f"🗺 <b>{name}</b> {returned} из экспедиции{who}.\n"
         f"Результат: талисман сыскал награду.\n"
-        f"Находка: <b>{prize}</b>.{cookies_line}"
+        f"Находка: <b>{prize}</b>."
     )
 
 

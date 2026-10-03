@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from community_bot.domain import discounted_price, reputation_tier
+import html
+import re
+
+from community_bot.domain import cookie_word, discounted_price, reputation_tier
 
 ITEM_LABELS = {
     "restore_rep": "Поднять репутацию +10",
@@ -112,6 +115,15 @@ DEFAULT_SHOP_HEADER = {
     "text": "",
 }
 
+DEFAULT_COOKIE_SHOP = {
+    "enabled": True,
+    "rate_rub": 1,
+    "title": "🍪 Купить печеньки",
+    "intro": "Оплата вручную через СБП. Скидка уровня на пакеты не действует.",
+    "button": "🍪 Купить печеньки",
+    "packs": [10, 50, 100],
+}
+
 
 def item_discount(item: str, tier_discount: int) -> int:
     if item in NO_REPUTATION_DISCOUNT:
@@ -144,6 +156,81 @@ def item_label(sku: str, catalog_title: str | None = None) -> str:
     if catalog_title:
         return catalog_title
     return str(ITEM_LABELS.get(sku) or sku)
+
+
+def format_rub(amount: int) -> str:
+    return f"{int(amount):,}".replace(",", " ") + " ₽"
+
+
+def cookie_rate_line(rate: int) -> str:
+    return f"🍪 1 {cookie_word(1)} = {format_rub(rate)}"
+
+
+def cookie_pack_label(amount: int, rate: int) -> str:
+    return f"{int(amount)} 🍪 — {format_rub(int(amount) * int(rate))}"
+
+
+def parse_cookie_packs(raw: str) -> list[int] | None:
+    parts = re.split(r"[\s,;]+", (raw or "").strip())
+    packs: list[int] = []
+    for part in parts:
+        if not part:
+            continue
+        if not re.fullmatch(r"\d{1,7}", part):
+            return None
+        value = int(part)
+        if value < 1 or value in packs:
+            continue
+        packs.append(value)
+    return packs or None
+
+
+def normalize_cookie_shop(raw: dict[str, object] | None) -> dict[str, object]:
+    shop: dict[str, object] = {
+        "enabled": True,
+        "rate_rub": 1,
+        "title": DEFAULT_COOKIE_SHOP["title"],
+        "intro": DEFAULT_COOKIE_SHOP["intro"],
+        "button": DEFAULT_COOKIE_SHOP["button"],
+        "packs": list(DEFAULT_COOKIE_SHOP["packs"]),
+    }
+    if not raw:
+        return shop
+    shop["enabled"] = bool(raw.get("enabled", True))
+    try:
+        shop["rate_rub"] = max(1, int(raw.get("rate_rub") or 1))
+    except (TypeError, ValueError):
+        shop["rate_rub"] = 1
+    title = str(raw.get("title") or "").strip()
+    if title:
+        shop["title"] = title[:60]
+    intro = str(raw.get("intro") or "").strip()
+    if "intro" in raw:
+        shop["intro"] = intro[:500]
+    button = str(raw.get("button") or "").strip()
+    if button:
+        shop["button"] = button[:40]
+    packs: list[int] = []
+    for item in raw.get("packs") or []:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 1_000_000 and value not in packs:
+            packs.append(value)
+    if packs:
+        shop["packs"] = packs
+    return shop
+
+
+def cookie_shop_member_text(shop: dict[str, object], header: str = "") -> str:
+    title = str(shop.get("title") or DEFAULT_COOKIE_SHOP["title"]).strip()
+    intro = str(shop.get("intro") or "").strip()
+    title_html = title if "<" in title else f"<b>{html.escape(title)}</b>"
+    parts = [f"{header}{title_html}", cookie_rate_line(int(shop.get("rate_rub") or 1))]
+    if intro:
+        parts.append(intro)
+    return "\n".join(parts)
 
 
 def shop_header_lines(header: dict[str, object] | None) -> str:

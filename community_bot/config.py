@@ -71,7 +71,7 @@ def load_settings() -> Settings:
         support_price=max(0, _as_int("SUPPORT_PRICE")),
         restricted_reputation_threshold=_as_int("RESTRICTED_REPUTATION_THRESHOLD"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip(),
-        cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 10)),
+        cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 1)),
         sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip() or DEFAULT_SBP_PAYMENT_URL,
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),

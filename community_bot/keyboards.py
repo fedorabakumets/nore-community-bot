@@ -8,7 +8,14 @@ from aiogram.types import (
 )
 
 from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
-from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, SHOP_CATEGORIES
+from community_bot.shop_catalog import (
+    DEFAULT_COOKIE_SHOP,
+    GIFTABLE_ITEMS,
+    ITEM_LABELS,
+    SHOP_CATEGORIES,
+    cookie_pack_label,
+    normalize_cookie_shop,
+)
 
 # Telegram: success=green, primary=blue, danger=red, omit=pastel/default.
 STYLE_GO = "success"
@@ -548,6 +555,7 @@ def shop_home_keyboard(
     categories: list[dict[str, object]] | None = None,
     featured_key: str | None = None,
     featured_label: str | None = None,
+    cookie_shop: dict[str, object] | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if featured_key and featured_label:
@@ -561,13 +569,12 @@ def shop_home_keyboard(
             pair = []
     if pair:
         rows.append(pair)
-    rows.extend(
-        [
-            [ibtn("🎟 Мероприятия", "shop:cat:extra")],
-            [ibtn("🍪 Купить печеньки", "shop:buy_cookies", STYLE_GO)],
-            [close_btn("shop:close")],
-        ]
-    )
+    rows.append([ibtn("🎟 Мероприятия", "shop:cat:extra")])
+    shop = normalize_cookie_shop(cookie_shop) if cookie_shop is not None else dict(DEFAULT_COOKIE_SHOP)
+    if shop.get("enabled"):
+        button = str(shop.get("button") or DEFAULT_COOKIE_SHOP["button"])[:40]
+        rows.append([ibtn(button, "shop:buy_cookies", STYLE_GO)])
+    rows.append([close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -616,15 +623,16 @@ def shop_keyboard(prices: dict[str, int]) -> InlineKeyboardMarkup:
     return shop_home_keyboard()
 
 
-def cookie_packages_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [ibtn("10 🍪 — 100 ₽", "cookies:sbp:10", STYLE_FUN)],
-            [ibtn("50 🍪 — 500 ₽", "cookies:sbp:50", STYLE_FUN)],
-            [ibtn("100 🍪 — 1 000 ₽", "cookies:sbp:100", STYLE_GO)],
-            [back_btn("shop:home"), close_btn("shop:close")],
-        ]
-    )
+def cookie_packages_keyboard(cookie_shop: dict[str, object] | None = None) -> InlineKeyboardMarkup:
+    shop = normalize_cookie_shop(cookie_shop)
+    rate = int(shop["rate_rub"])
+    packs = [int(item) for item in shop["packs"]]
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, amount in enumerate(packs):
+        style = STYLE_GO if index == len(packs) - 1 else STYLE_FUN
+        rows.append([ibtn(cookie_pack_label(amount, rate), f"cookies:sbp:{amount}", style)])
+    rows.append([back_btn("shop:home"), close_btn("shop:close")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def sbp_payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:

@@ -2,8 +2,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from community_bot.expedition import COOKIE_WEIGHTS, WEIGHT_TOTAL, parse_loot, result_text, roll_expedition_loot
-from community_bot.keyboards import admin_panel_keyboard, admin_system_keyboard, pet_keyboard
-from community_bot.shop_catalog import REMOVED_COSMETIC_SKUS, shop_header_lines, shop_prices_for
+from community_bot.keyboards import (
+    admin_panel_keyboard,
+    admin_system_keyboard,
+    cookie_packages_keyboard,
+    pet_keyboard,
+    shop_home_keyboard,
+)
+from community_bot.shop_catalog import (
+    REMOVED_COSMETIC_SKUS,
+    cookie_pack_label,
+    cookie_rate_line,
+    cookie_shop_member_text,
+    normalize_cookie_shop,
+    parse_cookie_packs,
+    shop_header_lines,
+    shop_prices_for,
+)
 from community_bot.states import AdminFlow, ShopAdminFlow
 
 
@@ -12,6 +27,8 @@ def test_admin_flow_is_intact() -> None:
     assert AdminFlow.contest_text
     assert ShopAdminFlow.edit_value
     assert ShopAdminFlow.header_title
+    assert ShopAdminFlow.cookie_rate
+    assert ShopAdminFlow.cookie_packs
     assert not hasattr(ShopAdminFlow, "post_body")
 
 
@@ -37,6 +54,31 @@ def test_expedition_result_text_is_extendable() -> None:
     assert parse_loot(None) is None
 
 
+def test_cookie_shop_rate_and_packs_are_aligned() -> None:
+    shop = normalize_cookie_shop(None)
+    assert shop["rate_rub"] == 1
+    assert shop["packs"] == [10, 50, 100]
+    assert cookie_rate_line(1) == "🍪 1 печенька = 1 ₽"
+    assert cookie_pack_label(10, 1) == "10 🍪 — 10 ₽"
+    assert cookie_pack_label(100, 1) == "100 🍪 — 100 ₽"
+    assert parse_cookie_packs("10, 50, 100") == [10, 50, 100]
+    assert parse_cookie_packs("abc") is None
+    text = cookie_shop_member_text(shop)
+    assert "1 печенька = 1 ₽" in text
+    keyboard = cookie_packages_keyboard(shop)
+    labels = [button.text for row in keyboard.inline_keyboard for button in row]
+    assert "10 🍪 — 10 ₽" in labels
+    assert "50 🍪 — 50 ₽" in labels
+    assert "100 🍪 — 100 ₽" in labels
+    assert not any("100 ₽" in label and label.startswith("10 ") for label in labels if "🍪" in label and "—" in label)
+    hidden = shop_home_keyboard(cookie_shop={**shop, "enabled": False})
+    hidden_data = [button.callback_data for row in hidden.inline_keyboard for button in row]
+    assert "shop:buy_cookies" not in hidden_data
+    shown = shop_home_keyboard(cookie_shop=shop)
+    shown_data = [button.callback_data for row in shown.inline_keyboard for button in row]
+    assert "shop:buy_cookies" in shown_data
+
+
 def test_shop_header_and_admin_entry() -> None:
     assert shop_header_lines({"enabled": False, "title": "Курс", "text": "1 🍪 = 1 ₽"}) == ""
     shown = shop_header_lines({"enabled": True, "title": "Курс на 21.09.2026", "text": "🍪 1 печенька = 1 ₽"})
@@ -44,6 +86,10 @@ def test_shop_header_and_admin_entry() -> None:
     assert "1 печенька" in shown
     panel = [button.callback_data for row in admin_panel_keyboard(["features"]).inline_keyboard for button in row]
     assert "ashop:home" in panel
+    from community_bot.routers.shop_admin import _home_keyboard
+
+    admin_shop = [button.callback_data for row in _home_keyboard().inline_keyboard for button in row]
+    assert "ashop:cookies" in admin_shop
     system = [button.callback_data for row in admin_system_keyboard(["features"]).inline_keyboard for button in row]
     assert "ashop:home" in system
     pet = [button.callback_data for row in pet_keyboard().inline_keyboard for button in row]
@@ -66,6 +112,13 @@ async def test_shop_catalog_starts_without_prices_and_supports_admin_crud(tmp_pa
         assert await db.get_shop_item(sku) is None
     header = await db.shop_header()
     assert header["enabled"] is False
+    cookies = await db.cookie_shop()
+    assert cookies["enabled"] is True
+    assert cookies["rate_rub"] == 1
+    assert cookies["packs"] == [10, 50, 100]
+    await db.set_cookie_shop(rate_rub=1, packs=[15, 40], title="Печеньки", intro="СБП")
+    cookies = await db.cookie_shop()
+    assert cookies["packs"] == [15, 40]
     await db.set_shop_header(enabled=True, title="Курс на 21.09.2026", text="🍪 1 печенька = 1 ₽")
     header = await db.shop_header()
     assert header["enabled"] is True

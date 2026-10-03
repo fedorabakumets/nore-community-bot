@@ -59,6 +59,11 @@ class ShopAdminFlow(StatesGroup):
     item_image = State()
     header_title = State()
     header_text = State()
+    cookie_rate = State()
+    cookie_title = State()
+    cookie_intro = State()
+    cookie_button = State()
+    cookie_packs = State()
     edit_value = State()
 
 

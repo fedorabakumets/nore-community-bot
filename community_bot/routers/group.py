@@ -34,6 +34,7 @@ from community_bot.blocks import answer_block, edit_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import (
+    cookies_phrase,
     discounted_price,
     is_permanent_duration,
     reputation_delta,
@@ -87,6 +88,9 @@ from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
     TITLE_ITEMS,
+    cookie_rate_line,
+    cookie_shop_member_text,
+    format_rub,
     item_discount,
     item_label,
     shop_header_lines,
@@ -575,7 +579,7 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
 
 
 @router.callback_query(F.data.startswith("profile_transfer:"), F.message.chat.type.in_({"group", "supergroup"}))
-async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
+async def profile_transfer(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.data or not callback.message:
         return
     _, raw_target_id, raw_amount = callback.data.split(":")
@@ -592,7 +596,10 @@ async def profile_transfer(callback: CallbackQuery, db: Database) -> None:
     if amount > int(sender["cookies"]):
         await callback.answer(f"Недостаточно печенек. Ваш баланс: {sender['cookies']} 🍪.", show_alert=True)
         return
-    percent = transfer_commission_percent(int(sender["reputation"]))
+    percent = transfer_commission_percent(
+        int(sender["reputation"]),
+        settings.restricted_reputation_threshold,
+    )
     received = amount * (100 - percent) // 100
     transfer_id = await db.create_transfer(callback.from_user.id, target_id, amount)
     await callback.message.edit_reply_markup(reply_markup=public_profile_keyboard(target_id))
@@ -939,8 +946,12 @@ async def _shop_prices(db: Database, user: dict[str, object], settings: Settings
 async def _shop_home_text(db: Database, user: dict[str, object], settings: Settings) -> str:
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
     header = shop_header_lines(await db.shop_header())
+    cookie_shop = await db.cookie_shop()
+    rate = cookie_rate_line(int(cookie_shop["rate_rub"])) if cookie_shop.get("enabled") else ""
+    rate_line = f"{rate}\n" if rate else ""
     return (
         f"{header}🛒 <b>Магазин NORA</b>\n"
+        f"{rate_line}"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
         "Откройте полку — у каждого товара цена в 🍪. Покупка только после подтверждения. "
@@ -971,7 +982,12 @@ async def _shop_home_markup(db: Database):
         if extra:
             label = f"{label} · {' · '.join(extra)}"
     categories = await db.list_shop_categories(enabled_only=True)
-    return shop_home_keyboard(categories, featured_key=key, featured_label=label if key else None)
+    return shop_home_keyboard(
+        categories,
+        featured_key=key,
+        featured_label=label if key else None,
+        cookie_shop=await db.cookie_shop(),
+    )
 
 
 @router.message(command_or_alias("shop"))
@@ -1041,38 +1057,60 @@ async def shop_category(callback: CallbackQuery, db: Database, settings: Setting
 
 
 @router.callback_query(F.data == "shop:buy_cookies")
-async def choose_cookie_pack(callback: CallbackQuery, settings: Settings) -> None:
+async def choose_cookie_pack(callback: CallbackQuery, db: Database) -> None:
+    shop = await db.cookie_shop()
+    if not shop.get("enabled"):
+        await callback.answer("Покупка печенек временно закрыта.", show_alert=True)
+        return
     await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽, оплата проводится вручную через СБП:",
-            reply_markup=cookie_packages_keyboard(),
-        )
+    if not callback.message:
+        return
+    header = shop_header_lines(await db.shop_header())
+    await edit_block(
+        callback.message,
+        cookie_shop_member_text(shop, header),
+        parse_mode="HTML",
+        reply_markup=cookie_packages_keyboard(shop),
+    )
 
 
 @router.message(command_or_alias("buycookies"))
-async def buycookies_command(message: Message, settings: Settings) -> None:
-    prompt = f"Выберите пакет. 1 🍪 = {settings.cookie_price_rub} ₽:"
-    await message.answer(prompt, reply_markup=cookie_packages_keyboard())
+async def buycookies_command(message: Message, db: Database) -> None:
+    shop = await db.cookie_shop()
+    if not shop.get("enabled"):
+        await message.answer("Покупка печенек временно закрыта.")
+        return
+    header = shop_header_lines(await db.shop_header())
+    await message.answer(
+        cookie_shop_member_text(shop, header),
+        parse_mode="HTML",
+        reply_markup=cookie_packages_keyboard(shop),
+    )
 
 
 @router.callback_query(F.data.startswith("cookies:sbp:"))
-async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
     if not callback.data or not callback.message:
         return
+    shop = await db.cookie_shop()
+    if not shop.get("enabled"):
+        await callback.answer("Покупка печенек временно закрыта.", show_alert=True)
+        return
     amount = int(callback.data.rsplit(":", 1)[1])
-    if amount not in {10, 50, 100}:
+    packs = {int(item) for item in shop["packs"]}
+    if amount not in packs:
         await callback.answer("Некорректный пакет.", show_alert=True)
         return
     if not settings.sbp_payment_url:
         await callback.answer("Оплата СБП ещё не настроена владельцем.", show_alert=True)
         return
-    rubles = amount * settings.cookie_price_rub
+    rubles = amount * int(shop["rate_rub"])
     await state.set_state(CookiePurchase.receipt)
     await state.set_data({"amount": amount, "rubles": rubles})
     await callback.answer()
     await callback.message.answer(
-        f"Вы выбрали <b>{amount} 🍪</b>. К оплате: <b>{rubles} ₽</b>.\n\n"
+        f"Вы выбрали <b>{cookies_phrase(amount, case='acc')}</b> ({amount} 🍪). "
+        f"К оплате: <b>{format_rub(rubles)}</b>.\n\n"
         "Переведите точную сумму по ссылке СБП, затем следующим сообщением отправьте скриншот оплаты.",
         parse_mode="HTML",
         reply_markup=sbp_payment_keyboard(settings.sbp_payment_url),
@@ -1126,7 +1164,7 @@ async def receive_sbp_receipt(
     caption = (
         f"💳 <b>Заказ печенек №{order_id}</b>\n"
         f"Пользователь: {user_link(message.from_user.id, message.from_user.full_name)}\n"
-        f"Пакет: <b>{amount} 🍪</b> · сумма <b>{rubles} ₽</b>"
+        f"Пакет: <b>{cookies_phrase(amount)}</b> ({amount} 🍪) · сумма <b>{format_rub(rubles)}</b>"
     )
     for recipient_id in recipients:
         try:
@@ -1622,7 +1660,7 @@ async def freebie_check(callback: CallbackQuery, db: Database, settings: Setting
 
 
 @router.message(command_or_alias("transfer"), F.chat.type.in_({"group", "supergroup"}))
-async def transfer_command(message: Message, db: Database) -> None:
+async def transfer_command(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
     target = await resolve_reply_target(message, db)
@@ -1630,10 +1668,16 @@ async def transfer_command(message: Message, db: Database) -> None:
     if not target or not args or not args[0].isdigit():
         await _respond(message, "Ответьте на сообщение пользователя: /transfer 100")
         return
-    await _prepare_transfer(message, db, target, int(args[0]))
+    await _prepare_transfer(message, db, settings, target, int(args[0]))
 
 
-async def _prepare_transfer(message: Message, db: Database, target: dict[str, object], amount: int) -> None:
+async def _prepare_transfer(
+    message: Message,
+    db: Database,
+    settings: Settings,
+    target: dict[str, object],
+    amount: int,
+) -> None:
     assert message.from_user
     sender = await register_telegram_user(db, message.from_user)
     if int(target["user_id"]) == message.from_user.id:
@@ -1642,7 +1686,10 @@ async def _prepare_transfer(message: Message, db: Database, target: dict[str, ob
     if amount <= 0 or amount > int(sender["cookies"]):
         await _respond(message, f"Недостаточно печенек. Ваш баланс: {sender['cookies']} 🍪.")
         return
-    percent = transfer_commission_percent(int(sender["reputation"]))
+    percent = transfer_commission_percent(
+        int(sender["reputation"]),
+        settings.restricted_reputation_threshold,
+    )
     received = amount * (100 - percent) // 100
     if received <= 0:
         await _respond(message, "После комиссии получателю ничего не останется. Увеличьте сумму.")
@@ -1659,7 +1706,7 @@ async def _prepare_transfer(message: Message, db: Database, target: dict[str, ob
 
 
 @router.callback_query(F.data.startswith("transfer:"))
-async def confirm_transfer(callback: CallbackQuery, db: Database, bot: Bot) -> None:
+async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
     if not callback.data or not callback.message:
         return
     _, decision, raw_id = callback.data.split(":")
@@ -1670,7 +1717,11 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, bot: Bot) -> N
         await callback.message.edit_reply_markup(reply_markup=None)
         return
     transfer = await db.fetchone("SELECT * FROM pending_transfers WHERE id = ?", (transfer_id,))
-    ok, error, received = await db.complete_transfer(transfer_id, callback.from_user.id)
+    ok, error, received = await db.complete_transfer(
+        transfer_id,
+        callback.from_user.id,
+        settings.restricted_reputation_threshold,
+    )
     if not ok:
         await callback.answer(error, show_alert=True)
         return
@@ -1694,7 +1745,7 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         return
     amount = transfer_amount(message.text or "")
     if amount is not None:
-        await _prepare_transfer(message, db, target, amount)
+        await _prepare_transfer(message, db, settings, target, amount)
         return
     delta = reputation_delta(message.text or "")
     if delta is None:
