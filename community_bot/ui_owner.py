@@ -16,6 +16,7 @@ from community_bot.helpers import rank_of_user
 OWNED_PREFIXES = (
     "shop:",
     "pet:",
+    "ashop:",
     "menu:",
     "wallet:",
     "p:",

@@ -12,10 +12,15 @@ from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file
 from community_bot.config import Settings
 from community_bot.database import Database
+from community_bot.expedition import (
+    ExpeditionLoot,
+    announce_expedition_result,
+    parse_loot,
+    remaining_label,
+)
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
-from community_bot.pet_cosmetics import render_pet_image
 from community_bot.pets_talk import SPECIES, aftercare_line, pet_pronouns, species_meta
-from community_bot.shop_catalog import SHOP_CATEGORIES, shop_prices_for
+from community_bot.shop_catalog import shop_header_lines, shop_prices_for
 from community_bot.states import PetFlow
 from community_bot.ui_owner import bind_ui_owner
 
@@ -29,105 +34,127 @@ def _bar(value: int) -> str:
     return "█" * filled + "░" * (10 - filled)
 
 
-def pet_photo(species: str, equipped: list[str] | tuple[str, ...] | set[str] = ()) -> FSInputFile | None:
-    path = render_pet_image(species, equipped)
-    if path and path.is_file():
-        return FSInputFile(path)
+def pet_photo(species: str) -> FSInputFile | None:
     fallback = ASSETS / f"{species}.png"
     return FSInputFile(fallback) if fallback.is_file() else None
 
 
-def pet_text(pet: dict[str, object], equipped: list[str] | None = None) -> str:
+def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
     emoji, species = species_meta(str(pet["species"]))
     words = pet_pronouns(str(pet["species"]))
     hunger = int(pet["hunger"])
     thirst = int(pet["thirst"])
     mood = int(pet["mood"])
     sleeping = bool(int(pet["sleeping"]))
-    farm_milli = int(pet["farm_milli"])
     status = f"💤 {words['sleep_status']}" if sleeping else f"✨ {words['awake']}"
-    from community_bot.pet_cosmetics import COSMETIC_ITEMS, cosmetic_bonus_milli
-
-    worn = equipped or []
-    bonus = cosmetic_bonus_milli(worn)
-    cosmetic_line = ""
-    if worn:
-        labels = ", ".join(str(COSMETIC_ITEMS[item]["label"]) for item in worn if item in COSMETIC_ITEMS)
-        cosmetic_line = f"🎨 На {words['him']}: {labels} · фарм +{bonus}/ч\n"
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
+        "Тамагочи — ваш талисман, который сыщет для вас самые редкие вещи!\n"
+        "Через него в сообществе появляются сезонные находки, титулы, коллекционные награды "
+        "и особые призы с мероприятий.\n\n"
         f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
         f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
-        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
-        f"🍪 Крошки: <b>{farm_milli}/1000</b> до печеньки\n"
-        f"{cosmetic_line}\n"
-        f"{_expedition_line(pet, words)}"
-        f"Покорми или напои — {species} живёт в чате, не в личке."
+        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n\n"
+        f"{_expedition_line(pet, words, timezone)}"
+        "Печеньки талисман приносит только из экспедиции — сам по себе он их не фармит."
     )
 
 
-def _expedition_line(pet: dict[str, object], words: dict[str, str]) -> str:
+def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: str) -> str:
     until = str(pet.get("expedition_until") or "")
-    if not until:
-        return ""
-    return f"🌲 Сейчас в экспедиции. {words['returned'].capitalize()} с добычей.\n\n"
+    if until:
+        left = remaining_label(until, timezone)
+        return (
+            f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} с находкой — "
+            "одно сообщение в чат и в личку.\n\n"
+        )
+    return "🗺 Можно отправить в экспедицию раз в 24 часа. Находка: 1–10 🍪, крупные награды очень редки.\n\n"
 
 
-async def _equipped(db: Database, user_id: int) -> list[str]:
-    return await db.equipped_cosmetics(user_id)
+async def _maybe_announce(message: Message, db: Database, settings: Settings, pet: dict[str, object]) -> None:
+    sent = pet.get("expedition_notice_sent")
+    if sent is None:
+        sent = 1
+    if not pet.get("expedition_done") and int(sent):
+        return
+    raw_loot = pet.get("expedition_loot")
+    loot = ExpeditionLoot.from_mapping(raw_loot) if isinstance(raw_loot, dict) else parse_loot(str(raw_loot or ""))
+    if loot is None:
+        await db.claim_expedition_notice(int(pet["user_id"]))
+        return
+    await announce_expedition_result(message.bot, db, settings, int(pet["user_id"]), pet, loot)
 
 
-async def send_pet_card(message: Message, pet: dict[str, object], db: Database | None = None) -> Message | None:
-    equipped = await _equipped(db, int(pet["user_id"])) if db else []
-    text = pet_text(pet, equipped)
-    photo = pet_photo(str(pet["species"]), equipped)
+async def send_pet_card(
+    message: Message,
+    pet: dict[str, object],
+    db: Database | None = None,
+    settings: Settings | None = None,
+) -> Message | None:
+    timezone = settings.timezone if settings else "Europe/Moscow"
+    text = pet_text(pet, timezone)
+    photo = pet_photo(str(pet["species"]))
     sent: Message | None = None
+    markup = pet_keyboard(pet, timezone)
     if photo:
         try:
-            sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+            sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
         except TelegramBadRequest:
             sent = None
     if sent is None:
         cover = cover_file("pet")
         if cover:
             try:
-                sent = await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+                sent = await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
             except TelegramBadRequest:
                 sent = None
     if sent is None:
-        sent = await message.answer(text, parse_mode="HTML", reply_markup=pet_keyboard())
+        sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     if db and message.from_user:
         await bind_ui_owner(db, sent, message.from_user.id, "pet")
     return sent
 
 
-async def refresh_pet_card(target: Message, pet: dict[str, object], db: Database | None = None) -> None:
-    equipped = await _equipped(db, int(pet["user_id"])) if db else []
-    text = pet_text(pet, equipped)
-    photo = pet_photo(str(pet["species"]), equipped)
+async def refresh_pet_card(
+    target: Message,
+    pet: dict[str, object],
+    db: Database | None = None,
+    settings: Settings | None = None,
+) -> None:
+    timezone = settings.timezone if settings else "Europe/Moscow"
+    text = pet_text(pet, timezone)
+    photo = pet_photo(str(pet["species"]))
+    markup = pet_keyboard(pet, timezone)
     if photo:
         try:
             await target.edit_media(
                 InputMediaPhoto(media=photo, caption=text, parse_mode="HTML"),
-                reply_markup=pet_keyboard(),
+                reply_markup=markup,
             )
             return
         except TelegramBadRequest:
             pass
     try:
-        await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=pet_keyboard())
+        await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
         return
     except TelegramBadRequest:
         pass
     try:
-        await target.edit_text(text, parse_mode="HTML", reply_markup=pet_keyboard())
+        await target.edit_text(text, parse_mode="HTML", reply_markup=markup)
     except TelegramBadRequest:
-        await send_pet_card(target, pet, db)
+        await send_pet_card(target, pet, db, settings)
 
 
-async def _show_pet(message: Message, db: Database, user_id: int, *, replace: bool = False) -> None:
+async def _show_pet(
+    message: Message,
+    db: Database,
+    user_id: int,
+    settings: Settings,
+    *,
+    replace: bool = False,
+) -> None:
     pet = await db.get_pet(user_id)
     if not pet:
         text = "У вас пока нет тамагочи. Откройте магазин снизу."
@@ -138,18 +165,19 @@ async def _show_pet(message: Message, db: Database, user_id: int, *, replace: bo
             return
         await message.answer(text)
         return
+    await _maybe_announce(message, db, settings, pet)
     if replace:
-        await refresh_pet_card(message, pet, db)
+        await refresh_pet_card(message, pet, db, settings)
         return
-    await send_pet_card(message, pet, db)
+    await send_pet_card(message, pet, db, settings)
 
 
 @router.message(command_or_alias("pet"))
 @router.message(F.text == "🐾 Тамагочи")
-async def show_pet(message: Message, db: Database) -> None:
+async def show_pet(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
-    await _show_pet(message, db, message.from_user.id)
+    await _show_pet(message, db, message.from_user.id, settings)
 
 
 @router.callback_query(F.data.startswith("pet:species:"))
@@ -178,7 +206,7 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
 
 
 @router.message(PetFlow.name)
-async def create_pet(message: Message, state: FSMContext, db: Database) -> None:
+async def create_pet(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
     name = (message.text or "").strip()
@@ -202,11 +230,17 @@ async def create_pet(message: Message, state: FSMContext, db: Database) -> None:
         f"✅ {SPECIES[species][0]} <b>{html.escape(name)}</b> теперь живёт у вас. Списано {price} 🍪.",
         parse_mode="HTML",
     )
-    await send_pet_card(message, pet, db)
+    await send_pet_card(message, pet, db, settings)
+
+
+@router.callback_query(F.data.startswith("pet:custom"))
+@router.callback_query(F.data.startswith("pet:look"))
+async def stale_pet_custom(callback: CallbackQuery) -> None:
+    await callback.answer("Кастомизация тамагочи больше недоступна. Теперь это талисман экспедиций.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("pet:use:"))
-async def use_supply(callback: CallbackQuery, db: Database) -> None:
+async def use_supply(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.data or not callback.message:
         return
     kind = callback.data.rsplit(":", 1)[1]
@@ -215,7 +249,7 @@ async def use_supply(callback: CallbackQuery, db: Database) -> None:
         await callback.answer(error, show_alert=True)
         return
     await callback.answer("Готово!")
-    await refresh_pet_card(callback.message, pet, db)
+    await refresh_pet_card(callback.message, pet, db, settings)
     await callback.message.answer(aftercare_line(pet, kind))
 
 
@@ -257,26 +291,26 @@ async def rename_pet(message: Message, state: FSMContext, db: Database) -> None:
 
 
 @router.callback_query(F.data == "pet:expedition")
-async def pet_expedition(callback: CallbackQuery, db: Database) -> None:
+async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message:
         return
-    pet = await db.get_pet(callback.from_user.id, settle=False)
-    ok, error, _reward = await db.start_expedition(callback.from_user.id)
+    pet = await db.get_pet(callback.from_user.id)
+    until = str((pet or {}).get("expedition_until") or "")
+    if until:
+        left = remaining_label(until, settings.timezone)
+        await callback.answer(f"Талисман ещё в экспедиции ({left}).", show_alert=True)
+        return
+    ok, error, _reward = await db.start_expedition(callback.from_user.id, timezone=settings.timezone)
     if not ok:
         await callback.answer(error, show_alert=True)
         return
     from community_bot.life import unlock
 
     await unlock(db, callback.from_user.id, "expedition")
-    words = pet_pronouns(str((pet or {}).get("species") or ""))
-    await callback.answer(f"{words['went'].capitalize()} в лес на 4 часа.")
+    await callback.answer("Талисман ушёл искать редкие вещи на 24 часа.")
     pet = await db.get_pet(callback.from_user.id, settle=False)
     if pet:
-        await refresh_pet_card(callback.message, pet, db)
-    await callback.message.answer(
-        f"🌲 {html.escape(str((pet or {}).get('name') or 'Питомец'))} {words['went']} в экспедицию на 4 часа. "
-        f"{words['returned'].capitalize()} с 🍪 — пинг будет в чат."
-    )
+        await refresh_pet_card(callback.message, pet, db, settings)
 
 
 @router.callback_query(F.data == "pet:shop")
@@ -288,31 +322,16 @@ async def pet_shop(callback: CallbackQuery, db: Database, settings: Settings) ->
     if not user:
         await callback.answer("Сначала откройте /start.", show_alert=True)
         return
-    prices = shop_prices_for(user, settings.restricted_reputation_threshold)
+    category = await db.get_shop_category("pets")
+    items = await db.list_shop_items("pets", enabled_only=True, priced_only=True)
+    prices = shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
     await callback.answer()
-    meta = SHOP_CATEGORIES["pets"]
+    header = shop_header_lines(await db.shop_header())
+    title = str((category or {}).get("title") or "🐾 Тамагочи")
+    intro = str((category or {}).get("description") or "")
     sent = await callback.message.answer(
-        f"{meta['title']}\nБаланс: {user['cookies']} 🍪\n\n{meta['intro']}",
-        reply_markup=shop_category_keyboard("pets", prices),
-    )
-    await bind_ui_owner(db, sent, callback.from_user.id, "shop")
-
-
-@router.callback_query(F.data == "pet:custom")
-async def pet_custom(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not callback.from_user:
-        await callback.answer()
-        return
-    user = await db.get_user(callback.from_user.id)
-    if not user:
-        await callback.answer("Сначала откройте /start.", show_alert=True)
-        return
-    prices = shop_prices_for(user, settings.restricted_reputation_threshold)
-    owned, equipped = await db.pet_cosmetic_sets(callback.from_user.id)
-    await callback.answer()
-    meta = SHOP_CATEGORIES["cosmetics"]
-    sent = await callback.message.answer(
-        f"{meta['title']}\nБаланс: {user['cookies']} 🍪\n\n{meta['intro']}",
-        reply_markup=shop_category_keyboard("cosmetics", prices, owned=owned, equipped=equipped),
+        f"{header}{title}\nБаланс: {user['cookies']} 🍪\n\n{intro}",
+        parse_mode="HTML",
+        reply_markup=shop_category_keyboard("pets", prices, items=items),
     )
     await bind_ui_owner(db, sent, callback.from_user.id, "shop")

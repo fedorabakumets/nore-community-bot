@@ -148,9 +148,35 @@ def win_after_commission(gross: int, reputation: int, restricted_threshold: int 
     return net, percent
 
 
+def ru_plural(n: int, one: str, few: str, many: str) -> str:
+    value = abs(int(n)) % 100
+    if 11 <= value <= 14:
+        return many
+    value %= 10
+    if value == 1:
+        return one
+    if 2 <= value <= 4:
+        return few
+    return many
+
+
+def cookie_word(n: int, *, case: str = "nom") -> str:
+    if case == "gen":
+        return ru_plural(n, "печеньки", "печенек", "печенек")
+    if case == "acc":
+        return ru_plural(n, "печеньку", "печеньки", "печенек")
+    if case == "prep":
+        return ru_plural(n, "печеньке", "печеньках", "печеньках")
+    return ru_plural(n, "печенька", "печеньки", "печенек")
+
+
+def cookies_phrase(n: int, *, case: str = "nom") -> str:
+    return f"{int(n)} {cookie_word(n, case=case)}"
+
+
 def transfer_amount(text: str) -> int | None:
     match = re.fullmatch(
-        r"\s*(?:перевести|передать)\s+(\d+)\s+(?:печен(?:ек|ьки|ья)|🍪)\s*",
+        r"\s*(?:перевести|передать)\s+(\d+)(?:\s+(?:печен(?:ек|ьку|ьки|ька|ья)|🍪))?\s*",
         text,
         re.IGNORECASE,
     )

@@ -15,7 +15,7 @@ from community_bot.economy import (
     LOAN_PRINCIPAL,
     loan_interest_percent,
     loan_repay_amount,
-    pet_farm_rate_line,
+    pet_status_line,
     transaction_line,
     wallet_net,
 )
@@ -57,22 +57,16 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
     interest = loan_interest_percent(int(user["reputation"]), settings.restricted_reputation_threshold)
     repay = loan_repay_amount(LOAN_PRINCIPAL, interest)
     pet = await db.get_pet(user_id)
-    equipped = await db.equipped_cosmetics(user_id) if pet else []
     loan = await db.get_active_loan(user_id)
     debt = int(user.get("cookie_debt") or 0)
     cookies = int(user["cookies"])
     net = wallet_net(user)
-    farm = "нет питомца"
-    if pet:
-        hunger = int(pet["hunger"])
-        thirst = int(pet["thirst"])
-        if hunger == 0 or thirst == 0 or int(pet.get("sleeping") or 0):
-            farm = "спит"
-        else:
-            from community_bot.pet_cosmetics import pet_hourly_milli
-
-            milli = pet_hourly_milli(pet, equipped)
-            farm = f"{milli * 24 / 1000:.1f}/сут"
+    if not pet:
+        expedition = "нет"
+    elif pet.get("expedition_until"):
+        expedition = "в пути"
+    else:
+        expedition = "дома"
     table = (
         "<pre>"
         "┌──────────────┬────────────┐\n"
@@ -84,7 +78,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
         f"│ {_pad('Ставка', 12)} │ {_pad(str(interest) + ' %', 10, right=True)} │\n"
         f"│ {_pad('Репутация', 12)} │ {_pad(str(int(user['reputation'])) + ' %', 10, right=True)} │\n"
         f"│ {_pad('Уровень', 12)} │ {_pad(tier.label, 10, right=True)} │\n"
-        f"│ {_pad('Фарм', 12)} │ {_pad(farm, 10, right=True)} │\n"
+        f"│ {_pad('Экспедиция', 12)} │ {_pad(expedition, 10, right=True)} │\n"
         "└──────────────┴────────────┘"
         "</pre>"
     )
@@ -96,7 +90,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
         f"Уровень: {tier.emoji} {tier.label} · комиссия переводов <b>{percent}%</b>.",
         f"Кредит 100 🍪: ставка <b>{interest}%</b>, к возврату {repay} 🍪 через {LOAN_DAYS} дней.",
         "",
-        pet_farm_rate_line(pet),
+        pet_status_line(pet),
     ]
     if loan:
         lines.append("")
@@ -171,7 +165,7 @@ async def wallet_shop(callback: CallbackQuery, db: Database, settings: Settings)
     await replace_block(
         callback.message,
         "shop",
-        _shop_home_text(user, settings),
+        await _shop_home_text(db, user, settings),
         parse_mode="HTML",
         reply_markup=await _shop_home_markup(db),
     )
@@ -195,7 +189,8 @@ async def wallet_send_hint(callback: CallbackQuery) -> None:
     if callback.message:
         await edit_block(
             callback.message,
-            "💸 <b>Перевод</b>\nВ личке цели нет. В чате ответом на человека: <code>перевести 10</code>.",
+            "💸 <b>Перевод</b>\nВ личке цели нет. В чате ответом на человека: "
+            "<code>перевести 10</code> или <code>перевести 1 печеньку</code>.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("wallet:home"), close_btn("ui:close")]]),
         )

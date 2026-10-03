@@ -1,10 +1,13 @@
 from datetime import timedelta
 
 from community_bot.domain import (
+    cookie_word,
+    cookies_phrase,
     discounted_price,
     parse_duration,
     reputation_delta,
     reputation_tier,
+    ru_plural,
     transfer_amount,
     transfer_commission_percent,
     win_after_commission,
@@ -47,7 +50,22 @@ def test_duration_parser() -> None:
 def test_transfer_phrase() -> None:
     assert transfer_amount("перевести 100 печенек") == 100
     assert transfer_amount("ПЕРЕДАТЬ 2 🍪") == 2
+    assert transfer_amount("перевести 10") == 10
+    assert transfer_amount("перевести 1 печеньку") == 1
+    assert transfer_amount("передать 21 печеньку") == 21
     assert transfer_amount("перевести много печенек") is None
+
+
+def test_cookie_declensions() -> None:
+    assert ru_plural(1, "печенька", "печеньки", "печенек") == "печенька"
+    assert ru_plural(2, "печенька", "печеньки", "печенек") == "печеньки"
+    assert ru_plural(5, "печенька", "печеньки", "печенек") == "печенек"
+    assert ru_plural(21, "печенька", "печеньки", "печенек") == "печенька"
+    assert ru_plural(22, "печенька", "печеньки", "печенек") == "печеньки"
+    assert cookie_word(1) == "печенька"
+    assert cookie_word(3, case="acc") == "печеньки"
+    assert cookie_word(1, case="acc") == "печеньку"
+    assert cookies_phrase(21) == "21 печенька"
 
 
 def test_transfer_commission_by_tier() -> None:

@@ -387,13 +387,29 @@ CREATE TABLE IF NOT EXISTS bot_chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_bot_chat_messages_created ON bot_chat_messages(chat_id, created_at);
 
-CREATE TABLE IF NOT EXISTS pet_cosmetics (
-    user_id INTEGER NOT NULL REFERENCES users(user_id),
-    item TEXT NOT NULL,
-    equipped INTEGER NOT NULL DEFAULT 0 CHECK(equipped IN (0, 1)),
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(user_id, item)
+CREATE TABLE IF NOT EXISTS shop_categories (
+    slug TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shop_items (
+    sku TEXT PRIMARY KEY,
+    category_slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    price INTEGER,
+    image TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    extra_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shop_items_category ON shop_items(category_slug, sort_order, sku);
 
 CREATE TABLE IF NOT EXISTS ui_owners (
     chat_id INTEGER NOT NULL,
@@ -488,6 +504,10 @@ class Database:
                 await db.execute("ALTER TABLE pets ADD COLUMN expedition_until TEXT")
             if "expedition_reward" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN expedition_reward INTEGER NOT NULL DEFAULT 0")
+            if "expedition_loot" not in pet_columns:
+                await db.execute("ALTER TABLE pets ADD COLUMN expedition_loot TEXT")
+            if "expedition_notice_sent" not in pet_columns:
+                await db.execute("ALTER TABLE pets ADD COLUMN expedition_notice_sent INTEGER NOT NULL DEFAULT 1")
             audit_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(admin_audit_log)")).fetchall()
             }
@@ -509,6 +529,7 @@ class Database:
                     (key, enabled, now),
                 )
             await db.commit()
+        await self._seed_shop_catalog()
         await self.reset_incomplete_reputation_to_bronze()
         await self.sync_all_bio_auto_warns()
 
@@ -827,54 +848,318 @@ class Database:
         )
         return int(row["user_id"]) if row else None
 
-    async def pet_cosmetic_sets(self, user_id: int) -> tuple[set[str], set[str]]:
-        rows = await self.fetchall(
-            "SELECT item, equipped FROM pet_cosmetics WHERE user_id = ?",
-            (user_id,),
+    async def _seed_shop_catalog(self) -> None:
+        from community_bot.shop_catalog import (
+            DEFAULT_COOKIE_SHOP,
+            DEFAULT_SHOP_HEADER,
+            REMOVED_COSMETIC_SKUS,
+            SEED_CATEGORIES,
+            SEED_ITEMS,
         )
-        owned = {str(row["item"]) for row in rows}
-        equipped = {str(row["item"]) for row in rows if int(row["equipped"] or 0)}
-        return owned, equipped
 
-    async def equipped_cosmetics(self, user_id: int) -> list[str]:
-        _owned, equipped = await self.pet_cosmetic_sets(user_id)
-        from community_bot.pet_cosmetics import COSMETIC_ORDER
-
-        return [item for item in COSMETIC_ORDER if item in equipped]
-
-    async def grant_pet_cosmetic(self, user_id: int, item: str, *, equip: bool = True) -> None:
         now = utcnow()
-        await self.execute(
-            """
-            INSERT INTO pet_cosmetics(user_id, item, equipped, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, item) DO NOTHING
-            """,
-            (user_id, item, 1 if equip else 0, now),
-        )
-        if equip:
-            await self.execute(
-                "UPDATE pet_cosmetics SET equipped = 1 WHERE user_id = ? AND item = ?",
-                (user_id, item),
+        async with self.connect() as db:
+            for row in SEED_CATEGORIES:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO shop_categories(slug, title, description, sort_order, enabled, created_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    """,
+                    (row["slug"], row["title"], row["description"], row["sort_order"], now),
+                )
+            for row in SEED_ITEMS:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO shop_items(
+                        sku, category_slug, title, description, price, image, sort_order, enabled, extra_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, '', NULL, '', ?, 1, '{}', ?, ?)
+                    """,
+                    (row["sku"], row["category_slug"], row["title"], row["sort_order"], now, now),
+                )
+            await db.execute(
+                f"DELETE FROM shop_items WHERE sku IN ({','.join('?' * len(REMOVED_COSMETIC_SKUS))})",
+                REMOVED_COSMETIC_SKUS,
             )
+            await db.execute("DELETE FROM shop_categories WHERE slug = 'cosmetics'")
+            await db.execute("DROP TABLE IF EXISTS pet_cosmetics")
+            cleared = await db.execute("SELECT value FROM bot_state WHERE key = 'shop_prices_cleared'")
+            flag = await cleared.fetchone()
+            if not flag:
+                await db.execute("UPDATE shop_items SET price = NULL, updated_at = ?", (now,))
+                await db.execute(
+                    "INSERT INTO bot_state(key, value) VALUES ('shop_prices_cleared', '1') ON CONFLICT(key) DO NOTHING"
+                )
+            header = await db.execute("SELECT value FROM bot_state WHERE key = 'shop_header'")
+            if not await header.fetchone():
+                await db.execute(
+                    "INSERT INTO bot_state(key, value) VALUES (?, ?)",
+                    ("shop_header", json.dumps(DEFAULT_SHOP_HEADER, ensure_ascii=False)),
+                )
+            cookies = await db.execute("SELECT value FROM bot_state WHERE key = 'cookie_shop'")
+            if not await cookies.fetchone():
+                await db.execute(
+                    "INSERT INTO bot_state(key, value) VALUES (?, ?)",
+                    ("cookie_shop", json.dumps(DEFAULT_COOKIE_SHOP, ensure_ascii=False)),
+                )
+            await db.commit()
 
-    async def toggle_pet_cosmetic(self, user_id: int, item: str) -> tuple[bool, str]:
-        from community_bot.pet_cosmetics import COSMETIC_ITEMS
+    async def list_shop_categories(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
+        if enabled_only:
+            return await self.fetchall(
+                "SELECT * FROM shop_categories WHERE enabled = 1 ORDER BY sort_order, title"
+            )
+        return await self.fetchall("SELECT * FROM shop_categories ORDER BY sort_order, title")
 
-        if item not in COSMETIC_ITEMS:
-            return False, "Нет такого предмета."
-        row = await self.fetchone(
-            "SELECT equipped FROM pet_cosmetics WHERE user_id = ? AND item = ?",
-            (user_id, item),
+    async def get_shop_category(self, slug: str) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM shop_categories WHERE slug = ?", (slug,))
+
+    async def upsert_shop_category(
+        self,
+        slug: str,
+        title: str,
+        description: str = "",
+        *,
+        sort_order: int | None = None,
+        enabled: int | None = None,
+    ) -> None:
+        now = utcnow()
+        existing = await self.get_shop_category(slug)
+        if existing is None:
+            order = 10 if sort_order is None else sort_order
+            max_row = await self.fetchone("SELECT MAX(sort_order) AS m FROM shop_categories")
+            if sort_order is None:
+                order = int((max_row or {}).get("m") or 0) + 10
+            await self.execute(
+                """
+                INSERT INTO shop_categories(slug, title, description, sort_order, enabled, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """,
+                (slug, title, description, order, now),
+            )
+            return
+        fields = ["title = ?", "description = ?"]
+        values: list[Any] = [title, description]
+        if sort_order is not None:
+            fields.append("sort_order = ?")
+            values.append(sort_order)
+        if enabled is not None:
+            fields.append("enabled = ?")
+            values.append(enabled)
+        values.append(slug)
+        await self.execute(f"UPDATE shop_categories SET {', '.join(fields)} WHERE slug = ?", tuple(values))
+
+    async def delete_shop_category(self, slug: str) -> bool:
+        if slug in {"pets", "reputation", "profile"}:
+            return False
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute("DELETE FROM shop_items WHERE category_slug = ?", (slug,))
+            cursor = await db.execute("DELETE FROM shop_categories WHERE slug = ?", (slug,))
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def list_shop_items(
+        self,
+        category_slug: str | None = None,
+        *,
+        enabled_only: bool = False,
+        priced_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if category_slug:
+            clauses.append("category_slug = ?")
+            params.append(category_slug)
+        if enabled_only:
+            clauses.append("enabled = 1")
+        if priced_only:
+            clauses.append("price IS NOT NULL AND price > 0")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return await self.fetchall(
+            f"SELECT * FROM shop_items {where} ORDER BY sort_order, title",
+            tuple(params),
         )
-        if not row:
-            return False, "Сначала купите этот предмет."
-        nxt = 0 if int(row["equipped"] or 0) else 1
+
+    async def get_shop_item(self, sku: str) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM shop_items WHERE sku = ?", (sku,))
+
+    async def upsert_shop_item(
+        self,
+        sku: str,
+        *,
+        category_slug: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        price: int | None | object = ...,
+        image: str | None = None,
+        sort_order: int | None = None,
+        enabled: int | None = None,
+        extra_json: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = utcnow()
+        existing = await self.get_shop_item(sku)
+        if existing is None:
+            if not category_slug or not title:
+                return None
+            order = sort_order
+            if order is None:
+                max_row = await self.fetchone(
+                    "SELECT MAX(sort_order) AS m FROM shop_items WHERE category_slug = ?",
+                    (category_slug,),
+                )
+                order = int((max_row or {}).get("m") or 0) + 10
+            stored_price = None if price is ... else price
+            stored_extra = extra_json if extra_json is not None else "{}"
+            await self.execute(
+                """
+                INSERT INTO shop_items(
+                    sku, category_slug, title, description, price, image, sort_order, enabled, extra_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sku,
+                    category_slug,
+                    title,
+                    description or "",
+                    stored_price,
+                    image or "",
+                    order,
+                    1 if enabled is None else enabled,
+                    stored_extra,
+                    now,
+                    now,
+                ),
+            )
+            return await self.get_shop_item(sku)
+        fields = ["updated_at = ?"]
+        values: list[Any] = [now]
+        if category_slug is not None:
+            fields.append("category_slug = ?")
+            values.append(category_slug)
+        if title is not None:
+            fields.append("title = ?")
+            values.append(title)
+        if description is not None:
+            fields.append("description = ?")
+            values.append(description)
+        if price is not ...:
+            fields.append("price = ?")
+            values.append(price)
+        if image is not None:
+            fields.append("image = ?")
+            values.append(image)
+        if sort_order is not None:
+            fields.append("sort_order = ?")
+            values.append(sort_order)
+        if enabled is not None:
+            fields.append("enabled = ?")
+            values.append(enabled)
+        if extra_json is not None:
+            fields.append("extra_json = ?")
+            values.append(extra_json)
+        values.append(sku)
+        await self.execute(f"UPDATE shop_items SET {', '.join(fields)} WHERE sku = ?", tuple(values))
+        return await self.get_shop_item(sku)
+
+    async def delete_shop_item(self, sku: str) -> bool:
+        async with self.connect() as db:
+            cursor = await db.execute("DELETE FROM shop_items WHERE sku = ?", (sku,))
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def shift_shop_item(self, sku: str, direction: int) -> bool:
+        item = await self.get_shop_item(sku)
+        if not item:
+            return False
+        neighbors = await self.list_shop_items(str(item["category_slug"]))
+        index = next((i for i, row in enumerate(neighbors) if row["sku"] == sku), None)
+        if index is None:
+            return False
+        target = index + direction
+        if target < 0 or target >= len(neighbors):
+            return False
+        other = neighbors[target]
         await self.execute(
-            "UPDATE pet_cosmetics SET equipped = ? WHERE user_id = ? AND item = ?",
-            (nxt, user_id, item),
+            "UPDATE shop_items SET sort_order = ? WHERE sku = ?",
+            (int(other["sort_order"]), sku),
         )
-        return True, "снят" if nxt == 0 else "надет"
+        await self.execute(
+            "UPDATE shop_items SET sort_order = ? WHERE sku = ?",
+            (int(item["sort_order"]), other["sku"]),
+        )
+        return True
+
+    async def shift_shop_category(self, slug: str, direction: int) -> bool:
+        rows = await self.list_shop_categories()
+        index = next((i for i, row in enumerate(rows) if row["slug"] == slug), None)
+        if index is None:
+            return False
+        target = index + direction
+        if target < 0 or target >= len(rows):
+            return False
+        other = rows[target]
+        current = rows[index]
+        await self.execute("UPDATE shop_categories SET sort_order = ? WHERE slug = ?", (int(other["sort_order"]), slug))
+        await self.execute(
+            "UPDATE shop_categories SET sort_order = ? WHERE slug = ?",
+            (int(current["sort_order"]), other["slug"]),
+        )
+        return True
+
+    async def shop_header(self) -> dict[str, Any]:
+        from community_bot.shop_catalog import DEFAULT_SHOP_HEADER
+
+        raw = await self.get_bot_state("shop_header")
+        if not raw:
+            return dict(DEFAULT_SHOP_HEADER)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return dict(DEFAULT_SHOP_HEADER)
+        if not isinstance(data, dict):
+            return dict(DEFAULT_SHOP_HEADER)
+        header = dict(DEFAULT_SHOP_HEADER)
+        header.update({key: data.get(key, header[key]) for key in header})
+        header["enabled"] = bool(data.get("enabled"))
+        return header
+
+    async def set_shop_header(self, **fields: Any) -> dict[str, Any]:
+        header = await self.shop_header()
+        header.update(fields)
+        header["enabled"] = bool(header.get("enabled"))
+        header["title"] = str(header.get("title") or "")
+        header["text"] = str(header.get("text") or "")
+        await self.set_bot_state("shop_header", json.dumps(header, ensure_ascii=False))
+        return header
+
+    async def cookie_shop(self) -> dict[str, Any]:
+        from community_bot.shop_catalog import DEFAULT_COOKIE_SHOP, normalize_cookie_shop
+
+        raw = await self.get_bot_state("cookie_shop")
+        if not raw:
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        if not isinstance(data, dict):
+            return normalize_cookie_shop(dict(DEFAULT_COOKIE_SHOP))
+        return normalize_cookie_shop(data)
+
+    async def set_cookie_shop(self, **fields: Any) -> dict[str, Any]:
+        from community_bot.shop_catalog import normalize_cookie_shop
+
+        shop = await self.cookie_shop()
+        shop.update(fields)
+        shop = normalize_cookie_shop(shop)
+        await self.set_bot_state("cookie_shop", json.dumps(shop, ensure_ascii=False))
+        return shop
+
+    async def priced_shop_map(self) -> dict[str, int]:
+        items = await self.list_shop_items(enabled_only=True, priced_only=True)
+        return {str(row["sku"]): int(row["price"]) for row in items if row.get("price") is not None}
 
     async def save_event_offer(
         self,
@@ -1234,7 +1519,12 @@ class Database:
             (sender_id, receiver_id, amount, utcnow()),
         )
 
-    async def complete_transfer(self, transfer_id: int, sender_id: int) -> tuple[bool, str, int]:
+    async def complete_transfer(
+        self,
+        transfer_id: int,
+        sender_id: int,
+        restricted_threshold: int = 0,
+    ) -> tuple[bool, str, int]:
         from community_bot.domain import transfer_commission_percent
 
         now = utcnow()
@@ -1254,7 +1544,7 @@ class Database:
             if not sender:
                 await db.rollback()
                 return False, "Отправитель не найден.", 0
-            percent = transfer_commission_percent(int(sender["reputation"]))
+            percent = transfer_commission_percent(int(sender["reputation"]), restricted_threshold)
             receiver_amount = amount * (100 - percent) // 100
             if receiver_amount <= 0:
                 await db.rollback()
@@ -1513,18 +1803,6 @@ class Database:
                 "UPDATE pets SET thirst = MIN(100, thirst + 50), sleeping = 0, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
             )
-        else:
-            from community_bot.pet_cosmetics import COSMETIC_ITEMS
-
-            if item in COSMETIC_ITEMS:
-                await db.execute(
-                    """
-                    INSERT INTO pet_cosmetics(user_id, item, equipped, created_at)
-                    VALUES (?, ?, 1, ?)
-                    ON CONFLICT(user_id, item) DO UPDATE SET equipped = 1
-                    """,
-                    (user_id, item, now),
-                )
 
     async def set_immunity(self, user_id: int, until: datetime) -> None:
         await self.execute(
@@ -1886,8 +2164,11 @@ class Database:
             return True, "ok"
 
     async def settle_pet(self, user_id: int) -> dict[str, Any] | None:
+        from community_bot.expedition import parse_loot, roll_expedition_loot
+
         now_dt = datetime.now(UTC)
         now = now_dt.isoformat()
+        loot_payload: dict[str, object] | None = None
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             cursor = await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))
@@ -1901,28 +2182,19 @@ class Database:
             except ValueError:
                 last_tick = now_dt
             hours = max(0, int((now_dt - last_tick).total_seconds() // 3600))
-            earned_milli = 0
-            payout = 0
             expedition_until = str(pet.get("expedition_until") or "")
             on_expedition = False
+            expedition_due = False
             if expedition_until:
                 try:
-                    on_expedition = datetime.fromisoformat(expedition_until) > now_dt
+                    until_dt = datetime.fromisoformat(expedition_until)
+                    if until_dt.tzinfo is None:
+                        until_dt = until_dt.replace(tzinfo=UTC)
+                    on_expedition = until_dt > now_dt
+                    expedition_due = until_dt <= now_dt
                 except ValueError:
-                    on_expedition = False
+                    expedition_due = True
             if hours and not on_expedition:
-                from community_bot.pet_cosmetics import COSMETIC_ORDER, pet_hourly_milli
-
-                cursor = await db.execute(
-                    "SELECT item FROM pet_cosmetics WHERE user_id = ? AND equipped = 1",
-                    (user_id,),
-                )
-                equipped = {str(row["item"]) for row in await cursor.fetchall()}
-                equipped_list = [item for item in COSMETIC_ORDER if item in equipped]
-                hourly_rate = pet_hourly_milli(pet, equipped_list)
-                earned_milli = hours * hourly_rate
-                farm_total = int(pet["farm_milli"]) + earned_milli
-                payout, farm_milli = divmod(farm_total, 1000)
                 hunger = max(0, int(pet["hunger"]) - hours * 2)
                 thirst = max(0, int(pet["thirst"]) - hours * 3)
                 sleeping = int(hunger == 0 or thirst == 0)
@@ -1930,52 +2202,41 @@ class Database:
                 new_tick = (last_tick + timedelta(hours=hours)).isoformat()
                 await db.execute(
                     """
-                    UPDATE pets SET hunger = ?, thirst = ?, mood = ?, farm_milli = ?, sleeping = ?,
+                    UPDATE pets SET hunger = ?, thirst = ?, mood = ?, sleeping = ?,
                         last_tick_at = ?, updated_at = ? WHERE user_id = ?
                     """,
-                    (hunger, thirst, mood, farm_milli, sleeping, new_tick, now, user_id),
+                    (hunger, thirst, mood, sleeping, new_tick, now, user_id),
                 )
-                if payout:
+            if expedition_due:
+                loot = parse_loot(str(pet.get("expedition_loot") or "")) or roll_expedition_loot()
+                loot_payload = loot.to_json()
+                reward = int(loot.amount) if loot.kind == "cookies" else 0
+                if reward:
                     await db.execute(
                         "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
-                        (payout, now, user_id),
+                        (reward, now, user_id),
                     )
                     await db.execute(
                         "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                        (user_id, payout, "pet_farm", f"milli:{earned_milli}", now),
+                        (user_id, reward, "pet_expedition", json.dumps(loot_payload, ensure_ascii=False), now),
                     )
+                await db.execute(
+                    """
+                    UPDATE pets SET expedition_until = NULL, expedition_reward = ?, expedition_loot = ?,
+                        expedition_notice_sent = 0, updated_at = ? WHERE user_id = ?
+                    """,
+                    (reward, json.dumps(loot_payload, ensure_ascii=False), now, user_id),
+                )
             await db.commit()
         result = await self.fetchone("SELECT * FROM pets WHERE user_id = ?", (user_id,))
-        if result is not None:
-            until = str(result.get("expedition_until") or "")
-            reward = int(result.get("expedition_reward") or 0)
-            done = False
-            if until:
-                try:
-                    done = datetime.fromisoformat(until) <= datetime.now(UTC)
-                except ValueError:
-                    done = True
-            if done and reward:
-                await self.execute(
-                    "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
-                    (reward, utcnow(), user_id),
-                )
-                await self.execute(
-                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user_id, reward, "pet_expedition", str(reward), utcnow()),
-                )
-                await self.execute(
-                    "UPDATE pets SET expedition_until = NULL, expedition_reward = 0, updated_at = ? WHERE user_id = ?",
-                    (utcnow(), user_id),
-                )
-                result = await self.fetchone("SELECT * FROM pets WHERE user_id = ?", (user_id,))
-                if result is not None:
-                    result = dict(result)
-                    result["payout"] = payout + reward
-                    result["expedition_done"] = True
-                    return result
-            result["earned_milli"] = earned_milli
-            result["payout"] = payout
+        if result is None:
+            return None
+        result["payout"] = 0
+        result["earned_milli"] = 0
+        if loot_payload:
+            result["expedition_done"] = True
+            result["expedition_loot"] = loot_payload
+            result["payout"] = int(loot_payload.get("amount") or 0) if loot_payload.get("kind") == "cookies" else 0
         return result
 
     async def get_pet(self, user_id: int, settle: bool = True) -> dict[str, Any] | None:
@@ -3056,36 +3317,60 @@ class Database:
             await db.commit()
             return cursor.rowcount == 1
 
-    async def start_expedition(self, user_id: int) -> tuple[bool, str, int]:
+    async def start_expedition(self, user_id: int, timezone: str = "Europe/Moscow") -> tuple[bool, str, int]:
+        from community_bot.expedition import expedition_until_iso, remaining_label
+
         pet = await self.get_pet(user_id)
         if not pet:
             return False, "Сначала заведите тамагочи.", 0
-        if int(pet.get("sleeping") or 0) or int(pet.get("hunger") or 0) < 40:
-            from community_bot.pets_talk import pet_pronouns
+        until = expedition_until_iso()
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                UPDATE pets SET expedition_until = ?, expedition_reward = 0, expedition_loot = NULL,
+                    expedition_notice_sent = 1, updated_at = ?
+                WHERE user_id = ? AND (expedition_until IS NULL OR expedition_until <= ?)
+                """,
+                (until, now, user_id, now),
+            )
+            if cursor.rowcount != 1:
+                cursor = await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))
+                row = await cursor.fetchone()
+                await db.rollback()
+                leftover = remaining_label(str(dict(row).get("expedition_until") if row else ""), timezone)
+                return False, f"Талисман ещё в экспедиции ({leftover}).", 0
+            await db.commit()
+        return True, "ok", 0
 
-            words = pet_pronouns(str(pet.get("species") or ""))
-            return False, f"В лес отправляют сытого бодрого {words['pet_acc']}.", 0
-        if pet.get("expedition_until"):
-            try:
-                if datetime.fromisoformat(str(pet["expedition_until"])) > datetime.now(UTC):
-                    from community_bot.pets_talk import pet_pronouns
+    async def claim_expedition_notice(self, user_id: int) -> dict[str, Any] | None:
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                UPDATE pets SET expedition_notice_sent = 1, updated_at = ?
+                WHERE user_id = ? AND expedition_notice_sent = 0
+                """,
+                (now, user_id),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return None
+            row = await (await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))).fetchone()
+            await db.commit()
+            return dict(row) if row else None
 
-                    words = pet_pronouns(str(pet.get("species") or ""))
-                    return False, f"{words['he'].capitalize()} ещё в лесу.", 0
-            except ValueError:
-                pass
-        reward = 4 + secrets.randbelow(5)
-        until = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
-        hunger = max(10, int(pet["hunger"]) - 25)
-        thirst = max(10, int(pet["thirst"]) - 20)
-        await self.execute(
-            """
-            UPDATE pets SET hunger = ?, thirst = ?, expedition_until = ?, expedition_reward = ?,
-                updated_at = ? WHERE user_id = ?
-            """,
-            (hunger, thirst, until, reward, utcnow(), user_id),
+    async def list_due_expeditions(self, now_iso: str | None = None) -> list[dict[str, Any]]:
+        stamp = now_iso or datetime.now(UTC).isoformat()
+        return await self.fetchall(
+            "SELECT * FROM pets WHERE expedition_until IS NOT NULL AND expedition_until <= ?",
+            (stamp,),
         )
-        return True, "ok", reward
+
+    async def list_pending_expedition_notices(self) -> list[dict[str, Any]]:
+        return await self.fetchall("SELECT * FROM pets WHERE expedition_notice_sent = 0")
 
     async def add_captcha(self, user_id: int, chat_id: int) -> None:
         await self.execute(

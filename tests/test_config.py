@@ -16,6 +16,7 @@ def test_owner_ids_and_group_id_fallback(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("SBP_PAYMENT_URL", raising=False)
     monkeypatch.delenv("FREEBIE_CHANNEL_URL", raising=False)
     monkeypatch.delenv("WELCOME_COVER", raising=False)
+    monkeypatch.delenv("COOKIE_PRICE_RUB", raising=False)
 
     settings = load_settings()
 
@@ -24,6 +25,7 @@ def test_owner_ids_and_group_id_fallback(monkeypatch, tmp_path: Path) -> None:
     assert settings.is_owner(1612141295)
     assert settings.community_chat_id == -1004331642093
     assert settings.community_invite_url == "https://t.me/+MfMowwQUlZlkMDIy"
+    assert settings.cookie_price_rub == 1
     assert settings.sbp_payment_url == DEFAULT_SBP_PAYMENT_URL
     assert "79533571508" in settings.sbp_payment_url
     assert 406719727 in settings.reviewers

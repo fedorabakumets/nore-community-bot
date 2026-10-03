@@ -50,6 +50,23 @@ class GiftFlow(StatesGroup):
     target = State()
 
 
+class ShopAdminFlow(StatesGroup):
+    category_title = State()
+    category_intro = State()
+    item_title = State()
+    item_description = State()
+    item_price = State()
+    item_image = State()
+    header_title = State()
+    header_text = State()
+    cookie_rate = State()
+    cookie_title = State()
+    cookie_intro = State()
+    cookie_button = State()
+    cookie_packs = State()
+    edit_value = State()
+
+
 class AdminFlow(StatesGroup):
     user_value = State()
     broadcast_private = State()
