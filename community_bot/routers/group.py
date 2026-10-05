@@ -362,6 +362,14 @@ async def _delete_message_ids(bot: Bot, chat_id: int, message_ids: list[int]) ->
     return removed
 
 
+@router.message(command_or_alias("question"), F.chat.type.in_({"group", "supergroup"}))
+async def question_in_group(message: Message) -> None:
+    notice = await message.reply(
+        "Тикет открывается в личке с ботом: напишите «вопрос» или нажмите «🎫 Тикет». Сообщение в чате остаётся."
+    )
+    asyncio.create_task(_delete_later(notice))
+
+
 @router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
 async def group_commands(message: Message) -> None:
     await answer_block(
@@ -1222,7 +1230,7 @@ async def review_cookie_order(callback: CallbackQuery, db: Database, settings: S
         await safe_send(
             bot,
             int(order["user_id"]),
-            f"❌ Оплата заказа №{order_id} не подтверждена. Обратитесь к администрации через «Задать вопрос».",
+            f"❌ Оплата заказа №{order_id} не подтверждена. Напишите боту в личку «вопрос» или нажмите «🎫 Тикет».",
         )
 
 

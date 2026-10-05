@@ -90,7 +90,38 @@ def canonical_command(token: str) -> str | None:
 
 # Bare aliases that must match the whole message, not the first word.
 # Slash commands like /shop still accept arguments.
-_EXACT_TEXT_COMMANDS = {"shop"}
+# Ordinary words («вопрос», «магазин», «помощь») must not eat the rest of a sentence.
+_EXACT_TEXT_COMMANDS = {
+    "admin",
+    "apply",
+    "balance",
+    "board",
+    "bunker",
+    "card",
+    "cgames",
+    "close",
+    "commands",
+    "freebie",
+    "gamecancel",
+    "games",
+    "help",
+    "id",
+    "mafia",
+    "mail",
+    "pet",
+    "profile",
+    "question",
+    "reputation",
+    "roulette",
+    "shop",
+    "start",
+    "store",
+    "updates",
+}
+
+# These only do something in a private chat. Do not delete them from the group:
+# a sentence or a lone «вопрос» is not a reason to erase the message.
+_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "question", "start"})
 
 
 def parse_trigger(text: str) -> tuple[str, str] | None:
@@ -100,7 +131,11 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
         return None
     folded = raw.casefold()
     for alias, command in sorted(MULTIWORD_ALIASES.items(), key=lambda item: -len(item[0])):
-        if folded == alias or folded.startswith(f"{alias} "):
+        if folded == alias:
+            return command, ""
+        if folded.startswith(f"{alias} "):
+            if command in _EXACT_TEXT_COMMANDS:
+                return None
             return command, raw[len(alias) :].strip()
     first, _, rest = raw.partition(" ")
     token = first
@@ -169,9 +204,12 @@ def is_group_command_to_sweep(message: Message) -> bool:
         source = text or caption
     if not source:
         return False
+    parsed = parse_trigger(source)
     if source[:1] in {"/", "／"}:
-        return True
-    return is_command_trigger(source)
+        return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
+    if not parsed:
+        return False
+    return parsed[0] not in _PRIVATE_CHAT_COMMANDS
 
 
 class CommandOrAlias(Filter):
