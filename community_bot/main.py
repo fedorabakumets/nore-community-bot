@@ -311,6 +311,24 @@ async def notify_digest_job(db: Database, bot: Bot, settings: Settings) -> None:
             logger.exception("Ошибка дайджеста уведомлений")
 
 
+async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.morning import due_morning, publish_morning_digest, seconds_until_morning
+
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        try:
+            await publish_morning_digest(bot, db, settings)
+        except Exception:
+            logger.exception("Ошибка утреннего поста")
+        now = datetime.now(timezone)
+        posted = await db.get_bot_state("morning_digest_day")
+        if due_morning(now, posted):
+            await asyncio.sleep(600)
+            continue
+        await asyncio.sleep(seconds_until_morning(now))
+
+
 async def cookie_loan_job(db: Database, bot: Bot) -> None:
     while True:
         try:
@@ -385,6 +403,7 @@ async def main() -> None:
     digest_task = asyncio.create_task(notify_digest_job(db, bot, settings))
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
+    morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
@@ -403,6 +422,7 @@ async def main() -> None:
             digest_task,
             loan_task,
             board_task,
+            morning_task,
             emergency_task,
             restart_task,
         ):
@@ -415,6 +435,7 @@ async def main() -> None:
                 digest_task,
                 loan_task,
                 board_task,
+                morning_task,
                 emergency_task,
                 restart_task,
             )

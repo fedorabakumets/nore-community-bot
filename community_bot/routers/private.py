@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,7 @@ from community_bot.texts import (
 )
 from community_bot.updates import updates_text
 
+logger = logging.getLogger(__name__)
 router = Router(name="private")
 router.message.filter(F.chat.type == "private")
 router.callback_query.filter(F.message.chat.type == "private")
@@ -928,6 +930,28 @@ async def admin_toggle_feature(callback: CallbackQuery, db: Database, settings: 
         parse_mode="HTML",
         reply_markup=feature_flags_keyboard(flags),
     )
+
+
+@router.callback_query(F.data == "admin:morning")
+async def admin_morning(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_FEATURES):
+        return
+    if not await db.feature_enabled("morning_digest"):
+        await callback.answer("Утренний пост выключен в функциях.", show_alert=True)
+        return
+    if not settings.community_chat_id:
+        await callback.answer("Чат сообщества не задан.", show_alert=True)
+        return
+    await callback.answer("Собираю утреннюю сводку…")
+    from community_bot.morning import publish_morning_digest
+
+    try:
+        await publish_morning_digest(bot, db, settings, force=True)
+    except Exception:
+        logger.exception("Не удалось отправить утренний пост вручную")
+        await callback.message.answer("Сводку собрать не удалось. Повторю в 9:00.")
+        return
+    await callback.message.answer("Утренний пост отправлен в чат и закреплён.")
 
 
 @router.callback_query(F.data == "admin:health")

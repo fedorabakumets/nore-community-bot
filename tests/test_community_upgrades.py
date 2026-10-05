@@ -182,15 +182,15 @@ def test_member_announcement_omits_staff() -> None:
     details = member_details_text(item)
     nodes = str(member_details_nodes(item))
     staff = staff_announcement(item)
-    assert "Обновление №13" in pin
+    assert "Обновление №14" in pin
     assert len(pin) <= 1024
     assert "Админ" not in pin
     assert "четыре комнаты" not in details.casefold()
     assert "Админка" not in nodes
-    assert "магазин" in details.casefold() or "тамагочи" in details.casefold()
-    assert "экспедиц" in details.casefold() or "магазин" in details.casefold()
+    assert "утро" in details.casefold() or "погод" in details.casefold()
+    assert "петербург" in details.casefold()
     assert staff not in pin
-    assert "экспедиц" in staff.casefold() or "shop_items" in staff
+    assert "morning" in staff.casefold() or "9:00" in staff
 
 
 async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
@@ -308,9 +308,9 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Обновление №13" in sent[0].text
+    assert "Обновление №14" in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "13:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "14:photo-v1"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -329,7 +329,7 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "13:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "14:photo-v1"
 
 
 def test_update_cover_renders_number(tmp_path) -> None:

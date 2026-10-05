@@ -240,6 +240,7 @@ def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> 
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
         rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
+        rows.append([ibtn("🌅 Утренний пост сейчас", "admin:morning", STYLE_FUN)])
     if is_owner:
         rows.append([ibtn("🔄 Перезапустить бота", "admin:restart", STYLE_CLOSE)])
     rows.append([back_btn("admin:panel")])
@@ -774,6 +775,10 @@ FEATURE_META = {
     "join_captcha": (
         "🤖 Капча на вход",
         "Новый человек должен нажать кнопку «Я человек», иначе писать нельзя.",
+    ),
+    "morning_digest": (
+        "🌅 Утренний пост",
+        "Каждый день в 9:00 — погода, транспорт, ночь, рассвет и факт о Петербурге. Пост закрепляется.",
     ),
 }
 
