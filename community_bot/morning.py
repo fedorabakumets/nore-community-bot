@@ -412,7 +412,10 @@ def select_news(items: list[NewsItem], now: datetime) -> tuple[list[str], list[s
         night_start -= timedelta(days=1)
     night_from = night_start.astimezone(UTC)
     moment = local.astimezone(UTC)
-    night_until = moment
+    night_end = local.replace(hour=MORNING_HOUR, minute=0, second=0, microsecond=0)
+    if local < night_end:
+        night_end = local
+    night_until = night_end.astimezone(UTC)
     transport_from = moment - timedelta(hours=20)
     night: list[str] = []
     transport: list[str] = []
@@ -453,6 +456,13 @@ def _metro_block(lines: dict[int, str], stations: list[str]) -> list[str]:
     return rows
 
 
+def brief_title(moment: datetime) -> str:
+    local = moment.astimezone(ZoneInfo("Europe/Moscow"))
+    if local.hour < 12:
+        return "🌅 <b>Доброе утро</b>"
+    return "🌅 <b>Сводка на сегодня</b>"
+
+
 def render_brief(brief: MorningBrief) -> str:
     day = brief.when.astimezone(ZoneInfo("Europe/Moscow")).date()
     weather_lines = ["🌤 <b>Погода</b>", "Сводку погоды сейчас не удалось снять."]
@@ -485,7 +495,7 @@ def render_brief(brief: MorningBrief) -> str:
     else:
         night = ["🚨 <b>За ночь</b>", "Тихая ночь: крупных городских происшествий в сводке нет."]
     parts = [
-        "🌅 <b>Доброе утро</b>",
+        brief_title(brief.when),
         "",
         *weather_lines,
         "",
@@ -589,4 +599,23 @@ async def publish_morning_digest(bot, db, settings, *, force: bool = False) -> b
     except Exception:
         logger.warning("Утренний пост ушёл в чат, но закрепить его не удалось")
     await db.set_bot_state("morning_digest_day", now.date().isoformat())
+    logger.info("Сводка за %s отправлена в чат", now.date().isoformat())
     return True
+
+
+CATCHUP_DAY = "2026-10-05"
+
+
+async def publish_missed_today(bot, db, settings) -> None:
+    """One catch-up for 5 October. Later days stay on the 09:00 schedule."""
+    if await db.get_bot_state("morning_catchup_done") == CATCHUP_DAY:
+        return
+    timezone = ZoneInfo(settings.timezone)
+    today = datetime.now(timezone).date().isoformat()
+    if today != CATCHUP_DAY:
+        return
+    if await db.get_bot_state("morning_digest_day") == today:
+        await db.set_bot_state("morning_catchup_done", CATCHUP_DAY)
+        return
+    await publish_morning_digest(bot, db, settings, force=True)
+    await db.set_bot_state("morning_catchup_done", CATCHUP_DAY)

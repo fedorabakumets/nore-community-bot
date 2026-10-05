@@ -312,9 +312,16 @@ async def notify_digest_job(db: Database, bot: Bot, settings: Settings) -> None:
 
 
 async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
-    from community_bot.morning import due_morning, publish_morning_digest, seconds_until_morning
+    from community_bot.morning import due_morning, publish_missed_today, publish_morning_digest, seconds_until_morning
 
     timezone = ZoneInfo(settings.timezone)
+    for _ in range(3):
+        try:
+            await publish_missed_today(bot, db, settings)
+            break
+        except Exception:
+            logger.exception("Не удалось отправить сводку за сегодня")
+            await asyncio.sleep(20)
     while True:
         now = datetime.now(timezone)
         try:

@@ -56,6 +56,10 @@ def test_day_fact_and_schedule_window() -> None:
     assert due_morning(nine, "2026-10-05") is False
     assert due_morning(nine.replace(hour=8), None) is False
     assert due_morning(nine.replace(hour=12), None) is False
+    from community_bot.morning import brief_title
+
+    assert "Доброе утро" in brief_title(nine)
+    assert "Сводка на сегодня" in brief_title(nine.replace(hour=20))
 
 
 def test_news_keeps_city_incidents_and_drops_crime() -> None:
@@ -79,6 +83,11 @@ def test_news_keeps_city_incidents_and_drops_crime() -> None:
     assert any("Выборгском" in line for line in night)
     assert all("Якутии" not in line for line in night + transport)
     assert all("Мойки" not in line for line in night)
+    evening = datetime(2026, 10, 5, 20, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    late = NewsItem("Пожар на набережной Мойки", datetime(2026, 10, 5, 12, 0, tzinfo=UTC))
+    _, evening_night = select_news([*items, late], evening)
+    assert all("Мойки" not in line for line in evening_night)
+    assert any("Выборгском" in line for line in evening_night)
 
 
 def test_metro_keeps_active_restriction_and_clears_restored_line() -> None:
