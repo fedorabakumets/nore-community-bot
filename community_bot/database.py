@@ -446,6 +446,7 @@ DEFAULT_FEATURE_FLAGS = {
     "raid_mode": 0,
     "word_filter": 0,
     "join_captcha": 0,
+    "morning_digest": 1,
 }
 
 
