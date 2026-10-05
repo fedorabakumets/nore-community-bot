@@ -45,6 +45,19 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("/команды") == ("commands", "")
     assert parse_trigger("команды!") == ("commands", "")
     assert parse_trigger("Команды") == ("commands", "")
+    assert parse_trigger("команды бота") is None
+    assert parse_trigger("вопрос") == ("question", "")
+    assert parse_trigger("Вопрос") == ("question", "")
+    assert parse_trigger("Вопрос?") == ("question", "")
+    assert parse_trigger("Вопрос к чату") is None
+    assert parse_trigger("вопрос почему удалили") is None
+    assert parse_trigger("/question") == ("question", "")
+    assert parse_trigger("задать вопрос") == ("question", "")
+    assert parse_trigger("задать вопрос по анкете") is None
+    assert parse_trigger("закрыть") == ("close", "")
+    assert parse_trigger("Закрыть обсуждение") is None
+    assert parse_trigger("помощь") == ("help", "")
+    assert parse_trigger("Помощь нужна") is None
     assert is_command_trigger("халява")
     assert is_command_trigger("обновления")
     from community_bot.aliases import is_command_message
@@ -82,6 +95,13 @@ def test_media_payloads_are_not_swept_as_group_commands() -> None:
     assert not is_group_command_to_sweep(payload(photo=object(), caption="красивый вечер"))
     assert is_group_command_to_sweep(payload(photo=object(), caption="/shop"))
     assert is_group_command_to_sweep(payload(text="баланс"))
+    assert not is_group_command_to_sweep(payload(text="Вопрос к чату, почему удалили?"))
+    assert not is_group_command_to_sweep(payload(text="вопрос"))
+    assert not is_group_command_to_sweep(payload(text="Вопрос"))
+    assert not is_group_command_to_sweep(payload(text="закрыть тему"))
+    assert not is_group_command_to_sweep(payload(text="/question"))
+    assert is_group_command_to_sweep(payload(text="команды"))
+    assert is_group_command_to_sweep(payload(text="магазин"))
     assert is_game_callback("cg:join:8")
     assert is_game_callback("game:start:1")
     assert is_game_callback("roulette:accept:2")
@@ -154,6 +174,10 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     lowered = GROUP_COMMANDS_TEXT.casefold()
     assert "«команды»" in GROUP_COMMANDS_TEXT
     assert "«магазин»" in GROUP_COMMANDS_TEXT
+    assert "«вопрос»" in GROUP_COMMANDS_TEXT
+    assert "🎫 Тикет" in GROUP_COMMANDS_TEXT
+    assert "не удаляется" in GROUP_COMMANDS_TEXT
+    assert "не стирает" in GROUP_COMMANDS_TEXT
     assert "«обновления»" not in GROUP_COMMANDS_TEXT
     assert "/updates" not in lowered
     for leaked in ("/mute", "/warn", "/kick", "/ban", "/unban", "/givecookies", "/role", "/purge", "/botsweep"):
@@ -313,6 +337,36 @@ async def test_housekeeping_deletes_command_before_handler() -> None:
     assert result == "ok"
     assert seen_before_handler is True
     assert deleted == [(-1004331642093, 77)]
+
+
+async def test_housekeeping_keeps_messages_that_start_with_vopros() -> None:
+    from aiogram.types import Message
+
+    from community_bot.ephemeral import GroupHousekeepingMiddleware
+
+    deleted: list[tuple[int, int]] = []
+
+    class FakeBot:
+        async def delete_message(self, chat_id: int, message_id: int) -> bool:
+            deleted.append((chat_id, message_id))
+            return True
+
+    event = Message.model_validate(
+        {
+            "message_id": 88,
+            "date": 1_725_000_000,
+            "chat": {"id": -1004331642093, "type": "supergroup", "title": "Nora"},
+            "from": {"id": 1, "is_bot": False, "first_name": "Анна"},
+            "text": "Вопрос к чату: почему сообщение пропало?",
+        }
+    )
+
+    async def handler(_event, _data):
+        return "ok"
+
+    result = await GroupHousekeepingMiddleware()(handler, event, {"bot": FakeBot()})
+    assert result == "ok"
+    assert deleted == []
 
 
 async def test_housekeeping_does_not_sweep_media_stickers_voice_or_circles() -> None:
