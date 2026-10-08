@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
+from community_bot.city import city_digest_job
 from community_bot.config import Settings, load_settings
 from community_bot.database import Database
 from community_bot.helpers import send_stored_message
@@ -29,6 +30,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
             BotCommand(command="admin", description="Админ-панель"),
             BotCommand(command="help", description="Помощь"),
+            BotCommand(command="pogoda", description="Погода в Петербурге"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
         language_code="ru",
@@ -52,6 +54,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="kick", description="Исключить ответом"),
             BotCommand(command="ban", description="Заблокировать ответом"),
             BotCommand(command="unban", description="Разблокировать по ID"),
+            BotCommand(command="pogoda", description="Погода в Петербурге"),
         ],
         scope=BotCommandScopeAllGroupChats(),
         language_code="ru",
@@ -180,14 +183,16 @@ async def main() -> None:
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot))
+    digest_task = asyncio.create_task(city_digest_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
+    background_tasks = (reputation_task, scheduled_task, pet_task, digest_task, emergency_task)
     try:
         await dispatcher.start_polling(bot, db=db, settings=settings, emergency_stop=emergency_stop)
     finally:
-        for task in (reputation_task, scheduled_task, pet_task, emergency_task):
+        for task in background_tasks:
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reputation_task, scheduled_task, pet_task, emergency_task)
+            await asyncio.gather(*background_tasks)
         await bot.session.close()
 
 

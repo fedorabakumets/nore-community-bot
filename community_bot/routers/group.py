@@ -20,10 +20,12 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     ChatPermissions,
+    LinkPreviewOptions,
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from community_bot.city import is_weather_text, weather_report
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import (
@@ -1086,6 +1088,17 @@ async def roulette_decision(callback: CallbackQuery, db: Database) -> None:
         f"🏆 Победил {_target_display(winner)} и получил {result['payout']} 🍪{commission}.\n"
         f"💀 {_target_display(loser)} потерял 10 🍪.",
         parse_mode="HTML",
+    )
+
+
+@router.message(F.text.func(is_weather_text), F.chat.type.in_({"group", "supergroup"}))
+async def group_weather(message: Message, settings: Settings) -> None:
+    now = datetime.now(ZoneInfo(settings.timezone))
+    await _respond(
+        message,
+        await weather_report(now),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
 
 

@@ -6,6 +6,7 @@ import html
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -17,9 +18,11 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    LinkPreviewOptions,
     Message,
 )
 
+from community_bot.city import is_weather_text, weather_report
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import ROLE_LABELS, ROLE_LEVELS
@@ -1271,3 +1274,13 @@ async def edit_profile_avatar(message: Message, state: FSMContext, db: Database)
     await db.update_profile(message.from_user.id, "avatar_media_type", "photo")
     await state.clear()
     await message.answer("Аватар обновлён.")
+
+
+@router.message(F.text.func(is_weather_text), F.chat.type == "private")
+async def private_weather(message: Message, settings: Settings) -> None:
+    now = datetime.now(ZoneInfo(settings.timezone))
+    await message.answer(
+        await weather_report(now),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )

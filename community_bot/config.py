@@ -41,6 +41,7 @@ class Settings:
     sbp_payment_url: str
     freebie_channel_id: int
     freebie_channel_url: str
+    digest_hour: int
 
     @property
     def reviewers(self) -> frozenset[int]:
@@ -64,6 +65,7 @@ def load_settings() -> Settings:
         sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip(),
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),
+        digest_hour=min(23, max(0, _as_int("DIGEST_HOUR", 8))),
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")
