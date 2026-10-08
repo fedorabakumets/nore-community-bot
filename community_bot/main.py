@@ -23,12 +23,14 @@ from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHouse
 from community_bot.helpers import send_stored_message
 from community_bot.restart import relaunch
 from community_bot.routers import (
+    command_admin_router,
     contest_router,
     cookie_games_router,
     flows_router,
     games_router,
     group_router,
     life_router,
+    nora_router,
     notices_router,
     pets_router,
     private_router,
@@ -37,7 +39,7 @@ from community_bot.routers import (
     social_games_router,
     wallet_router,
 )
-from community_bot.telegraph import publish_member_update, publish_staff_guide
+from community_bot.telegraph import publish_member_update, publish_staff_guide, publish_staff_update
 from community_bot.ui_owner import UiOwnerMiddleware
 from community_bot.updates import announcement_key, community_announcement, latest_update
 
@@ -137,15 +139,18 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", announcement_key(item))
-    await notify_staff_update(bot, db, item)
+    staff_url = await publish_staff_update(db, item)
+    await notify_staff_update(bot, db, item, staff_url)
 
 
-async def notify_staff_update(bot: Bot, db: Database, item) -> None:
+async def notify_staff_update(bot: Bot, db: Database, item, staff_url: str | None = None) -> None:
     from community_bot.updates import staff_announcement
 
     text = staff_announcement(item)
     if not text:
         return
+    if staff_url:
+        text = f"{text}\n\n<a href=\"{staff_url}\">Служебная страница</a>"
     for user_id in await db.list_panel_user_ids():
         with contextlib.suppress(Exception):
             await bot.send_message(user_id, text, parse_mode="HTML")
@@ -313,6 +318,56 @@ async def notify_digest_job(db: Database, bot: Bot, settings: Settings) -> None:
             logger.exception("Ошибка дайджеста уведомлений")
 
 
+async def daily_chat_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.daily_chat import due_daily_chat, publish_daily_chat, seconds_until_midnight
+
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        posted = await db.get_bot_state("daily_chat_marker")
+        day = due_daily_chat(now, posted)
+        if day is not None:
+            try:
+                await publish_daily_chat(bot, db, settings, day)
+            except Exception:
+                logger.exception("Ошибка сводки суток")
+            if await db.get_bot_state(f"daily_chat:{day.isoformat()}"):
+                await db.set_bot_state("daily_chat_marker", day.isoformat())
+            await asyncio.sleep(600)
+            continue
+        await asyncio.sleep(seconds_until_midnight(now))
+
+
+async def day_note_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.day_note import day_note_text
+
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        local = now.astimezone(timezone)
+        stamp = local.date().isoformat()
+        posted = await db.get_bot_state("day_note_day")
+        in_window = 12 <= local.hour < 18
+        if in_window and posted != stamp and settings.community_chat_id:
+            try:
+                text = await day_note_text(local)
+            except Exception:
+                logger.exception("Ошибка поста «Этот день»")
+                text = None
+            if text:
+                try:
+                    await bot.send_message(settings.community_chat_id, text, parse_mode="HTML")
+                    await db.set_bot_state("day_note_day", stamp)
+                except Exception:
+                    logger.exception("Не удалось отправить «Этот день»")
+            await asyncio.sleep(600)
+            continue
+        nxt = local.replace(hour=12, minute=0, second=0, microsecond=0)
+        if nxt <= local:
+            nxt += timedelta(days=1)
+        await asyncio.sleep(max(1, (nxt - local).total_seconds()))
+
+
 async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
     from community_bot.morning import due_morning, publish_missed_today, publish_morning_digest, seconds_until_morning
 
@@ -385,6 +440,8 @@ async def main() -> None:
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
+    dispatcher.include_router(nora_router)
+    dispatcher.include_router(command_admin_router)
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)
     dispatcher.include_router(notices_router)
@@ -399,6 +456,9 @@ async def main() -> None:
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
 
+    from community_bot.command_registry import load_registry
+
+    await load_registry(db)
     await configure_commands(bot)
     await log_community_permissions(bot, settings)
     await announce_latest_update(bot, db, settings)
@@ -413,6 +473,8 @@ async def main() -> None:
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
+    daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
+    day_note_task = asyncio.create_task(day_note_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
@@ -432,6 +494,8 @@ async def main() -> None:
             loan_task,
             board_task,
             morning_task,
+            daily_chat_task,
+            day_note_task,
             emergency_task,
             restart_task,
         ):
@@ -445,6 +509,8 @@ async def main() -> None:
                 loan_task,
                 board_task,
                 morning_task,
+                daily_chat_task,
+                day_note_task,
                 emergency_task,
                 restart_task,
             )

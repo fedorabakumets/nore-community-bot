@@ -22,6 +22,7 @@ _GAME_CALLBACK_PREFIXES = ("game:", "cg:", "roulette:", "g:hide", "crash:", "con
 logger = logging.getLogger(__name__)
 
 _REPLY_TTL: ContextVar[float | None] = ContextVar("group_reply_ttl", default=None)
+_EXPLICIT_TTL: ContextVar[float | None] = ContextVar("group_reply_explicit_ttl", default=None)
 _PENDING: set[asyncio.Task[Any]] = set()
 
 _HARMLESS_DELETE = (
@@ -34,11 +35,28 @@ _HARMLESS_DELETE = (
 @contextmanager
 def keep_in_chat() -> Iterator[None]:
     """Do not auto-delete bot messages sent inside this block."""
+    if _EXPLICIT_TTL.get() is not None:
+        yield
+        return
     token = _REPLY_TTL.set(None)
     try:
         yield
     finally:
         _REPLY_TTL.reset(token)
+
+
+@contextmanager
+def reply_ttl(seconds: float | None) -> Iterator[None]:
+    delay = None if seconds is None or seconds <= 0 else float(seconds)
+    token = _REPLY_TTL.set(delay)
+    try:
+        yield
+    finally:
+        _REPLY_TTL.reset(token)
+
+
+def current_reply_ttl() -> float | None:
+    return _REPLY_TTL.get()
 
 
 def is_game_callback(data: str | None) -> bool:
@@ -139,11 +157,23 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
         deleted = False
         if is_cmd:
             deleted = await delete_user_command(event, bot)
-        token = _REPLY_TTL.set(BOT_REPLY_TTL if is_cmd else None)
+        from community_bot.aliases import parse_trigger
+        from community_bot.command_registry import default_reply_ttl, explicit_ttl
+
+        source = (event.text or event.caption or "").strip()
+        parsed = parse_trigger(source) if source else None
+        explicit = explicit_ttl(parsed[0]) if parsed else None
+        explicit_token = _EXPLICIT_TTL.set(explicit)
+        if explicit is not None:
+            delay = None if explicit <= 0 else explicit
+        else:
+            delay = default_reply_ttl() if is_cmd else None
+        token = _REPLY_TTL.set(delay)
         try:
             return await handler(event, data)
         finally:
             _REPLY_TTL.reset(token)
+            _EXPLICIT_TTL.reset(explicit_token)
             if is_cmd and not deleted:
                 await delete_user_command(event, bot)
 

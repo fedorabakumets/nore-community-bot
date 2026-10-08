@@ -709,6 +709,21 @@ async def collect_brief(now: datetime) -> MorningBrief:
     return brief
 
 
+async def news_digest(now: datetime, limit: int = 2) -> str:
+    timeout = aiohttp.ClientTimeout(total=12)
+    headers = {"User-Agent": "NoraMorning/1.0"}
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            raw = await _get_text(session, NEWS_URL)
+        items = select_day_news(parse_rss(raw), now, max(1, limit))
+    except (aiohttp.ClientError, TimeoutError):
+        logger.warning("Новости для Норы не ответили")
+        return "Новости сейчас не открылись. Попробуй через минуту."
+    if not items:
+        return "📰 <b>За сутки</b>\nЗа сутки в ленте Фонтанки нет новых материалов."
+    return "\n".join(["📰 <b>За сутки</b>", *[render_news_line(item) for item in items]])
+
+
 async def weather_reply(now: datetime) -> str:
     timeout = aiohttp.ClientTimeout(total=12)
     headers = {"User-Agent": "NoraMorning/1.0"}

@@ -241,6 +241,8 @@ def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> 
         rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
         rows.append([ibtn("🌅 Утренний пост сейчас", "admin:morning", STYLE_FUN)])
+    if _allow(permissions, "commands.studio"):
+        rows.append([ibtn("⌨️ Команды", "admin:cmds")])
     if is_owner:
         rows.append([ibtn("🔄 Перезапустить бота", "admin:restart", STYLE_CLOSE)])
     rows.append([back_btn("admin:panel")])

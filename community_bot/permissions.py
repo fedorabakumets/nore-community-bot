@@ -26,6 +26,7 @@ PERM_GAMES = "games.admin"
 PERM_SEE_PRIVATE = "profile.see_private"
 PERM_PURGE = "mod.purge"
 PERM_CONTEST = "contest.cookies"
+PERM_COMMANDS = "commands.studio"
 
 PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_ADMIN_PANEL, "Админ-панель"),
@@ -51,6 +52,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_SEE_PRIVATE, "Видеть скрытые профили"),
     (PERM_PURGE, "Чистить сообщения чата"),
     (PERM_CONTEST, "Конкурс на печеньки"),
+    (PERM_COMMANDS, "Команды бота"),
 )
 
 PERMISSION_KEYS = [key for key, _ in PERMISSIONS]

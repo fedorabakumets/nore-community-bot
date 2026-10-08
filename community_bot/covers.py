@@ -57,9 +57,10 @@ def render_update_cover(number: int, title: str, dest: Path) -> Path | None:
 
 
 def cover_path_for(item: BotUpdate, cache_dir: Path | None = None) -> Path | None:
-    numbered = ASSETS / f"{item.number}.png"
-    if numbered.is_file():
-        return numbered
+    for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+        numbered = ASSETS / f"{item.number}{suffix}"
+        if numbered.is_file():
+            return numbered
     dest = cover_cache_path(item.number, cache_dir)
     if COVER_BASE.is_file() and dest.is_file() and dest.stat().st_mtime >= COVER_BASE.stat().st_mtime:
         return dest

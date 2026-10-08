@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator
+from zoneinfo import ZoneInfo
 
 import aiosqlite
 
@@ -329,6 +330,28 @@ CREATE TABLE IF NOT EXISTS weekly_scores (
     week_id TEXT NOT NULL,
     messages INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(user_id, week_id)
+);
+
+CREATE TABLE IF NOT EXISTS daily_scores (
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    day TEXT NOT NULL,
+    chat_id INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(user_id, day, chat_id)
+);
+
+CREATE TABLE IF NOT EXISTS command_overrides (
+    slug TEXT PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'builtin',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    title TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    ttl_seconds INTEGER,
+    scope TEXT NOT NULL DEFAULT 'both',
+    reply_text TEXT NOT NULL DEFAULT '',
+    options_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS lotteries (
@@ -2121,6 +2144,14 @@ class Database:
                 """,
                 (user_id, week_id),
             )
+            day = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+            await db.execute(
+                """
+                INSERT INTO daily_scores(user_id, day, chat_id, messages) VALUES (?, ?, ?, 1)
+                ON CONFLICT(user_id, day, chat_id) DO UPDATE SET messages = messages + 1
+                """,
+                (user_id, day, chat_id),
+            )
             await db.commit()
             return count, rewarded
 
@@ -3099,6 +3130,72 @@ class Database:
             ((datetime.now(UTC) - timedelta(days=7)).isoformat(),),
         )
         return {"messages": messages, "plus": plus, "farm": farm}
+
+    async def daily_message_board(self, day: str, chat_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """
+            SELECT s.user_id, s.messages, u.telegram_name, u.profile_name, u.username
+            FROM daily_scores s
+            JOIN users u ON u.user_id = s.user_id
+            WHERE s.day = ? AND s.chat_id = ? AND s.messages > 0
+            ORDER BY s.messages DESC, s.user_id ASC
+            LIMIT ?
+            """,
+            (day, chat_id, limit),
+        )
+
+    async def list_command_overrides(self) -> list[dict[str, Any]]:
+        return await self.fetchall("SELECT * FROM command_overrides ORDER BY slug")
+
+    async def save_command_override(
+        self,
+        slug: str,
+        *,
+        kind: str,
+        enabled: bool,
+        title: str,
+        description: str,
+        aliases: list[str],
+        ttl_seconds: int | None,
+        scope: str,
+        reply_text: str,
+        options: dict[str, str],
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO command_overrides(
+                slug, kind, enabled, title, description, aliases_json, ttl_seconds,
+                scope, reply_text, options_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(slug) DO UPDATE SET
+                kind = excluded.kind,
+                enabled = excluded.enabled,
+                title = excluded.title,
+                description = excluded.description,
+                aliases_json = excluded.aliases_json,
+                ttl_seconds = excluded.ttl_seconds,
+                scope = excluded.scope,
+                reply_text = excluded.reply_text,
+                options_json = excluded.options_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                slug,
+                kind,
+                1 if enabled else 0,
+                title,
+                description,
+                json.dumps(aliases, ensure_ascii=False),
+                ttl_seconds,
+                scope,
+                reply_text,
+                json.dumps(options, ensure_ascii=False),
+                utcnow(),
+            ),
+        )
+
+    async def delete_command_override(self, slug: str) -> None:
+        await self.execute("DELETE FROM command_overrides WHERE slug = ?", (slug,))
 
     async def create_lottery(self, chat_id: int, creator_id: int, entry_fee: int) -> tuple[int | None, str]:
         if not 1 <= entry_fee <= 100:

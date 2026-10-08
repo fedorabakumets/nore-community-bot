@@ -108,7 +108,7 @@ async def publish_member_update(db: Database, item: BotUpdate) -> str | None:
     image_urls = await _section_images(item)
     payload: dict[str, Any] = {
         "access_token": token,
-        "title": f"НОРА · Обновление №{item.number}",
+        "title": item.telegraph_title or f"НОРА · Обновление №{item.number}",
         "author_name": "НОРА",
         "content": member_details_nodes(item, image_urls),
         "return_content": False,
@@ -129,6 +129,44 @@ async def publish_member_update(db: Database, item: BotUpdate) -> str | None:
         await db.set_bot_state(path_key, new_path)
     if url:
         await db.set_bot_state("telegraph_url", url)
+    return url or None
+
+
+async def publish_staff_update(db: Database, item: BotUpdate) -> str | None:
+    if not item.staff_details:
+        return None
+    token = await ensure_token(db)
+    if not token:
+        return None
+    path_key = f"staff_telegraph_path_{item.number}"
+    path = await db.get_bot_state(path_key)
+    nodes: list[dict[str, Any]] = [
+        {"tag": "h3", "children": [f"Служебное обновление №{item.number}"]},
+        {"tag": "h4", "children": [item.title]},
+    ]
+    nodes.extend({"tag": "p", "children": [line]} for line in item.staff_details)
+    payload: dict[str, Any] = {
+        "access_token": token,
+        "title": f"{item.title} · служебное",
+        "author_name": "НОРА",
+        "content": nodes,
+        "return_content": False,
+    }
+    if path:
+        payload["path"] = path
+        result = await _call("editPage", payload)
+        if not result:
+            result = await _call("createPage", {k: v for k, v in payload.items() if k != "path"})
+    else:
+        result = await _call("createPage", payload)
+    if not result:
+        return None
+    url = str(result.get("url") or "").strip()
+    new_path = str(result.get("path") or "").strip()
+    if new_path:
+        await db.set_bot_state(path_key, new_path)
+    if url:
+        await db.set_bot_state(f"staff_telegraph_url_{item.number}", url)
     return url or None
 
 

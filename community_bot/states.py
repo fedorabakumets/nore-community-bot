@@ -90,3 +90,7 @@ class AdminFlow(StatesGroup):
     automessage_interval = State()
     role_name = State()
     role_rename = State()
+
+
+class CommandStudio(StatesGroup):
+    value = State()

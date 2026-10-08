@@ -86,7 +86,12 @@ def canonical_command(token: str) -> str | None:
     cleaned = _PUNCT.sub("", token).casefold()
     if not cleaned:
         return None
-    return _ALIAS_TO_COMMAND.get(cleaned)
+    from community_bot.command_registry import resolve_alias
+
+    resolved = resolve_alias(cleaned)
+    if resolved:
+        return resolved
+    return None
 
 
 # Bare aliases that must match the whole message, not the first word.
@@ -132,6 +137,16 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     if not raw:
         return None
     folded = raw.casefold()
+    from community_bot.command_registry import is_exact_slug, phrase_command
+
+    phrase = phrase_command(folded)
+    if phrase:
+        command, alias = phrase
+        if folded == alias:
+            return command, ""
+        if command in _EXACT_TEXT_COMMANDS or is_exact_slug(command):
+            return None
+        return command, raw[len(alias) :].strip()
     for alias, command in sorted(MULTIWORD_ALIASES.items(), key=lambda item: -len(item[0])):
         if folded == alias:
             return command, ""
@@ -147,9 +162,17 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     command = canonical_command(token)
     if not command:
         return None
-    if command in _EXACT_TEXT_COMMANDS and not slash:
+    if (command in _EXACT_TEXT_COMMANDS or is_exact_slug(command)) and not slash:
         body = _PUNCT.sub("", raw).casefold()
-        allowed = {command, *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ()))}
+        from community_bot.command_registry import get_command
+
+        view = get_command(command)
+        live_aliases = view.aliases if view else ()
+        allowed = {
+            command,
+            *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ())),
+            *(alias.casefold() for alias in live_aliases),
+        }
         if body not in allowed:
             return None
         return command, ""
@@ -227,6 +250,15 @@ class CommandOrAlias(Filter):
             return False
         name, args = parsed
         if name not in self.commands:
+            return False
+        from community_bot.command_registry import get_command
+
+        view = get_command(name)
+        chat = getattr(message, "chat", None)
+        chat_type = str(getattr(chat, "type", "") or "")
+        if view is not None and not view.enabled:
+            return False
+        if view is not None and chat_type and not view.allows(chat_type):
             return False
         return {
             "command": CommandObject(

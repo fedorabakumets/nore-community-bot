@@ -387,12 +387,11 @@ async def group_weather(message: Message, settings: Settings) -> None:
     from community_bot.morning import weather_reply
 
     now = datetime.now(ZoneInfo(settings.timezone))
-    with keep_in_chat():
-        await message.answer(
-            await weather_reply(now),
-            parse_mode="HTML",
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-        )
+    await message.answer(
+        await weather_reply(now),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 @router.message(command_or_alias("reputation"), F.chat.type.in_({"group", "supergroup"}))
