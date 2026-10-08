@@ -101,7 +101,6 @@ from community_bot.texts import (
     APPLICATION_INTRO,
     APPLICATION_QUESTIONS,
     APPLICATION_REJECTED_INTERVIEW,
-    GROUP_COMMANDS_TEXT,
     REPUTATION_HELP_TEXT,
     STORE_HELP_TEXT,
     WELCOME_MEMBER_TEXT,
@@ -245,18 +244,13 @@ async def private_weather(message: Message, settings: Settings) -> None:
     )
 
 
-@router.message(command_or_alias("help", "commands"))
-async def help_command(message: Message, db: Database, settings: Settings) -> None:
+@router.message(command_or_alias("help", "commands"), F.chat.type == "private")
+async def help_command(message: Message, db: Database) -> None:
     if not message.from_user:
         return
-    await answer_block(
-        message,
-        "commands",
-        GROUP_COMMANDS_TEXT,
-        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
-        parse_mode="HTML",
-        reply_markup=await _private_keyboard(message.from_user.id, db, settings),
-    )
+    from community_bot.commands_guide import send_commands_card
+
+    await send_commands_card(message, db)
 
 
 @router.message(command_or_alias("store"))

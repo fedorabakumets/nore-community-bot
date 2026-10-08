@@ -98,7 +98,7 @@ from community_bot.shop_catalog import (
     shop_prices_for,
 )
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
-from community_bot.texts import GROUP_COMMANDS_TEXT, REPUTATION_HELP_TEXT, STORE_HELP_TEXT
+from community_bot.texts import REPUTATION_HELP_TEXT, STORE_HELP_TEXT
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="community")
@@ -372,14 +372,10 @@ async def question_in_group(message: Message) -> None:
 
 
 @router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
-async def group_commands(message: Message) -> None:
-    await answer_block(
-        message,
-        "commands",
-        GROUP_COMMANDS_TEXT,
-        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
-        parse_mode="HTML",
-    )
+async def group_commands(message: Message, db: Database) -> None:
+    from community_bot.commands_guide import send_commands_card
+
+    await send_commands_card(message, db)
 
 
 @router.message(command_or_alias("pogoda"), F.chat.type.in_({"group", "supergroup"}))

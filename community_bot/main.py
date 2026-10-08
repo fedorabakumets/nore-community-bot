@@ -39,7 +39,12 @@ from community_bot.routers import (
     social_games_router,
     wallet_router,
 )
-from community_bot.telegraph import publish_member_update, publish_staff_guide, publish_staff_update
+from community_bot.telegraph import (
+    publish_commands_guide,
+    publish_member_update,
+    publish_staff_guide,
+    publish_staff_update,
+)
 from community_bot.ui_owner import UiOwnerMiddleware
 from community_bot.updates import announcement_key, community_announcement, latest_update
 
@@ -491,6 +496,7 @@ async def main() -> None:
     await log_community_permissions(bot, settings)
     await announce_latest_update(bot, db, settings)
     await publish_staff_guide(db)
+    await publish_commands_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()

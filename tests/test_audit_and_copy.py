@@ -200,6 +200,93 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     assert "сезонный набор" in STORE_HELP_TEXT.casefold()
 
 
+def test_commands_page_is_detailed_and_the_card_is_short() -> None:
+    from community_bot.commands_guide import COMMANDS_CARD_TEXT, commands_guide_nodes, commands_keyboard
+
+    assert len(COMMANDS_CARD_TEXT) <= 1024
+    assert "не удаляется" in COMMANDS_CARD_TEXT
+    page = "\n".join(
+        "".join(str(child) for child in node.get("children", []))
+        for node in commands_guide_nodes()
+    )
+    lowered = page.casefold()
+    assert "Пример. кубик 25" in page
+    assert "Пример. Нора, какой фильм посмотреть" in page
+    assert "пример." in lowered
+    for word in (
+        "магазин",
+        "вопрос",
+        "тикет",
+        "рулетка",
+        "рейс",
+        "капкан",
+        "подарить",
+        "репорт",
+        "почта",
+        "доска",
+        "экспедиц",
+        "витрин",
+        "набор",
+        "погода",
+    ):
+        assert word in lowered
+    for leaked in ("/mute", "/warn", "/kick", "/ban", "/purge", "tmdb", "api"):
+        assert leaked not in lowered
+    button = commands_keyboard("https://telegra.ph/Komandy").inline_keyboard[0][0]
+    assert button.text == "Читать команды"
+    assert button.url == "https://telegra.ph/Komandy"
+
+
+async def test_commands_card_sends_one_photo_with_a_page_button(monkeypatch) -> None:
+    from community_bot.commands_guide import send_commands_card
+
+    async def publish(_db):
+        return "https://telegra.ph/Komandy"
+
+    monkeypatch.setattr("community_bot.telegraph.publish_commands_guide", publish)
+    sent: list[dict] = []
+
+    class Message:
+        async def answer_photo(self, photo, **kwargs):
+            sent.append({"photo": photo, **kwargs})
+            return self
+
+        async def answer(self, text, **kwargs):
+            sent.append({"text": text, **kwargs})
+            return self
+
+    await send_commands_card(Message(), db=None)
+    assert len(sent) == 1
+    assert len(sent[0]["caption"]) <= 1024
+    assert sent[0]["reply_markup"].inline_keyboard[0][0].url == "https://telegra.ph/Komandy"
+
+
+async def test_commands_page_is_published_once(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from community_bot.database import Database
+    from community_bot.telegraph import publish_commands_guide
+
+    db = Database(Path(tmp_path) / "commands.db")
+    await db.initialize()
+    calls: list[str] = []
+
+    async def token(_db):
+        return "token"
+
+    async def call(method, payload):
+        calls.append(method)
+        assert payload["title"] == "Команды НОРЫ"
+        assert any(node.get("tag") == "blockquote" for node in payload["content"])
+        return {"url": "https://telegra.ph/Komandy", "path": "Komandy"}
+
+    monkeypatch.setattr("community_bot.telegraph.ensure_token", token)
+    monkeypatch.setattr("community_bot.telegraph._call", call)
+    assert await publish_commands_guide(db) == "https://telegra.ph/Komandy"
+    assert await publish_commands_guide(db) == "https://telegra.ph/Komandy"
+    assert calls == ["createPage"]
+
+
 def test_post_templates_and_buttons() -> None:
     html = render_post("announce", "Собрание в субботу")
     assert "Объявление" in html

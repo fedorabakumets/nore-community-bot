@@ -170,6 +170,43 @@ async def publish_staff_update(db: Database, item: BotUpdate) -> str | None:
     return url or None
 
 
+async def publish_commands_guide(db: Database) -> str | None:
+    from community_bot.commands_guide import COMMANDS_PAGE_VERSION, commands_guide_nodes
+
+    token = await ensure_token(db)
+    if not token:
+        return None
+    version = await db.get_bot_state("commands_guide_version")
+    stored_url = await db.get_bot_state("commands_guide_url")
+    path = await db.get_bot_state("commands_guide_path")
+    if stored_url and version == COMMANDS_PAGE_VERSION:
+        return stored_url
+    payload: dict[str, Any] = {
+        "access_token": token,
+        "title": "Команды НОРЫ",
+        "author_name": "НОРА",
+        "content": commands_guide_nodes(),
+        "return_content": False,
+    }
+    if path:
+        payload["path"] = path
+        result = await _call("editPage", payload)
+        if not result:
+            result = await _call("createPage", {k: v for k, v in payload.items() if k != "path"})
+    else:
+        result = await _call("createPage", payload)
+    if not result:
+        return stored_url or None
+    url = str(result.get("url") or "").strip()
+    new_path = str(result.get("path") or "").strip()
+    if new_path:
+        await db.set_bot_state("commands_guide_path", new_path)
+    if url:
+        await db.set_bot_state("commands_guide_url", url)
+        await db.set_bot_state("commands_guide_version", COMMANDS_PAGE_VERSION)
+    return url or stored_url or None
+
+
 async def publish_staff_guide(db: Database) -> str | None:
     from community_bot.staff_guide import STAFF_GUIDE_VERSION, staff_guide_nodes
 
