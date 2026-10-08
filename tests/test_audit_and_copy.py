@@ -58,6 +58,11 @@ def test_parse_trigger_slash_and_russian_alias() -> None:
     assert parse_trigger("Закрыть обсуждение") is None
     assert parse_trigger("помощь") == ("help", "")
     assert parse_trigger("Помощь нужна") is None
+    assert parse_trigger("погода") == ("pogoda", "")
+    assert parse_trigger("Погода!") == ("pogoda", "")
+    assert parse_trigger("/pogoda") == ("pogoda", "")
+    assert parse_trigger("/погода@bot") == ("pogoda", "")
+    assert parse_trigger("какая погода") is None
     assert is_command_trigger("халява")
     assert is_command_trigger("обновления")
     from community_bot.aliases import is_command_message
