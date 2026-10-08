@@ -8,7 +8,17 @@ from community_bot.daily_chat import due_daily_chat, render_daily_chat
 from community_bot.day_note import DayEvent, pick_day_event, render_day_note
 from community_bot.ephemeral import _EXPLICIT_TTL, _REPLY_TTL, current_reply_ttl, keep_in_chat
 from community_bot.keyboards import admin_system_keyboard
-from community_bot.nora import render_tracks, render_watch, rule_intent, strip_address
+from community_bot.nora import (
+    clip_spoken,
+    movies_from_itunes,
+    render_open_title,
+    render_tracks,
+    render_watch,
+    rule_intent,
+    series_from_schedule,
+    strip_address,
+    wiki_search_title,
+)
 from community_bot.permissions import DEFAULT_STAFF_ROLES, PERM_COMMANDS
 from community_bot.updates import community_announcement, latest_update, member_details_text, staff_announcement
 
@@ -25,6 +35,8 @@ def test_nora_routes_plain_phrases() -> None:
     assert rule_intent("какая погода")["tool"] == "weather"
     assert rule_intent("новости")["tool"] == "news"
     assert rule_intent("коротко расскажи основные команды бота")["tool"] == "help"
+    assert rule_intent("где дюна")["tool"] == "find_title"
+    assert rule_intent("где находится эрмитаж") is None
 
 
 def test_watch_and_chart_do_not_invent_places() -> None:
@@ -37,6 +49,48 @@ def test_watch_and_chart_do_not_invent_places() -> None:
     chart = render_tracks("🎵 <b>Сейчас в топе</b>", [("А", "Б", "https://music.example/a")])
     assert "А — Б" in chart
     assert "music.example/a" in chart
+    opened = render_open_title(
+        "Дюна",
+        "2021",
+        "Пустыня и семья.",
+        "https://example.com/dune",
+        series=False,
+        platforms_unknown=True,
+    )
+    assert "Дюна" in opened
+    assert "отсюда не видно" in opened
+    assert "TMDB" not in opened
+    assert "Okko" not in opened
+    assert "API" not in opened
+    movies = movies_from_itunes(
+        {
+            "feed": {
+                "entry": {
+                    "im:name": {"label": "Поймай меня, если сможешь"},
+                    "summary": {"label": "Молодой мастер обмана и агент, который идёт следом."},
+                    "im:releaseDate": {"label": "2003-02-12T00:00:00-07:00"},
+                    "link": [{"attributes": {"rel": "alternate", "href": "https://itunes.apple.com/ru/movie/1"}}],
+                }
+            }
+        }
+    )
+    assert movies[0]["title"] == "Поймай меня, если сможешь"
+    assert movies[0]["year"] == "2003"
+    assert "itunes.apple.com" in movies[0]["link"]
+    show = series_from_schedule(
+        [
+            {"show": {"name": "Новости", "type": "News", "summary": "<p>Сводка</p>", "url": "https://tv.example/n"}},
+            {"show": {"name": "Невский", "type": "Scripted", "summary": "", "premiered": "2016-04-11", "url": "https://tv.example/s"}},
+        ]
+    )
+    assert show is not None
+    assert show["title"] == "Невский"
+    assert show["year"] == "2016"
+    assert wiki_search_title({"query": {"search": [{"title": "Дюна (фильм, 2021)"}]}}) == "Дюна (фильм, 2021)"
+    spoken = clip_spoken("Возьми зонт. <b>не тег</b> " + ("слово " * 200))
+    assert "<b>" not in spoken
+    assert "не тег" in spoken
+    assert len(spoken) <= 700
 
 
 def test_day_note_prefers_calm_petersburg() -> None:
@@ -198,3 +252,119 @@ def test_public_update_hides_the_command_tool() -> None:
     moderator_role = next(role for role in DEFAULT_STAFF_ROLES if role[0] == "moderator")
     assert PERM_COMMANDS in admin_role[3]
     assert PERM_COMMANDS not in moderator_role[3]
+
+
+async def test_film_without_catalog_key_uses_open_sources(monkeypatch) -> None:
+    from community_bot.nora import find_title, suggest_title
+
+    async def movie(genre_asked: bool) -> str:
+        assert genre_asked is False
+        return "🎬 <b>Поймай меня, если сможешь</b>"
+
+    async def lookup(query: str, kind: str) -> str:
+        assert kind == "movie"
+        assert "дюна" in query.casefold()
+        return "🎬 <b>Дюна</b>\nГде именно это показывают, отсюда не видно."
+
+    monkeypatch.setattr("community_bot.nora._suggest_movie_open", movie)
+    monkeypatch.setattr("community_bot.nora._lookup_open", lookup)
+
+    class Settings:
+        tmdb_api_key = ""
+
+    suggested = await suggest_title(Settings(), kind="movie", genre="", avoid="")
+    found = await find_title(Settings(), "дюна", "movie")
+    assert "Поймай" in suggested
+    assert "TMDB" not in suggested
+    assert "Дюна" in found
+    assert "отсюда не видно" in found
+
+
+async def test_unmatched_nora_phrase_uses_the_model_or_a_hunch(monkeypatch) -> None:
+    from community_bot.nora import reply_for, spoken_reply
+
+    prompts: list[str] = []
+
+    async def fake_model(prompt: str, settings: object) -> str:
+        del settings
+        prompts.append(prompt)
+        if "диспетчер" in prompt:
+            return '{"tool":"none"}'
+        return "Возьми зонт, на Неве ветрено. <b>не тег</b>"
+
+    monkeypatch.setattr("community_bot.nora.ask_model", fake_model)
+
+    class Ready:
+        gemini_api_key = "x"
+        groq_api_key = ""
+        tmdb_api_key = ""
+
+    now = datetime.now(ZoneInfo("Europe/Moscow"))
+    text = await reply_for("Нора, что надеть вечером", Ready(), now)
+    assert "зонт" in text
+    assert "<b>" not in text
+    assert len(prompts) == 2
+
+    class Empty:
+        gemini_api_key = ""
+        groq_api_key = ""
+        tmdb_api_key = ""
+
+    hello = await spoken_reply("привет", Empty())
+    assert hello.startswith("Привет")
+
+    async def page(query: str):
+        assert "эрмитаж" in query.casefold()
+        return ("Эрмитаж", "Музей на Дворцовой набережной.", "https://ru.wikipedia.org/wiki/H")
+
+    monkeypatch.setattr("community_bot.nora._wiki_lookup", page)
+    fact = await spoken_reply("кто основал эрмитаж", Empty())
+    assert fact.startswith("Если коротко:")
+    assert "Эрмитаж" in fact
+    assert "википед" not in fact.casefold()
+    assert "API" not in fact
+
+
+async def test_group_nora_line_is_deleted_after_the_reply(monkeypatch) -> None:
+    from community_bot.routers.nora import nora_address
+
+    async def fake_reply(text: str, settings: object, now: datetime) -> str:
+        del text, settings, now
+        return "Привет. Я на связи."
+
+    monkeypatch.setattr("community_bot.routers.nora.reply_for", fake_reply)
+    deleted: list[tuple[int, int]] = []
+    answers: list[str] = []
+
+    class User:
+        is_bot = False
+
+    class Chat:
+        def __init__(self, kind: str) -> None:
+            self.type = kind
+            self.id = -100 if kind == "group" else 5
+
+    class Bot:
+        async def delete_message(self, chat_id: int, message_id: int) -> None:
+            deleted.append((chat_id, message_id))
+
+    class Msg:
+        def __init__(self, kind: str) -> None:
+            self.text = "Нора, привет"
+            self.from_user = User()
+            self.chat = Chat(kind)
+            self.message_id = 15
+            self.bot = Bot()
+
+        async def answer(self, text: str, **kwargs: object) -> None:
+            del kwargs
+            answers.append(text)
+
+    settings = type("Settings", (), {"timezone": "Europe/Moscow"})()
+    await nora_address(Msg("group"), settings)
+    assert answers == ["Привет. Я на связи."]
+    assert deleted == [(-100, 15)]
+    answers.clear()
+    await nora_address(Msg("private"), settings)
+    assert answers == ["Привет. Я на связи."]
+    assert deleted == [(-100, 15)]

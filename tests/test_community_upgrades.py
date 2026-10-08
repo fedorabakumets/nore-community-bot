@@ -311,7 +311,7 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     assert "Админ" not in sent[0].text
     assert "Обновление №15" in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "15:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "15:photo-v2"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -331,7 +331,65 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "15:photo-v1"
+    assert await db.get_bot_state("last_announced_update") == "15:photo-v2"
+
+
+async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeypatch) -> None:
+    from datetime import datetime
+    from pathlib import Path
+    from zoneinfo import ZoneInfo
+
+    from community_bot.database import Database
+    from community_bot.main import announce_latest_update
+
+    db = Database(Path(tmp_path) / "repost.db")
+    await db.initialize()
+    await db.ensure_user(10, telegram_name="Owner")
+    await db.set_role(10, "owner")
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+    await db.set_bot_state("last_announced_update", "15:photo-v1")
+    await db.set_bot_state("morning_digest_day", today)
+    await db.set_bot_state("morning_pin_message_id", "42")
+    pinned: list[int] = []
+    cleared: list[int] = []
+    dms: list[int] = []
+
+    class Bot:
+        async def send_photo(self, chat_id, photo, **kwargs):
+            dms.append(chat_id)
+            return SimpleNamespace(message_id=9, text=kwargs.get("caption"))
+
+        async def send_message(self, chat_id, text, **kwargs):
+            dms.append(chat_id)
+            return SimpleNamespace(message_id=9, text=text, reply_markup=kwargs.get("reply_markup"))
+
+        async def unpin_all_chat_messages(self, chat_id):
+            cleared.append(chat_id)
+
+        async def pin_chat_message(self, chat_id, message_id, disable_notification=True):
+            pinned.append(message_id)
+
+        async def unpin_chat_message(self, chat_id, message_id):
+            raise AssertionError(message_id)
+
+    async def fake_publish(_db, _item):
+        return "https://telegra.ph/NORA"
+
+    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
+    monkeypatch.setattr("community_bot.main.publish_staff_update", fake_publish)
+    settings = SimpleNamespace(community_chat_id=-100, timezone="Europe/Moscow")
+    await announce_latest_update(Bot(), db, settings)
+    assert cleared == [-100]
+    assert pinned == [42, 9]
+    assert 10 not in dms
+    assert await db.get_bot_state("last_announced_update") == "15:photo-v2"
+
+    await db.set_bot_state("last_announced_update", "15:photo-v1")
+    await db.set_bot_state("morning_digest_day", "2020-01-01")
+    pinned.clear()
+    cleared.clear()
+    await announce_latest_update(Bot(), db, settings)
+    assert pinned == [9]
 
 
 def test_update_cover_renders_number(tmp_path) -> None:

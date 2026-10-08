@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-ANNOUNCE_LAYOUT = "photo-v1"
+ANNOUNCE_LAYOUT = "photo-v2"
 
 
 @dataclass(frozen=True, slots=True)

@@ -92,6 +92,39 @@ async def configure_commands(bot: Bot) -> None:
     )
 
 
+def _same_release(last: str | None, number: int) -> bool:
+    if not last:
+        return False
+    return str(last).split(":", 1)[0] == str(number)
+
+
+async def _pin_announcement(bot: Bot, db: Database, settings: Settings, message_id: int) -> None:
+    chat_id = settings.community_chat_id
+    try:
+        cleared = False
+        unpin_all = getattr(bot, "unpin_all_chat_messages", None)
+        if unpin_all is not None:
+            with contextlib.suppress(Exception):
+                await unpin_all(chat_id)
+                cleared = True
+        if not cleared:
+            old_pin = await db.get_bot_state("last_announcement_message_id")
+            if old_pin:
+                with contextlib.suppress(Exception):
+                    await bot.unpin_chat_message(chat_id, int(old_pin))
+        if cleared:
+            tz_name = getattr(settings, "timezone", None) or "Europe/Moscow"
+            today = datetime.now(ZoneInfo(tz_name)).date().isoformat()
+            digest_day = await db.get_bot_state("morning_digest_day")
+            morning_id = await db.get_bot_state("morning_pin_message_id")
+            if morning_id and digest_day == today:
+                with contextlib.suppress(Exception):
+                    await bot.pin_chat_message(chat_id, int(morning_id), disable_notification=True)
+        await bot.pin_chat_message(chat_id, message_id, disable_notification=True)
+    except Exception:
+        logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
+
+
 async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> None:
     item = latest_update()
     last = await db.get_bot_state("last_announced_update")
@@ -129,16 +162,11 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
     except Exception:
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
-    try:
-        old_pin = await db.get_bot_state("last_announcement_message_id")
-        if old_pin:
-            with contextlib.suppress(Exception):
-                await bot.unpin_chat_message(settings.community_chat_id, int(old_pin))
-        await bot.pin_chat_message(settings.community_chat_id, sent.message_id, disable_notification=True)
-    except Exception:
-        logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
+    await _pin_announcement(bot, db, settings, sent.message_id)
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", announcement_key(item))
+    if _same_release(last, item.number):
+        return
     staff_url = await publish_staff_update(db, item)
     await notify_staff_update(bot, db, item, staff_url)
 

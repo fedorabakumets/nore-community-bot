@@ -9,7 +9,7 @@ from aiogram.types import LinkPreviewOptions, Message
 from community_bot.aliases import parse_trigger
 from community_bot.command_registry import get_command
 from community_bot.config import Settings
-from community_bot.ephemeral import reply_ttl
+from community_bot.ephemeral import delete_user_command, reply_ttl
 from community_bot.nora import reply_for, reply_ttl_seconds, strip_address
 
 router = Router(name="nora")
@@ -29,14 +29,15 @@ async def nora_address(message: Message, settings: Settings) -> None:
 
     now = datetime.now(ZoneInfo(settings.timezone))
     answer = await reply_for(text, settings, now)
-    if not answer:
-        return
-    with reply_ttl(reply_ttl_seconds(text)):
-        await message.answer(
-            answer,
-            parse_mode="HTML",
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-        )
+    if answer:
+        with reply_ttl(reply_ttl_seconds(text)):
+            await message.answer(
+                answer,
+                parse_mode="HTML",
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+    if message.chat.type in {"group", "supergroup"}:
+        await delete_user_command(message, message.bot)
 
 
 class CustomCommand(Filter):

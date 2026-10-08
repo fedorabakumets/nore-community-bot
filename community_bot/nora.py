@@ -5,6 +5,8 @@ import json
 import logging
 import re
 from datetime import datetime
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -40,6 +42,18 @@ COMMANDS_BRIEF = """Коротко, что я умею.
 «магазин», «профиль», «баланс», «игры», «тамагочи» — как и раньше.
 
 Полный список: «команды»."""
+
+_SPEAK_PROMPT = """Ты Нора, бот сообщества в Петербурге. Человек обратился к тебе по имени.
+Ответь коротко, на «ты», по-русски, своими словами. Пойми, о чём речь, и попробуй подсказать.
+Не выдумывай кинотеатры, чарты, цены и площадки.
+Не говори, что ты модель, и не упоминай технические источники.
+Если вопрос про команды, опирайся только на список ниже.
+
+Вопрос: {question}
+
+Команды:
+{commands}
+"""
 
 _HELP_PROMPT = """Ты Нора, бот сообщества. Ответь на вопрос коротко, на «ты», по-русски.
 Используй только этот список команд. Не выдумывай команды и цены.
@@ -104,7 +118,7 @@ def rule_intent(text: str) -> dict[str, str] | None:
         if named and "чарт" not in raw and "топ" not in raw:
             return {"tool": "music_search", "query": _query_after(raw)}
         return {"tool": "music_chart"}
-    if cinema or raw.startswith("где "):
+    if cinema:
         kind = "tv" if "сериал" in raw else "movie" if any(word in raw for word in ("фильм", "кино")) else "any"
         suggest = any(word in raw for word in ("какой", "какая", "какое", "посовет", "подскаж", "что "))
         titled = _query_after(raw)
@@ -116,6 +130,10 @@ def rule_intent(text: str) -> dict[str, str] | None:
                 "avoid": "27" if any(word in raw for word in ("не ужас", "не кровь", "без крови")) else "",
             }
         return {"tool": "find_title", "kind": kind, "query": titled}
+    if raw.startswith("где ") and not re.search(r"наход|жив|работ|можно|куп", raw):
+        titled = _query_after(raw)
+        if titled:
+            return {"tool": "find_title", "kind": "any", "query": titled}
     return None
 
 
@@ -149,6 +167,183 @@ def render_watch(name: str, year: str, overview: str, providers: list[str], link
         lines.append("В каталоге для России площадок не видно.")
     lines.extend(["", f"{kind}. Каталог: TMDB"])
     return "\n".join(lines)
+
+
+def _plain_html(text: str) -> str:
+    cleaned = re.sub(r"<[^>]+>", " ", text)
+    cleaned = html.unescape(cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _short_sentence(text: str) -> str:
+    clean = _plain_html(text)
+    if not clean:
+        return ""
+    match = re.search(r"^.{20,}?[.!?]", clean)
+    sentence = match.group(0) if match else clean
+    if len(sentence) > 280:
+        sentence = sentence[:279].rsplit(" ", 1)[0] + "…"
+    return html.escape(sentence)
+
+
+def render_open_title(
+    name: str,
+    year: str,
+    overview: str,
+    link: str,
+    *,
+    series: bool,
+    platforms_unknown: bool = False,
+    on_air: bool = False,
+) -> str:
+    kind = "Сериал" if series else "Фильм"
+    year_bit = f" ({html.escape(year)})" if year else ""
+    sentence = _short_sentence(overview)
+    lines = [f"🎬 <b>{html.escape(name)}</b>{year_bit}"]
+    if sentence:
+        lines.append(sentence)
+    elif on_air:
+        lines.append("Сегодня это в эфире.")
+    else:
+        lines.append("Короткого описания нет.")
+    lines.append("")
+    if platforms_unknown:
+        lines.append("Где именно это показывают, отсюда не видно.")
+    if link:
+        url = html.escape(link, quote=True)
+        lines.append(f"<a href=\"{url}\">Открыть</a>")
+    lines.extend(["", kind])
+    return "\n".join(lines)
+
+
+def _entry_link(entry: dict[str, object]) -> str:
+    links = entry.get("link")
+    if isinstance(links, dict):
+        links = [links]
+    if not isinstance(links, list):
+        return ""
+    for item in links:
+        if not isinstance(item, dict):
+            continue
+        rel = str((item.get("attributes") or {}).get("rel"))
+        if rel not in {"", "alternate"}:
+            continue
+        href = str((item.get("attributes") or {}).get("href") or "")
+        if href:
+            return href
+    return ""
+
+
+def movies_from_itunes(payload: dict[str, object]) -> list[dict[str, str]]:
+    feed = payload.get("feed")
+    if not isinstance(feed, dict):
+        return []
+    entries = feed.get("entry")
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return []
+    movies: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("im:name")
+        title = str(name.get("label") if isinstance(name, dict) else name or "").strip()
+        if not title:
+            continue
+        summary = entry.get("summary")
+        text = str(summary.get("label") if isinstance(summary, dict) else summary or "").strip()
+        released = entry.get("im:releaseDate")
+        raw_date = str(released.get("label") if isinstance(released, dict) else released or "")
+        year = raw_date[:4] if len(raw_date) >= 4 and raw_date[:4].isdigit() else ""
+        movies.append({"title": title, "summary": text, "year": year, "link": _entry_link(entry)})
+    return movies
+
+
+def _show_card(show: dict[str, object]) -> dict[str, str]:
+    premiered = str(show.get("premiered") or "")
+    year = premiered[:4] if len(premiered) >= 4 and premiered[:4].isdigit() else ""
+    return {
+        "title": str(show.get("name") or "").strip(),
+        "summary": _plain_html(str(show.get("summary") or "")),
+        "year": year,
+        "link": str(show.get("url") or "").strip(),
+    }
+
+
+def series_from_schedule(payload: object) -> dict[str, str] | None:
+    if not isinstance(payload, list):
+        return None
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        show = item.get("show")
+        if not isinstance(show, dict) or str(show.get("type") or "") != "Scripted":
+            continue
+        card = _show_card(show)
+        if card["title"]:
+            return card
+    return None
+
+
+def series_from_search(payload: object) -> dict[str, str] | None:
+    if not isinstance(payload, list):
+        return None
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        show = item.get("show")
+        if isinstance(show, dict):
+            card = _show_card(show)
+            if card["title"]:
+                return card
+    return None
+
+
+def wiki_search_title(payload: dict[str, object]) -> str:
+    query = payload.get("query")
+    if not isinstance(query, dict):
+        return ""
+    rows = query.get("search")
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return ""
+    return str(rows[0].get("title") or "").strip()
+
+
+def wiki_page_bits(payload: dict[str, object]) -> tuple[str, str, str]:
+    title = str(payload.get("title") or "").strip()
+    extract = str(payload.get("extract") or "").strip()
+    url = ""
+    content = payload.get("content_urls")
+    if isinstance(content, dict):
+        desktop = content.get("desktop")
+        if isinstance(desktop, dict):
+            url = str(desktop.get("page") or "").strip()
+    return title, extract, url
+
+
+def clip_spoken(raw: str, limit: int = 700) -> str:
+    text = html.escape(re.sub(r"\s+", " ", raw).strip())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(".,;:")
+    return (cut or text[: limit - 1]) + "…"
+
+
+def local_hunch(text: str) -> str | None:
+    raw = text.casefold().replace("ё", "е")
+    if re.search(r"привет|здравств|доброе утро|добрый день|добрый вечер", raw):
+        return "Привет. Я на связи: погода, новости, музыка, кино или «команды»."
+    if re.search(r"как дела|как ты|что нового", raw):
+        return "Я на месте. Спроси погоду, новости, музыку или что посмотреть."
+    if re.search(r"спасибо|благодар", raw):
+        return "Пожалуйста."
+    return None
+
+
+def looks_factual(text: str) -> bool:
+    raw = text.casefold().replace("ё", "е")
+    return bool(re.search(r"\b(кто|что такое|когда|почему|зачем|сколько|расскажи|объясни)\b", raw))
 
 
 def _tracks_from_itunes_chart(payload: dict[str, object]) -> list[tuple[str, str, str]]:
@@ -399,9 +594,28 @@ async def _watch_line(settings: object, media: str, title_id: int) -> tuple[list
     return _providers(payload)
 
 
-async def suggest_title(settings: object, *, kind: str, genre: str, avoid: str) -> str:
-    if not str(getattr(settings, "tmdb_api_key", "") or "").strip():
-        return "С кино сейчас не связаться. Попробуй позже."
+def _has_tmdb(settings: object) -> bool:
+    return bool(str(getattr(settings, "tmdb_api_key", "") or "").strip())
+
+
+async def _fetch_json(url: str, params: dict[str, str] | None = None) -> object | None:
+    headers = {
+        "User-Agent": "NoraCommunityBot/2.0 (telegram community bot)",
+        "Accept": "application/json",
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+            async with session.get(url, params=params, headers=headers) as response:
+                response.raise_for_status()
+                return await response.json(content_type=None)
+    except (aiohttp.ClientError, TimeoutError):
+        logger.warning("Внешний источник Норы не ответил")
+        return None
+
+
+async def _suggest_tmdb(settings: object, *, kind: str, genre: str, avoid: str) -> str | None:
+    if not _has_tmdb(settings):
+        return None
     params: dict[str, str] = {"sort_by": "popularity.desc", "watch_region": "RU", "include_adult": "false"}
     path = "discover/movie" if kind != "tv" else "discover/tv"
     if genre.isdigit():
@@ -409,19 +623,17 @@ async def suggest_title(settings: object, *, kind: str, genre: str, avoid: str) 
     if avoid.isdigit():
         params["without_genres"] = avoid
     payload = await _tmdb(path, settings, params)
-    if payload == {}:
-        return "Каталог кино сейчас не открылся. Попробуй через минуту."
+    if not payload:
+        return None
     item = _pick_title(payload, "tv" if kind == "tv" else "movie")
     if item is None:
-        return "Сейчас не нашла подходящий вариант. Назови жанр или название."
+        return None
     return await _describe(settings, item)
 
 
-async def find_title(settings: object, query: str, kind: str) -> str:
-    if not query:
-        return "Назови фильм или сериал."
-    if not str(getattr(settings, "tmdb_api_key", "") or "").strip():
-        return "С кино сейчас не связаться. Попробуй позже."
+async def _find_tmdb(settings: object, query: str, kind: str) -> str | None:
+    if not _has_tmdb(settings):
+        return None
     if kind == "tv":
         payload = await _tmdb("search/tv", settings, {"query": query, "include_adult": "false"})
         media = "tv"
@@ -431,14 +643,118 @@ async def find_title(settings: object, query: str, kind: str) -> str:
     else:
         payload = await _tmdb("search/multi", settings, {"query": query, "include_adult": "false"})
         media = "any"
-    if payload == {}:
-        return "Каталог кино сейчас не открылся. Попробуй через минуту."
+    if not payload:
+        return None
     item = _pick_title(payload, media)
-    if item is None and kind == "any":
-        return "Не нашла такое название. Напиши его чуть точнее."
     if item is None:
-        return "Не нашла такое название. Напиши его чуть точнее."
+        return None
     return await _describe(settings, item)
+
+
+async def _suggest_movie_open(genre_asked: bool) -> str:
+    payload = await _fetch_json("https://itunes.apple.com/ru/rss/topmovies/limit=5/json")
+    movies = movies_from_itunes(payload if isinstance(payload, dict) else {})
+    if not movies:
+        return "С кино сейчас не связаться. Попробуй позже."
+    film = movies[0]
+    card = render_open_title(film["title"], film["year"], film["summary"], film["link"], series=False)
+    if genre_asked:
+        return f"Точный жанр сейчас не разобрать.\n{card}"
+    return card
+
+
+async def _suggest_series_open() -> str:
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
+    payload = await _fetch_json("https://api.tvmaze.com/schedule", {"country": "RU", "date": today})
+    show = series_from_schedule(payload)
+    if show is None:
+        return "С сериалами сейчас не связаться. Попробуй позже."
+    return render_open_title(
+        show["title"],
+        show["year"],
+        show["summary"],
+        show["link"],
+        series=True,
+        on_air=True,
+    )
+
+
+async def _wiki_lookup(query: str) -> tuple[str, str, str] | None:
+    payload = await _fetch_json(
+        "https://ru.wikipedia.org/w/api.php",
+        {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": "1",
+            "format": "json",
+            "utf8": "1",
+        },
+    )
+    title = wiki_search_title(payload if isinstance(payload, dict) else {})
+    if not title:
+        return None
+    page = await _fetch_json(
+        "https://ru.wikipedia.org/api/rest_v1/page/summary/" + quote(title.replace(" ", "_"), safe="")
+    )
+    if not isinstance(page, dict):
+        return None
+    found, extract, url = wiki_page_bits(page)
+    if not extract:
+        return None
+    lowered = extract.casefold()
+    if "может означать" in lowered or lowered.startswith("значения"):
+        return None
+    return found or title, extract, url
+
+
+async def _lookup_open(query: str, kind: str) -> str | None:
+    if kind == "tv":
+        payload = await _fetch_json("https://api.tvmaze.com/search/shows", {"q": query})
+        show = series_from_search(payload)
+        if show is not None:
+            return render_open_title(
+                show["title"],
+                show["year"],
+                show["summary"],
+                show["link"],
+                series=True,
+                platforms_unknown=True,
+            )
+        page = await _wiki_lookup(query if "сериал" in query.casefold() else f"{query} сериал")
+        if page:
+            title, extract, url = page
+            return render_open_title(title, "", extract, url, series=True, platforms_unknown=True)
+        return None
+    film_query = query if "фильм" in query.casefold() else f"{query} фильм"
+    page = await _wiki_lookup(film_query)
+    if page:
+        title, extract, url = page
+        return render_open_title(title, "", extract, url, series=False, platforms_unknown=True)
+    if kind == "any":
+        return await _lookup_open(query, "tv")
+    return None
+
+
+async def suggest_title(settings: object, *, kind: str, genre: str, avoid: str) -> str:
+    described = await _suggest_tmdb(settings, kind=kind, genre=genre, avoid=avoid)
+    if described:
+        return described
+    if kind == "tv":
+        return await _suggest_series_open()
+    return await _suggest_movie_open(bool(genre or avoid))
+
+
+async def find_title(settings: object, query: str, kind: str) -> str:
+    if not query:
+        return "Назови фильм или сериал."
+    described = await _find_tmdb(settings, query, kind)
+    if described:
+        return described
+    opened = await _lookup_open(query, kind if kind in {"movie", "tv", "any"} else "any")
+    if opened:
+        return opened
+    return "Не нашла такое название. Напиши его чуть точнее."
 
 
 async def _describe(settings: object, item: dict[str, object]) -> str:
@@ -455,6 +771,29 @@ async def _describe(settings: object, item: dict[str, object]) -> str:
     if title_id:
         providers, link = await _watch_line(settings, media, title_id)
     return render_watch(name, year, overview, providers, link, series=media == "tv")
+
+
+async def spoken_reply(question: str, settings: object) -> str:
+    if _ai_ready(settings) and question:
+        text = await ask_model(
+            _SPEAK_PROMPT.format(question=question, commands=GROUP_COMMANDS_TEXT),
+            settings,
+        )
+        if text:
+            return clip_spoken(text)
+    hunch = local_hunch(question)
+    if hunch:
+        return hunch
+    if question and looks_factual(question):
+        page = await _wiki_lookup(question)
+        if page:
+            title, extract, url = page
+            lines = [f"Если коротко: {clip_spoken(extract, 320)}"]
+            if url and title:
+                safe_url = html.escape(url, quote=True)
+                lines.append(f"(<a href=\"{safe_url}\">{html.escape(title)}</a>)")
+            return "\n".join(lines)
+    return "Не до конца поняла. Могу подсказать погоду, новости, музыку и кино — или скажи «Нора, команды»."
 
 
 async def help_reply(question: str, settings: object) -> str:
@@ -476,7 +815,7 @@ async def reply_for(text: str, settings: object, now: datetime) -> str:
         routed = _parse_route(await ask_model(_ROUTE_PROMPT.format(question=body), settings) or "")
         intent = routed
     if intent is None or intent.get("tool") in {None, "", "none"}:
-        return "Могу подсказать погоду, новости, музыку и кино. Или спроси про команды."
+        return await spoken_reply(body, settings)
     tool = intent["tool"]
     if tool == "weather":
         from community_bot.morning import weather_reply
