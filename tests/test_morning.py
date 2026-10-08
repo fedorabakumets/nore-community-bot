@@ -12,8 +12,12 @@ from community_bot.morning import (
     format_day,
     metro_status,
     news_bucket,
+    parse_closed_stations,
     parse_traffic_xml,
     render_brief,
+    render_news_line,
+    render_weather_command,
+    select_day_news,
     select_news,
     weather_kind,
 )
@@ -132,10 +136,72 @@ def test_traffic_xml_and_caption_fit_photo() -> None:
     )
     text = render_brief(brief)
     assert "Доброе утро" in text
-    assert "6/10" in text
+    assert "Пробки: 6, местами затруднения." in text
     assert "Рассвет — 07:13" in text
     assert "Закат — 18:19" in text
     assert "Факт дня" in text
-    assert "Московском" in text
+    assert "Московском" not in text
+    assert "За сутки" in text
     assert len(text) <= 1024
     assert brief.photo is not None and brief.photo.name == "cloudy.jpg"
+
+
+def test_closed_stations_and_day_news_stay_in_one_brief() -> None:
+    page = """
+    <p>Вестибюль станции</p>
+    <tr><td>29</td><td>Парк Победы</td><td>Станция закрыта на реконструкцию</td></tr>
+    <tr><td>32</td><td>Фрунзенская</td><td>Станция закрыта на реконструкцию</td></tr>
+    <tr><td></td><td>Зенит</td><td>Вестибюль закрыт по выходным</td></tr>
+    """
+    assert parse_closed_stations(page) == ["Парк Победы", "Фрунзенская"]
+    now = datetime(2026, 10, 8, 9, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    items = [
+        NewsItem(
+            "Драка на Коломяжском проспекте",
+            datetime(2026, 10, 8, 5, 0, tzinfo=UTC),
+            link="https://www.fontanka.ru/2026/10/08/3/?from=yanews",
+            lead="Подростки устроили драку на парковке. Полиция приехала позже.",
+        ),
+        NewsItem("Федеральная заметка", datetime(2026, 10, 8, 6, 0, tzinfo=UTC), lead="Далеко от города."),
+        NewsItem("Старая драка на набережной", datetime(2026, 10, 6, 5, 0, tzinfo=UTC), lead="Это было раньше."),
+    ]
+    selected = select_day_news(items, now)
+    assert [item.title for item in selected] == ["Драка на Коломяжском проспекте"]
+    line = render_news_line(selected[0])
+    assert "Подростки устроили драку" in line
+    assert 'href="https://www.fontanka.ru/2026/10/08/3/"' in line
+    brief = MorningBrief(
+        when=now,
+        weather=_weather(),
+        traffic_level=4,
+        traffic_hint="Местами затруднения",
+        closed_stations=parse_closed_stations(page) or [],
+        day_news=selected,
+    )
+    text = render_brief(brief)
+    assert "Не работают: Парк Победы, Фрунзенская" in text
+    assert "Пробки: 4, местами затруднения." in text
+    assert "За сутки" in text
+    assert "fontanka.ru/2026/10/08/3/" in text
+    forecast = render_weather_command(
+        {
+            "current": {
+                "temperature_2m": 9.4,
+                "apparent_temperature": 7.2,
+                "weather_code": 3,
+                "wind_speed_10m": 7.2,
+                "precipitation": 0,
+            },
+            "daily": {"sunrise": ["2026-10-08T07:20"], "sunset": ["2026-10-08T18:10"]},
+            "hourly": {
+                "time": ["2026-10-08T09:00", "2026-10-08T12:00"],
+                "temperature_2m": [8, 11],
+                "weather_code": [3, 2],
+            },
+        },
+        now,
+    )
+    assert forecast is not None
+    assert "Сейчас: +9°" in forecast
+    assert "12:00 +11°, облачно" in forecast
+    assert "Источник: Open-Meteo" in forecast

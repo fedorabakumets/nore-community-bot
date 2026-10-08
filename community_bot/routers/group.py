@@ -18,6 +18,7 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     ChatPermissions,
+    LinkPreviewOptions,
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -379,6 +380,19 @@ async def group_commands(message: Message) -> None:
         cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
         parse_mode="HTML",
     )
+
+
+@router.message(command_or_alias("pogoda"), F.chat.type.in_({"group", "supergroup"}))
+async def group_weather(message: Message, settings: Settings) -> None:
+    from community_bot.morning import weather_reply
+
+    now = datetime.now(ZoneInfo(settings.timezone))
+    with keep_in_chat():
+        await message.answer(
+            await weather_reply(now),
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
 
 @router.message(command_or_alias("reputation"), F.chat.type.in_({"group", "supergroup"}))

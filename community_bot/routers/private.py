@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -18,6 +19,7 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    LinkPreviewOptions,
     Message,
     User,
 )
@@ -229,6 +231,18 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
     await register_telegram_user(db, message.from_user)
     await state.clear()
     await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
+
+
+@router.message(command_or_alias("pogoda"), F.chat.type == "private")
+async def private_weather(message: Message, settings: Settings) -> None:
+    from community_bot.morning import weather_reply
+
+    now = datetime.now(ZoneInfo(settings.timezone))
+    await message.answer(
+        await weather_reply(now),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 @router.message(command_or_alias("help", "commands"))

@@ -26,11 +26,14 @@ WEATHER_URL = (
     f"?latitude={SPB_LATITUDE}&longitude={SPB_LONGITUDE}"
     "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation"
     "&daily=sunrise,sunset,weather_code"
-    "&timezone=Europe%2FMoscow&forecast_days=1"
+    "&hourly=temperature_2m,weather_code"
+    "&timezone=Europe%2FMoscow&forecast_days=2"
 )
 TRAFFIC_URL = "https://export.yandex.ru/bar/reginfo.xml?region=2"
-NEWS_URL = "https://fontanka.ru/rss-feeds/rss.xml"
-METRO_URL = "https://t.me/s/spbmetro"
+NEWS_URL = "https://www.fontanka.ru/rss-feeds/zen-news.xml"
+METRO_URL = "https://metro.spb.ru/rejimrabotystancii.html"
+FALLBACK_CLOSED_STATIONS = ("Парк Победы", "Фрунзенская")
+_CONTENT_TAG = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
 PHOTOS = Path(__file__).resolve().parent.parent / "assets" / "morning"
 
@@ -134,6 +137,12 @@ class NewsItem:
     title: str
     published: datetime
     categories: tuple[str, ...] = ()
+    link: str = ""
+    lead: str = ""
+
+    @property
+    def body(self) -> str:
+        return self.lead or self.title
 
 
 @dataclass(slots=True)
@@ -152,6 +161,8 @@ class MorningBrief:
     metro_lines: dict[int, str] = field(default_factory=dict)
     station_notes: list[str] = field(default_factory=list)
     night: list[str] = field(default_factory=list)
+    day_news: list[NewsItem] = field(default_factory=list)
+    closed_stations: list[str] = field(default_factory=list)
 
     @property
     def photo(self) -> Path | None:
@@ -273,6 +284,34 @@ def news_bucket(title: str) -> str | None:
     return None
 
 
+def _markup(node: ET.Element) -> str:
+    parts = [node.text or ""]
+    for child in list(node):
+        parts.append(ET.tostring(child, encoding="unicode"))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def news_lead(raw: str) -> str:
+    text = re.sub(r"(?is)<(script|style|figure|figcaption)\b[^>]*>.*?</\1>", " ", raw)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)</p>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = html.unescape(text).replace("\xa0", " ")
+    paragraphs = [re.sub(r"\s+", " ", part).strip() for part in text.split("\n")]
+    paragraphs = [part for part in paragraphs if part and not part.casefold().startswith("фото:")]
+    source = " ".join(paragraphs[:2])
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?…])\s+", source) if part.strip()]
+    result = " ".join(sentences[:2]).strip()
+    if len(result) > 280:
+        return result[:279].rstrip() + "…"
+    return result
+
+
+def clean_link(url: str) -> str:
+    return url.split("?", 1)[0].strip()
+
+
 def parse_rss(xml_text: str) -> list[NewsItem]:
     try:
         root = ET.fromstring(xml_text)
@@ -289,7 +328,18 @@ def parse_rss(xml_text: str) -> list[NewsItem]:
         except (TypeError, ValueError, IndexError):
             continue
         categories = tuple((item.text or "").strip() for item in node.findall("category") if item.text)
-        items.append(NewsItem(title=title, published=published, categories=categories))
+        encoded = node.find(_CONTENT_TAG)
+        description = node.findtext("description") or ""
+        lead = news_lead(_markup(encoded) if encoded is not None else description)
+        items.append(
+            NewsItem(
+                title=title,
+                published=published,
+                categories=categories,
+                link=clean_link(node.findtext("link") or ""),
+                lead=lead,
+            )
+        )
     return items
 
 
@@ -436,8 +486,106 @@ def _traffic_line(level: int | None, hint: str) -> str:
     hint_clean = hint.strip().rstrip(".")
     if hint_clean:
         hint_clean = hint_clean[:1].lower() + hint_clean[1:]
-        return f"🚗 Загруженность дорог — {level}/10, {hint_clean}."
-    return f"🚗 Загруженность дорог — {level}/10."
+        return f"🚗 Пробки: {level}, {hint_clean}."
+    return f"🚗 Пробки: {level}."
+
+
+def parse_closed_stations(page: str) -> list[str] | None:
+    if "вестибюль станции" not in page.casefold():
+        return None
+    stations: list[str] = []
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, flags=re.IGNORECASE | re.DOTALL):
+        text = re.sub(r"<[^>]+>", " ", row)
+        text = html.unescape(text).replace("\xa0", " ")
+        text = re.sub(r"\s+", " ", text).strip()
+        match = re.search(r"^\d+\s+(.+?)\s+станция закрыта\b", text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        name = match.group(1).strip()
+        if name and name not in stations:
+            stations.append(name)
+    return stations
+
+
+DAY_NEWS_SKIP_RE = re.compile(r"убил|убийств|изнасил|расчлен|маньяк", re.IGNORECASE)
+
+
+def select_day_news(items: list[NewsItem], now: datetime, limit: int = 2) -> list[NewsItem]:
+    moment = now.astimezone(UTC)
+    start = moment - timedelta(hours=24)
+    fresh = [
+        item
+        for item in items
+        if start <= item.published <= moment + timedelta(minutes=5)
+        and not DAY_NEWS_SKIP_RE.search(f"{item.title} {item.lead}")
+    ]
+    fresh.sort(key=lambda item: item.published, reverse=True)
+    local = [item for item in fresh if _local(f"{item.title} {item.lead}")]
+    return (local or fresh)[:limit]
+
+
+def render_news_line(item: NewsItem) -> str:
+    text = html.escape(item.body)
+    link = clean_link(item.link)
+    if not link:
+        return text
+    url = html.escape(link, quote=True)
+    visible = html.escape(link)
+    return f"{text} (<a href=\"{url}\">{visible}</a>)"
+
+
+def upcoming_lines(payload: dict[str, object], now: datetime, count: int = 4) -> list[str]:
+    hourly = payload.get("hourly")
+    if not isinstance(hourly, dict):
+        return []
+    times = hourly.get("time") or []
+    temperatures = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    if not isinstance(times, list) or not isinstance(temperatures, list) or not isinstance(codes, list):
+        return []
+    lines: list[str] = []
+    local_now = now.astimezone(ZoneInfo("Europe/Moscow"))
+    for raw_time, temperature, code in zip(times, temperatures, codes, strict=False):
+        try:
+            moment = datetime.fromisoformat(str(raw_time))
+        except ValueError:
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=ZoneInfo("Europe/Moscow"))
+        if moment <= local_now or moment.hour % 3 != 0:
+            continue
+        lines.append(f"{moment:%H:%M} {format_temp(float(temperature))}, {weather_label(int(code)).lower()}")
+        if len(lines) >= count:
+            break
+    return lines
+
+
+def render_weather_command(payload: dict[str, object], now: datetime) -> str | None:
+    weather = parse_weather(payload)
+    if weather is None:
+        return None
+    emoji = {"clear": "☀️", "cloudy": "🌥", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}[weather.kind]
+    wind = max(0, int(round(weather.wind_kmh / 3.6)))
+    rain = "Осадков нет" if weather.precipitation < 0.1 else f"Осадки {weather.precipitation:.1f} мм"
+    lines = [
+        f"{emoji} <b>Погода в Петербурге</b>",
+        "",
+        f"Сейчас: {format_temp(weather.temperature)}, ощущается как {format_temp(weather.feels_like)}.",
+        f"{weather_label(weather.code)}, ветер {wind} м/с. {rain}.",
+        f"👕 {html.escape(clothing_advice(weather))}",
+    ]
+    later = upcoming_lines(payload, now)
+    if later:
+        lines.extend(["", "<b>Дальше</b>", *later])
+    lines.extend(["", "Источник: Open-Meteo"])
+    return "\n".join(lines)
+
+
+def _closed_stations_line(stations: list[str]) -> str:
+    if not stations:
+        return "🚇 Закрытых станций нет."
+    names = ", ".join(html.escape(station) for station in stations)
+    return f"🚇 Не работают: {names}"
 
 
 def _metro_block(lines: dict[int, str], stations: list[str]) -> list[str]:
@@ -465,43 +613,30 @@ def brief_title(moment: datetime) -> str:
 
 def render_brief(brief: MorningBrief) -> str:
     day = brief.when.astimezone(ZoneInfo("Europe/Moscow")).date()
-    weather_lines = ["🌤 <b>Погода</b>", "Сводку погоды сейчас не удалось снять."]
+    weather_lines = ["🌤 Погода сейчас недоступна."]
     sun = "—"
     moon = "—"
     if brief.weather:
-        wind = max(0, int(round(brief.weather.wind_kmh / 3.6)))
         emoji = {"clear": "☀️", "cloudy": "🌥", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}[
             brief.weather.kind
         ]
         weather_lines = [
-            f"{emoji} <b>Погода</b>",
-            f"{format_temp(brief.weather.temperature)}, ощущается как {format_temp(brief.weather.feels_like)}.",
-            f"{weather_label(brief.weather.code)}, ветер {wind} м/с.",
-            f"👕 {html.escape(clothing_advice(brief.weather))}",
+            f"{emoji} {format_temp(brief.weather.temperature)}, {weather_label(brief.weather.code).lower()}",
         ]
         sun = clock(brief.weather.sunrise)
         moon = clock(brief.weather.sunset)
-    transport = [
-        "🚇 <b>Транспорт</b>",
-        *_metro_block(brief.metro_lines, brief.station_notes),
-        _traffic_line(brief.traffic_level, brief.traffic_hint),
-    ]
-    if brief.transport_notes:
-        transport.extend(f"⚠️ {html.escape(_short(note, 120))}" for note in brief.transport_notes[:3])
+    if brief.day_news:
+        news = ["📰 <b>За сутки</b>", *[render_news_line(item) for item in brief.day_news[:2]]]
     else:
-        transport.append("🚌 Крупных задержек наземного транспорта в утренней сводке нет.")
-    if brief.night:
-        night = ["🚨 <b>За ночь</b>", *[f"• {html.escape(_short(item, 120))}" for item in brief.night[:5]]]
-    else:
-        night = ["🚨 <b>За ночь</b>", "Тихая ночь: крупных городских происшествий в сводке нет."]
+        news = ["📰 <b>За сутки</b>", "За сутки в ленте Фонтанки нет новых материалов."]
     parts = [
         brief_title(brief.when),
         "",
         *weather_lines,
+        _traffic_line(brief.traffic_level, brief.traffic_hint),
+        _closed_stations_line(brief.closed_stations),
         "",
-        *transport,
-        "",
-        *night,
+        *news,
         "",
         "🕐 <b>Сегодня</b>",
         f"📅 {format_day(day)}",
@@ -512,11 +647,8 @@ def render_brief(brief: MorningBrief) -> str:
         html.escape(fact_for(day)),
     ]
     text = "\n".join(parts)
-    if len(text) > CAPTION_LIMIT and brief.night:
-        brief.night.pop()
-        return render_brief(brief)
-    if len(text) > CAPTION_LIMIT and brief.transport_notes:
-        brief.transport_notes.pop()
+    if len(text) > CAPTION_LIMIT and len(brief.day_news) > 1:
+        brief.day_news.pop()
         return render_brief(brief)
     if len(text) > CAPTION_LIMIT:
         return text[: CAPTION_LIMIT - 1].rsplit("\n", 1)[0]
@@ -524,9 +656,17 @@ def render_brief(brief: MorningBrief) -> str:
 
 
 async def _get_text(session: aiohttp.ClientSession, url: str) -> str:
-    async with session.get(url) as response:
-        response.raise_for_status()
-        return await response.text()
+    try:
+        async with session.get(url) as response:
+            response.raise_for_status()
+            return await response.text()
+    except aiohttp.ClientSSLError:
+        if "metro.spb.ru" not in url:
+            raise
+        logger.warning("Сертификат metro.spb.ru не прошёл проверку, повторяю запрос к официальной странице")
+        async with session.get(url, ssl=False) as response:
+            response.raise_for_status()
+            return await response.text()
 
 
 async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, object]:
@@ -557,14 +697,31 @@ async def collect_brief(now: datetime) -> MorningBrief:
     else:
         logger.warning("Утренние пробки не ответили")
     if isinstance(news_raw, str):
-        brief.transport_notes, brief.night = select_news(parse_rss(news_raw), now)
+        brief.day_news = select_day_news(parse_rss(news_raw), now)
     else:
         logger.warning("Утренняя лента новостей не ответила")
     if isinstance(metro_raw, str):
-        brief.metro_lines, brief.station_notes = metro_status(extract_metro_messages(metro_raw), now)
+        stations = parse_closed_stations(metro_raw)
+        brief.closed_stations = list(FALLBACK_CLOSED_STATIONS) if stations is None else stations
     else:
         logger.warning("Сводка метро не ответила")
+        brief.closed_stations = list(FALLBACK_CLOSED_STATIONS)
     return brief
+
+
+async def weather_reply(now: datetime) -> str:
+    timeout = aiohttp.ClientTimeout(total=12)
+    headers = {"User-Agent": "NoraMorning/1.0"}
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            payload = await _get_json(session, WEATHER_URL)
+        text = render_weather_command(payload, now)
+    except (aiohttp.ClientError, TimeoutError):
+        logger.warning("Команда погоды не ответила")
+        text = None
+    if not text:
+        return "Не удалось получить погоду. Попробуйте ещё раз через минуту."
+    return text
 
 
 async def publish_morning_digest(bot, db, settings, *, force: bool = False) -> bool:
