@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import Bot, Dispatcher, Router
@@ -17,8 +18,11 @@ from aiogram.methods import (
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from community_bot.database import Database
+from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, patch_bot_ephemeral
+from community_bot.navigation import CabinetNavigationMiddleware
 from community_bot.routers import life, private
 from community_bot.states import AdminFlow
+from community_bot.ui_owner import UiOwnerMiddleware
 
 
 class TelegramSession(BaseSession):
@@ -42,7 +46,7 @@ class TelegramSession(BaseSession):
             return True
         self.message_id += 1
         return Message(
-            message_id=self.message_id,
+            message_id=getattr(method, "message_id", None) or self.message_id,
             date=datetime.now(UTC),
             chat=Chat(id=method.chat_id, type="private" if method.chat_id > 0 else "supergroup"),
             from_user=User(id=123456, is_bot=True, first_name="Нора"),
@@ -52,7 +56,7 @@ class TelegramSession(BaseSession):
 
 
 @pytest.fixture
-async def app(tmp_path):
+async def app(tmp_path, monkeypatch):
     db = Database(tmp_path / "events.db")
     await db.initialize()
     await db.ensure_user(1, telegram_name="Админ")
@@ -61,6 +65,9 @@ async def app(tmp_path):
         community_chat_id=-100123, timezone="Europe/Moscow", reviewers=frozenset(),
     )
     dispatcher = Dispatcher()
+    dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
+    dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
+    dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     # Use the actual registered filters and handlers without reparenting global routers.
     for source in (life.router, private.router):
         isolated = Router()
@@ -71,6 +78,8 @@ async def app(tmp_path):
         dispatcher.include_router(isolated)
     session = TelegramSession()
     bot = Bot("123456:test", session=session)
+    monkeypatch.setattr("community_bot.ephemeral.delete_later", AsyncMock())
+    patch_bot_ephemeral(bot)
     yield SimpleNamespace(db=db, settings=settings, dp=dispatcher, bot=bot, session=session)
     await dispatcher.storage.close()
     await bot.session.close()
@@ -230,6 +239,25 @@ async def test_counter_retries_after_telegram_failure_and_database_restart(app):
     await sync_event_counters(app.bot, Database(app.db.path))
     assert counter(app) == "Я буду (1)"
     assert (await app.db.get_studio_event("e-test"))["markup_dirty"] == 0
+
+
+async def test_counter_edit_never_schedules_deletion_of_the_original_event_post(app, monkeypatch):
+    import community_bot.ephemeral as ephemeral
+
+    scheduled = []
+
+    def track(result, ttl):
+        if isinstance(result, Message):
+            scheduled.append(result.message_id)
+
+    monkeypatch.setattr(ephemeral, "schedule_group_reply", track)
+    await event(app)
+    await attend(app)
+    assert counter(app) == "Я буду (1)"
+    assert 50 not in scheduled
+    await attend(app)
+    assert scheduled  # The separate, short-lived cancellation prompt still expires normally.
+    assert 50 not in scheduled
 
 
 async def test_preview_and_wrong_post_cannot_register_or_charge(app):

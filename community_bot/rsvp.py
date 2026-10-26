@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 
 from community_bot.database import Database
+from community_bot.ephemeral import keep_in_chat
 from community_bot.posting import compose_post_markup, post_title
 
 logger = logging.getLogger(__name__)
@@ -64,9 +65,11 @@ async def refresh_event_markup(bot, db: Database, event_id: str) -> bool:
         rsvp_count=await db.event_participant_count(event_id),
     )
     try:
-        await bot.edit_message_reply_markup(
-            chat_id=int(event["chat_id"]), message_id=int(event["message_id"]), reply_markup=markup,
-        )
+        # Edits also return Message; group callback TTL must never delete the original event post.
+        with keep_in_chat():
+            await bot.edit_message_reply_markup(
+                chat_id=int(event["chat_id"]), message_id=int(event["message_id"]), reply_markup=markup,
+            )
     except TelegramBadRequest as error:
         if "message is not modified" not in error.message.casefold():
             if any(text in error.message.casefold() for text in (
