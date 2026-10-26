@@ -19,6 +19,7 @@ PERM_CHAT_LOCK = "chat.lock"
 PERM_BROADCAST = "chat.broadcast"
 PERM_MENTION = "chat.mention"
 PERM_POST = "chat.post"
+PERM_EVENT_PARTICIPANTS = "events.participants"
 PERM_FEATURES = "features"
 PERM_AUTOMESSAGES = "automessages"
 PERM_AUDIT = "audit"
@@ -45,6 +46,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_BROADCAST, "Рассылка в ЛС"),
     (PERM_MENTION, "Упомянуть всех"),
     (PERM_POST, "Пост в сообщество"),
+    (PERM_EVENT_PARTICIPANTS, "Мероприятия: участники и журнал оплат"),
     (PERM_FEATURES, "Функции и флаги"),
     (PERM_AUTOMESSAGES, "Автосообщения"),
     (PERM_AUDIT, "Журнал"),

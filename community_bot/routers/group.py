@@ -1277,6 +1277,12 @@ async def buy_shop_item(
     item = str(intent["item"]) if intent else raw.split(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
     prices = await _shop_prices(db, user, settings)
+    if item == "event_pass":
+        from community_bot.event_access import open_event_purchase
+
+        await state.clear()
+        await open_event_purchase(callback, db)
+        return
     if item in {"event_pass", "support"} and not confirmed:
         tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
         discount = item_discount(item, tier.discount)
