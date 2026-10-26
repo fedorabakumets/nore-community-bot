@@ -298,3 +298,16 @@ async def test_event_participants_and_payment_journal_are_reachable_in_web(env):
     view = await click(env, view, 'Журнал оплат')
     assert any('Журнал оплат' in c['html'] for c in view['cards'])
     assert not any('Действие больше' in n for n in view['notices'])
+
+
+async def test_close_admin_panel_returns_to_lk_and_cancels_draft(env):
+    root = await env.bridge.open(env.actor)
+    view = await click(env, root, 'Управление магазином')
+    view = await click(env, view, 'Создать категорию')
+    assert view['draft']
+    # The root toolbar cancels the draft, and the standard close control exits to LK.
+    root = await env.bridge.open(env.actor, reset=True)
+    closed = await click(env, root, 'Закрыть')
+    assert closed['exit'] is True
+    assert await (await env.bridge.context(7)).get_state() is None
+    assert not env.telegram.calls
