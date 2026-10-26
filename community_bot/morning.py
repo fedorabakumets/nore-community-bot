@@ -961,6 +961,9 @@ async def _refresh_today(bot, db, settings, now: datetime) -> bool:
 
 
 async def _pin_morning(bot, db, chat_id: int, message_id: int, today: str) -> bool:
+    from community_bot.stickers import send_context_sticker
+
+    await send_context_sticker(bot, db, chat_id, "morning", message_id)
     old_pin = await db.get_bot_state("morning_pin_message_id")
     try:
         await bot.pin_chat_message(chat_id, message_id, disable_notification=True)

@@ -2506,6 +2506,10 @@ async def _admin_post_send(
                 list(data.get("post_buttons") or []), int(raw_stake) if raw_stake.isdigit() else 0,
                 callback.from_user.id, rsvp_enabled=bool(data.get("post_rsvp")),
             )
+        if sent_id and (data.get("post_template") == "event" or data.get("post_rsvp")):
+            from community_bot.stickers import send_context_sticker
+
+            await send_context_sticker(bot, db, settings.community_chat_id, "event", sent_id)
         if poll and not data.get("post_poll_sent"):
             await send_studio_poll(bot, settings.community_chat_id, dict(poll))
             await state.update_data(post_poll_sent=True)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,6 +14,7 @@ class UpdateSection:
     body: str
     example: str | None = None
     image: str | None = None
+    image_caption: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +28,9 @@ class BotUpdate:
     sections: tuple[UpdateSection, ...] = field(default_factory=tuple)
     staff_details: tuple[str, ...] = field(default_factory=tuple)
     telegraph_title: str = ""
+    article_intro: str = ""
+    sticker_pack_url: str = ""
+    invitation_text: str = ""
 
 
 UPDATES: tuple[BotUpdate, ...] = (
@@ -785,18 +791,33 @@ UPDATES: tuple[BotUpdate, ...] = (
             "Свои сцены получили игры, роли, поддержка, уведомления и каждый вид питомца.",
         ),
         teasers=("Одна Нора — десятки ироничных образов.",),
+        article_intro=(
+            "Бабушка с логотипа давно смотрит на нас сквозь круглые очки. "
+            "Теперь у неё появилась работа: встречать вас в каждом разделе Норы.\n\n"
+            "Мы собрали для меню целую серию сцен. У всех одна основа — чёрный, белый, "
+            "немного красного и крупные пиксельные заголовки. Меняется настроение бабушки, "
+            "а знакомый характер остаётся."
+        ),
         sections=(
             UpdateSection(
-                heading="Единый стиль",
-                body="Чёрный фон, белые заголовки, красные акценты и пиксельный шрифт. "
-                     "Бабушка узнаваема, но мягко размыта на фоне, чтобы текст читался сразу.",
+                heading="Сначала узнаёшь бабушку, потом — раздел",
+                body="В профиле она, конечно, поворачивается в профиль. В кошельке разглядывает "
+                     "дырявый кошелёк с выражением человека, который всё понял ещё вчера. "
+                     "В магазине отправляется за покупками, а рядом с питомцем появляется его компания.\n\n"
+                     "Рисунок на обложках мягко размыт: так он задаёт настроение и не мешает "
+                     "сразу прочитать название. Сам заголовок везде остаётся крупным и чётким.",
                 image="profile.jpg",
+                image_caption="Да, бабушка в профиле теперь действительно в профиль.",
             ),
             UpdateSection(
-                heading="Картинка под каждый раздел",
-                body="Кошелёк, магазин, кабинет, поддержка и игры получили собственные сцены. "
-                     "У питомцев бабушка появляется вместе с выбранным животным.",
+                heading="Маленькие сцены из жизни Норы",
+                body="Свои обложки получили кошелёк, кабинет, поддержка, игры и остальные меню. "
+                     "Здесь нет случайной картинки, выбранной только потому, что она подошла по цвету: "
+                     "каждая сцена связана с тем, что вы открываете.\n\n"
+                     "Загляните в привычные разделы заново. Бабушка там уже устроилась, "
+                     "а в кошельке, кажется, снова ищет печеньки.",
                 image="wallet.jpg",
+                image_caption="Баланс меняется. Выражение лица — не всегда.",
             ),
         ),
         staff_details=(
@@ -839,6 +860,72 @@ UPDATES: tuple[BotUpdate, ...] = (
         ),
         telegraph_title="Нора · Запись на события",
     ),
+    BotUpdate(
+        number=20,
+        slug="grandma-stickers-and-stories",
+        title="Бабушка вышла в чат",
+        summary="У Норы появились свои стикеры. Бабушка встречает утро, зовёт на тусу и первой узнаёт об обновлениях.",
+        details=(
+            "Стикер «ОБНОВА» появляется следом за новостями Норы, «ТУСА» — за анонсом мероприятия.",
+            "Утренний закреп сопровождает отдельное «Доброе утро <3».",
+            "Мемные реакции с бабушкой можно добавить себе и отправлять в любые чаты.",
+            "В статьях об обновлениях появились полноценные истории с иллюстрациями.",
+        ),
+        teasers=("«Я всё», «Это база», «Без паники» — забирайте знакомые реакции в свой Telegram.",),
+        article_intro=(
+            "У каждого чата есть человек, который без лишних слов понимает, что происходит. "
+            "В Норе эту роль забрала бабушка в круглых очках. До сих пор она встречала нас "
+            "на обложках меню, а теперь перебралась в переписку.\n\n"
+            "Мы сделали с ней набор стикеров: чёткий рисунок, белые пиксельные подписи "
+            "и одно красное слово, на которое падает весь акцент. Бабушка узнаваемая, "
+            "выражения лица — на разные случаи жизни."
+        ),
+        sections=(
+            UpdateSection(
+                heading="Когда за тебя уже всё сказала бабушка",
+                body="Закончились силы — есть «Я всё». Прочитали что-то особенно убедительное — "
+                     "«Это база». Хотите переждать разговор за газетой — «Меня нет». "
+                     "А для людей, которые умеют пить чай посреди небольшого пожара, нашлось «Без паники».\n\n"
+                     "Это реакции для обычных разговоров: своих, рабочих, дружеских и тех, "
+                     "где кто-то снова спрашивает, куда делись печеньки. Сохраняйте набор "
+                     "и пробуйте — бабушка теперь может отвечать вместе с вами.",
+                image="20-stickers.png",
+                image_caption="У бабушки найдётся ответ и на хорошие новости, и на понедельник.",
+            ),
+            UpdateSection(
+                heading="У новостей появилось своё выражение лица",
+                body="Когда в Норе выходит обновление, следом за сообщением приходит «ОБНОВА». "
+                     "У анонсов мероприятий — своя «ТУСА»: увидели бабушку, значит, есть повод собраться.\n\n"
+                     "Стикер идёт отдельным сообщением после поста. Дата, место и кнопки участия "
+                     "остаются в самом анонсе, а бабушка берёт на себя настроение.",
+            ),
+            UpdateSection(
+                heading="С утра — с любовью и без лишней суеты",
+                body="После утреннего закрепа Нора отправляет «Доброе утро <3». "
+                     "Погода и городские новости остаются в сводке, рядом появляется маленькое приветствие. "
+                     "Даже если за окном петербургское серое, кто-то здесь вам уже рад.",
+            ),
+            UpdateSection(
+                heading="За картинками теперь можно идти в статью",
+                body="У обновлений тоже меняется голос. Здесь будут связные истории: "
+                     "что появилось в Норе, как этим пользоваться и почему нам захотелось это сделать. "
+                     "С картинками, примерами и нормальным человеческим рассказом.\n\n"
+                     "Знакомая бабушка остаётся общей нитью — на обложках, в стикерах и в историях "
+                     "про наш чат. Сначала она просто смотрела на нас с логотипа. "
+                     "Кажется, теперь она здесь всерьёз и надолго.",
+                image="20-profile.jpg",
+                image_caption="Та же бабушка, знакомые цвета — теперь и за пределами меню.",
+            ),
+        ),
+        staff_details=(
+            "Служебные стикеры отправляются после анонса обновления, опубликованного мероприятия и утреннего закрепа.",
+            "Рисунки отправляются как настоящие Telegram-стикеры; текст и inline-кнопки исходных постов сохранены.",
+            "Статьи поддерживают абзацы, иллюстрации с подписями и прямую ссылку на набор.",
+        ),
+        telegraph_title="Бабушка вышла в чат — Нора",
+        sticker_pack_url="https://t.me/addstickers/vstickere",
+        invitation_text="Добавляйте набор себе, отправляйте бабушку друзьям и заходите в чат с любимой реакцией.",
+    ),
 )
 
 
@@ -857,26 +944,38 @@ def updates_text() -> str:
         "",
     ]
     for item in reversed(UPDATES):
-        lines.append(f"<b>№{item.number} · {item.title}</b>")
-        lines.append(item.summary)
-        lines.extend(f"• {line}" for line in item.details)
-        lines.extend(f"• {line}" for line in item.staff_details)
+        lines.append(f"<b>№{item.number} · {html.escape(item.title)}</b>")
+        lines.append(html.escape(item.summary))
+        lines.extend(f"• {html.escape(line)}" for line in item.details)
+        lines.extend(f"• {html.escape(line)}" for line in item.staff_details)
         lines.append("")
     lines.append("Открывается только из админ-панели.")
     return "\n".join(lines).strip()
 
 
-def community_announcement(item: BotUpdate) -> str:
+def _paragraphs(text: str) -> list[str]:
+    return [part.strip() for part in text.split("\n\n") if part.strip()]
+
+
+def _pack_link(item: BotUpdate, override: str | None = None) -> str:
+    candidate = item.sticker_pack_url if override is None else override
+    return candidate if re.fullmatch(r"https://t\.me/addstickers/[A-Za-z0-9_]{1,64}", candidate) else ""
+
+
+def community_announcement(item: BotUpdate, sticker_pack_url: str | None = None) -> str:
     lines = [
         f"✨ <b>Обновление №{item.number}</b>",
-        f"<b>{item.title}</b>",
+        f"<b>{html.escape(item.title)}</b>",
         "",
-        item.summary,
+        html.escape(item.summary),
     ]
     if item.teasers:
         lines.append("")
-        lines.extend(item.teasers)
-    lines.extend(["", "Подробности, примеры и картинки — кнопка ниже."])
+        lines.extend(html.escape(line) for line in item.teasers)
+    pack_url = _pack_link(item, sticker_pack_url)
+    if pack_url:
+        lines.extend(["", f'<a href="{pack_url}">Добавить стикеры Норы</a>'])
+    lines.extend(["", "Вся история и иллюстрации — по кнопке ниже."])
     return "\n".join(lines)
 
 
@@ -888,59 +987,67 @@ def staff_announcement(item: BotUpdate) -> str:
         "Это служебное письмо. В общий чат оно не уходит.",
         "",
     ]
-    lines.extend(f"• {line}" for line in item.staff_details)
+    lines.extend(f"• {html.escape(line)}" for line in item.staff_details)
     return "\n".join(lines)
 
 
-def member_details_text(item: BotUpdate) -> str:
+def member_details_text(item: BotUpdate, sticker_pack_url: str | None = None) -> str:
     lines = [
         f"✨ <b>Обновление №{item.number}</b>",
-        f"<b>{item.title}</b>",
-        "",
-        item.summary,
+        f"<b>{html.escape(item.title)}</b>",
         "",
     ]
+    lines.extend(html.escape(paragraph) + "\n" for paragraph in _paragraphs(item.article_intro or item.summary))
     if item.sections:
         for section in item.sections:
-            lines.append(f"<b>{section.heading}</b>")
-            lines.append(section.body)
+            if section.heading:
+                lines.append(f"<b>{html.escape(section.heading)}</b>")
+            lines.extend(html.escape(paragraph) + "\n" for paragraph in _paragraphs(section.body))
             if section.example:
-                lines.append("")
-                lines.append(f"<i>Пример.</i> {section.example}")
-            lines.append("")
+                lines.extend([f"<i>Пример.</i> {html.escape(section.example)}", ""])
     else:
-        lines.extend(f"• {line}" for line in item.details)
+        lines.extend(f"• {html.escape(line)}" for line in item.details)
+    pack_url = _pack_link(item, sticker_pack_url)
+    if pack_url:
+        lines.extend(["", html.escape(item.invitation_text), f'<a href="{pack_url}">Добавить стикеры Норы</a>'])
     return "\n".join(lines).strip()
 
 
 def member_details_nodes(
     item: BotUpdate,
     image_urls: dict[str, str] | None = None,
+    sticker_pack_url: str | None = None,
 ) -> list[dict[str, Any]]:
     urls = image_urls or {}
+    # Telegraph already displays the page title. Start the article with a small issue line,
+    # then actual paragraphs rather than repeating the title as two more headings.
     nodes: list[dict[str, Any]] = [
-        {"tag": "h3", "children": [f"Обновление №{item.number}"]},
-        {"tag": "h4", "children": [item.title]},
-        {"tag": "p", "children": [item.summary]},
+        {"tag": "p", "children": [{"tag": "em", "children": [f"Нора · Обновление №{item.number}"]}]},
     ]
+    nodes.extend({"tag": "p", "children": [paragraph]}
+                 for paragraph in _paragraphs(item.article_intro or item.summary))
     sections = item.sections or tuple(
         UpdateSection(heading="", body=line) for line in item.details
     )
     for section in sections:
         if section.heading:
-            nodes.append({"tag": "h4", "children": [section.heading]})
+            nodes.append({"tag": "h3", "children": [section.heading]})
         image_url = urls.get(section.image or "")
-        if image_url:
-            nodes.append(
-                {
-                    "tag": "figure",
-                    "children": [
-                        {"tag": "img", "attrs": {"src": image_url}},
-                    ],
-                }
-            )
-        if section.body:
-            nodes.append({"tag": "p", "children": [section.body]})
+        if image_url and image_url.startswith("https://"):
+            figure: dict[str, Any] = {
+                "tag": "figure", "children": [{"tag": "img", "attrs": {"src": image_url}}],
+            }
+            if section.image_caption:
+                figure["children"].append({"tag": "figcaption", "children": [section.image_caption]})
+            nodes.append(figure)
+        nodes.extend({"tag": "p", "children": [paragraph]} for paragraph in _paragraphs(section.body))
         if section.example:
             nodes.append({"tag": "blockquote", "children": [f"Пример. {section.example}"]})
+    pack_url = _pack_link(item, sticker_pack_url)
+    if pack_url:
+        if item.invitation_text:
+            nodes.append({"tag": "p", "children": [item.invitation_text]})
+        nodes.append({"tag": "p", "children": [
+            {"tag": "a", "attrs": {"href": pack_url}, "children": ["Добавить стикеры Норы в Telegram"]},
+        ]})
     return nodes

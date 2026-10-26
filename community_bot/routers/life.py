@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -43,6 +44,14 @@ from community_bot.states import GiftFlow, MailboxForm
 router = Router(name="life")
 
 _TG_ERRORS = (TelegramBadRequest, TelegramForbiddenError)
+
+
+@router.message(Command("stickers"))
+@router.message(F.text.casefold().in_({"стикеры", "стикерпак"}))
+async def sticker_pack(message: Message, bot: Bot) -> None:
+    from community_bot.stickers import send_pack_invitation
+
+    await send_pack_invitation(message, bot)
 
 
 def _captcha_markup(chat_id: int) -> InlineKeyboardMarkup:
