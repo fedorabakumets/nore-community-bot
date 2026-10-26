@@ -90,7 +90,9 @@ async def _section_images(item: BotUpdate) -> dict[str, str]:
         if not name or name in seen:
             continue
         seen.add(name)
-        path = _ASSETS / name
+        from community_bot.menu_art import menu_cover
+
+        path = menu_cover(Path(name).stem) or _ASSETS / name
         if not path.is_file():
             path = _COVERS / name
         url = await upload_image(path)

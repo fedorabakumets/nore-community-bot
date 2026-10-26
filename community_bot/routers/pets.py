@@ -19,6 +19,7 @@ from community_bot.expedition import (
     remaining_label,
 )
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
+from community_bot.menu_art import menu_cover
 from community_bot.pets_talk import SPECIES, aftercare_line, pet_pronouns, species_meta
 from community_bot.shop_catalog import shop_header_lines, shop_prices_for
 from community_bot.states import PetFlow
@@ -35,6 +36,9 @@ def _bar(value: int) -> str:
 
 
 def pet_photo(species: str) -> FSInputFile | None:
+    modern = menu_cover(f"pet_{species}")
+    if modern:
+        return FSInputFile(modern)
     fallback = ASSETS / f"{species}.png"
     return FSInputFile(fallback) if fallback.is_file() else None
 

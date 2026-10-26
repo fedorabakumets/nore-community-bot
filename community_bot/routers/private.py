@@ -133,7 +133,10 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
 
 
 async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
-    cover = settings.welcome_cover
+    from community_bot.menu_art import menu_cover
+
+    bundled = menu_cover("welcome")
+    cover = str(bundled) if bundled else settings.welcome_cover
     user_id = message.from_user.id if message.from_user else 0
     apply_markup = None
     if await db.has_approved_application(user_id):
