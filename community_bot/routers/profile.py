@@ -43,7 +43,7 @@ async def send_profile_card(
 ) -> Message | None:
     user_id = int(user["user_id"])
     markup = (
-        profile_keyboard(user_id, bool(user.get("profile_private")))
+        profile_keyboard(user_id, bool(user.get("profile_private")), back_to_menu=message.chat.type == "private")
         if editable
         else public_profile_keyboard(user_id)
     )
@@ -51,7 +51,7 @@ async def send_profile_card(
     if replace:
         sent = await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
         if db and message.from_user:
-            await bind_ui_owner(db, sent or message, message.from_user.id, "profile")
+            await bind_ui_owner(db, sent or message, user_id if editable else message.from_user.id, "profile")
         return sent
     if user.get("avatar_file_id"):
         try:
@@ -81,7 +81,7 @@ async def send_profile_card(
     if sent is None:
         sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     if db and message.from_user:
-        await bind_ui_owner(db, sent, message.from_user.id, "profile")
+        await bind_ui_owner(db, sent, user_id if editable else message.from_user.id, "profile")
     return sent
 
 

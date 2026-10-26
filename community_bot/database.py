@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS wallet_intents (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id),
+    target_id INTEGER NOT NULL REFERENCES users(user_id),
+    item TEXT NOT NULL,
+    price INTEGER NOT NULL CHECK(price > 0),
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    catalog_version TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'cancelled')),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS cookie_loans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(user_id),
@@ -1602,11 +1616,97 @@ class Database:
             await db.commit()
             return True, "ok", receiver_amount
 
-    async def list_transactions(self, user_id: int, limit: int = 12) -> list[dict[str, Any]]:
+    async def list_transactions(self, user_id: int, limit: int = 12, *, offset: int = 0) -> list[dict[str, Any]]:
         return await self.fetchall(
-            "SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-            (user_id, limit),
+            "SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+            (user_id, limit, max(0, offset)),
         )
+
+    async def create_wallet_intent(
+        self,
+        user_id: int,
+        item: str,
+        price: int,
+        *,
+        target_id: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        """Persist a short-lived confirmation; no balance changes until it is consumed."""
+        if price <= 0:
+            raise ValueError("The confirmed amount must be positive")
+        now = datetime.now(UTC)
+        token = secrets.token_urlsafe(12)
+        catalog = await self.get_shop_item(item)
+        await self.execute(
+            """
+            INSERT INTO wallet_intents(
+                token, user_id, target_id, item, price, payload_json, catalog_version, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                token, user_id, target_id if target_id is not None else user_id, item, price,
+                json.dumps(payload or {}, ensure_ascii=False),
+                catalog["updated_at"] if catalog else None,
+                now.isoformat(), (now + timedelta(minutes=15)).isoformat(),
+            ),
+        )
+        return token
+
+    async def get_wallet_intent(self, user_id: int, token: str) -> dict[str, Any] | None:
+        row = await self.fetchone(
+            "SELECT * FROM wallet_intents WHERE token = ? AND user_id = ? AND status = 'pending' AND expires_at > ?",
+            (token, user_id, utcnow()),
+        )
+        if row:
+            row["payload"] = json.loads(row["payload_json"])
+        return row
+
+    async def cancel_wallet_intent(self, user_id: int, token: str) -> None:
+        await self.execute(
+            "UPDATE wallet_intents SET status = 'cancelled' WHERE token = ? AND user_id = ? AND status = 'pending'",
+            (token, user_id),
+        )
+
+    async def _consume_wallet_intent(
+        self,
+        db: aiosqlite.Connection,
+        token: str | None,
+        user_id: int,
+        item: str,
+        price: int,
+        target_id: int,
+    ) -> str | None:
+        """Called inside the same write transaction as debit, delivery and ledger entry."""
+        if token is None:  # Trusted internal operations; Telegram handlers always supply a token.
+            return None
+        cursor = await db.execute("SELECT * FROM wallet_intents WHERE token = ?", (token,))
+        row = await cursor.fetchone()
+        if not row or (row["user_id"], row["target_id"], row["item"], row["price"]) != (
+            user_id, target_id, item, price,
+        ):
+            return "Подтверждение не найдено. Откройте операцию заново."
+        if row["status"] == "cancelled":
+            return "Операция отменена. Откройте её заново, если хотите повторить."
+        if row["status"] != "pending":
+            return "Эта операция уже выполнена. Повторного списания не было."
+        if row["expires_at"] <= utcnow():
+            return "Подтверждение устарело. Откройте операцию заново."
+        if row["catalog_version"] is not None:
+            cursor = await db.execute(
+                """SELECT i.enabled, i.updated_at, c.enabled AS category_enabled
+                FROM shop_items i JOIN shop_categories c ON c.slug = i.category_slug WHERE i.sku = ?""",
+                (item,),
+            )
+            catalog = await cursor.fetchone()
+            if not catalog or not catalog["enabled"] or not catalog["category_enabled"]:
+                return "Товар больше недоступен."
+            if catalog["updated_at"] != row["catalog_version"]:
+                return "Условия товара изменились. Откройте товар и подтвердите покупку заново."
+        await db.execute(
+            "UPDATE wallet_intents SET status = 'completed', completed_at = ? WHERE token = ?",
+            (utcnow(), token),
+        )
+        return None
 
     async def get_active_loan(self, user_id: int) -> dict[str, Any] | None:
         return await self.fetchone(
@@ -1618,6 +1718,8 @@ class Database:
         self,
         user_id: int,
         restricted_threshold: int = 0,
+        *,
+        intent_id: str | None = None,
     ) -> tuple[bool, str, dict[str, Any] | None]:
         from community_bot.economy import LOAN_DAYS, LOAN_PRINCIPAL, loan_interest_percent, loan_repay_amount
 
@@ -1625,6 +1727,10 @@ class Database:
         now = now_dt.isoformat()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
+            error = await self._consume_wallet_intent(db, intent_id, user_id, "loan", LOAN_PRINCIPAL, user_id)
+            if error:
+                await db.rollback()
+                return False, error, None
             cursor = await db.execute(
                 "SELECT cookies, reputation, cookie_debt FROM users WHERE user_id = ?",
                 (user_id,),
@@ -1644,6 +1750,12 @@ class Database:
                 await db.rollback()
                 return False, "У вас уже есть открытый кредит.", None
             percent = loan_interest_percent(int(user["reputation"]), restricted_threshold)
+            if intent_id is not None:
+                cursor = await db.execute("SELECT payload_json FROM wallet_intents WHERE token = ?", (intent_id,))
+                intent = await cursor.fetchone()
+                if json.loads(intent["payload_json"]).get("interest_percent") != percent:
+                    await db.rollback()
+                    return False, "Ставка изменилась. Подтвердите новые условия кредита.", None
             due_amount = loan_repay_amount(LOAN_PRINCIPAL, percent)
             due_at = (now_dt + timedelta(days=LOAN_DAYS)).isoformat()
             await db.execute(
@@ -1704,11 +1816,38 @@ class Database:
                 )
                 await db.execute(
                     "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user_id, -due_amount, "loan_repay", f"loan:{loan['id']}", now),
+                    (user_id, -pay, "loan_repay", f"loan:{loan['id']};debt:{remainder}", now),
                 )
                 collected.append({**loan, "paid": pay, "debt_added": remainder})
             await db.commit()
         return collected
+
+    async def repay_cookie_debt(
+        self, user_id: int, amount: int, *, intent_id: str | None = None,
+    ) -> tuple[bool, str]:
+        if amount <= 0:
+            return False, "Сумма погашения должна быть больше нуля."
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            error = await self._consume_wallet_intent(db, intent_id, user_id, "debt_repay", amount, user_id)
+            if error:
+                await db.rollback()
+                return False, error
+            cursor = await db.execute(
+                """UPDATE users SET cookies = cookies - ?, cookie_debt = cookie_debt - ?, updated_at = ?
+                WHERE user_id = ? AND cookies >= ? AND cookie_debt >= ?""",
+                (amount, amount, now, user_id, amount, amount),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False, "Баланс или долг изменился. Откройте кошелёк и подтвердите сумму заново."
+            await db.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, -amount, "debt_repay", "overdue", now),
+            )
+            await db.commit()
+            return True, "ok"
 
     async def cancel_transfer(self, transfer_id: int, sender_id: int) -> bool:
         async with self.connect() as db:
@@ -1759,11 +1898,32 @@ class Database:
             await db.commit()
             return True, difference
 
-    async def buy_item(self, user_id: int, item: str, price: int, target_id: int | None = None) -> tuple[bool, str]:
+    async def buy_item(
+        self, user_id: int, item: str, price: int, target_id: int | None = None,
+        *, intent_id: str | None = None, profile_value: str | None = None,
+    ) -> tuple[bool, str]:
+        from community_bot.shop_catalog import ITEM_LABELS
+
+        if price <= 0:
+            return False, "Некорректная цена."
+        if item not in ITEM_LABELS and item not in {"event_pass", "support", "immunity"}:
+            return False, "Для этого товара ещё не настроена выдача."
+        if item == "tamagotchi":
+            return False, "Сначала выберите питомца и его имя."
+        if item in {"video_avatar", "custom_status"} and not profile_value:
+            return False, "Сначала отправьте видео или текст статуса."
         now = utcnow()
-        beneficiary = target_id or user_id
+        beneficiary = target_id if target_id is not None else user_id
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
+            error = await self._consume_wallet_intent(db, intent_id, user_id, item, price, beneficiary)
+            if error:
+                await db.rollback()
+                return False, error
+            cursor = await db.execute("SELECT 1 FROM users WHERE user_id = ?", (beneficiary,))
+            if not await cursor.fetchone():
+                await db.rollback()
+                return False, "Получатель не найден."
             cursor = await db.execute(
                 "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
                 (price, now, user_id, price),
@@ -1771,7 +1931,20 @@ class Database:
             if cursor.rowcount != 1:
                 await db.rollback()
                 return False, "Недостаточно печенек."
-            await self._apply_shop_effect(db, beneficiary, item, now)
+            error = await self._apply_shop_effect(db, beneficiary, item, now)
+            if error:
+                await db.rollback()
+                return False, error
+            if item == "custom_status":
+                if len(profile_value or "") > 50:
+                    await db.rollback()
+                    return False, "Статус должен содержать от 1 до 50 символов."
+                await db.execute("UPDATE users SET custom_status = ? WHERE user_id = ?", (profile_value, beneficiary))
+            elif item == "video_avatar":
+                await db.execute(
+                    "UPDATE users SET avatar_file_id = ?, avatar_media_type = 'video' WHERE user_id = ?",
+                    (profile_value, beneficiary),
+                )
             await db.execute(
                 "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
                 (user_id, -price, "shop", item if beneficiary == user_id else f"{item}->{beneficiary}", now),
@@ -1779,7 +1952,11 @@ class Database:
             await db.commit()
             return True, "ok"
 
-    async def _apply_shop_effect(self, db: aiosqlite.Connection, user_id: int, item: str, now: str) -> None:
+    async def _apply_shop_effect(
+        self, db: aiosqlite.Connection, user_id: int, item: str, now: str,
+    ) -> str | None:
+        from community_bot.shop_catalog import IMMUNITY_HOURS, TITLE_ITEMS
+
         if item == "restore_rep":
             from community_bot.profile_fill import reputation_cap
 
@@ -1787,6 +1964,8 @@ class Database:
             row = await cursor.fetchone()
             current = int(row["reputation"]) if row else 0
             cap = reputation_cap(dict(row) if row else {})
+            if current >= cap:
+                return "Репутация уже на доступном максимуме. Для роста заполните профиль, если он ещё не заполнен."
             nxt = current if current >= cap else min(cap, current + 10)
             await db.execute(
                 "UPDATE users SET reputation = ? WHERE user_id = ?",
@@ -1805,16 +1984,25 @@ class Database:
                 (now, user_id),
             )
         elif item == "private_profile":
+            cursor = await db.execute("SELECT profile_private FROM users WHERE user_id = ?", (user_id,))
+            if (await cursor.fetchone())["profile_private"]:
+                return "Профиль уже скрыт."
             await db.execute(
                 "UPDATE users SET profile_private = 1, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
             )
         elif item == "ornate_profile":
+            cursor = await db.execute("SELECT profile_ornate FROM users WHERE user_id = ?", (user_id,))
+            if (await cursor.fetchone())["profile_ornate"]:
+                return "Оформление профиля уже куплено."
             await db.execute(
                 "UPDATE users SET profile_ornate = 1, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
             )
         elif item == "season_pack":
+            cursor = await db.execute("SELECT 1 FROM pets WHERE user_id = ?", (user_id,))
+            if not await cursor.fetchone():
+                return "Для сезонного набора сначала заведите питомца."
             for part in ("rep_shield", "pet_meal"):
                 await self._apply_shop_effect(db, user_id, part, now)
         elif item == "pet_meal":
@@ -1827,6 +2015,27 @@ class Database:
                 "UPDATE pets SET thirst = MIN(100, thirst + 50), sleeping = 0, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
             )
+        elif item in IMMUNITY_HOURS or item == "immunity":
+            cursor = await db.execute("SELECT hate_immunity_until FROM users WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            start = datetime.fromisoformat(now)
+            if row["hate_immunity_until"]:
+                current_until = datetime.fromisoformat(row["hate_immunity_until"])
+                start = max(start, current_until if current_until.tzinfo else current_until.replace(tzinfo=UTC))
+            until = start + timedelta(hours=IMMUNITY_HOURS.get(item, 24))
+            await db.execute(
+                "UPDATE users SET hate_immunity_until = ?, updated_at = ? WHERE user_id = ?",
+                (until.isoformat(), now, user_id),
+            )
+        elif item in TITLE_ITEMS:
+            cursor = await db.execute("SELECT profile_title FROM users WHERE user_id = ?", (user_id,))
+            if (await cursor.fetchone())["profile_title"] == TITLE_ITEMS[item]:
+                return "Этот титул уже установлен."
+            await db.execute(
+                "UPDATE users SET profile_title = ?, updated_at = ? WHERE user_id = ?",
+                (TITLE_ITEMS[item], now, user_id),
+            )
+        return None
 
     async def set_immunity(self, user_id: int, until: datetime) -> None:
         await self.execute(
@@ -2161,10 +2370,20 @@ class Database:
             (user_id, chat_id),
         )
 
-    async def purchase_pet(self, user_id: int, species: str, name: str, price: int) -> tuple[bool, str]:
+    async def purchase_pet(
+        self, user_id: int, species: str, name: str, price: int, *, intent_id: str | None = None,
+    ) -> tuple[bool, str]:
+        from community_bot.pets_talk import SPECIES
+
+        if price <= 0 or species not in SPECIES or not 1 <= len(name.strip()) <= 24:
+            return False, "Некорректная покупка питомца."
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
+            error = await self._consume_wallet_intent(db, intent_id, user_id, "tamagotchi", price, user_id)
+            if error:
+                await db.rollback()
+                return False, error
             cursor = await db.execute("SELECT cookies FROM users WHERE user_id = ?", (user_id,))
             user = await cursor.fetchone()
             if not user:
@@ -2312,6 +2531,8 @@ class Database:
         price: int,
         item: str,
         payer_id: int | None = None,
+        *,
+        intent_id: str | None = None,
     ) -> tuple[bool, str, dict[str, Any] | None]:
         if kind not in {"food", "water"} or gain <= 0 or price <= 0:
             return False, "Некорректный товар.", None
@@ -2321,17 +2542,25 @@ class Database:
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute("SELECT 1 FROM pets WHERE user_id = ?", (user_id,))
-            if not await cursor.fetchone():
+            error = await self._consume_wallet_intent(db, intent_id, payer, item, price, user_id)
+            if error:
                 await db.rollback()
-                return False, "Сначала заведите тамагочи."
+                return False, error, None
+            cursor = await db.execute(f"SELECT {stat} FROM pets WHERE user_id = ?", (user_id,))
+            pet = await cursor.fetchone()
+            if not pet:
+                await db.rollback()
+                return False, "Сначала заведите тамагочи.", None
+            if int(pet[stat]) >= 100:
+                await db.rollback()
+                return False, "Этот показатель питомца уже на максимуме. Списания не было.", None
             cursor = await db.execute(
                 "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
                 (price, now, payer, price),
             )
             if cursor.rowcount != 1:
                 await db.rollback()
-                return False, "Недостаточно печенек."
+                return False, "Недостаточно печенек.", None
             await db.execute(
                 f"UPDATE pets SET {stat} = MIN(100, {stat} + ?), sleeping = 0, updated_at = ? WHERE user_id = ?",
                 (gain, now, user_id),
@@ -2896,6 +3125,10 @@ class Database:
                 return False
             state = json.loads(str(game["state_json"] or "{}"))
             stake = int(state.get("stake") or 0)
+            if stake > 0 and game["status"] == "active" and not is_admin:
+                # A player must not cancel a losing round after seeing its cards/results.
+                await db.rollback()
+                return False
             if stake > 0:
                 cursor = await db.execute("SELECT user_id FROM party_game_players WHERE game_id = ?", (game_id,))
                 players = await cursor.fetchall()
