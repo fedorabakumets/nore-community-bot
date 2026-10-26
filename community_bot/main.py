@@ -442,8 +442,14 @@ async def main() -> None:
 
     bot = Bot(settings.bot_token)
     bot.community_db = db  # type: ignore[attr-defined]
+    bot.community_settings = settings  # type: ignore[attr-defined]
+    from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMiddleware
+
+    bot.session.middleware.register(OnboardingKeyboardMiddleware())
     patch_bot_ephemeral(bot)
     dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
@@ -490,13 +496,10 @@ async def main() -> None:
 
         web_runner = await start_server(db, settings, bot)
         logger.info("Nora Mini App HTTP server started")
-    mini_url = os.getenv("MINIAPP_URL", "")
-    if mini_url.startswith("https://"):
-        from aiogram.types import MenuButtonWebApp, WebAppInfo
+    from community_bot.access import configure_private_menus
 
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="Открыть Нору", web_app=WebAppInfo(url=mini_url)),
-        )
+    await configure_private_menus(bot, db, settings)
+    logger.info("Private menus configured: Mini App administrators only")
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
