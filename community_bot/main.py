@@ -106,26 +106,11 @@ def _same_release(last: str | None, number: int) -> bool:
 async def _pin_announcement(bot: Bot, db: Database, settings: Settings, message_id: int) -> None:
     chat_id = settings.community_chat_id
     try:
-        cleared = False
-        unpin_all = getattr(bot, "unpin_all_chat_messages", None)
-        if unpin_all is not None:
-            with contextlib.suppress(Exception):
-                await unpin_all(chat_id)
-                cleared = True
-        if not cleared:
-            old_pin = await db.get_bot_state("last_announcement_message_id")
-            if old_pin:
-                with contextlib.suppress(Exception):
-                    await bot.unpin_chat_message(chat_id, int(old_pin))
-        if cleared:
-            tz_name = getattr(settings, "timezone", None) or "Europe/Moscow"
-            today = datetime.now(ZoneInfo(tz_name)).date().isoformat()
-            digest_day = await db.get_bot_state("morning_digest_day")
-            morning_id = await db.get_bot_state("morning_pin_message_id")
-            if morning_id and digest_day == today:
-                with contextlib.suppress(Exception):
-                    await bot.pin_chat_message(chat_id, int(morning_id), disable_notification=True)
         await bot.pin_chat_message(chat_id, message_id, disable_notification=True)
+        old_pin = await db.get_bot_state("last_announcement_message_id")
+        if old_pin and int(old_pin) != message_id:
+            with contextlib.suppress(Exception):
+                await bot.unpin_chat_message(chat_id, int(old_pin))
     except Exception:
         logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
 
@@ -380,8 +365,9 @@ async def day_note_job(db: Database, settings: Settings, bot: Bot) -> None:
         local = now.astimezone(timezone)
         stamp = local.date().isoformat()
         posted = await db.get_bot_state("day_note_day")
+        morning_history = await db.get_bot_state("morning_history_day")
         in_window = 12 <= local.hour < 18
-        if in_window and posted != stamp and settings.community_chat_id:
+        if in_window and posted != stamp and morning_history != stamp and settings.community_chat_id:
             try:
                 text = await day_note_text(local)
             except Exception:
