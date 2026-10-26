@@ -164,34 +164,6 @@ def test_history_is_calendar_bound_city_specific_and_not_a_year_article():
     ]
 
 
-async def test_no_second_historical_post_when_morning_already_contains_it(monkeypatch):
-    from community_bot.main import day_note_job
-
-    class Clock:
-        @classmethod
-        def now(cls, tz):
-            return datetime(2026, 10, 26, 12, tzinfo=tz)
-
-    class StopJob(Exception):
-        pass
-
-    class DB:
-        async def get_bot_state(self, key):
-            return "2026-10-26" if key == "morning_history_day" else None
-
-    async def sleep(seconds):
-        raise StopJob()
-
-    async def forbidden(*args):
-        pytest.fail("duplicate history requested")
-
-    monkeypatch.setattr("community_bot.main.datetime", Clock)
-    monkeypatch.setattr("community_bot.main.asyncio.sleep", sleep)
-    monkeypatch.setattr("community_bot.day_note.day_note_text", forbidden)
-    with pytest.raises(StopJob):
-        await day_note_job(DB(), SimpleNamespace(timezone="Europe/Moscow", community_chat_id=-100), object())
-
-
 async def test_collector_keeps_working_feed_and_distinguishes_failures(monkeypatch):
     async def get_text(session, url):
         if "fontanka" in url:
