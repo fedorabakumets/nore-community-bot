@@ -31,6 +31,7 @@ from community_bot.life import (
     unlock,
 )
 from community_bot.permissions import PERM_POST
+from community_bot.rsvp import attendance_action, event_lock, published_event, refresh_event_markup
 from community_bot.shop_catalog import (
     GIFTABLE_ITEMS,
     ITEM_LABELS,
@@ -310,26 +311,68 @@ async def lottery_join(callback: CallbackQuery, db: Database) -> None:
 
 
 @router.callback_query(F.data.startswith("rsvp:"))
-async def rsvp_join(callback: CallbackQuery, db: Database) -> None:
-    event_id = callback.data.split(":", 1)[1]
-    stake_raw = await db.get_bot_state("rsvp_stake")
-    stake = int(stake_raw) if (stake_raw or "").isdigit() else 0
-    ok, error = await db.add_rsvp(event_id, callback.from_user.id, stake)
-    if not ok:
-        await callback.answer(error, show_alert=True)
+async def rsvp_join(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    event = await published_event(callback, db, settings.community_chat_id)
+    if not event:
+        await callback.answer("Запись доступна только под опубликованным постом сообщества.", show_alert=True)
         return
-    extra = f" Залог {stake} 🍪." if stake else ""
-    await callback.answer(f"Вы в списке.{extra}")
-    title = (await db.get_bot_state("event_title")) or "событие"
-    from community_bot.notify import emit
+    event_id = str(event["event_id"])
+    await register_telegram_user(db, callback.from_user)
+    if await db.has_event_payment(event_id, callback.from_user.id):
+        await callback.answer("Вы уже оплатили участие. Отмена — через администрацию.", show_alert=True)
+        return
+    if await db.has_event_rsvp(event_id, callback.from_user.id):
+        await callback.answer("Вы уже в списке")
+        await callback.message.answer(
+            f"Вы записаны на «{html.escape(event['title'])}». Отменить участие?",
+            parse_mode="HTML",
+            reply_markup=attendance_action(event_id, callback.from_user.id, cancel=True),
+        )
+        return
+    stake = int(event["stake"])
+    if stake:
+        await callback.answer()
+        await callback.message.answer(
+            f"Запись на «{html.escape(event['title'])}»: залог {stake} 🍪.\n"
+            "При отмене записи залог вернётся. При покупке билета он войдёт в оплату.",
+            parse_mode="HTML",
+            reply_markup=attendance_action(event_id, callback.from_user.id, cancel=False, stake=stake),
+        )
+        return
+    await _record_attendance(callback, db, event)
 
-    await emit(
-        callback.bot,
-        db,
-        callback.from_user.id,
-        "events",
-        f"🎟 RSVP на {html.escape(title)}.{extra}",
-    )
+
+async def _record_attendance(callback: CallbackQuery, db: Database, event: dict) -> None:
+    event_id = str(event["event_id"])
+    async with event_lock(db, event_id):
+        ok, error = await db.add_rsvp(event_id, callback.from_user.id, int(event["stake"]), kind="rsvp")
+        await callback.answer("Вы в списке!" if ok else error, show_alert=not ok)
+        await refresh_event_markup(callback.bot, db, event_id)
+    if ok:
+        from community_bot.notify import emit
+
+        await emit(callback.bot, db, callback.from_user.id, "events", f"🎟 Вы записаны: {html.escape(event['title'])}.")
+
+
+@router.callback_query(F.data.startswith("rsvpj:") | F.data.startswith("rsvpc:"))
+async def rsvp_confirm_action(callback: CallbackQuery, db: Database) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3 or parts[2] != str(callback.from_user.id):
+        await callback.answer("Эта кнопка предназначена другому участнику.", show_alert=True)
+        return
+    action, event_id, _ = parts
+    event = await db.get_studio_event(event_id)
+    if not event or not event["rsvp_enabled"] or not callback.message or callback.message.chat.id != event["chat_id"]:
+        await callback.answer("Запись недоступна.", show_alert=True)
+        return
+    await register_telegram_user(db, callback.from_user)
+    if action == "rsvpj":
+        await _record_attendance(callback, db, event)
+    else:
+        async with event_lock(db, event_id):
+            ok, text = await db.cancel_event_rsvp(event_id, callback.from_user.id)
+            await callback.answer(text, show_alert=True)
+            await refresh_event_markup(callback.bot, db, event_id)
 
 
 @router.callback_query(F.data.startswith("evpay:"))
@@ -341,7 +384,7 @@ async def event_pay_open(callback: CallbackQuery, db: Database) -> None:
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже в списке участников.", show_alert=True)
         return
     price = int(offer["price"])
@@ -372,16 +415,21 @@ async def event_pay_confirm(callback: CallbackQuery, db: Database) -> None:
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже оплатили участие.", show_alert=True)
         return
     price = int(offer["price"])
+    reservation = await db.get_event_rsvp(event_id, callback.from_user.id)
+    deposit = int(reservation["stake"]) if reservation else 0
+    charge = max(0, price - deposit)
+    refund = max(0, deposit - price)
     from community_bot.posting import event_pay_confirm_keyboard
 
     await callback.answer()
     await callback.message.answer(
-        f"Вы действительно хотите оплатить участие в мероприятии за {price} печенек?",
-        reply_markup=event_pay_confirm_keyboard(event_id),
+        f"Билет стоит {price} 🍪. Внесён залог: {deposit} 🍪.\nСпишется: {charge} 🍪. "
+        + (f"Вернётся остаток залога: {refund} 🍪. " if refund else "") + "Подтвердить оплату?",
+        reply_markup=event_pay_confirm_keyboard(f"{event_id}:{price}"),
     )
 
 
@@ -389,27 +437,35 @@ async def event_pay_confirm(callback: CallbackQuery, db: Database) -> None:
 async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
     if not callback.data or not callback.message:
         return
-    event_id = callback.data.split(":", 1)[1]
+    parts = callback.data.split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        await callback.answer("Откройте оплату заново, чтобы подтвердить актуальную цену.", show_alert=True)
+        return
+    event_id = parts[1]
     offer = await db.get_event_offer(event_id)
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже оплатили участие.", show_alert=True)
         return
-    price = int(offer["price"])
-    ok, error = await db.add_rsvp(event_id, callback.from_user.id, price)
+    await register_telegram_user(db, callback.from_user)
+    async with event_lock(db, event_id):
+        ok, error, charged = await db.pay_event_offer(event_id, callback.from_user.id, int(parts[2]))
+        if ok:
+            await refresh_event_markup(callback.bot, db, event_id)
     if not ok:
         await callback.answer(error, show_alert=True)
         return
     await callback.answer("Участие оплачено.")
+    result = f"Списано {charged} 🍪." if charged >= 0 else f"Возвращён остаток залога {-charged} 🍪."
     try:
         await callback.message.edit_text(
-            f"✅ Участие оплачено: списано {price} 🍪.",
+            f"✅ Участие оплачено. {result}",
             reply_markup=None,
         )
     except Exception:
-        await callback.message.answer(f"✅ Участие оплачено: списано {price} 🍪.")
+        await callback.message.answer(f"✅ Участие оплачено. {result}")
     from community_bot.notify import emit
 
     await emit(
@@ -417,7 +473,7 @@ async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
         db,
         callback.from_user.id,
         "events",
-        f"🎟 Оплачено участие за {price} 🍪.",
+        f"🎟 Участие оплачено. {result}",
     )
 
 

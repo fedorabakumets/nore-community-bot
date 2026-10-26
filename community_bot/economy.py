@@ -20,6 +20,7 @@ TRANSACTION_LABELS = {
     "pet_expedition": "Экспедиция тамагочи",
     "pet_shop": "Магазин питомца",
     "rsvp": "Мероприятие",
+    "rsvp_refund": "Возврат залога за мероприятие",
     "cookie_game_stake": "Ставка в игре",
     "cookie_game_win": "Выигрыш в игре",
     "cookie_game_refund": "Возврат ставки",
