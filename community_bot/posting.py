@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import re
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -118,6 +120,9 @@ def compose_post_markup(
     buttons: list[dict[str, str]] | None,
     rsvp_id: str | None = None,
     pay: tuple[str, str] | None = None,
+    *,
+    rsvp_count: int = 0,
+    preview: bool = False,
 ) -> InlineKeyboardMarkup | None:
     rows: list[list[InlineKeyboardButton]] = []
     for item in buttons or []:
@@ -126,7 +131,8 @@ def compose_post_markup(
             kwargs["style"] = item["style"]
         rows.append([InlineKeyboardButton(**kwargs)])
     if rsvp_id:
-        rows.append([ibtn("Я буду", f"rsvp:{rsvp_id}", STYLE_GO)])
+        action = "post:rsvp:preview" if preview else f"rsvp:{rsvp_id}"
+        rows.append([ibtn(f"Я буду ({rsvp_count})", action, STYLE_GO)])
     if pay:
         rows.append([ibtn(pay[0][:64], f"evpay:{pay[1]}", STYLE_GO)])
     if not rows:
@@ -245,9 +251,21 @@ def is_skip_text(text: str | None) -> bool:
 def poll_preview_block(poll: dict[str, Any] | None) -> str:
     if not poll:
         return ""
-    options = "\n".join(f"• {item}" for item in poll.get("options") or [])
+    options = "\n".join(f"• {html.escape(str(item))}" for item in poll.get("options") or [])
     anonymous = "анонимное" if poll.get("anonymous", True) else "видно, кто голосует"
-    return f"\n\n📊 <b>Голосование</b> ({anonymous})\n<b>{poll.get('question') or ''}</b>\n{options}"
+    question = html.escape(str(poll.get("question") or ""))
+    return f"\n\n📊 <b>Голосование</b> ({anonymous})\n<b>{question}</b>\n{options}"
+
+
+def rsvp_preview_block(rsvp_id: str | None) -> str:
+    if not rsvp_id:
+        return ""
+    return "\n\n🎟 Запись: «Я буду (0)». Список участников виден только администрации."
+
+
+def post_title(body: str) -> str:
+    plain = html.unescape(re.sub(r"<[^>]*>", "", body))
+    return next((line.strip()[:100] for line in plain.splitlines() if line.strip()), "Мероприятие")
 
 
 async def send_studio_post(

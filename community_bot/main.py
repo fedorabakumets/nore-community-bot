@@ -471,6 +471,9 @@ async def main() -> None:
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
+    from community_bot.rsvp import event_counters_job
+
+    event_counters_task = asyncio.create_task(event_counters_job(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
@@ -491,6 +494,7 @@ async def main() -> None:
             board_task,
             morning_task,
             daily_chat_task,
+            event_counters_task,
             emergency_task,
             restart_task,
         ):
@@ -505,6 +509,7 @@ async def main() -> None:
                 board_task,
                 morning_task,
                 daily_chat_task,
+                event_counters_task,
                 emergency_task,
                 restart_task,
             )

@@ -221,6 +221,7 @@ def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
         rows.append(chat_row)
     if _allow(permissions, "chat.post"):
         rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
+        rows.append([ibtn("🎟 События и участники", "admin:events:0")])
         rows.append([ibtn("🎲 Розыгрыш", "admin:lottery")])
     if _allow(permissions, "automessages"):
         rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])

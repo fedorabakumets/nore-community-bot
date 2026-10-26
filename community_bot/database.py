@@ -328,8 +328,23 @@ CREATE TABLE IF NOT EXISTS event_rsvps (
     event_id TEXT NOT NULL,
     user_id INTEGER NOT NULL REFERENCES users(user_id),
     stake INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'legacy',
     created_at TEXT NOT NULL,
     PRIMARY KEY(event_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS studio_events (
+    event_id TEXT PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    buttons_json TEXT NOT NULL DEFAULT '[]',
+    rsvp_enabled INTEGER NOT NULL DEFAULT 1,
+    stake INTEGER NOT NULL DEFAULT 0 CHECK(stake >= 0),
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    markup_dirty INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(chat_id, message_id)
 );
 
 CREATE TABLE IF NOT EXISTS achievements (
@@ -516,6 +531,11 @@ class Database:
             if "avatar_media_type" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN avatar_media_type TEXT NOT NULL DEFAULT 'photo'")
             pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
+            rsvp_columns = {
+                str(row[1]) for row in await (await db.execute("PRAGMA table_info(event_rsvps)")).fetchall()
+            }
+            if "kind" not in rsvp_columns:
+                await db.execute("ALTER TABLE event_rsvps ADD COLUMN kind TEXT NOT NULL DEFAULT 'legacy'")
             if "last_talk_at" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN last_talk_at TEXT")
             if "profile_private" not in columns:
@@ -3284,7 +3304,11 @@ class Database:
             await db.commit()
             return cursor.rowcount == 1
 
-    async def add_rsvp(self, event_id: str, user_id: int, stake: int) -> tuple[bool, str]:
+    async def add_rsvp(
+        self, event_id: str, user_id: int, stake: int, *, kind: str = "legacy",
+    ) -> tuple[bool, str]:
+        if stake < 0 or kind not in {"legacy", "rsvp", "payment"}:
+            return False, "Некорректные условия участия."
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -3308,22 +3332,130 @@ class Database:
                     (user_id, -stake, "rsvp", event_id, now),
                 )
             await db.execute(
-                "INSERT INTO event_rsvps(event_id, user_id, stake, created_at) VALUES (?, ?, ?, ?)",
-                (event_id, user_id, stake, now),
+                "INSERT INTO event_rsvps(event_id, user_id, stake, kind, created_at) VALUES (?, ?, ?, ?, ?)",
+                (event_id, user_id, stake, kind, now),
             )
+            await db.execute("UPDATE studio_events SET markup_dirty = 1 WHERE event_id = ?", (event_id,))
             await db.commit()
             return True, "ok"
 
-    async def list_rsvps(self, event_id: str) -> list[dict[str, Any]]:
+    async def save_studio_event(
+        self, event_id: str, chat_id: int, message_id: int, title: str,
+        buttons: list[dict[str, str]], stake: int, created_by: int, *, rsvp_enabled: bool = True,
+    ) -> None:
+        await self.execute(
+            """INSERT OR IGNORE INTO studio_events(
+                event_id, chat_id, message_id, title, buttons_json, stake, created_by, created_at, rsvp_enabled
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (event_id, chat_id, message_id, title, json.dumps(buttons, ensure_ascii=False),
+             stake, created_by, utcnow(), int(rsvp_enabled)),
+        )
+
+    async def get_studio_event(self, event_id: str) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM studio_events WHERE event_id = ?", (event_id,))
+
+    async def event_participant_count(self, event_id: str) -> int:
+        row = await self.fetchone("SELECT COUNT(*) AS n FROM event_rsvps WHERE event_id = ?", (event_id,))
+        return int(row["n"])
+
+    async def list_studio_events(self, offset: int = 0, limit: int = 8) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            """WITH ids AS (
+                SELECT event_id FROM studio_events UNION SELECT event_id FROM event_offers
+                UNION SELECT event_id FROM event_rsvps
+            )
+            SELECT ids.event_id, COALESCE(s.title, NULLIF(o.title, ''), ids.event_id) AS title,
+                COALESCE(s.created_at, o.created_at, MIN(r.created_at)) AS created_at,
+                COALESCE(s.chat_id, o.chat_id) AS chat_id,
+                COALESCE(s.message_id, o.message_id) AS message_id, COUNT(r.user_id) AS participants
+            FROM ids LEFT JOIN studio_events s USING(event_id) LEFT JOIN event_offers o USING(event_id)
+            LEFT JOIN event_rsvps r USING(event_id)
+            GROUP BY ids.event_id ORDER BY created_at DESC, ids.event_id DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+
+    async def get_event_rsvp(self, event_id: str, user_id: int) -> dict[str, Any] | None:
+        return await self.fetchone("SELECT * FROM event_rsvps WHERE event_id = ? AND user_id = ?", (event_id, user_id))
+
+    async def has_event_payment(self, event_id: str, user_id: int) -> bool:
+        row = await self.get_event_rsvp(event_id, user_id)
+        # Old code did not distinguish deposits from tickets. Never auto-refund ambiguous paid rows.
+        return bool(row and (row["kind"] == "payment" or (row["kind"] == "legacy" and int(row["stake"]) > 0)))
+
+    async def cancel_event_rsvp(self, event_id: str, user_id: int) -> tuple[bool, str]:
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT * FROM event_rsvps WHERE event_id = ? AND user_id = ?", (event_id, user_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return False, "Вы уже не записаны."
+            if row["kind"] == "payment" or (row["kind"] == "legacy" and int(row["stake"]) > 0):
+                return False, "Для отмены оплаченного участия обратитесь к администрации."
+            refund = int(row["stake"])
+            await db.execute("DELETE FROM event_rsvps WHERE event_id = ? AND user_id = ?", (event_id, user_id))
+            if refund:
+                now = utcnow()
+                await db.execute(
+                    "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?", (refund, now, user_id),
+                )
+                await db.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, refund, "rsvp_refund", event_id, now),
+                )
+            await db.execute("UPDATE studio_events SET markup_dirty = 1 WHERE event_id = ?", (event_id,))
+            await db.commit()
+            return True, f"Запись отменена. Возвращён залог {refund} 🍪." if refund else "Запись отменена."
+
+    async def pay_event_offer(self, event_id: str, user_id: int, expected_price: int) -> tuple[bool, str, int]:
+        """Turn a reservation into a paid ticket, crediting its deposit exactly once."""
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute("SELECT price FROM event_offers WHERE event_id = ?", (event_id,))
+            offer = await cursor.fetchone()
+            if not offer or int(offer["price"]) != expected_price or expected_price <= 0:
+                return False, "Условия участия изменились. Откройте оплату заново.", 0
+            cursor = await db.execute(
+                "SELECT * FROM event_rsvps WHERE event_id = ? AND user_id = ?", (event_id, user_id),
+            )
+            row = await cursor.fetchone()
+            if row and (row["kind"] == "payment" or (row["kind"] == "legacy" and int(row["stake"]) > 0)):
+                return False, "Вы уже оплатили участие.", 0
+            deposit = int(row["stake"]) if row else 0
+            charge = expected_price - deposit
+            now = utcnow()
+            cursor = await db.execute(
+                "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
+                (charge, now, user_id, max(0, charge)),
+            )
+            if cursor.rowcount != 1:
+                return False, "Недостаточно печенек для оплаты.", 0
+            if charge:
+                await db.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, -charge, "rsvp" if charge > 0 else "rsvp_refund", event_id, now),
+                )
+            await db.execute(
+                """INSERT INTO event_rsvps(event_id, user_id, stake, kind, created_at) VALUES (?, ?, ?, 'payment', ?)
+                ON CONFLICT(event_id, user_id) DO UPDATE SET stake=excluded.stake, kind='payment'""",
+                (event_id, user_id, expected_price, now),
+            )
+            await db.execute("UPDATE studio_events SET markup_dirty = 1 WHERE event_id = ?", (event_id,))
+            await db.commit()
+            return True, "ok", charge
+
+    async def list_rsvps(self, event_id: str, *, offset: int = 0, limit: int | None = None) -> list[dict[str, Any]]:
         return await self.fetchall(
             """
             SELECT r.*, u.telegram_name, u.profile_name, u.username
             FROM event_rsvps r
             JOIN users u ON u.user_id = r.user_id
             WHERE r.event_id = ?
-            ORDER BY r.created_at
+            ORDER BY r.created_at, r.user_id
+            LIMIT ? OFFSET ?
             """,
-            (event_id,),
+            (event_id, limit if limit is not None else -1, offset),
         )
 
     async def weekly_board(self, week_id: str) -> dict[str, list[dict[str, Any]]]:
