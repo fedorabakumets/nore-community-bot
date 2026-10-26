@@ -11,7 +11,7 @@ from aiogram import BaseMiddleware, Bot
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods.base import TelegramMethod, TelegramType
-from aiogram.types import CallbackQuery, Message, TelegramObject
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, TelegramObject
 
 from community_bot.aliases import is_group_command_to_sweep
 from community_bot.helpers import BOT_REPLY_TTL, delete_later
@@ -104,6 +104,11 @@ class EphemeralSendMiddleware(BaseRequestMiddleware):
         bot: Bot,
         method: TelegramMethod[TelegramType],
     ) -> TelegramType:
+        markup = getattr(method, "reply_markup", None)
+        if isinstance(markup, InlineKeyboardMarkup):
+            from community_bot.inline_style import style_menu
+
+            method = method.model_copy(update={"reply_markup": style_menu(markup)})
         result = await make_request(bot, method)
         _schedule(result)
         if isinstance(result, Message) and result.chat.type in {"group", "supergroup"}:
