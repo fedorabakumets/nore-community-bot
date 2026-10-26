@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -483,6 +484,19 @@ async def main() -> None:
     await publish_staff_guide(db)
     await publish_commands_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
+    web_runner = None
+    if os.getenv("MINIAPP_ENABLED") == "1":
+        from community_bot.miniapp import start_server
+
+        web_runner = await start_server(db, settings, bot)
+        logger.info("Nora Mini App HTTP server started")
+    mini_url = os.getenv("MINIAPP_URL", "")
+    if mini_url.startswith("https://"):
+        from aiogram.types import MenuButtonWebApp, WebAppInfo
+
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Открыть Нору", web_app=WebAppInfo(url=mini_url)),
+        )
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
@@ -538,6 +552,8 @@ async def main() -> None:
                 emergency_task,
                 restart_task,
             )
+        if web_runner:
+            await web_runner.cleanup()
         await bot.session.close()
     if restart_stop.is_set() and await db.get_bot_state("emergency_disabled") != "1":
         logger.info("owner restart: relaunching in-place, sqlite and settings preserved")
