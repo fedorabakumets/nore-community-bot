@@ -447,6 +447,9 @@ async def main() -> None:
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
+    from community_bot.event_access import router as event_router
+
+    dispatcher.include_router(event_router)
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)
     dispatcher.include_router(flows_router)
@@ -473,6 +476,10 @@ async def main() -> None:
     await verify_sticker_pack(bot)
     await repair_member_images(db)
     await announce_latest_update(bot, db, settings)
+    if await db.get_bot_state("event_shop_fix_staff_notice_v1") != "1":
+        for staff_id in await db.list_panel_user_ids():
+            await safe_staff_event_notice(bot, staff_id)
+        await db.set_bot_state("event_shop_fix_staff_notice_v1", "1")
     await publish_staff_guide(db)
     await publish_commands_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
@@ -539,6 +546,16 @@ async def main() -> None:
 
 def run() -> None:
     asyncio.run(main())
+
+
+async def safe_staff_event_notice(bot, user_id):
+    with contextlib.suppress(Exception):
+        await bot.send_message(
+            user_id,
+            "🛠 Исправлены мероприятия в магазине: цена берётся из анонса, без цены — бесплатная запись. "
+            "Команда «участники» и журнал оплат доступны по отдельному праву "
+            "«Мероприятия: участники и журнал оплат» в настройках ролей.",
+        )
 
 
 if __name__ == "__main__":

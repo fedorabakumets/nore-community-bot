@@ -226,7 +226,7 @@ async def test_gift_requires_confirmation_and_only_delivers_once(db, monkeypatch
     assert (await db.get_user(8))["hate_shields"] == 1
 
 
-async def test_entering_event_amount_does_not_spend_until_explicit_confirmation(db, monkeypatch):
+async def test_legacy_event_amount_cannot_charge_without_published_event(db, monkeypatch):
     state = Flow(flex_item="event_pass", flex_discount=0)
     message = SimpleNamespace(from_user=User(id=7, is_bot=False, first_name="Анна"), text="30", answer=AsyncMock())
     await group.finish_flexible_purchase(message, state, db, settings(), SimpleNamespace())
@@ -237,9 +237,9 @@ async def test_entering_event_amount_does_not_spend_until_explicit_confirmation(
 
     monkeypatch.setattr(notify, "vitrine_consumed", AsyncMock())
     await group.buy_shop_item(callback_for(data), state, db, settings(), SimpleNamespace())
-    assert (await db.get_user(7))["cookies"] == 120
+    assert (await db.get_user(7))["cookies"] == 150
     await group.buy_shop_item(callback_for(data), state, db, settings(), SimpleNamespace())
-    assert (await db.get_user(7))["cookies"] == 120
+    assert (await db.get_user(7))["cookies"] == 150
 
 
 async def test_actual_shop_callbacks_with_double_click_only_charge_once(db, monkeypatch):

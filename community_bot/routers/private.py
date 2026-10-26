@@ -83,6 +83,7 @@ from community_bot.permissions import (
     PERM_AUTOMESSAGES,
     PERM_BROADCAST,
     PERM_CHAT_LOCK,
+    PERM_EVENT_PARTICIPANTS,
     PERM_FEATURES,
     PERM_MENTION,
     PERM_PAYMENTS,
@@ -1988,7 +1989,7 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
 
 @router.callback_query(F.data.startswith("admin:events:"))
 async def admin_event_list(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_EVENT_PARTICIPANTS):
         return
     raw = (callback.data or "").rsplit(":", 1)[-1]
     if not raw.isdigit():
@@ -2018,7 +2019,7 @@ async def admin_event_list(callback: CallbackQuery, db: Database, settings: Sett
 
 @router.callback_query(F.data.startswith("admin:attendees:"))
 async def admin_event_participants(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_EVENT_PARTICIPANTS):
         return
     parts = (callback.data or "").split(":")
     if len(parts) != 4 or not parts[3].isdigit():
@@ -2497,6 +2498,8 @@ async def _admin_post_send(
                 data.get("post_file_id"),
                 markup,
             )
+            if data.get("post_template") == "event":
+                await db.set_bot_state("current_studio_event", event_id)
             sent_id = int(sent.message_id)
             await state.update_data(post_sent_id=sent_id)
         if sent_id and (data.get("post_rsvp") or data.get("post_template") == "event"):
@@ -2568,7 +2571,7 @@ async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext, db: Data
     await state.clear()
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Ок, пост без кнопки оплаты.")
+        await callback.message.answer("Ок, мероприятие бесплатное; запись доступна в магазине.")
 
 
 @router.callback_query(F.data == "post:pay:yes")
