@@ -1397,6 +1397,33 @@ class Database:
                         (AUTO_REPUTATION_CAP, utcnow(), user_id),
                     )
 
+    async def save_self_profile(self, user_id: int, values: dict, revision: str, *, avatar: bool = False) -> bool:
+        from community_bot.profile_fields import profile_revision, validate_profile_fields
+        from community_bot.profile_fill import reputation_cap
+
+        if avatar:
+            if set(values) != {"avatar_file_id", "avatar_media_type"} or values["avatar_media_type"] != "photo":
+                raise ValueError("Некорректный аватар")
+        else:
+            values = validate_profile_fields(values)
+        async with self.connect() as connection:
+            await connection.execute("BEGIN IMMEDIATE")
+            row = await (await connection.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))).fetchone()
+            if not row or profile_revision(dict(row)) != revision:
+                await connection.rollback()
+                return False
+            updated = dict(row) | values
+            reputation = min(int(row["reputation"]), reputation_cap(updated))
+            assignments = ", ".join(f"{key} = ?" for key in values)
+            await connection.execute(
+                f"UPDATE users SET {assignments}, reputation = ?, updated_at = ? WHERE user_id = ?",
+                (*values.values(), reputation, utcnow(), user_id),
+            )
+            await connection.commit()
+        if "profile_bio" in values:
+            await self.sync_bio_auto_warn(user_id)
+        return True
+
     async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
         if await self.has_approved_application(user_id):
             return 0

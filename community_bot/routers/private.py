@@ -126,8 +126,9 @@ EMERGENCY_STOP_KEYBOARD = InlineKeyboardMarkup(
 
 
 async def _private_keyboard(user_id: int, db: Database, settings: Settings):
-    del user_id, db, settings
-    return main_private_keyboard()
+    from community_bot.access import private_keyboard
+
+    return await private_keyboard(db, settings, user_id)
 
 
 async def _panel_markup(db: Database, settings: Settings, user_id: int):
@@ -1201,13 +1202,12 @@ async def _notify_application_decision(
             f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
             f"{html.escape(settings.community_invite_url)}</a>"
         )
-    is_staff = await has_permission(db, settings, int(application["user_id"]), PERM_ADMIN_PANEL)
     await safe_send(
         bot,
         int(application["user_id"]),
         f"{result}.{reason_text}{invite}",
         parse_mode="HTML",
-        reply_markup=main_private_keyboard(is_staff),
+        reply_markup=await _private_keyboard(int(application["user_id"]), db, settings),
     )
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
@@ -1590,6 +1590,9 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
         await callback.answer("Нельзя выдать роль не ниже своей.", show_alert=True)
         return
     await db.set_role(user_id, new_role)
+    from community_bot.access import sync_menu
+
+    await sync_menu(bot, db, settings, user_id)
     label = str(role["name"])
     await callback.answer(f"Новая роль: {label}.")
     roles = await db.list_staff_roles()

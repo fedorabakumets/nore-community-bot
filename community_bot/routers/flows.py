@@ -15,7 +15,6 @@ from community_bot.keyboards import (
     BTN_TICKET,
     BTN_WALLET,
     flow_reply_keyboard,
-    main_private_keyboard,
     private_menu_keyboard,
     profile_keyboard,
 )
@@ -32,13 +31,17 @@ class InFlow(Filter):
 
 
 async def restore_private_menu(message: Message, db: Database, settings: Settings) -> None:
-    del db, settings
     if message.chat.type != "private":
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
+    from community_bot.access import private_allowed, private_keyboard
+
+    uid = message.chat.id
+    allowed = await private_allowed(db, settings, uid)
     await message.answer(
-        "Можно открыть профиль, магазин, кошелёк или написать тикет.",
-        reply_markup=main_private_keyboard(),
+        "Можно открыть профиль, магазин, кошелёк или написать тикет." if allowed
+        else "Дождись одобрения анкеты. Если нужна помощь — кнопка внизу.",
+        reply_markup=await private_keyboard(db, settings, uid),
     )
 
 
