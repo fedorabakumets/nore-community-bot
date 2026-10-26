@@ -182,15 +182,15 @@ def test_member_announcement_omits_staff() -> None:
     details = member_details_text(item)
     nodes = str(member_details_nodes(item))
     staff = staff_announcement(item)
-    assert "Обновление №17" in pin
+    assert "Обновление №18" in pin
     assert len(pin) <= 1024
     assert "Админ" not in pin
     assert "четыре комнаты" not in details.casefold()
     assert "Админка" not in nodes
     assert "кошелёк" in details.casefold()
-    assert "подтвержден" in details.casefold()
+    assert "пиксель" in details.casefold()
     assert staff not in pin
-    assert "wallet_intents" in staff
+    assert "Monocraft" in staff
 
 
 async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
@@ -309,9 +309,9 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Обновление №17" in sent[0].text
+    assert "Обновление №18" in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "17:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == "18:photo-v2"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -331,7 +331,7 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "17:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == "18:photo-v2"
 
 
 async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeypatch) -> None:
@@ -347,7 +347,7 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
     await db.ensure_user(10, telegram_name="Owner")
     await db.set_role(10, "owner")
     today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
-    await db.set_bot_state("last_announced_update", "17:photo-v1")
+    await db.set_bot_state("last_announced_update", "18:photo-v1")
     await db.set_bot_state("morning_digest_day", today)
     await db.set_bot_state("morning_pin_message_id", "42")
     pinned: list[int] = []
@@ -382,9 +382,9 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
     assert cleared == []
     assert pinned == [9]
     assert 10 not in dms
-    assert await db.get_bot_state("last_announced_update") == "17:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == "18:photo-v2"
 
-    await db.set_bot_state("last_announced_update", "17:photo-v1")
+    await db.set_bot_state("last_announced_update", "18:photo-v1")
     await db.set_bot_state("morning_digest_day", "2020-01-01")
     pinned.clear()
     cleared.clear()

@@ -6,6 +6,8 @@ from typing import Any
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
+from community_bot.menu_art import menu_cover
+
 COVERS = Path(__file__).resolve().parent.parent / "assets" / "covers"
 CAPTION_LIMIT = 1024
 
@@ -50,6 +52,9 @@ BLOCK_FILES = {
 
 
 def cover_path(block: str) -> Path | None:
+    modern = menu_cover(block)
+    if modern:
+        return modern
     name = BLOCK_FILES.get(block)
     if not name:
         return None
