@@ -356,38 +356,8 @@ async def daily_chat_job(db: Database, settings: Settings, bot: Bot) -> None:
         await asyncio.sleep(seconds_until_midnight(now))
 
 
-async def day_note_job(db: Database, settings: Settings, bot: Bot) -> None:
-    from community_bot.day_note import day_note_text
-
-    timezone = ZoneInfo(settings.timezone)
-    while True:
-        now = datetime.now(timezone)
-        local = now.astimezone(timezone)
-        stamp = local.date().isoformat()
-        posted = await db.get_bot_state("day_note_day")
-        morning_history = await db.get_bot_state("morning_history_day")
-        in_window = 12 <= local.hour < 18
-        if in_window and posted != stamp and morning_history != stamp and settings.community_chat_id:
-            try:
-                text = await day_note_text(local)
-            except Exception:
-                logger.exception("Ошибка поста «Этот день»")
-                text = None
-            if text:
-                try:
-                    await bot.send_message(settings.community_chat_id, text, parse_mode="HTML")
-                    await db.set_bot_state("day_note_day", stamp)
-                except Exception:
-                    logger.exception("Не удалось отправить «Этот день»")
-            await asyncio.sleep(600)
-            continue
-        nxt = local.replace(hour=12, minute=0, second=0, microsecond=0)
-        if nxt <= local:
-            nxt += timedelta(days=1)
-        await asyncio.sleep(max(1, (nxt - local).total_seconds()))
-
-
 async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.maintenance import apply_requested_morning_rebuild
     from community_bot.morning import due_morning, publish_missed_today, publish_morning_digest, seconds_until_morning
 
     timezone = ZoneInfo(settings.timezone)
@@ -401,6 +371,9 @@ async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None
     while True:
         now = datetime.now(timezone)
         try:
+            if not await apply_requested_morning_rebuild(bot, db, settings):
+                await asyncio.sleep(30)
+                continue
             await publish_morning_digest(bot, db, settings)
         except Exception:
             logger.exception("Ошибка утреннего поста")
@@ -494,7 +467,6 @@ async def main() -> None:
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
-    day_note_task = asyncio.create_task(day_note_job(db, settings, bot))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
@@ -515,7 +487,6 @@ async def main() -> None:
             board_task,
             morning_task,
             daily_chat_task,
-            day_note_task,
             emergency_task,
             restart_task,
         ):
@@ -530,7 +501,6 @@ async def main() -> None:
                 board_task,
                 morning_task,
                 daily_chat_task,
-                day_note_task,
                 emergency_task,
                 restart_task,
             )
