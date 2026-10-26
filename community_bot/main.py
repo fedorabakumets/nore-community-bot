@@ -46,6 +46,7 @@ from community_bot.telegraph import (
     publish_member_update,
     publish_staff_guide,
     publish_staff_update,
+    repair_member_images,
 )
 from community_bot.ui_owner import UiOwnerMiddleware
 from community_bot.updates import announcement_key, community_announcement, latest_update
@@ -67,6 +68,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="mail", description="Анонимное письмо в чат"),
             BotCommand(command="help", description="Помощь"),
             BotCommand(command="pogoda", description="Погода в Петербурге"),
+            BotCommand(command="stickers", description="Стикеры Норы"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
         language_code="ru",
@@ -93,6 +95,7 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="board", description="Доска недели"),
             BotCommand(command="gamecancel", description="Отменить текущую игру"),
             BotCommand(command="pogoda", description="Погода в Петербурге"),
+            BotCommand(command="stickers", description="Стикеры Норы"),
         ],
         scope=BotCommandScopeAllGroupChats(),
         language_code="ru",
@@ -118,9 +121,14 @@ async def _pin_announcement(bot: Bot, db: Database, settings: Settings, message_
 
 
 async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> None:
+    from community_bot.stickers import STICKER_PACK_URL, send_context_sticker
+
     item = latest_update()
     last = await db.get_bot_state("last_announced_update")
     if last == announcement_key(item):
+        source = await db.get_bot_state("last_announcement_message_id")
+        if source and settings.community_chat_id:
+            await send_context_sticker(bot, db, settings.community_chat_id, "update", int(source))
         return
     if not settings.community_chat_id:
         return
@@ -133,6 +141,8 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         markup = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
         )
+    if item.sticker_pack_url:
+        markup.inline_keyboard.append([InlineKeyboardButton(text="😎 Забрать стикеры", url=STICKER_PACK_URL)])
     caption = community_announcement(item)
     cover = cover_path_for(item)
     try:
@@ -154,6 +164,7 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
     except Exception:
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
+    await send_context_sticker(bot, db, settings.community_chat_id, "update", sent.message_id)
     await _pin_announcement(bot, db, settings, sent.message_id)
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", announcement_key(item))
@@ -457,6 +468,10 @@ async def main() -> None:
     await load_registry(db)
     await configure_commands(bot)
     await log_community_permissions(bot, settings)
+    from community_bot.stickers import sticker_delivery_job, verify_sticker_pack
+
+    await verify_sticker_pack(bot)
+    await repair_member_images(db)
     await announce_latest_update(bot, db, settings)
     await publish_staff_guide(db)
     await publish_commands_guide(db)
@@ -474,6 +489,7 @@ async def main() -> None:
     from community_bot.rsvp import event_counters_job
 
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
+    sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
@@ -495,6 +511,7 @@ async def main() -> None:
             morning_task,
             daily_chat_task,
             event_counters_task,
+            sticker_delivery_task,
             emergency_task,
             restart_task,
         ):
@@ -510,6 +527,7 @@ async def main() -> None:
                 morning_task,
                 daily_chat_task,
                 event_counters_task,
+                sticker_delivery_task,
                 emergency_task,
                 restart_task,
             )
