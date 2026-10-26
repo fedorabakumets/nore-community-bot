@@ -28,7 +28,7 @@ class CabinetNavigationMiddleware(BaseMiddleware):
             return await handler(event, data)
         current = await state.get_data()
         tokens = {current["purchase_intent"]} if current.get("purchase_intent") else set()
-        markup = event.message.reply_markup if event.message else None
+        markup = getattr(event.message, "reply_markup", None)
         if markup:
             for row in markup.inline_keyboard:
                 for button in row:
