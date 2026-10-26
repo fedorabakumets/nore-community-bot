@@ -954,12 +954,15 @@ async def admin_morning(callback: CallbackQuery, db: Database, settings: Setting
     from community_bot.morning import publish_morning_digest
 
     try:
-        await publish_morning_digest(bot, db, settings, force=True)
+        pinned = await publish_morning_digest(bot, db, settings, force=True)
     except Exception:
         logger.exception("Не удалось отправить утренний пост вручную")
         await callback.message.answer("Сводку собрать не удалось. Повторю в 9:00.")
         return
-    await callback.message.answer("Утренний пост отправлен в чат и закреплён.")
+    await callback.message.answer(
+        "Утренний пост отправлен в чат и закреплён." if pinned else
+        "Пост отправлен, но закрепить его не удалось. Проверьте право бота закреплять сообщения.",
+    )
 
 
 @router.callback_query(F.data == "admin:health")

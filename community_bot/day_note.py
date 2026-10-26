@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 
@@ -29,6 +30,34 @@ class DayEvent:
     text: str
     title: str
     url: str
+    context: str = ""
+    month: int | None = None
+    day: int | None = None
+
+
+# Editorial entries: exact Gregorian dates and consequences checked against the linked source.
+# They supplement the daily calendar; they are never rotated onto another date.
+VERIFIED_EVENTS = {
+    (10, 26): DayEvent(
+        1930,
+        "В Ленинграде впервые показали балет Шостаковича «Золотой век».",
+        "Золотой век",
+        "https://site.mariinsky.ru/about/exhibitions/shostakovich111/golden_age1930/",
+        "Постановка стала площадкой для хореографических экспериментов. "
+        "Впервые для работы над балетом здесь пригласили оперного режиссёра; "
+        "впоследствии эта практика закрепилась в театре.",
+        10, 26,
+    ),
+    (10, 27): DayEvent(
+        2007,
+        "В Петербурге началась первая конференция русскоязычной Википедии.",
+        "Первая Вики-конференция",
+        "https://ru.wikipedia.org/wiki/Википедия:Вики-конференция_2007/Итоговый_пресс-релиз",
+        "В ИТМО встретились 90 участников из нескольких стран. Они обсудили проверку "
+        "источников и авторские права, а по итогам предложили сделать конференцию ежегодной.",
+        10, 27,
+    ),
+}
 
 
 def _first_sentence(text: str) -> str:
@@ -42,7 +71,7 @@ def _first_sentence(text: str) -> str:
     return sentence
 
 
-def parse_onthisday(payload: dict[str, object]) -> list[DayEvent]:
+def parse_onthisday(payload: dict[str, object], today: date | None = None) -> list[DayEvent]:
     raw = payload.get("events")
     if not isinstance(raw, list):
         return []
@@ -58,22 +87,37 @@ def parse_onthisday(payload: dict[str, object]) -> list[DayEvent]:
         if year <= 0 or not text:
             continue
         pages = item.get("pages")
-        title = ""
-        url = ""
-        if isinstance(pages, list) and pages and isinstance(pages[0], dict):
-            title = str(pages[0].get("title") or pages[0].get("normalizedtitle") or "").strip()
-            content = pages[0].get("content_urls")
-            if isinstance(content, dict):
-                desktop = content.get("desktop")
-                if isinstance(desktop, dict):
-                    url = str(desktop.get("page") or "").strip()
-        events.append(DayEvent(year=year, text=text, title=title, url=url))
+        title, url, context = "", "", ""
+        # The first linked page is often just a year or the city itself. Do not use
+        # those generic descriptions as an explanation of this particular event.
+        words = set(re.findall(r"[а-яё]{5,}", text.casefold()))
+        ranked = []
+        for page in pages if isinstance(pages, list) else []:
+            if not isinstance(page, dict):
+                continue
+            name = str(page.get("title") or "").replace("_", " ")
+            if re.fullmatch(r"\d+.*|Санкт-Петербург|Ленинград|Петроград", name, re.IGNORECASE):
+                continue
+            extract = str(page.get("extract") or "").strip()
+            overlap = len(words & set(re.findall(r"[а-яё]{5,}", name.casefold())))
+            content = page.get("content_urls") or {}
+            desktop = content.get("desktop") or {} if isinstance(content, dict) else {}
+            link = str(desktop.get("page") or "") if isinstance(desktop, dict) else ""
+            if overlap and extract and urlsplit(link).scheme == "https":
+                ranked.append((overlap, name, link, extract))
+        if ranked:
+            _, title, url, context = max(ranked)
+        if not url and today:
+            calendar_title = f"{today.day}_{MONTHS[today.month - 1]}"
+            url = "https://ru.wikipedia.org/wiki/" + quote(calendar_title) + "#События"
+        events.append(DayEvent(year, text, title, url, context,
+                               today.month if today else None, today.day if today else None))
     return events
 
 
 def _score(event: DayEvent, today_year: int) -> float | None:
     blob = f"{event.text} {event.title}"
-    if _GRIM.search(blob):
+    if _GRIM.search(blob) or not _CITY.search(event.text):
         return None
     if event.year >= today_year:
         return None
@@ -89,6 +133,8 @@ def _score(event: DayEvent, today_year: int) -> float | None:
 def pick_day_event(events: list[DayEvent], today: date) -> DayEvent | None:
     ranked: list[tuple[float, int, DayEvent]] = []
     for event in events:
+        if event.month is not None and (event.month, event.day) != (today.month, today.day):
+            continue
         score = _score(event, today.year)
         if score is None:
             continue
@@ -103,15 +149,31 @@ def render_day_note(today: date, event: DayEvent) -> str:
     sentence = html.escape(_first_sentence(event.text))
     month = MONTHS[today.month - 1]
     lines = [
-        "📅 <b>Этот день</b>",
+        "📅 <b>Этот день в Петербурге</b>",
         "",
-        f"{today.day} {month} {event.year} года — {sentence}",
+        "<blockquote expandable>",
+        f"<b>{today.day} {month} {event.year} · {years_ago(today.year - event.year)}</b>",
+        sentence,
     ]
-    if event.url and event.title:
+    if event.context:
+        lines.append(html.escape(_first_sentence(event.context)))
+    if urlsplit(event.url).scheme == "https":
         url = html.escape(event.url, quote=True)
-        title = html.escape(event.title)
-        lines.append(f"(<a href=\"{url}\">{title}</a>)")
+        lines.append(f'<a href="{url}">Подробнее</a>')
+    lines.append("</blockquote>")
     return "\n".join(lines)
+
+
+def years_ago(age: int) -> str:
+    if 11 <= age % 100 <= 14:
+        word = "лет"
+    elif age % 10 == 1:
+        word = "год"
+    elif age % 10 in {2, 3, 4}:
+        word = "года"
+    else:
+        word = "лет"
+    return f"{age} {word} назад"
 
 
 async def fetch_day_events(today: date) -> list[DayEvent]:
@@ -122,7 +184,7 @@ async def fetch_day_events(today: date) -> list[DayEvent]:
         "Accept": "application/json",
     }
     try:
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=True) as session:
             async with session.get(url) as response:
                 response.raise_for_status()
                 payload = await response.json(content_type=None)
@@ -131,12 +193,19 @@ async def fetch_day_events(today: date) -> list[DayEvent]:
         return []
     if not isinstance(payload, dict):
         return []
-    return parse_onthisday(payload)
+    return parse_onthisday(payload, today)
+
+
+async def city_event_for(today: date) -> DayEvent | None:
+    verified = VERIFIED_EVENTS.get((today.month, today.day))
+    if verified and verified.year < today.year:
+        return verified
+    return pick_day_event(await fetch_day_events(today), today)
 
 
 async def day_note_text(moment: datetime) -> str | None:
     today = moment.date()
-    event = pick_day_event(await fetch_day_events(today), today)
+    event = await city_event_for(today)
     if event is None:
         return None
     return render_day_note(today, event)

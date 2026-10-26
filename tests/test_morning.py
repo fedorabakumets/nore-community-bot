@@ -8,7 +8,6 @@ from community_bot.morning import (
     WeatherNow,
     clothing_advice,
     due_morning,
-    fact_for,
     format_day,
     metro_status,
     news_bucket,
@@ -19,6 +18,7 @@ from community_bot.morning import (
     render_weather_command,
     select_day_news,
     select_news,
+    telegram_length,
     weather_kind,
 )
 
@@ -53,8 +53,6 @@ def test_weather_kind_and_clothing() -> None:
 def test_day_fact_and_schedule_window() -> None:
     day = datetime(2026, 10, 5, tzinfo=ZoneInfo("Europe/Moscow")).date()
     assert format_day(day) == "Понедельник, 5 октября"
-    assert fact_for(day) == fact_for(day)
-    assert "мост" in fact_for(day).casefold() or len(fact_for(day)) > 20
     nine = datetime(2026, 10, 5, 9, 5, tzinfo=ZoneInfo("Europe/Moscow"))
     assert due_morning(nine, None) is True
     assert due_morning(nine, "2026-10-05") is False
@@ -136,13 +134,12 @@ def test_traffic_xml_and_caption_fit_photo() -> None:
     )
     text = render_brief(brief)
     assert "Доброе утро" in text
-    assert "Пробки: 6, местами затруднения." in text
-    assert "Рассвет — 07:13" in text
-    assert "Закат — 18:19" in text
-    assert "Факт дня" in text
+    assert "пробки 6/10" in text
+    assert "ощущается +5°" in text
+    assert "Этот день в Петербурге" in text
     assert "Московском" not in text
-    assert "За сутки" in text
-    assert len(text) <= 1024
+    assert "Подходящих новостей" in text
+    assert telegram_length(text) <= 1024
     assert brief.photo is not None and brief.photo.name == "cloudy.jpg"
 
 
@@ -157,18 +154,18 @@ def test_closed_stations_and_day_news_stay_in_one_brief() -> None:
     now = datetime(2026, 10, 8, 9, 0, tzinfo=ZoneInfo("Europe/Moscow"))
     items = [
         NewsItem(
-            "Драка на Коломяжском проспекте",
+            "На Коломяжском проспекте изменили движение автобусов",
             datetime(2026, 10, 8, 5, 0, tzinfo=UTC),
             link="https://www.fontanka.ru/2026/10/08/3/?from=yanews",
-            lead="Подростки устроили драку на парковке. Полиция приехала позже.",
+            lead="Автобусы временно объезжают участок ремонта. Изменения действуют сегодня.",
         ),
         NewsItem("Федеральная заметка", datetime(2026, 10, 8, 6, 0, tzinfo=UTC), lead="Далеко от города."),
         NewsItem("Старая драка на набережной", datetime(2026, 10, 6, 5, 0, tzinfo=UTC), lead="Это было раньше."),
     ]
     selected = select_day_news(items, now)
-    assert [item.title for item in selected] == ["Драка на Коломяжском проспекте"]
+    assert [item.title for item in selected] == ["На Коломяжском проспекте изменили движение автобусов"]
     line = render_news_line(selected[0])
-    assert "Подростки устроили драку" in line
+    assert "Автобусы временно объезжают" in line
     assert 'href="https://www.fontanka.ru/2026/10/08/3/"' in line
     brief = MorningBrief(
         when=now,
@@ -179,8 +176,8 @@ def test_closed_stations_and_day_news_stay_in_one_brief() -> None:
         day_news=selected,
     )
     text = render_brief(brief)
-    assert "Не работают: Парк Победы, Фрунзенская" in text
-    assert "Пробки: 4, местами затруднения." in text
+    assert "закрыты: Парк Победы, Фрунзенская" in text
+    assert "пробки 4/10" in text
     assert "За сутки" in text
     assert "fontanka.ru/2026/10/08/3/" in text
     forecast = render_weather_command(

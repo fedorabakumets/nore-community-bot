@@ -20,7 +20,7 @@ from community_bot.nora import (
     wiki_search_title,
 )
 from community_bot.permissions import DEFAULT_STAFF_ROLES, PERM_COMMANDS
-from community_bot.updates import community_announcement, latest_update, member_details_text, staff_announcement
+from community_bot.updates import community_announcement, member_details_text, staff_announcement
 
 
 def test_nora_routes_plain_phrases() -> None:
@@ -225,7 +225,9 @@ def test_custom_command_and_removed_alias(tmp_path: Path) -> None:
 
 
 def test_public_update_hides_the_command_tool() -> None:
-    item = latest_update()
+    from community_bot.updates import UPDATES
+
+    item = next(update for update in UPDATES if update.number == 15)
     pin = community_announcement(item)
     details = member_details_text(item)
     staff = staff_announcement(item)
