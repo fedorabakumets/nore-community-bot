@@ -368,7 +368,10 @@ class AdminBridge:
                 await self.feed(session, actor, callback='admin:panel')
             else:
                 await self.feed(session, actor, callback=callback, mid=mid)
-            return await self.snapshot(session)
+            result = await self.snapshot(session)
+            if callback == 'ui:close':
+                result['exit'] = True
+            return result
 
     async def input(self, actor, data, upload=None):
         session = await self.session(actor['id'])

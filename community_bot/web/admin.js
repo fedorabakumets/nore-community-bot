@@ -4,7 +4,7 @@ window.NoraAdmin=(()=>{
   const htmlEscape=s=>esc(s);
   function redraw(){if(tab==='admin')render()}
   function clearMedia(){for(const url of mediaURLs)URL.revokeObjectURL(url);mediaURLs=[]}
-  function show(next){clearMedia();panel=next;error='';for(const notice of next.notices||[])toast(notice);redraw()}
+  function show(next){clearMedia();panel=next;error='';for(const notice of next.notices||[])toast(notice);if(next.exit){tab='lk';render()}else redraw()}
   async function load(reset=false){if(working||loading)return;loading=true;error='';redraw();try{show(await api(reset?'admin/reset':'admin',reset?{}:undefined))}catch(e){error=e.message}finally{loading=false;redraw()}}
   async function act(action){if(working||!panel)return;working=true;redraw();try{show(await api('admin/action',{action,version:panel.version}))}catch(e){error=e.message;toast(e.message)}finally{working=false;redraw()}}
   function button(b){const c=b.style==='danger'?'danger':b.style==='success'?'success':'';return b.tab?`<button class="admin-control" data-tab="${htmlEscape(b.tab)}">${htmlEscape(b.text)}</button>`:b.url?`<a class="admin-control ${c}" href="${htmlEscape(b.url)}" target="_blank" rel="noopener noreferrer">${htmlEscape(b.text)}</a>`:`<button class="admin-control ${c}" data-admin-action="${htmlEscape(b.action)}" ${working?'disabled':''}>${htmlEscape(b.text)}</button>`}
