@@ -101,10 +101,14 @@ def private_menu_keyboard(
         notices = f"🔔 Уведомления ({unread})"
     rows = [
         [
+            ibtn("💼 Кошелёк", "menu:wallet"),
+            ibtn("🛒 Магазин", "menu:shop", STYLE_GO),
+        ],
+        [
             ibtn("👤 Профиль", "menu:profile", STYLE_FUN),
             ibtn("🐾 Питомец", "menu:pet", STYLE_FUN),
         ],
-        [ibtn(notices, "menu:notices")],
+        [ibtn(notices, "menu:notices"), ibtn("🎫 Поддержка", "menu:question")],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
@@ -462,7 +466,9 @@ def ticket_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
+def profile_keyboard(
+    user_id: int, is_private: bool = False, *, back_to_menu: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
         [
             ibtn("Имя", f"profile:name:{user_id}"),
@@ -477,7 +483,7 @@ def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMa
     ]
     if is_private:
         rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
-    rows.append([close_btn("ui:close")])
+    rows.append(([back_btn("menu:home")] if back_to_menu else []) + [close_btn("ui:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -577,7 +583,7 @@ def shop_home_keyboard(
     if shop.get("enabled"):
         button = str(shop.get("button") or DEFAULT_COOKIE_SHOP["button"])[:40]
         rows.append([ibtn(button, "shop:buy_cookies", STYLE_GO)])
-    rows.append([close_btn("shop:close")])
+    rows.append([back_btn("menu:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -612,10 +618,10 @@ def shop_category_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def shop_confirm_keyboard(item: str, price: int) -> InlineKeyboardMarkup:
+def shop_confirm_keyboard(intent_id: str, price: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn(f"✅ Купить за {price} 🍪", f"shop:ok:{item}", STYLE_GO)],
+            [ibtn(f"✅ Подтвердить · {price} 🍪", f"shop:pay:{intent_id}", STYLE_GO)],
             [back_btn("shop:home"), close_btn("shop:close")],
         ]
     )
@@ -690,18 +696,18 @@ def transfer_keyboard(transfer_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def pet_species_keyboard(price: int) -> InlineKeyboardMarkup:
+def pet_species_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                ibtn("🐈 Кот", f"pet:species:cat:{price}", STYLE_FUN),
-                ibtn("🐕 Пёс", f"pet:species:dog:{price}", STYLE_FUN),
+                ibtn("🐈 Кот", f"pet:species:cat:{intent_id}", STYLE_FUN),
+                ibtn("🐕 Пёс", f"pet:species:dog:{intent_id}", STYLE_FUN),
             ],
             [
-                ibtn("🦝 Енот", f"pet:species:raccoon:{price}", STYLE_FUN),
-                ibtn("🦊 Лиса", f"pet:species:fox:{price}", STYLE_FUN),
+                ibtn("🦝 Енот", f"pet:species:raccoon:{intent_id}", STYLE_FUN),
+                ibtn("🦊 Лиса", f"pet:species:fox:{intent_id}", STYLE_FUN),
             ],
-            [ibtn("🐉 Дракончик", f"pet:species:dragon:{price}", STYLE_GO)],
+            [ibtn("🐉 Дракончик", f"pet:species:dragon:{intent_id}", STYLE_GO)],
             [ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE)],
         ]
     )
@@ -1003,28 +1009,28 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def wallet_keyboard(can_borrow: bool) -> InlineKeyboardMarkup:
-    loan_label = "🍪 Взять 100 в долг" if can_borrow else "🍪 Кредит уже открыт"
+def wallet_keyboard(can_borrow: bool, *, has_debt: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn("📜 История операций", "wallet:history", STYLE_FUN), ibtn("🍪 Пополнить", "shop:buy_cookies", STYLE_GO)],
+        [ibtn("💸 Перевести", "wallet:send"), ibtn("🛒 Магазин", "wallet:shop")],
+    ]
+    if has_debt:
+        rows.append([ibtn("💳 Погасить просроченный долг", "wallet:repay", STYLE_GO)])
+    elif can_borrow:
+        rows.append([ibtn("💳 Взять 100 🍪 в долг", "wallet:loan")])
+    rows.extend([
+        [ibtn("❓ Условия и комиссии", "wallet:help")],
+        [back_btn("menu:home"), close_btn("ui:close")],
+    ])
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                ibtn("📜 История", "wallet:history", STYLE_FUN),
-                ibtn("🛒 Пополнить", "wallet:shop", STYLE_GO),
-            ],
-            [
-                ibtn("💸 Перевести", "wallet:send"),
-                ibtn(loan_label, "wallet:loan", STYLE_GO if can_borrow else None),
-            ],
-            [ibtn("❓ Помощь по кошельку", "wallet:help")],
-            [close_btn("ui:close")],
-        ]
+        inline_keyboard=rows,
     )
 
 
-def wallet_loan_confirm_keyboard() -> InlineKeyboardMarkup:
+def wallet_loan_confirm_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn("Да, взять 100 🍪", "wallet:loan:yes", STYLE_GO)],
+            [ibtn("Да, взять 100 🍪", f"wallet:loan:yes:{intent_id}", STYLE_GO)],
             [ibtn("Не надо", "wallet:back", STYLE_CLOSE)],
         ]
     )

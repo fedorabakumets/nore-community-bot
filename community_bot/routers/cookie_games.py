@@ -308,7 +308,9 @@ async def cancel_active_game(message: Message, db: Database, settings: Settings)
         return
     is_admin = await _admin_cancel(db, settings, message.from_user.id)
     if not await db.cancel_party_game(int(game["id"]), message.from_user.id, is_admin):
-        await message.answer("Отменить может создатель или администратор игр.")
+        await message.answer(
+            "Создатель может отменить набор игроков. Начатую игру на печеньки может отменить только администратор игр.",
+        )
         return
     _cancel_game_jobs(int(game["id"]))
     from community_bot.routers.social_games import cancel_social_jobs
@@ -430,7 +432,9 @@ async def cookie_cancel(callback: CallbackQuery, db: Database, settings: Setting
     game_id = int(callback.data.rsplit(":", 1)[1])
     is_admin = await _admin_cancel(db, settings, callback.from_user.id)
     if not await db.cancel_party_game(game_id, callback.from_user.id, is_admin):
-        await callback.answer("Отменить может создатель или администратор игр.", show_alert=True)
+        await callback.answer(
+            "Создатель может отменить набор. Начатую игру на печеньки — только администратор игр.", show_alert=True,
+        )
         return
     _cancel_game_jobs(game_id)
     await callback.answer("Ставки возвращены.")

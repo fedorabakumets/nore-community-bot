@@ -4,7 +4,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, User
 
 from community_bot.config import Settings
 from community_bot.database import Database
@@ -95,15 +95,23 @@ async def _show_inline_menu(
     settings: Settings,
     *,
     replace: bool = False,
+    actor: User | None = None,
 ) -> None:
-    if not message.from_user:
+    actor = actor or message.from_user
+    if not actor or actor.is_bot:
         return
     from community_bot.blocks import answer_block, replace_block
+    from community_bot.cabinet import cabinet_text
+    from community_bot.helpers import register_telegram_user
 
-    show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
-    unread = await db.notify_unread_count(message.from_user.id)
+    user = await register_telegram_user(db, actor)
+    show_admin = await has_permission(db, settings, actor.id, PERM_ADMIN_PANEL)
+    unread = await db.notify_unread_count(actor.id)
     markup = private_menu_keyboard(show_admin, unread=unread)
-    text = "📋 <b>Меню</b>\nПрофиль, питомец, уведомления. Снизу — магазин, кошелёк и тикет."
+    text = cabinet_text(
+        user, await db.get_pet(actor.id, settle=False), unread=unread,
+        restricted_threshold=settings.restricted_reputation_threshold,
+    )
     if replace:
         await replace_block(message, "cabinet", text, parse_mode="HTML", reply_markup=markup)
         return
@@ -122,7 +130,7 @@ async def menu_home(callback: CallbackQuery, db: Database, settings: Settings) -
         await callback.answer()
         return
     await callback.answer()
-    await _show_inline_menu(callback.message, db, settings, replace=True)
+    await _show_inline_menu(callback.message, db, settings, replace=True, actor=callback.from_user)
 
 
 @router.message(F.chat.type == "private", F.text.in_({BTN_MENU, BTN_SHOP, BTN_WALLET, BTN_TICKET}))

@@ -312,7 +312,7 @@ async def menu_wallet(callback: CallbackQuery, db: Database, settings: Settings)
     from community_bot.routers.wallet import send_wallet
 
     await callback.answer()
-    await send_wallet(callback.message, db, settings)
+    await send_wallet(callback.message, db, settings, actor=callback.from_user, replace=True)
 
 
 @router.callback_query(F.data == "menu:question")
@@ -326,18 +326,19 @@ async def menu_question(
     if not callback.message:
         return
     await callback.answer()
-    await open_ticket(callback.message, state, db, settings, bot)
+    await open_ticket(callback.message, state, db, settings, bot, actor=callback.from_user)
 
 
 @router.callback_query(F.data == "menu:shop")
 async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not callback.from_user:
         return
+    from community_bot.blocks import replace_block
     from community_bot.routers.group import _shop_home_markup, _shop_home_text
 
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await replace_block(
         callback.message,
         "shop",
         await _shop_home_text(db, user, settings),
@@ -2663,11 +2664,15 @@ async def admin_delete_automessage(callback: CallbackQuery, db: Database, settin
 
 @router.message(command_or_alias("question"))
 @router.message(F.text == "❓ Задать вопрос")
-async def open_ticket(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
-    if not message.from_user:
+async def open_ticket(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot,
+    *, actor: User | None = None,
+) -> None:
+    actor = actor or message.from_user
+    if not actor or actor.is_bot:
         return
-    await register_telegram_user(db, message.from_user)
-    ticket_id, created = await db.get_or_create_ticket(message.from_user.id)
+    await register_telegram_user(db, actor)
+    ticket_id, created = await db.get_or_create_ticket(actor.id)
     await state.set_state(TicketForm.active)
     await state.set_data({"ticket_id": ticket_id})
     if created:
@@ -2676,7 +2681,7 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
                 bot,
                 reviewer_id,
                 f"🎫 Открыт тикет №{ticket_id} пользователем "
-                f"{user_link(message.from_user.id, message.from_user.full_name)}.",
+                f"{user_link(actor.id, actor.full_name)}.",
                 parse_mode="HTML",
                 reply_markup=ticket_keyboard(ticket_id),
             )

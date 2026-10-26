@@ -187,13 +187,23 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
     if not await db.feature_enabled("tamagotchi"):
         await callback.answer("Тамагочи временно выключены администрацией.", show_alert=True)
         return
-    _, _, species, raw_price = callback.data.split(":")
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Откройте покупку питомца заново.", show_alert=True)
+        return
+    _, _, species, token = parts
     if species not in SPECIES:
         await callback.answer("Неизвестный питомец.", show_alert=True)
         return
-    price = int(raw_price)
+    intent = await db.get_wallet_intent(callback.from_user.id, token)
+    if not intent or intent["item"] != "tamagotchi" or intent["target_id"] != callback.from_user.id:
+        await callback.answer("Покупка устарела или уже выполнена. Откройте магазин заново.", show_alert=True)
+        return
+    price = int(intent["price"])
     await state.set_state(PetFlow.name)
-    await state.set_data({"pet_species": species, "pet_price": price, "flow_kind": "pet_name"})
+    await state.set_data({
+        "pet_species": species, "pet_price": price, "purchase_intent": token, "flow_kind": "pet_name",
+    })
     await callback.answer()
     emoji, label, _gender = SPECIES[species]
     words = pet_pronouns(species)
@@ -214,9 +224,14 @@ async def create_pet(message: Message, state: FSMContext, db: Database, settings
         await message.answer("Имя должно содержать от 1 до 24 символов.")
         return
     data = await state.get_data()
+    if not data.get("purchase_intent"):
+        await message.answer("Покупка устарела. Откройте магазин заново.")
+        return
     species = str(data["pet_species"])
     price = int(data["pet_price"])
-    ok, error = await db.purchase_pet(message.from_user.id, species, name, price)
+    ok, error = await db.purchase_pet(
+        message.from_user.id, species, name, price, intent_id=str(data["purchase_intent"]),
+    )
     await state.clear()
     if not ok:
         await message.answer(error)

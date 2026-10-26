@@ -22,7 +22,7 @@ from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import has_permission, register_telegram_user, resolve_reply_target, user_link
-from community_bot.keyboards import STYLE_GO, ibtn
+from community_bot.keyboards import STYLE_GO, ibtn, shop_confirm_keyboard
 from community_bot.life import (
     WARN_KICK_AT,
     WARN_MUTE_AT,
@@ -33,10 +33,8 @@ from community_bot.life import (
 from community_bot.permissions import PERM_POST
 from community_bot.shop_catalog import (
     GIFTABLE_ITEMS,
-    IMMUNITY_HOURS,
     ITEM_LABELS,
     PET_SUPPLIES,
-    TITLE_ITEMS,
     shop_prices_for,
 )
 from community_bot.states import GiftFlow, MailboxForm
@@ -75,22 +73,22 @@ async def _deliver_shop(
     target_id: int,
     item: str,
     price: int,
+    *,
+    intent_id: str,
 ) -> tuple[bool, str]:
     if item not in GIFTABLE_ITEMS and item not in ITEM_LABELS:
         return False, "Этот товар нельзя подарить."
     if item in PET_SUPPLIES:
         kind, gain, _ = PET_SUPPLIES[item]
-        ok, error, _ = await db.purchase_pet_supply(target_id, kind, gain, price, item, payer_id=buyer_id)
+        ok, error, _ = await db.purchase_pet_supply(
+            target_id, kind, gain, price, item, payer_id=buyer_id, intent_id=intent_id,
+        )
         if not ok:
             return False, error
     else:
-        ok, error = await db.buy_item(buyer_id, item, price, target_id=target_id)
+        ok, error = await db.buy_item(buyer_id, item, price, target_id=target_id, intent_id=intent_id)
         if not ok:
             return False, error
-        if item in IMMUNITY_HOURS:
-            await db.set_immunity(target_id, datetime.now(UTC) + timedelta(hours=IMMUNITY_HOURS[item]))
-        if item in TITLE_ITEMS:
-            await db.update_profile(target_id, "profile_title", TITLE_ITEMS[item])
         if item == "forgive" and settings.community_chat_id:
             with suppress(*_TG_ERRORS):
                 await bot.restrict_chat_member(
@@ -105,6 +103,19 @@ async def _deliver_shop(
         await unlock(db, buyer_id, "gift_first")
     await unlock(db, buyer_id, "shop_first")
     return True, "ok"
+
+
+async def _confirm_gift(
+    message: Message, db: Database, buyer_id: int, target: dict[str, object], item: str, price: int,
+) -> None:
+    token = await db.create_wallet_intent(
+        buyer_id, item, price, target_id=int(target["user_id"]), payload={"gift": True},
+    )
+    await message.answer(
+        f"🎁 <b>Подтвердите подарок</b>\n{html.escape(ITEM_LABELS.get(item, item))}\n"
+        f"Получатель: {html.escape(person_label(target))}\nСпишется: <b>{price} 🍪</b>.",
+        parse_mode="HTML", reply_markup=shop_confirm_keyboard(token, price),
+    )
 
 
 @router.message(command_or_alias("gift"))
@@ -132,17 +143,7 @@ async def gift_command(
     if item not in prices:
         await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
         return
-    ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
-    if not ok:
-        await message.answer(error)
-        return
-    label = ITEM_LABELS.get(item, item)
-    with keep_in_chat():
-        await message.answer(
-            f"🎁 {user_link(buyer['user_id'], message.from_user.full_name)} дарит "
-            f"{html.escape(label)} → {user_link(int(target['user_id']), person_label(target))}.",
-            parse_mode="HTML",
-        )
+    await _confirm_gift(message, db, int(buyer["user_id"]), target, item, prices[item])
 
 
 @router.message(GiftFlow.target)
@@ -168,8 +169,7 @@ async def gift_target_text(message: Message, state: FSMContext, db: Database, se
     if item not in prices:
         await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
         return
-    ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
-    await message.answer(error if not ok else f"🎁 Подарок «{ITEM_LABELS.get(item, item)}» доставлен.")
+    await _confirm_gift(message, db, int(buyer["user_id"]), target, item, prices[item])
 
 
 @router.callback_query(F.data.startswith("shop:g:"))

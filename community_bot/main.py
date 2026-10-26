@@ -21,6 +21,8 @@ from community_bot.covers import cover_path_for
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message
+from community_bot.navigation import CabinetNavigationMiddleware
+from community_bot.release_backup import verify_requested_release_backup
 from community_bot.restart import relaunch
 from community_bot.routers import (
     command_admin_router,
@@ -412,6 +414,7 @@ async def main() -> None:
     )
     settings = load_settings()
     db = Database(settings.database_path)
+    await verify_requested_release_backup(db)
     await db.initialize()
     if await db.get_bot_state("emergency_disabled") == "1":
         logger.critical("Бот заблокирован аварийным выключателем")
@@ -431,6 +434,7 @@ async def main() -> None:
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
+    dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)
