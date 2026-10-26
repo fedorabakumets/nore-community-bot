@@ -26,7 +26,6 @@ class ProfileEdit(StatesGroup):
     bio = State()
     avatar = State()
     video_avatar = State()
-    custom_status = State()
 
 
 class CookiePurchase(StatesGroup):

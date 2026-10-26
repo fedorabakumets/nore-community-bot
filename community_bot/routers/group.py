@@ -90,7 +90,6 @@ from community_bot.permissions import (
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
-    TITLE_ITEMS,
     cookie_rate_line,
     cookie_shop_member_text,
     format_rub,
@@ -427,12 +426,15 @@ async def open_admin_from_group(message: Message, db: Database, settings: Settin
         f"Анкет на проверке: <b>{pending}</b>\n"
         f"Платежей на проверке: <b>{int(orders['count']) if orders else 0}</b>"
     )
+    from community_bot.routers.private import _web_admin_markup
+
+    web_markup = await _web_admin_markup(db, settings, message.from_user.id)
     try:
         await bot.send_message(
             message.from_user.id,
             text,
             parse_mode="HTML",
-            reply_markup=admin_panel_keyboard(
+            reply_markup=web_markup or admin_panel_keyboard(
                 await user_permissions(db, settings, message.from_user.id),
                 await db.dashboard_stats(),
             ),
@@ -465,7 +467,6 @@ async def staff_user_card(message: Message, db: Database, settings: Settings) ->
             f"Роль: {html.escape(str(target['role']))}\n"
             f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
             f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
-            f"Титул: {html.escape(str(target.get('profile_title') or 'нет'))}\n"
             f"Питомец: {html.escape(str(pet_line))}\n"
             f"Заметка: {html.escape(note)}",
             parse_mode="HTML",
@@ -936,28 +937,6 @@ async def change_role(message: Message, db: Database, settings: Settings) -> Non
     )
 
 
-@router.message(command_or_alias("setstatus"), F.chat.type.in_({"group", "supergroup"}))
-async def admin_set_status(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_perm(message, db, settings, PERM_USERS_EDIT) or not message.from_user:
-        return
-    target = await resolve_reply_target(message, db)
-    status = " ".join(remainder_args(message.text or "")).strip()[:50]
-    if not target or not status:
-        await _respond(message, "Ответьте на сообщение: /setstatus Новый статус")
-        return
-    await db.update_profile(int(target["user_id"]), "custom_status", status)
-    await db.log_admin_action(
-        message.from_user.id,
-        "set_status",
-        str(target["user_id"]),
-        status,
-        actor_name=message.from_user.full_name,
-        target_name=person_label(target),
-        reason=status,
-    )
-    await _respond(message, "Кастомный статус установлен.")
-
-
 async def _shop_prices(db: Database, user: dict[str, object], settings: Settings) -> dict[str, int]:
     return shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
 
@@ -1405,18 +1384,6 @@ async def buy_shop_item(
             reply_markup=await _shop_home_markup(db),
         )
         return
-    if item == "custom_status":
-        if int(user["cookies"]) < price:
-            await callback.answer("Недостаточно печенек.", show_alert=True)
-            return
-        await state.set_state(ProfileEdit.custom_status)
-        await state.set_data({"shop_price": price, "purchase_intent": token})
-        await callback.answer()
-        await callback.message.answer(
-            "Введите новый кастомный статус (до 50 символов).",
-            reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
-        )
-        return
     if item in IMMUNITY_HOURS:
         ok, error = await db.buy_item(callback.from_user.id, item, price, intent_id=token)
         if not ok:
@@ -1430,26 +1397,6 @@ async def buy_shop_item(
 
         await unlock(db, callback.from_user.id, "shop_first")
         await callback.answer(f"Иммунитет продлён на {hours} ч.")
-        fresh = await db.get_user(callback.from_user.id) or user
-        await edit_block(
-            callback.message,
-            await _shop_home_text(db, fresh, settings),
-            parse_mode="HTML",
-            reply_markup=await _shop_home_markup(db),
-        )
-        return
-    if item in TITLE_ITEMS:
-        ok, error = await db.buy_item(callback.from_user.id, item, price, intent_id=token)
-        if not ok:
-            await callback.answer(error, show_alert=True)
-            return
-        from community_bot.notify import vitrine_consumed
-
-        await vitrine_consumed(bot, db, item)
-        from community_bot.life import unlock
-
-        await unlock(db, callback.from_user.id, "shop_first")
-        await callback.answer("Титул надет.")
         fresh = await db.get_user(callback.from_user.id) or user
         await edit_block(
             callback.message,
@@ -1567,32 +1514,6 @@ async def save_video_avatar(message: Message, state: FSMContext, db: Database) -
         return
     await state.clear()
     await message.answer(f"✅ Видео-профиль установлен. Списано {price} 🍪.")
-
-
-@router.message(ProfileEdit.custom_status)
-async def save_purchased_status(message: Message, state: FSMContext, db: Database) -> None:
-    if not message.from_user or not message.text:
-        await message.answer("Введите статус текстом.")
-        return
-    status = message.text.strip()
-    if not 1 <= len(status) <= 50:
-        await message.answer("Статус должен содержать от 1 до 50 символов.")
-        return
-    data = await state.get_data()
-    if not data.get("purchase_intent"):
-        await message.answer("Покупка устарела. Откройте товар заново.")
-        return
-    price = int(data["shop_price"])
-    ok, error = await db.buy_item(
-        message.from_user.id, "custom_status", price,
-        intent_id=str(data["purchase_intent"]), profile_value=status,
-    )
-    if not ok:
-        await state.clear()
-        await message.answer(error)
-        return
-    await state.clear()
-    await message.answer(f"✅ Статус установлен. Списано {price} 🍪.")
 
 
 @router.message(command_or_alias("givecookies"), F.chat.type.in_({"group", "supergroup"}))

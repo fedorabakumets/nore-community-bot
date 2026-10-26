@@ -19,7 +19,7 @@ def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
     assert "pet_meal" in SHOP_CATEGORIES["pets"]["items"]
     assert "forgive" in SHOP_CATEGORIES["reputation"]["items"]
     assert "rep_shield" in SHOP_CATEGORIES["reputation"]["items"]
-    assert "title_owl" in SHOP_CATEGORIES["profile"]["items"]
+    assert "title_owl" not in SHOP_CATEGORIES["profile"]["items"]
     assert set(IMMUNITY_HOURS) <= set(SHOP_CATEGORIES["reputation"]["items"])
     assert IMMUNITY_HOURS["immunity_24h"] == 24
 

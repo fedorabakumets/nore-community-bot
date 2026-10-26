@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import html
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from aiogram.types import (
     LinkPreviewOptions,
     Message,
     User,
+    WebAppInfo,
 )
 
 from community_bot.aliases import command_or_alias
@@ -363,11 +365,26 @@ async def menu_pet(callback: CallbackQuery, db: Database, settings: Settings) ->
     await _show_pet(callback.message, db, callback.from_user.id, settings, replace=True)
 
 
+async def _web_admin_markup(db: Database, settings: Settings, user_id: int):
+    from community_bot.access import miniapp_allowed
+
+    url = os.getenv("MINIAPP_URL", "")
+    if url.startswith("https://") and await miniapp_allowed(db, settings, user_id):
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Открыть админ-панель", web_app=WebAppInfo(url=url.split("#", 1)[0]+"#admin")),
+        ]])
+    return None
+
+
 @router.callback_query(F.data == "menu:admin")
 async def menu_admin(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
     await callback.answer()
+    web_markup = await _web_admin_markup(db, settings, callback.from_user.id)
+    if web_markup:
+        await callback.message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
+        return
     await callback.message.answer(
         await _admin_panel_text(db),
         parse_mode="HTML",
@@ -410,6 +427,10 @@ async def _admin_panel_text(db: Database) -> str:
 @router.message(F.text == "🛡 Админ-панель")
 async def admin_panel(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        return
+    web_markup = await _web_admin_markup(db, settings, message.from_user.id)
+    if web_markup:
+        await message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
         return
     await answer_block(
         message,
@@ -457,6 +478,73 @@ async def admin_queue(callback: CallbackQuery, db: Database, settings: Settings)
         parse_mode="HTML",
         reply_markup=admin_queue_keyboard(await user_permissions(db, settings, callback.from_user.id), stats),
     )
+
+
+@router.callback_query(F.data.startswith("admin:tickets:"))
+async def admin_tickets(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    raw = (callback.data or "").rsplit(":", 1)[-1]
+    page = int(raw) if raw.isdigit() else 0
+    rows = await db.fetchall(
+        "SELECT t.id, u.telegram_name FROM tickets t JOIN users u ON u.user_id=t.user_id "
+        "WHERE t.status='open' ORDER BY t.updated_at DESC LIMIT 11 OFFSET ?", (page * 10,),
+    )
+    buttons = [[InlineKeyboardButton(text=f"№{row['id']} · {row['telegram_name'] or 'Участник'}"[:60],
+                                     callback_data=f"admin:ticket:{row['id']}:0")] for row in rows[:10]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:tickets:{page-1}"))
+    if len(rows) > 10:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:tickets:{page+1}"))
+    if paging:
+        buttons.append(paging)
+    buttons.append([InlineKeyboardButton(text="К очереди", callback_data="admin:queue")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎫 <b>Тикеты</b>\n\nВыберите диалог." if rows else "🎫 <b>Тикеты</b>\n\nОткрытых диалогов нет.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:ticket:"))
+async def admin_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    _, _, raw_id, raw_page = (callback.data or "").split(":")
+    ticket_id, page = int(raw_id), int(raw_page)
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден", show_alert=True)
+        return
+    records = await db.fetchall(
+        "SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id DESC LIMIT 6 OFFSET ?",
+        (ticket_id, page * 5),
+    )
+    await callback.answer()
+    await callback.message.answer(f"🎫 <b>Диалог №{ticket_id}</b>", parse_mode="HTML")
+    for record in reversed(records[:5]):
+        sender = "Участник" if record["sender_kind"] == "user" else "Модератор"
+        body = f"<b>{sender}</b>\n{html.escape(str(record['text'] or ''))}"
+        media_type, file_id = record.get("media_type"), record.get("media_file_id")
+        method = getattr(bot, f"send_{media_type}", None) if media_type in {
+            "photo", "video", "document", "audio", "voice", "animation",
+        } else None
+        if method and file_id:
+            await method(callback.from_user.id, file_id, caption=body[:1024], parse_mode="HTML")
+        else:
+            await callback.message.answer(body, parse_mode="HTML")
+    rows = [[InlineKeyboardButton(text="Ответить", callback_data=f"ticket:reply:{ticket_id}"),
+             InlineKeyboardButton(text="Закрыть тикет", callback_data=f"ticket:close:{ticket_id}", style="danger")]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="Новее", callback_data=f"admin:ticket:{ticket_id}:{page-1}"))
+    if len(records) > 5:
+        paging.append(InlineKeyboardButton(text="Раньше", callback_data=f"admin:ticket:{ticket_id}:{page+1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="К тикетам", callback_data="admin:tickets:0")])
+    await callback.message.answer("Действия с диалогом", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 @router.callback_query(F.data == "admin:reports")
@@ -596,7 +684,7 @@ async def admin_people(callback: CallbackQuery, db: Database, settings: Settings
         return
     await callback.answer()
     await callback.message.edit_text(
-        "👤 <b>Люди</b>\n\nПоиск, роли, карточка, заметка и титул недели.",
+        "👤 <b>Люди</b>\n\nПоиск, роли, карточки и заметки.",
         parse_mode="HTML",
         reply_markup=admin_people_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
@@ -757,18 +845,6 @@ async def admin_search_begin(
     await state.set_data({"admin_action": "search", "target_user_id": 0})
     await callback.answer()
     await callback.message.answer("Имя, @username или Telegram ID:", reply_markup=flow_reply_keyboard())
-
-
-@router.callback_query(F.data.startswith("admin:weekstar:"))
-async def admin_weekstar(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _admin_callback(callback, db, settings, PERM_USERS_EDIT):
-        return
-    user_id = int(callback.data.rsplit(":", 1)[1])
-    if not await db.get_user(user_id):
-        await callback.answer("Пользователь не найден.", show_alert=True)
-        return
-    await db.set_weekly_star(user_id)
-    await callback.answer("Титул недели выдан.", show_alert=True)
 
 
 @router.callback_query(F.data == "admin:vitrine")
@@ -1658,7 +1734,6 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
         f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
         f"Репутация: <b>{user['reputation']}</b> · щиты {int(user.get('hate_shields') or 0)}\n"
-        f"Титул: {html.escape(str(user.get('profile_title') or 'нет'))}\n"
         f"Возраст: {user['age'] or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Предупреждения: <b>{user['warnings']}</b>\n"
@@ -2059,6 +2134,7 @@ async def admin_event_participants(callback: CallbackQuery, db: Database, settin
         paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:attendees:{event_id}:{page + 1}"))
     if paging:
         rows.append(paging)
+    rows.append([InlineKeyboardButton(text="Журнал оплат", callback_data=f"eventlist:{event_id}:1:0")])
     rows.append([InlineKeyboardButton(text="Обновить", callback_data=f"admin:attendees:{event_id}:{page}")])
     if event and str(event["chat_id"]).startswith("-100"):
         rows.append([InlineKeyboardButton(
@@ -2893,7 +2969,7 @@ async def relay_ticket_message(message: Message, state: FSMContext, db: Database
 
 @router.callback_query(F.data.startswith("ticket:reply:"))
 async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)
@@ -2911,8 +2987,9 @@ async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Dat
 
 
 @router.message(ModeratorReply.ticket_message)
-async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
-    if not message.from_user:
+async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_TICKETS):
+        await state.clear()
         return
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
@@ -2937,7 +3014,7 @@ async def send_ticket_reply(message: Message, state: FSMContext, db: Database, b
 
 @router.callback_query(F.data.startswith("ticket:close:"))
 async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)

@@ -268,16 +268,11 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
         f"👤 <b>{user_link(int(user['user_id']), str(name))}</b>",
         f"{role_icons.get(role, '💠')} <b>{html.escape(str(label))}</b>",
     ]
-    if user["custom_status"]:
-        lines.append(f"💬 <i>«{html.escape(str(user['custom_status']))}»</i>")
     bio = str(user.get("profile_bio") or "").strip()
     if bio:
         lines.append(f"📝 {html.escape(bio)}")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
-    title = str(user.get("profile_title") or "").strip()
-    if title:
-        lines.append(f"🏷 {html.escape(title)}")
     lines.extend(
         [
             f"🔗 {html.escape(username)}",
@@ -310,12 +305,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     progress = "◆" * filled + "◇" * (10 - filled)
     jewels = {"owner": "👑", "admin": "🛡", "moderator": "⚔️", "member": "🌙"}
     jewel = jewels.get(role, "💠")
-    status = (
-        f"\n     <i>❝ {html.escape(str(user['custom_status']))} ❞</i>\n" if user.get("custom_status") else "\n"
-    )
     lock = "  🔒 скрыт от чужих глаз\n" if user.get("profile_private") else ""
-    title = str(user.get("profile_title") or "").strip()
-    title_line = f"  🏷  {html.escape(title)}\n" if title else ""
     bio = str(user.get("profile_bio") or "").strip()
     bio_line = f"  📝  {html.escape(bio)}\n" if bio else ""
     return (
@@ -324,10 +314,8 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         "╭─━━━━━━━━━━━━━━━━━─╮\n"
         f"   {jewel}  {user_link(int(user['user_id']), name)}\n"
         f"   ✦ {html.escape(str(label))} ✦\n"
-        f"{status}"
         "╰─━━━━━━━━━━━━━━━━━─╯\n"
         f"{lock}"
-        f"{title_line}"
         f"{bio_line}"
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"

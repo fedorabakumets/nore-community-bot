@@ -1026,6 +1026,10 @@ class Database:
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
+        from community_bot.shop_catalog import RETIRED_PROFILE_SKUS
+
+        clauses.append(f"sku NOT IN ({','.join('?' * len(RETIRED_PROFILE_SKUS))})")
+        params.extend(sorted(RETIRED_PROFILE_SKUS))
         if category_slug:
             clauses.append("category_slug = ?")
             params.append(category_slug)
@@ -1040,6 +1044,10 @@ class Database:
         )
 
     async def get_shop_item(self, sku: str) -> dict[str, Any] | None:
+        from community_bot.shop_catalog import RETIRED_PROFILE_SKUS
+
+        if sku in RETIRED_PROFILE_SKUS:
+            return None
         return await self.fetchone("SELECT * FROM shop_items WHERE sku = ?", (sku,))
 
     async def upsert_shop_item(
@@ -1055,6 +1063,10 @@ class Database:
         enabled: int | None = None,
         extra_json: str | None = None,
     ) -> dict[str, Any] | None:
+        from community_bot.shop_catalog import RETIRED_PROFILE_SKUS
+
+        if sku in RETIRED_PROFILE_SKUS:
+            return None
         now = utcnow()
         existing = await self.get_shop_item(sku)
         if existing is None:
@@ -1370,10 +1382,8 @@ class Database:
             "hobbies",
             "avatar_file_id",
             "avatar_media_type",
-            "custom_status",
             "profile_private",
             "profile_ornate",
-            "profile_title",
             "moderator_note",
             "profile_bio",
         }
@@ -1957,8 +1967,8 @@ class Database:
             return False, "Для этого товара ещё не настроена выдача."
         if item == "tamagotchi":
             return False, "Сначала выберите питомца и его имя."
-        if item in {"video_avatar", "custom_status"} and not profile_value:
-            return False, "Сначала отправьте видео или текст статуса."
+        if item == "video_avatar" and not profile_value:
+            return False, "Сначала отправьте видео."
         now = utcnow()
         beneficiary = target_id if target_id is not None else user_id
         async with self.connect() as db:
@@ -1982,12 +1992,7 @@ class Database:
             if error:
                 await db.rollback()
                 return False, error
-            if item == "custom_status":
-                if len(profile_value or "") > 50:
-                    await db.rollback()
-                    return False, "Статус должен содержать от 1 до 50 символов."
-                await db.execute("UPDATE users SET custom_status = ? WHERE user_id = ?", (profile_value, beneficiary))
-            elif item == "video_avatar":
+            if item == "video_avatar":
                 await db.execute(
                     "UPDATE users SET avatar_file_id = ?, avatar_media_type = 'video' WHERE user_id = ?",
                     (profile_value, beneficiary),
@@ -2002,7 +2007,7 @@ class Database:
     async def _apply_shop_effect(
         self, db: aiosqlite.Connection, user_id: int, item: str, now: str,
     ) -> str | None:
-        from community_bot.shop_catalog import IMMUNITY_HOURS, TITLE_ITEMS
+        from community_bot.shop_catalog import IMMUNITY_HOURS
 
         if item == "restore_rep":
             from community_bot.profile_fill import reputation_cap
@@ -2073,14 +2078,6 @@ class Database:
             await db.execute(
                 "UPDATE users SET hate_immunity_until = ?, updated_at = ? WHERE user_id = ?",
                 (until.isoformat(), now, user_id),
-            )
-        elif item in TITLE_ITEMS:
-            cursor = await db.execute("SELECT profile_title FROM users WHERE user_id = ?", (user_id,))
-            if (await cursor.fetchone())["profile_title"] == TITLE_ITEMS[item]:
-                return "Этот титул уже установлен."
-            await db.execute(
-                "UPDATE users SET profile_title = ?, updated_at = ? WHERE user_id = ?",
-                (TITLE_ITEMS[item], now, user_id),
             )
         return None
 
@@ -2665,7 +2662,6 @@ class Database:
 
     async def set_weekly_star(self, user_id: int) -> None:
         await self.set_bot_state("weekly_star_user_id", str(user_id))
-        await self.update_profile(user_id, "profile_title", "Титул недели")
 
     async def mark_pet_talk(self, user_id: int) -> None:
         now = utcnow()

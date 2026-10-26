@@ -37,7 +37,7 @@ def test_persistent_keyboard_is_cabinet_four_buttons() -> None:
 def test_shop_profile_shelf_has_privacy_and_ornate() -> None:
     items = SHOP_CATEGORIES["profile"]["items"]
     assert "private_profile" in items
-    assert "title_owl" in items
+    assert "title_owl" not in items
 
 
 def test_permissions_roundtrip_and_wildcard() -> None:
@@ -68,7 +68,7 @@ def test_ornate_profile_uses_frame_and_status() -> None:
     }
     text = profile_text(user, SimpleNamespace(restricted_reputation_threshold=0))
     assert "Ｎ Ｏ Ｒ Ａ" in text
-    assert "На стиле" in text
+    assert "На стиле" not in text
     assert "скрыт" in text
     assert "◆" in text
     fancy = ornate_profile_text(user, SimpleNamespace(restricted_reputation_threshold=0))

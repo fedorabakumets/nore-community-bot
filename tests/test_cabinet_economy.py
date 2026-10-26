@@ -192,25 +192,25 @@ async def test_restarting_database_does_not_allow_replay(db):
     assert (await restarted.get_user(7))["cookies"] == 138
 
 
-async def test_catalog_change_during_status_flow_is_not_charged(db):
-    token = await db.create_wallet_intent(7, "custom_status", 10)
-    await db.upsert_shop_item("custom_status", price=50)
-    ok, _ = await db.buy_item(7, "custom_status", 10, intent_id=token, profile_value="Привет")
+async def test_catalog_change_during_video_flow_is_not_charged(db):
+    token = await db.create_wallet_intent(7, "video_avatar", 10)
+    await db.upsert_shop_item("video_avatar", price=50)
+    ok, _ = await db.buy_item(7, "video_avatar", 10, intent_id=token, profile_value="Привет")
     assert not ok
     assert (await db.get_user(7))["cookies"] == 150
-    assert not (await db.get_user(7))["custom_status"]
+    assert not (await db.get_user(7))["avatar_file_id"]
 
 
-async def test_concurrent_status_messages_only_apply_one_paid_value(db):
-    token = await db.create_wallet_intent(7, "custom_status", 10)
+async def test_concurrent_video_messages_only_apply_one_paid_value(db):
+    token = await db.create_wallet_intent(7, "video_avatar", 10)
     values = ["Первый", "Второй"]
     results = await asyncio.gather(*(
-        db.buy_item(7, "custom_status", 10, intent_id=token, profile_value=value) for value in values
+        db.buy_item(7, "video_avatar", 10, intent_id=token, profile_value=value) for value in values
     ))
     assert sum(ok for ok, _ in results) == 1
     winner = next(value for value, result in zip(values, results, strict=True) if result[0])
     user = await db.get_user(7)
-    assert (user["cookies"], user["custom_status"]) == (140, winner)
+    assert (user["cookies"], user["avatar_file_id"]) == (140, winner)
 
 
 async def test_gift_requires_confirmation_and_only_delivers_once(db, monkeypatch):
@@ -459,7 +459,7 @@ async def test_navigation_cancels_pending_paid_flow_and_old_confirmation(db, act
 
     from community_bot.navigation import CabinetNavigationMiddleware
 
-    token = await db.create_wallet_intent(7, "custom_status", 10)
+    token = await db.create_wallet_intent(7, "video_avatar", 10)
     state = Flow(purchase_intent=token, shop_price=10)
     callback = CallbackQuery(
         id="nav", chat_instance="private", from_user=User(id=7, is_bot=False, first_name="Анна"), data=action,
@@ -475,5 +475,5 @@ async def test_navigation_cancels_pending_paid_flow_and_old_confirmation(db, act
     await CabinetNavigationMiddleware()(handler, callback, {"db": db, "state": state})
     handler.assert_awaited_once()
     assert state.data == {}
-    assert not (await db.buy_item(7, "custom_status", 10, intent_id=token, profile_value="Случайный текст"))[0]
+    assert not (await db.buy_item(7, "video_avatar", 10, intent_id=token, profile_value="Случайный текст"))[0]
     assert (await db.get_user(7))["cookies"] == 150
