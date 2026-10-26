@@ -55,7 +55,7 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
         "Тамагочи — ваш талисман, который сыщет для вас самые редкие вещи!\n"
-        "Через него в сообществе появляются сезонные находки, титулы, коллекционные награды "
+        "Через него в сообществе появляются сезонные находки, коллекционные награды "
         "и особые призы с мероприятий.\n\n"
         f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
         f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"

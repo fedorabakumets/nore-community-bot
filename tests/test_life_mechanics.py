@@ -126,7 +126,8 @@ async def test_vitrine_stock_and_achievements(tmp_path) -> None:
     title = await unlock(db, 1, "shop_first")
     assert title == "Покупатель"
     user = await db.get_user(1)
-    assert user["profile_title"] == "Покупатель"
+    assert not user["profile_title"]
+    assert "shop_first" in await db.list_achievements(1)
     assert await unlock(db, 1, "shop_first") is None
 
 

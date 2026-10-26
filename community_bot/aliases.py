@@ -56,7 +56,6 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "ban": ("бан", "забанить"),
     "unban": ("разбан",),
     "role": ("роль",),
-    "setstatus": ("сетстатус",),
     "givecookies": ("выдатьпеченьки",),
     "setcookies": ("сетпеченьки",),
 }

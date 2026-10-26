@@ -68,7 +68,10 @@ async def protection(request, handler):
                                          status=403, headers={'Cache-Control': 'no-store'})
         response = await handler(request)
     except web.HTTPRequestEntityTooLarge:
-        response = web.json_response({'error': 'Фотография должна быть не больше 5 МБ'}, status=413)
+        limit = 'Файл должен быть не больше 20 МБ' if request.path.startswith('/api/admin') else (
+            'Фотография должна быть не больше 5 МБ'
+        )
+        response = web.json_response({'error': limit}, status=413)
     except ValueError:
         response = web.json_response(
             {'error': 'Проверь поля профиля, формат и размер фотографии (до 5 МБ)'}, status=400,
@@ -80,7 +83,7 @@ async def protection(request, handler):
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; "
         "frame-ancestors https://web.telegram.org https://*.telegram.org"
     )
     return response
@@ -114,7 +117,7 @@ async def overview(request):
                        'joined': await db.has_event_rsvp(eid, user['user_id']),
                        'paid': await db.has_event_payment(eid, user['user_id'])})
     from community_bot.domain import reputation_tier
-    from community_bot.helpers import effective_role, role_title
+    from community_bot.helpers import effective_role, has_permission, role_title
     from community_bot.profile_fields import profile_revision
     from community_bot.profile_fill import profile_block_states, profile_fill_percent, reputation_cap
 
@@ -132,9 +135,12 @@ async def overview(request):
     history = await db.list_transactions(user['user_id'], 20)
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
-                                        'cookies', 'cookie_debt', 'reputation', 'profile_bio', 'profile_title',
-                                        'age', 'hobbies', 'warnings', 'profile_private', 'custom_status',
+                                        'cookies', 'cookie_debt', 'reputation', 'profile_bio',
+                                        'age', 'hobbies', 'warnings', 'profile_private',
                                         'hate_shields', 'hate_immunity_until')},
+        'admin_available': await has_permission(
+            db, settings, user['user_id'], 'admin.panel',
+        ),
         'profile': stats, 'revision': profile_revision(user),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         'categories': [{'id': c['slug'], 'title': c['title']} for c in cats], 'products': products, 'events': events,
@@ -274,11 +280,24 @@ async def index(request):
     return web.FileResponse(ROOT / 'index.html')
 
 
-def create_app(db: Database, settings, bot):
-    app = web.Application(middlewares=[protection], client_max_size=5 * 1024 * 1024 + 1024)
+def create_app(db: Database, settings, bot, admin_runtime=None):
+    app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
     app.update(db=db, settings=settings, bot=bot)
     app.router.add_get('/', index)
     app.router.add_get('/healthz', lambda _: web.json_response({'ok': True}))
+    from community_bot import admin_web
+
+    if bot is not None:
+        app['admin_bridge'] = admin_web.AdminBridge(db, settings, bot, admin_runtime)
+        async def close_admin(_):
+            await app['admin_bridge'].dispatcher.storage.close()
+        app.on_cleanup.append(close_admin)
+    app.router.add_get('/api/admin', admin_web.panel)
+    app.router.add_post('/api/admin/reset', admin_web.reset)
+    app.router.add_post('/api/admin/action', admin_web.action)
+    app.router.add_post('/api/admin/input', admin_web.input_text)
+    app.router.add_post('/api/admin/upload', admin_web.upload)
+    app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
@@ -286,14 +305,14 @@ def create_app(db: Database, settings, bot):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('app.js', 'style.css'):
+    for name in ('app.js', 'admin.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
 
 
-async def start_server(db, settings, bot):
-    runner = web.AppRunner(create_app(db, settings, bot), access_log=None)
+async def start_server(db, settings, bot, admin_runtime=None):
+    runner = web.AppRunner(create_app(db, settings, bot, admin_runtime), access_log=None)
     await runner.setup()
     try:
         await web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', '8080'))).start()

@@ -182,6 +182,9 @@ def admin_queue_keyboard(permissions: list[str], stats: dict[str, int] | None = 
     if _allow(permissions, "payments"):
         n = int(stats.get("pending_orders") or 0)
         rows.append([ibtn(f"💳 Платежи ({n})" if n else "💳 Платежи", "admin:orders")])
+    if _allow(permissions, "tickets"):
+        n = int(stats.get("open_tickets") or 0)
+        rows.append([ibtn(f"🎫 Тикеты ({n})" if n else "🎫 Тикеты", "admin:tickets:0")])
     if _allow(permissions, "tickets") or _allow(permissions, "admin.panel"):
         n = int(stats.get("pending_reports") or 0)
         rows.append([ibtn(f"🚩 Репорты ({n})" if n else "🚩 Репорты", "admin:reports")])
@@ -423,7 +426,6 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("🖼 Аватар", f"admin:edit:avatar:{user_id}"),
                 ibtn("⚠️ Нарушения", f"admin:edit:warnings:{user_id}"),
             ],
-            [ibtn("⭐ Титул недели", f"admin:weekstar:{user_id}", STYLE_FUN)],
             [back_btn("admin:people")],
         ]
     )

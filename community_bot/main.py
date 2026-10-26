@@ -490,18 +490,18 @@ async def main() -> None:
     await publish_staff_guide(db)
     await publish_commands_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
+    emergency_stop = asyncio.Event()
+    restart_stop = asyncio.Event()
     web_runner = None
     if os.getenv("MINIAPP_ENABLED") == "1":
         from community_bot.miniapp import start_server
 
-        web_runner = await start_server(db, settings, bot)
+        web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
         logger.info("Nora Mini App HTTP server started")
     from community_bot.access import configure_private_menus
 
     await configure_private_menus(bot, db, settings)
     logger.info("Private menus configured: Mini App administrators only")
-    emergency_stop = asyncio.Event()
-    restart_stop = asyncio.Event()
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
