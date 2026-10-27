@@ -86,7 +86,7 @@ async def test_guest_cannot_bypass_gate_with_commands_and_old_inline_buttons(set
     handler.assert_awaited_once()
 
 
-async def test_only_admins_receive_miniapp_menu_and_role_revocation_clears_it(setup, monkeypatch):
+async def test_moderator_and_above_receive_miniapp_menu_and_revocation_clears_it(setup, monkeypatch):
     db, settings, bot = setup
     monkeypatch.setenv('MINIAPP_URL', 'https://example.test')
     await db.ensure_user(99, telegram_name='Owner')
@@ -97,7 +97,7 @@ async def test_only_admins_receive_miniapp_menu_and_role_revocation_clears_it(se
     assert next(c.kwargs['menu_button'] for c in calls if c.kwargs.get('chat_id') == 99).type == 'web_app'
     await db.set_role(7, 'moderator')
     await sync_menu(bot, db, settings, 7)
-    assert bot._nora_menu_access[7][0] is False
+    assert bot._nora_menu_access[7][0] is True
     await db.set_role(7, 'admin')
     await sync_menu(bot, db, settings, 7)
     assert bot.set_chat_menu_button.call_args.kwargs['menu_button'].type == 'web_app'

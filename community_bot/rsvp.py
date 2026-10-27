@@ -35,7 +35,7 @@ async def published_event(callback: CallbackQuery, db: Database, community_chat_
     if event:
         if int(event["chat_id"]) != message.chat.id or int(event["message_id"]) != message.message_id:
             return None
-        return event if event["rsvp_enabled"] else None
+        return event if event["rsvp_enabled"] and event["status"] == "active" else None
     # Old published posts had no registry. Bind only the original shared button in the community.
     markup = getattr(message, "reply_markup", None)
     if not markup or not any(b.callback_data == callback.data for row in markup.inline_keyboard for b in row):
@@ -58,12 +58,15 @@ async def refresh_event_markup(bot, db: Database, event_id: str) -> bool:
     event = await db.get_studio_event(event_id)
     if not event:
         return False
+    from community_bot.event_manager import sync_content
+
+    content_synced = await sync_content(bot, db, event_id)
     offer = await db.get_event_offer(event_id)
     markup = compose_post_markup(
         json.loads(event["buttons_json"]), event_id if event["rsvp_enabled"] else None,
         pay=(offer["button_text"], event_id) if offer else None,
         rsvp_count=await db.event_participant_count(event_id),
-    )
+    ) if event["status"] == "active" else None
     try:
         # Edits also return Message; group callback TTL must never delete the original event post.
         with keep_in_chat():
@@ -81,8 +84,9 @@ async def refresh_event_markup(bot, db: Database, event_id: str) -> bool:
     except TelegramAPIError as error:
         logger.warning("Event counter update deferred: %s (%s)", event_id, type(error).__name__)
         return False
-    await db.execute("UPDATE studio_events SET markup_dirty = 0 WHERE event_id = ?", (event_id,))
-    return True
+    if content_synced:
+        await db.execute("UPDATE studio_events SET markup_dirty = 0 WHERE event_id = ?", (event_id,))
+    return content_synced
 
 
 async def sync_event_counters(bot, db: Database) -> None:

@@ -71,7 +71,7 @@ async def test_overview_exposes_only_allowlisted_own_fields(db):
     assert 'telegraph_token' not in response.text
 
 
-async def test_role_gate_rejects_signed_member_and_moderator_and_revoked_admin(db):
+async def test_role_gate_accepts_staff_and_rejects_signed_member_and_revoked_admin(db):
     import time
     from unittest.mock import AsyncMock
 
@@ -83,10 +83,13 @@ async def test_role_gate_rejects_signed_member_and_moderator_and_revoked_admin(d
     req.path = '/api/profile'
     req.headers = {'Authorization': 'tma '+signed(date=int(time.time()))}
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
-    for role in ('member', 'moderator'):
+    for role in ('member',):
         await db.set_role(7, role)
         assert (await protection(req, handler)).status == 403
         handler.assert_not_awaited()
+    await db.set_role(7, 'moderator')
+    assert (await protection(req, handler)).status == 200
+    handler.reset_mock()
     await db.set_role(7, 'admin')
     assert (await protection(req, handler)).status == 200
     handler.reset_mock()

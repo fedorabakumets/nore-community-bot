@@ -411,7 +411,7 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
                 with contextlib.suppress(Exception):
                     await bot.send_message(
                         user_id,
-                        f"💳 Срок кредита истёк: списано {due_amount} 🍪.{extra}",
+                        f"💳 Срок стартер-пака истёк: списано {due_amount} 🍪.{extra}",
                     )
                 await asyncio.sleep(0.05)
         except Exception:
@@ -505,7 +505,7 @@ async def main() -> None:
     from community_bot.access import configure_private_menus
 
     await configure_private_menus(bot, db, settings)
-    logger.info("Private menus configured: Mini App administrators only")
+    logger.info("Private menus configured: Mini App moderator rank and above")
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))

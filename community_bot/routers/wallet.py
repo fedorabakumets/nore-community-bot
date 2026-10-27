@@ -66,7 +66,7 @@ async def wallet_text(db: Database, settings: Settings, user: dict[str, object])
     if loan:
         due = datetime.fromisoformat(str(loan["due_at"])).astimezone(ZoneInfo(settings.timezone))
         lines.extend([
-            "", f"Открыт кредит: к возврату <b>{loan['due_amount']} 🍪</b>",
+            "", f"Открыт стартер-пак: к возврату <b>{loan['due_amount']} 🍪</b>",
             f"До {due:%d.%m, %H:%M} · осталось {_due_label(str(loan['due_at']))}.",
         ])
     elif not debt:
@@ -189,7 +189,7 @@ async def wallet_loan_ask(callback: CallbackQuery, db: Database, settings: Setti
     user = await register_telegram_user(db, callback.from_user)
     loan = await db.get_active_loan(callback.from_user.id)
     if loan or int(user.get("cookie_debt") or 0) > 0:
-        await callback.answer("Сначала закройте текущий кредит или долг.", show_alert=True)
+        await callback.answer("Сначала закройте текущий стартер-пак или долг.", show_alert=True)
         return
     interest = loan_interest_percent(int(user["reputation"]), settings.restricted_reputation_threshold)
     repay = loan_repay_amount(LOAN_PRINCIPAL, interest)
@@ -221,7 +221,7 @@ async def wallet_loan_yes(callback: CallbackQuery, db: Database, settings: Setti
     user = await db.get_user(callback.from_user.id)
     interest = loan_interest_percent(int(user["reputation"]), settings.restricted_reputation_threshold)
     if interest != intent["payload"].get("interest_percent"):
-        await callback.answer("Ставка изменилась. Откройте кредит и подтвердите условия заново.", show_alert=True)
+        await callback.answer("Ставка изменилась. Откройте стартер-пак и подтвердите условия заново.", show_alert=True)
         return
     ok, error, loan = await db.take_cookie_loan(
         callback.from_user.id,
@@ -233,7 +233,7 @@ async def wallet_loan_yes(callback: CallbackQuery, db: Database, settings: Setti
         return
     user = await db.get_user(callback.from_user.id)
     assert user is not None
-    await callback.answer("Кредит зачислен.")
+    await callback.answer("Стартер-пак зачислен.")
     await edit_block(
         callback.message,
         f"✅ На кошелёк пришло {loan['principal']} 🍪.\n"
