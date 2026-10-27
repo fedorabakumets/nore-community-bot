@@ -268,14 +268,13 @@ async def cookie_games_command(
         raw = (command.command or "cgames").casefold()
         args = command.args or ""
     if raw == "cgames":
-        with keep_in_chat():
-            await answer_block(
-                message,
-                "games",
-                GAMES_HELP_TEXT,
-                parse_mode="HTML",
-                reply_markup=games_menu_keyboard(),
-            )
+        await answer_block(
+            message,
+            "games",
+            GAMES_HELP_TEXT,
+            parse_mode="HTML",
+            reply_markup=games_menu_keyboard(),
+        )
         return
     game_type = _game_type_from_command(raw)
     if game_type is None:

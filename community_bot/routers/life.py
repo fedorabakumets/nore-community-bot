@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -22,7 +21,14 @@ from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
-from community_bot.helpers import has_permission, register_telegram_user, resolve_reply_target, user_link
+from community_bot.helpers import (
+    effective_role,
+    has_permission,
+    media_from_message,
+    register_telegram_user,
+    resolve_reply_target,
+    user_link,
+)
 from community_bot.keyboards import STYLE_GO, ibtn, shop_confirm_keyboard
 from community_bot.life import (
     WARN_KICK_AT,
@@ -46,8 +52,7 @@ router = Router(name="life")
 _TG_ERRORS = (TelegramBadRequest, TelegramForbiddenError)
 
 
-@router.message(Command("stickers"))
-@router.message(F.text.casefold().in_({"стикеры", "стикерпак"}))
+@router.message(command_or_alias("stickers"))
 async def sticker_pack(message: Message, bot: Bot) -> None:
     from community_bot.stickers import send_pack_invitation
 
@@ -195,6 +200,37 @@ async def shop_gift_begin(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer(
             f"🎁 Кому подарить «{ITEM_LABELS.get(item, item)}»? Ответьте на сообщение или пришлите @username / ID."
         )
+
+
+@router.message(command_or_alias("bug"), F.chat.type.in_({"group", "supergroup"}))
+async def bug_message(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    if await effective_role(db, settings, message.from_user.id) not in {"admin", "owner"}:
+        await message.answer("Команда «баг» доступна администраторам и владельцам.")
+        return
+    source = message.reply_to_message
+    if source is None:
+        await message.answer("Ответьте «баг» на сообщение. После слова можно дописать, что сломалось.")
+        return
+    await register_telegram_user(db, message.from_user)
+    target = await resolve_reply_target(message, db)
+    # Anonymous/channel posts may have no from_user; the reporter owns this technical note.
+    target_id = int(target["user_id"]) if target else message.from_user.id
+    media_type, file_id = media_from_message(source)
+    if source.sticker:
+        media_type, file_id = "sticker", source.sticker.file_id
+    elif source.video_note:
+        media_type, file_id = "video_note", source.video_note.file_id
+    elif source.animation:
+        media_type, file_id = "animation", source.animation.file_id
+    text = source.text or source.caption or (f"[{media_type}]" if media_type else "[Сообщение без текста]")
+    note = remainder_text(message.text or message.caption or "") or "нужно проверить"
+    report_id = await db.create_report(
+        message.from_user.id, target_id, message.chat.id, source.message_id, text, f"БАГ · {note}",
+        attachment=(media_type, file_id) if media_type and file_id else None,
+    )
+    await message.answer(f"🐞 Баг #{report_id} сохранён: админ-панель → Очередь → Репорты.")
 
 
 @router.message(command_or_alias("report"), F.chat.type.in_({"group", "supergroup"}))

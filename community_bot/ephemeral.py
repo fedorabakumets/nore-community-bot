@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _REPLY_TTL: ContextVar[float | None] = ContextVar("group_reply_ttl", default=None)
 _EXPLICIT_TTL: ContextVar[float | None] = ContextVar("group_reply_explicit_ttl", default=None)
 _PENDING: set[asyncio.Task[Any]] = set()
+_DELETED_COMMAND: ContextVar[tuple[int, int] | None] = ContextVar("deleted_group_command", default=None)
 
 _HARMLESS_DELETE = (
     "message to delete not found",
@@ -109,6 +110,13 @@ class EphemeralSendMiddleware(BaseRequestMiddleware):
             from community_bot.inline_style import style_menu
 
             method = method.model_copy(update={"reply_markup": style_menu(markup)})
+        reply = getattr(method, "reply_parameters", None)
+        deleted = _DELETED_COMMAND.get()
+        if reply is not None and deleted == (getattr(method, "chat_id", None), reply.message_id):
+            # message.reply() must still work after the triggering command was removed.
+            method = method.model_copy(update={
+                "reply_parameters": reply.model_copy(update={"allow_sending_without_reply": True}),
+            })
         result = await make_request(bot, method)
         _schedule(result)
         if isinstance(result, Message) and result.chat.type in {"group", "supergroup"}:
@@ -174,10 +182,12 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
         else:
             delay = default_reply_ttl() if is_cmd else None
         token = _REPLY_TTL.set(delay)
+        deleted_token = _DELETED_COMMAND.set((event.chat.id, event.message_id) if deleted else None)
         try:
             return await handler(event, data)
         finally:
             _REPLY_TTL.reset(token)
+            _DELETED_COMMAND.reset(deleted_token)
             _EXPLICIT_TTL.reset(explicit_token)
             if is_cmd and not deleted:
                 await delete_user_command(event, bot)

@@ -3291,14 +3291,25 @@ class Database:
         message_id: int,
         text: str,
         reason: str,
+        *,
+        attachment: tuple[str, str] | None = None,
     ) -> int:
-        return await self.execute(
-            """
-            INSERT INTO reports(reporter_id, target_id, chat_id, message_id, text, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (reporter_id, target_id, chat_id, message_id, text[:1000], reason[:200], utcnow()),
-        )
+        async with self.connect() as connection:
+            cursor = await connection.execute(
+                """
+                INSERT INTO reports(reporter_id, target_id, chat_id, message_id, text, reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (reporter_id, target_id, chat_id, message_id, text[:4096], reason[:200], utcnow()),
+            )
+            report_id = int(cursor.lastrowid)
+            if attachment:
+                await connection.execute(
+                    "INSERT INTO bot_state(key, value) VALUES (?, ?)",
+                    (f"report_attachment:{report_id}", json.dumps(attachment)),
+                )
+            await connection.commit()
+            return report_id
 
     async def list_pending_reports(self, limit: int = 15) -> list[dict[str, Any]]:
         return await self.fetchall(

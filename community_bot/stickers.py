@@ -115,23 +115,21 @@ async def send_pack_invitation(message, bot) -> bool:
         InlineKeyboardButton(text="Добавить стикеры Норы", url=STICKER_PACK_URL),
     ]])
     try:
-        with keep_in_chat():
-            await message.answer(
-                "😎 <b>Бабушка теперь и в стикерах</b>\n\n"
-                "Когда слов уже мало: «Ну погоди», «Я всё» или просто «Это база». "
-                "Забирайте набор и отправляйте бабушку в свои чаты.",
-                parse_mode="HTML", reply_markup=markup,
-            )
+        await message.answer(
+            "😎 <b>Бабушка теперь и в стикерах</b>\n\n"
+            "Когда слов уже мало: «Ну погоди», «Я всё» или просто «Это база». "
+            "Забирайте набор и отправляйте бабушку в свои чаты.",
+            parse_mode="HTML", reply_markup=markup,
+        )
     except Exception as error:
         logger.warning("Sticker invitation failed: %s", type(error).__name__)
         return False
     try:
         pack = await bot.get_sticker_set(name=STICKER_PACK_NAME)
         if pack.stickers:
-            with keep_in_chat():
-                await bot.send_sticker(
-                    chat_id=message.chat.id, sticker=pack.stickers[0].file_id, disable_notification=True,
-                )
+            await bot.send_sticker(
+                chat_id=message.chat.id, sticker=pack.stickers[0].file_id, disable_notification=True,
+            )
     except Exception as error:
         logger.warning("Sticker pack preview unavailable: %s", type(error).__name__)
     return True

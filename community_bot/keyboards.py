@@ -285,7 +285,8 @@ def admin_reports_keyboard(rows_data: list[dict[str, object]]) -> InlineKeyboard
         report_id = int(row["id"])
         rows.append(
             [
-                ibtn(f"✅ #{report_id}", f"admin:report:ok:{report_id}", STYLE_GO),
+                ibtn(f"Открыть #{report_id}", f"admin:report:view:{report_id}"),
+                ibtn("✅", f"admin:report:ok:{report_id}", STYLE_GO),
                 ibtn("❌", f"admin:report:no:{report_id}", STYLE_CLOSE),
             ]
         )

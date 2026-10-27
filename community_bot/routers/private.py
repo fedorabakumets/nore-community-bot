@@ -557,7 +557,7 @@ async def admin_reports(callback: CallbackQuery, db: Database, settings: Setting
         lines.append("Очередь пуста.")
     for row in rows:
         snippet = html.escape((str(row.get("text") or "")[:80]).replace("\n", " "))
-        reason = html.escape(str(row.get("reason") or ""))
+        reason = html.escape(str(row.get("reason") or "")[:80])
         lines.append(f"#{row['id']} на {row['target_id']} · {reason}")
         if snippet:
             lines.append(f"<i>{snippet}</i>")
@@ -578,7 +578,44 @@ async def admin_report_review(callback: CallbackQuery, db: Database, settings: S
     if len(parts) < 4:
         await callback.answer("Нет.", show_alert=True)
         return
+    if not parts[3].isdigit() or parts[2] not in {"view", "ok", "no"}:
+        await callback.answer("Неизвестное действие.", show_alert=True)
+        return
     action, report_id = parts[2], int(parts[3])
+    if action == "view":
+        import json
+
+        from community_bot.helpers import telegram_message_link
+
+        row = await db.fetchone("SELECT * FROM reports WHERE id = ?", (report_id,))
+        if not row:
+            await callback.answer("Запись не найдена.", show_alert=True)
+            return
+        await callback.answer()
+        heading = "Баг" if str(row["reason"]).startswith("БАГ · ") else "Репорт"
+        link = ""
+        if row["chat_id"] and row["message_id"] and str(row["chat_id"]).startswith("-100"):
+            link = f'\n<a href="{telegram_message_link(row["chat_id"], row["message_id"])}">Оригинал сообщения ↗</a>'
+        await callback.message.answer(
+            f"<b>{heading} #{report_id}</b> · {html.escape(row['created_at'][:16])} UTC\n"
+            f"Автор записи: <code>{row['reporter_id']}</code>\n"
+            f"{html.escape(row['reason'])}{link}", parse_mode="HTML",
+        )
+        body = str(row["text"] or "[Без текста]")
+        for offset in range(0, len(body), 2000):
+            await callback.message.answer(body[offset:offset+2000], parse_mode=None)
+        attachment = await db.get_bot_state(f"report_attachment:{report_id}")
+        if attachment:
+            kind, file_id = json.loads(attachment)
+            if kind in {"photo", "video", "animation", "document", "audio", "voice", "sticker", "video_note"}:
+                try:
+                    await getattr(callback.bot, f"send_{kind}")(
+                        chat_id=callback.message.chat.id, **{kind: file_id},
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    await callback.message.answer("Вложение сейчас недоступно. Текст и ссылка сохранены в журнале.")
+        await callback.message.answer("Действия с записью", reply_markup=admin_reports_keyboard([row]))
+        return
     status = "approved" if action == "ok" else "rejected"
     if not await db.review_report(report_id, callback.from_user.id, status):
         await callback.answer("Уже разобрали.", show_alert=True)

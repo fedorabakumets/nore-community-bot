@@ -19,7 +19,6 @@ from community_bot.economy import (
     transaction_line,
     wallet_net,
 )
-from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import register_telegram_user
 from community_bot.keyboards import back_btn, close_btn, ibtn, wallet_keyboard, wallet_loan_confirm_keyboard
 from community_bot.routers.group import _shop_home_markup, _shop_home_text
@@ -92,11 +91,10 @@ async def send_wallet(
     if replace:
         await replace_block(message, "wallet", text, parse_mode="HTML", reply_markup=markup)
         return
-    with keep_in_chat():
-        from community_bot.ui_owner import bind_ui_owner
+    from community_bot.ui_owner import bind_ui_owner
 
-        sent = await answer_block(message, "wallet", text, parse_mode="HTML", reply_markup=markup)
-        await bind_ui_owner(db, sent, actor.id, "wallet")
+    sent = await answer_block(message, "wallet", text, parse_mode="HTML", reply_markup=markup)
+    await bind_ui_owner(db, sent, actor.id, "wallet")
 
 
 @router.message(command_or_alias("balance"))

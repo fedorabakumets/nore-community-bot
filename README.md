@@ -10,6 +10,7 @@
 ## Документация
 
 - [Архитектура](docs/ARCHITECTURE.md)
+- [Журнал багов и очистка команд](docs/BUG_REPORTS_COMMANDS.md)
 - [Разработка и выпуск](docs/DEVELOPMENT.md)
 - [Аудит](docs/AUDIT.md)
 - [Передача проекта](docs/MIGRATION.md)

@@ -174,7 +174,7 @@ class Session:
                 'media': old.get('media')}
         if name == 'editMessageReplyMarkup':
             card = dict(old) | {'markup': markup}
-        for kind in ('photo', 'video', 'animation', 'document', 'audio', 'voice', 'sticker'):
+        for kind in ('photo', 'video', 'animation', 'document', 'audio', 'voice', 'sticker', 'video_note'):
             payload = getattr(method, kind, None)
             if payload is not None:
                 card['media'] = (kind, payload)
@@ -206,7 +206,8 @@ class CaptureAdminUI(BaseRequestMiddleware):
                 return MessageId(message_id=sent.message_id)
         if name == 'answerCallbackQuery' or getattr(method, 'chat_id', None) == session.uid and name in {
             'sendMessage', 'sendPhoto', 'sendVideo', 'sendAnimation', 'sendDocument', 'sendAudio', 'sendVoice',
-            'sendSticker', 'editMessageText', 'editMessageCaption', 'editMessageMedia', 'editMessageReplyMarkup',
+            'sendSticker', 'sendVideoNote', 'editMessageText', 'editMessageCaption',
+            'editMessageMedia', 'editMessageReplyMarkup',
             'deleteMessage',
         }:
             result = session.capture(method, bot.id)
@@ -449,7 +450,8 @@ class AdminBridge:
                 raw = await asyncio.to_thread(normalized_photo, raw)
                 mime = 'image/jpeg'
             else:
-                mime = {'video': 'video/mp4', 'animation': 'video/mp4', 'audio': 'audio/mpeg',
+                mime = {'video': 'video/mp4', 'video_note': 'video/mp4', 'animation': 'video/mp4',
+                        'audio': 'audio/mpeg',
                         'voice': 'audio/ogg'}.get(kind, 'application/octet-stream')
             return web.Response(body=raw, content_type=mime, headers={'Cache-Control': 'no-store'})
 

@@ -44,6 +44,9 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "card": ("карточка",),
     "gift": ("подарить",),
     "report": ("репорт", "жалоба"),
+    "bug": ("баг",),
+    "participants": ("участники",),
+    "stickers": ("стикеры", "стикерпак"),
     "mail": ("почта", "письмо"),
     "board": ("доска", "таблица"),
     "lottery": ("розыгрыш", "лотерея"),
@@ -62,6 +65,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
 
 MULTIWORD_ALIASES: dict[str, str] = {
     "купить печеньки": "buycookies",
+    "выдать печеньки": "givecookies",
     "задать вопрос": "question",
     "заполнить анкету": "apply",
     "отменить игру": "gamecancel",
@@ -115,6 +119,8 @@ _EXACT_TEXT_COMMANDS = {
     "mail",
     "pet",
     "pogoda",
+    "participants",
+    "stickers",
     "profile",
     "question",
     "reputation",
@@ -127,7 +133,7 @@ _EXACT_TEXT_COMMANDS = {
 
 # These only do something in a private chat. Do not delete them from the group:
 # a sentence or a lone «вопрос» is not a reason to erase the message.
-_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "question", "start"})
+_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "start"})
 
 
 def parse_trigger(text: str) -> tuple[str, str] | None:
@@ -232,7 +238,17 @@ def is_group_command_to_sweep(message: Message) -> bool:
     if source[:1] in {"/", "／"}:
         return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
     if not parsed:
-        return False
+        # Reply-keyboard shortcuts have their own handlers outside the alias filter.
+        if text in {"🛒 Магазин", "🐾 Тамагочи", "👤 Мой профиль", "🛡 Админ-панель"}:
+            return True
+        from community_bot.domain import reputation_delta, transfer_amount
+        from community_bot.nora import strip_address
+
+        replied = getattr(message, "reply_to_message", None)
+        if replied and getattr(replied, "from_user", None) and text:
+            if reputation_delta(text) is not None or transfer_amount(text) is not None:
+                return True
+        return bool(text and strip_address(text) is not None)
     return parsed[0] not in _PRIVATE_CHAT_COMMANDS
 
 
