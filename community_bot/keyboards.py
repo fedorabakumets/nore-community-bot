@@ -248,7 +248,6 @@ def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> 
     if _allow(permissions, "features") or _allow(permissions, "users.edit"):
         rows.append([ibtn("🛠 Управление магазином", "ashop:home", STYLE_GO)])
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
-        rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
         rows.append([ibtn("🌅 Утренний пост сейчас", "admin:morning", STYLE_FUN)])
     if _allow(permissions, "commands.studio"):

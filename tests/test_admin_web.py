@@ -357,3 +357,50 @@ async def test_event_edit_date_and_delete_work_through_existing_admin_forms_and_
     assert (await env.db.get_studio_event('event-manage'))['status'] == 'cancelled'
     edits = [c for c in env.telegram.calls if c.__api_method__ == 'editMessageText' and c.chat_id == -100123]
     assert edits and any('Мероприятие отменено' in (c.text or '') for c in edits)
+
+
+async def test_event_full_lifecycle_from_chat_delete_create_publish_disable_enable_and_delete(env):
+    await env.db.save_studio_event('old-event', -100123, 201, 'Удаляемое событие', [], 0, 7)
+    await env.db.set_bot_state('current_studio_event', 'old-event')
+    view = await click(env, await env.bridge.open(env.actor), 'Чат')
+    view = await click(env, view, 'События и участники')
+    view = await click(env, view, 'Удаляемое событие')
+    view = await click(env, view, 'Удалить мероприятие')
+    view = await click(env, view, 'Да, удалить')
+    assert not any('Удаляемое событие' in b['text'] for c in view['cards'] for row in c['buttons'] for b in row)
+    view = await click(env, view, 'Добавить мероприятие')
+    assert view['state'] == 'AdminFlow:post_body'
+    view = await text(env, view, 'Новая встреча\nИгры и разговоры')
+    view = await click(env, view, 'Пропустить')
+    view = await click(env, view, 'Пропустить')
+    view = await click(env, view, 'Нет')
+    view = await click(env, view, 'Я буду')
+    assert not [c for c in env.telegram.calls if c.__api_method__ == 'sendMessage' and c.chat_id == -100123]
+    view = await click(env, view, 'Опубликовать')
+    await click(env, view, 'Нет, без кнопки')
+    eid = await env.db.get_bot_state('current_studio_event')
+    assert eid != 'old-event'
+    view = await click(env, await env.bridge.open(env.actor, reset=True), 'Чат')
+    view = await click(env, view, 'События и участники')
+    view = await click(env, view, 'Новая встреча')
+    view = await click(env, view, 'Выключить мероприятие')
+    assert (await env.db.get_studio_event(eid))['status'] == 'disabled'
+    from community_bot.event_access import current_event
+
+    assert await current_event(env.db) is None
+    assert not (await env.db.add_rsvp(eid, 8, 0, kind='rsvp'))[0]
+    view = await click(env, view, 'Включить мероприятие')
+    assert (await current_event(env.db))['event_id'] == eid
+    assert (await env.db.add_rsvp(eid, 8, 0, kind='rsvp'))[0]
+    view = await click(env, view, 'Выключить мероприятие')
+    view = await click(env, view, 'Удалить мероприятие')
+    view = await click(env, view, 'Да, удалить')
+    assert (await env.db.get_studio_event(eid))['status'] == 'cancelled'
+    assert not any('Новая встреча' in b['text'] for c in view['cards'] for row in c['buttons'] for b in row)
+    assert any('Добавить мероприятие' in b['text'] for c in view['cards'] for row in c['buttons'] for b in row)
+    assert await env.db.get_event_rsvp(eid, 8)
+
+
+async def test_abstract_event_system_setting_is_removed_and_stale_button_redirects(env):
+    view = await click(env, await env.bridge.open(env.actor), 'Система')
+    assert not any('Название мероприятия' in b['text'] for c in view['cards'] for row in c['buttons'] for b in row)
