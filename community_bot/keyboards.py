@@ -226,7 +226,7 @@ def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
         rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
 
         rows.append([ibtn("🎲 Розыгрыш", "admin:lottery")])
-    if _allow(permissions, "events.participants"):
+    if _allow(permissions, "events.participants") or _allow(permissions, "chat.post"):
         rows.append([ibtn("🎟 События и участники", "admin:events:0")])
     if _allow(permissions, "automessages"):
         rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
@@ -1023,7 +1023,7 @@ def wallet_keyboard(can_borrow: bool, *, has_debt: bool = False) -> InlineKeyboa
     if has_debt:
         rows.append([ibtn("💳 Погасить просроченный долг", "wallet:repay", STYLE_GO)])
     elif can_borrow:
-        rows.append([ibtn("💳 Взять 100 🍪 в долг", "wallet:loan")])
+        rows.append([ibtn("🍪 НОРА — СТАРТЕР-ПАК", "wallet:loan")])
     rows.extend([
         [ibtn("❓ Условия и комиссии", "wallet:help")],
         [back_btn("menu:home"), close_btn("ui:close")],
@@ -1036,7 +1036,7 @@ def wallet_keyboard(can_borrow: bool, *, has_debt: bool = False) -> InlineKeyboa
 def wallet_loan_confirm_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn("Да, взять 100 🍪", f"wallet:loan:yes:{intent_id}", STYLE_GO)],
+            [ibtn("Получить 100 🍪 с возвратом", f"wallet:loan:yes:{intent_id}", STYLE_GO)],
             [ibtn("Не надо", "wallet:back", STYLE_CLOSE)],
         ]
     )

@@ -371,7 +371,9 @@ async def _web_admin_markup(db: Database, settings: Settings, user_id: int):
     url = os.getenv("MINIAPP_URL", "")
     if url.startswith("https://") and await miniapp_allowed(db, settings, user_id):
         return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Открыть админ-панель", web_app=WebAppInfo(url=url.split("#", 1)[0]+"#admin")),
+            InlineKeyboardButton(
+                text="Открыть админ-панель", web_app=WebAppInfo(url=url.split("#", 1)[0]+"?view=admin"),
+            ),
         ]])
     return None
 
@@ -1829,6 +1831,11 @@ async def admin_save_user_edit(
     data = await state.get_data()
     user_id = int(data.get("target_user_id") or 0)
     action = str(data["admin_action"])
+    if action.startswith('event_meta:'):
+        from community_bot.event_manager import save_field
+
+        await save_field(message, state, db, settings, bot)
+        return
     if action == "search":
         if not actor_role:
             await state.clear()
@@ -2104,7 +2111,9 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
 
 @router.callback_query(F.data.startswith("admin:events:"))
 async def admin_event_list(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings, PERM_EVENT_PARTICIPANTS):
+    from community_bot.event_manager import can_read
+
+    if not callback.message or not await can_read(db, settings, callback.from_user.id):
         return
     raw = (callback.data or "").rsplit(":", 1)[-1]
     if not raw.isdigit():
@@ -2114,7 +2123,7 @@ async def admin_event_list(callback: CallbackQuery, db: Database, settings: Sett
     events = await db.list_studio_events(page * 8, 9)
     rows = [[InlineKeyboardButton(
         text=f"{event['title'][:42]} ({event['participants']})",
-        callback_data=f"admin:attendees:{event['event_id']}:0",
+        callback_data=f"admin:event:view:{event['event_id']}",
     )] for event in events[:8]]
     paging = []
     if page:
@@ -2624,6 +2633,7 @@ async def _admin_post_send(
                 event_id, settings.community_chat_id, sent_id, post_title(str(data.get("post_body") or "")),
                 list(data.get("post_buttons") or []), int(raw_stake) if raw_stake.isdigit() else 0,
                 callback.from_user.id, rsvp_enabled=bool(data.get("post_rsvp")),
+                description=str(data.get("post_body") or ""), media_type=str(data.get("post_media_type") or ""),
             )
         if sent_id and (data.get("post_template") == "event" or data.get("post_rsvp")):
             from community_bot.stickers import send_context_sticker
@@ -3071,3 +3081,10 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
     await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
+
+
+@router.callback_query(F.data.startswith("admin:event:"))
+async def admin_manage_event(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot):
+    from community_bot.event_manager import handle
+
+    await handle(callback, state, db, settings, bot)

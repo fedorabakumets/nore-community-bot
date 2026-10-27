@@ -158,15 +158,20 @@ async def test_queue_approval_is_once_and_notifies_applicant_not_the_admin_ui(en
 
 
 async def test_signed_actor_and_current_permissions_bound_every_control_and_input(env):
-    for uid, role in ((8, 'member'), (9, 'moderator')):
+    for uid, role in ((8, 'member'),):
         await env.db.set_role(uid, role)
         with pytest.raises(web.HTTPForbidden):
             await env.bridge.open({'id': uid, 'first_name': 'Не админ'})
+    await env.db.set_role(9, 'moderator')
+    moderator = await env.bridge.open({'id': 9, 'first_name': 'Модератор'})
+    assert moderator['cards']
     view = await click(env, await env.bridge.open(env.actor), 'Люди')
     with pytest.raises(web.HTTPConflict):
         await env.bridge.action(env.actor, {'action': 'admin:chat:mute', 'version': view['version']})
     await env.db.set_role(9, 'admin')
     actor = {'id': 9, 'first_name': 'Админ'}
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.open(actor)
     foreign = button(view, 'Найти')
     other = await env.bridge.open(actor)
     with pytest.raises(web.HTTPConflict):
@@ -294,6 +299,7 @@ async def test_event_participants_and_payment_journal_are_reachable_in_web(env):
     view = await click(env, await env.bridge.open(env.actor), 'Чат')
     view = await click(env, view, 'События и участники')
     view = await click(env, view, 'Тестовая встреча')
+    view = await click(env, view, 'Участники и оплаты')
     assert any('оплачено 20' in c['html'] for c in view['cards'])
     view = await click(env, view, 'Журнал оплат')
     assert any('Журнал оплат' in c['html'] for c in view['cards'])
@@ -329,3 +335,25 @@ async def test_bug_report_details_preserve_text_and_attachment_and_enforce_acces
     reviewed = await click(env, detail, '✅')
     assert await env.db.list_pending_reports() == []
     assert 'Очередь пуста' in '\n'.join(c['html'] for c in reviewed['cards'])
+
+
+async def test_event_edit_date_and_delete_work_through_existing_admin_forms_and_permissions(env):
+    await env.db.save_studio_event('event-manage', -100123, 201, 'Старая встреча', [], 0, 7,
+                                  description='Описание встречи')
+    view = await click(env, await env.bridge.open(env.actor), 'Чат')
+    view = await click(env, view, 'События и участники')
+    view = await click(env, view, 'Старая встреча')
+    view = await click(env, view, 'Название')
+    view = await text(env, view, 'Новая встреча')
+    assert (await env.db.get_studio_event('event-manage'))['title'] == 'Новая встреча'
+    view = await click(env, view, 'Дата и время')
+    view = await text(env, view, '27.10.2026 20:00')
+    assert (await env.db.get_studio_event('event-manage'))['starts_at'] == '2026-10-27T17:00:00+00:00'
+    view = await click(env, view, 'Удалить мероприятие')
+    confirm = button(view, 'Да, удалить')
+    await env.bridge.action(env.actor, confirm)
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action(env.actor, confirm)
+    assert (await env.db.get_studio_event('event-manage'))['status'] == 'cancelled'
+    edits = [c for c in env.telegram.calls if c.__api_method__ == 'editMessageText' and c.chat_id == -100123]
+    assert edits and any('Мероприятие отменено' in (c.text or '') for c in edits)

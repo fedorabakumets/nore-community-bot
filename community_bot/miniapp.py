@@ -64,7 +64,7 @@ async def protection(request, handler):
             from community_bot.access import miniapp_allowed
 
             if not await miniapp_allowed(request.app['db'], request.app['settings'], request['actor']['id']):
-                return web.json_response({'error': 'Миниапка пока доступна только администраторам'},
+                return web.json_response({'error': 'Миниапка пока доступна модераторам и администраторам'},
                                          status=403, headers={'Cache-Control': 'no-store'})
             if request.path.startswith(('/api/shop/', '/api/events/')):
                 from community_bot.profile_fill import profile_is_complete
@@ -80,7 +80,7 @@ async def protection(request, handler):
         )
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
-        if request.path.startswith('/api/shop/'):
+        if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -105,11 +105,15 @@ async def actor(request):
 
 
 async def overview(request):
+    from community_bot.cabinet_api import pet_data, wallet_data
     from community_bot.event_access import current_event
     from community_bot.shop_api import shop_data
+    from community_bot.shop_text import plain_shop_text
 
     db, settings = request.app['db'], request.app['settings']
     user = await actor(request)
+    pet = await pet_data(db, user)
+    user = await db.get_user(user['user_id'])
     shop = await shop_data(db, user, settings)
     events = []
     current = await current_event(db)
@@ -119,6 +123,7 @@ async def overview(request):
         events.append({'id': eid, 'title': current['title'], 'price': int(offer['price']) if offer else 0,
                        'count': await db.event_participant_count(eid),
                        'joined': await db.has_event_rsvp(eid, user['user_id']),
+                       'description': plain_shop_text(current['description']), 'starts_at': current['starts_at'],
                        'paid': await db.has_event_payment(eid, user['user_id'])})
     for product in shop['products']:
         if product['sku'] == 'event_pass':
@@ -158,7 +163,8 @@ async def overview(request):
         'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
-        **shop, 'events': events,
+        **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
+        'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
         'history': [{'amount': t['amount'], 'kind': t['kind'], 'date': t['created_at']} for t in history],
     })
 
@@ -312,7 +318,15 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
-    from community_bot import shop_api
+    from community_bot import cabinet_api, shop_api
+
+    app.router.add_post('/api/pet/prepare', cabinet_api.pet_prepare)
+    app.router.add_post('/api/pet/action', cabinet_api.pet_action)
+    app.router.add_post('/api/wallet/prepare', cabinet_api.wallet_prepare)
+    app.router.add_post('/api/wallet/confirm', cabinet_api.wallet_confirm)
+    app.router.add_get('/api/wallet/history', cabinet_api.wallet_history)
+    app.router.add_get('/api/notices', cabinet_api.notices)
+    app.router.add_post('/api/notices', cabinet_api.notices_update)
 
     app.router.add_post('/api/shop/video', shop_api.upload_video)
     app.router.add_get('/api/shop/media/{sku}', shop_api.product_image)
@@ -321,7 +335,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('app.js', 'shop.js', 'admin.js', 'style.css'):
+    for name in ('app.js', 'shop.js', 'cabinet.js', 'admin.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app

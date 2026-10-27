@@ -1,4 +1,4 @@
-"""Private onboarding gate and administrator-only Mini App visibility."""
+"""Private onboarding gate and staff Mini App visibility (moderator rank and above)."""
 from __future__ import annotations
 
 import os
@@ -16,7 +16,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from community_bot.helpers import effective_role, rank_of_user
+from community_bot.helpers import rank_of_user
 from community_bot.keyboards import STYLE_CLOSE, ibtn, kbtn, main_private_keyboard
 
 
@@ -25,7 +25,7 @@ def guest_keyboard():
 
 
 async def miniapp_allowed(db, settings, uid):
-    return await effective_role(db, settings, uid) in {'owner', 'admin'}
+    return await rank_of_user(db, settings, uid) >= 40
 
 
 async def private_allowed(db, settings, uid):
