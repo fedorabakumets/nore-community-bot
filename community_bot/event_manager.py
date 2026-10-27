@@ -25,6 +25,37 @@ async def can_read(db, settings, uid):
     )
 
 
+async def visible_events(db, offset=0, limit=9):
+    return await db.fetchall(
+        "SELECT s.*, (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id=s.event_id) AS participants "
+        "FROM studio_events s WHERE s.status IN ('active','disabled') "
+        "ORDER BY s.created_at DESC,s.event_id DESC LIMIT ? OFFSET ?",
+        (limit, offset),
+    )
+
+
+async def set_enabled(db, eid, revision, enabled):
+    target, source = ("active", "disabled") if enabled else ("disabled", "active")
+    async with db.connect() as connection:
+        await connection.execute("BEGIN IMMEDIATE")
+        cursor = await connection.execute(
+            "UPDATE studio_events SET status=?,revision=revision+1,content_dirty=1,markup_dirty=1 "
+            "WHERE event_id=? AND revision=? AND status=?",
+            (target, eid, revision, source),
+        )
+        if cursor.rowcount != 1:
+            await connection.rollback()
+            return False
+        if enabled:
+            await connection.execute(
+                "INSERT INTO bot_state(key,value) VALUES('current_studio_event',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (eid,),
+            )
+        await connection.commit()
+        return True
+
+
 async def update_metadata(db, eid, field, value, revision):
     if field not in {"title", "description", "starts_at"}:
         raise ValueError("Неизвестное поле события")
@@ -47,7 +78,7 @@ async def update_metadata(db, eid, field, value, revision):
                 await connection.execute("UPDATE event_offers SET body=? WHERE event_id=?", (description, eid))
         cursor = await connection.execute(
             f"UPDATE studio_events SET {field}=?, revision=revision+1, content_dirty=1, markup_dirty=1 "
-            "WHERE event_id=? AND revision=? AND status='active'",
+            "WHERE event_id=? AND revision=? AND status IN ('active','disabled')",
             (value, eid, revision),
         )
         if cursor.rowcount != 1:
@@ -65,7 +96,7 @@ async def cancel_event(db, eid, revision):
         await connection.execute("BEGIN IMMEDIATE")
         cursor = await connection.execute(
             "UPDATE studio_events SET status='cancelled', revision=revision+1, content_dirty=1, markup_dirty=1 "
-            "WHERE event_id=? AND revision=? AND status='active'",
+            "WHERE event_id=? AND revision=? AND status IN ('active','disabled')",
             (eid, revision),
         )
         if cursor.rowcount != 1:
@@ -115,19 +146,27 @@ async def show(message, db, settings, uid, eid):
     offer = await db.get_event_offer(eid)
     description = plain_shop_text(event["description"] or (offer or {}).get("body", ""))
     rows = []
-    if event["status"] == "active" and await has_permission(db, settings, uid, PERM_POST):
+    if event["status"] in {"active", "disabled"} and await has_permission(db, settings, uid, PERM_POST):
         rows += [
             [
                 ibtn("Название", f"admin:event:edit:{eid}:title"),
                 ibtn("Описание", f"admin:event:edit:{eid}:description"),
             ],
             [ibtn("Дата и время", f"admin:event:edit:{eid}:starts_at")],
+            [
+                ibtn(
+                    "Выключить мероприятие" if event["status"] == "active" else "Включить мероприятие",
+                    f"admin:event:{'disable' if event['status'] == 'active' else 'enable'}:{eid}:{event['revision']}",
+                )
+            ],
             [ibtn("Удалить мероприятие", f"admin:event:delete:{eid}", STYLE_CLOSE)],
         ]
     if await has_permission(db, settings, uid, PERM_EVENT_PARTICIPANTS):
         rows.append([ibtn("Участники и оплаты", f"admin:attendees:{eid}:0")])
     rows.append([ibtn("К событиям", "admin:events:0")])
-    status = "Актуальное" if event["status"] == "active" else "Удалено из актуальных · история сохранена"
+    status = {"active": "Актуальное", "disabled": "Выключено · запись и оплата приостановлены"}.get(
+        event["status"], "Удалено из актуальных · история сохранена"
+    )
     text = (
         f"🎟 <b>{html.escape(event['title'])}</b>\n{status}\n\n"
         f"Дата: {date_label(event['starts_at'], settings.timezone)} ({settings.timezone})\n"
@@ -146,6 +185,11 @@ async def handle(callback, state, db, settings, bot):
     if len(parts) < 4:
         return
     action, eid = parts[2:4]
+    if action == "new":
+        from community_bot.routers.private import begin_event_creation
+
+        await begin_event_creation(callback, state, db, settings)
+        return
     if action == "view":
         await callback.answer()
         await show(callback.message, db, settings, uid, eid)
@@ -154,8 +198,18 @@ async def handle(callback, state, db, settings, bot):
         await callback.answer("Нужно право «Пост в сообщество».", show_alert=True)
         return
     event = await db.get_studio_event(eid)
-    if not event or event["status"] != "active":
+    if not event or event["status"] not in {"active", "disabled"}:
         await callback.answer("Мероприятие уже закрыто.", show_alert=True)
+        return
+    if action in {"disable", "enable"} and len(parts) == 5 and parts[4].isdigit():
+        async with event_lock(db, eid):
+            ok = await set_enabled(db, eid, int(parts[4]), action == "enable")
+            if ok:
+                from community_bot.rsvp import refresh_event_markup
+
+                await refresh_event_markup(bot, db, eid)
+        await callback.answer("Сохранено" if ok else "Экран устарел, открой событие заново", show_alert=not ok)
+        await show(callback.message, db, settings, uid, eid)
         return
     if action == "edit" and len(parts) == 5 and parts[4] in {"title", "description", "starts_at"}:
         field = parts[4]
@@ -200,7 +254,9 @@ async def handle(callback, state, db, settings, bot):
         if ok:
             await db.log_admin_action(uid, "event_cancel", eid, f"Возвращено {total} 🍪")
             await callback.message.answer(f"Мероприятие убрано из актуальных. Возвращено {total} 🍪.")
-            await show(callback.message, db, settings, uid, eid)
+            from community_bot.routers.private import admin_event_list
+
+            await admin_event_list(callback.model_copy(update={"data": "admin:events:0"}), db, settings)
 
 
 async def save_field(message, state, db, settings, bot):
@@ -268,7 +324,10 @@ async def sync_content(bot, db, eid):
     offer = await db.get_event_offer(eid)
     description = plain_shop_text(event["description"] or (offer or {}).get("body", ""))
     when = "\n📅 " + date_label(event["starts_at"], "Europe/Moscow") + " МСК" if event["starts_at"] else ""
-    cancelled = "❌ <b>Мероприятие отменено</b>\n\n" if event["status"] != "active" else ""
+    cancelled = {
+        "cancelled": "❌ <b>Мероприятие отменено</b>\n\n",
+        "disabled": "⏸ <b>Запись на мероприятие приостановлена</b>\n\n",
+    }.get(event["status"], "")
     text = cancelled + f"<b>{html.escape(event['title'])}</b>{when}\n\n{html.escape(description)}"
     try:
         with keep_in_chat():

@@ -989,17 +989,9 @@ async def admin_eventtitle_begin(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
-        return
-    await state.set_state(AdminFlow.user_value)
-    await state.set_data({"admin_action": "eventtitle", "target_user_id": 0})
-    await callback.answer()
-    current = await db.get_bot_state("event_title")
-    await callback.message.answer(
-        f"Текущее название: {html.escape(current or 'не задано')}\nВведите новое (2–80 символов).",
-        parse_mode="HTML",
-        reply_markup=flow_reply_keyboard(),
-    )
+    # Retire stale system controls: all event operations live in Chat → Events.
+    await state.clear()
+    await admin_event_list(callback, db, settings)
 
 
 @router.callback_query(F.data == "admin:features")
@@ -1856,17 +1848,8 @@ async def admin_save_user_edit(
         )
         return
     if action == "eventtitle":
-        if not actor_role:
-            await state.clear()
-            await message.answer("Недостаточно прав.")
-            return
-        title = (message.text or "").strip()
-        if not 2 <= len(title) <= 80:
-            await message.answer("Название от 2 до 80 символов.")
-            return
-        await db.set_bot_state("event_title", title)
         await state.clear()
-        await message.answer(f"✅ Мероприятие теперь: {html.escape(title)}", parse_mode="HTML")
+        await message.answer("Настройка перенесена: Админ-панель → Чат → События и участники.")
         return
     if action == "stopword_add":
         if not actor_role or not await has_permission(db, settings, message.from_user.id, PERM_FEATURES):
@@ -2120,11 +2103,15 @@ async def admin_event_list(callback: CallbackQuery, db: Database, settings: Sett
         await callback.answer("Некорректная страница.", show_alert=True)
         return
     page = int(raw)
-    events = await db.list_studio_events(page * 8, 9)
+    from community_bot.event_manager import visible_events
+
+    events = await visible_events(db, page * 8, 9)
     rows = [[InlineKeyboardButton(
         text=f"{event['title'][:42]} ({event['participants']})",
         callback_data=f"admin:event:view:{event['event_id']}",
     )] for event in events[:8]]
+    if await has_permission(db, settings, callback.from_user.id, PERM_POST):
+        rows.insert(0, [InlineKeyboardButton(text="＋ Добавить мероприятие", callback_data="admin:event:new:0")])
     paging = []
     if page:
         paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:events:{page - 1}"))
@@ -3088,3 +3075,20 @@ async def admin_manage_event(callback: CallbackQuery, state: FSMContext, db: Dat
     from community_bot.event_manager import handle
 
     await handle(callback, state, db, settings, bot)
+
+
+async def begin_event_creation(callback, state, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.clear()
+    await state.set_state(AdminFlow.post_body)
+    await state.set_data({
+        "post_template": "event", "post_body": "", "post_media_type": None,
+        "post_file_id": None, "post_buttons": [], "post_poll": None, "post_draft": uuid4().hex,
+    })
+    await callback.answer()
+    await callback.message.answer(
+        "Новое мероприятие. Пришлите название первой строкой, ниже — описание. "
+        "Затем можно добавить фото, кнопки, RSVP и проверить предпросмотр. "
+        "В чат ничего не отправится до кнопки «Опубликовать».",
+    )
