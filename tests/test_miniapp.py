@@ -80,7 +80,7 @@ async def test_role_gate_rejects_signed_member_and_moderator_and_revoked_admin(d
     from community_bot.miniapp import protection
 
     req = Request(db)
-    req.path = '/api/shop/confirm'
+    req.path = '/api/profile'
     req.headers = {'Authorization': 'tma '+signed(date=int(time.time()))}
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
     for role in ('member', 'moderator'):

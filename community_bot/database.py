@@ -509,6 +509,13 @@ def utcnow() -> str:
 logger = logging.getLogger(__name__)
 
 
+SCHEMA += """
+CREATE TABLE IF NOT EXISTS profile_completion_rewards (
+    user_id INTEGER PRIMARY KEY REFERENCES users(user_id), awarded_at TEXT NOT NULL
+);
+"""
+
+
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -792,6 +799,7 @@ class Database:
         user = await self.get_user(user_id)
         assert user is not None
         await self.sync_bio_auto_warn(user_id)
+        await self.reward_complete_profile(user_id)
         user = await self.get_user(user_id)
         assert user is not None
         return user
@@ -1407,6 +1415,8 @@ class Database:
                         (AUTO_REPUTATION_CAP, utcnow(), user_id),
                     )
 
+        await self.reward_complete_profile(user_id)
+
     async def save_self_profile(self, user_id: int, values: dict, revision: str, *, avatar: bool = False) -> bool:
         from community_bot.profile_fields import profile_revision, validate_profile_fields
         from community_bot.profile_fill import reputation_cap
@@ -1432,7 +1442,34 @@ class Database:
             await connection.commit()
         if "profile_bio" in values:
             await self.sync_bio_auto_warn(user_id)
+        await self.reward_complete_profile(user_id)
         return True
+
+    async def reward_complete_profile(self, user_id: int) -> bool:
+        from community_bot.profile_fill import profile_is_complete
+
+        async with self.connect() as connection:
+            await connection.execute("BEGIN IMMEDIATE")
+            row = await (await connection.execute("SELECT * FROM users WHERE user_id=?", (user_id,))).fetchone()
+            if not row or not profile_is_complete(dict(row)):
+                await connection.rollback()
+                return False
+            now = utcnow()
+            inserted = await connection.execute(
+                "INSERT OR IGNORE INTO profile_completion_rewards(user_id, awarded_at) VALUES (?, ?)", (user_id, now),
+            )
+            if inserted.rowcount != 1:
+                await connection.rollback()
+                return False
+            await connection.execute(
+                "UPDATE users SET cookies=cookies+10, updated_at=? WHERE user_id=?", (now, user_id),
+            )
+            await connection.execute(
+                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?,10,?,?,?)",
+                (user_id, "profile_complete", "first_100_percent", now),
+            )
+            await connection.commit()
+            return True
 
     async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
         if await self.has_approved_application(user_id):
