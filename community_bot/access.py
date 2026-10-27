@@ -122,3 +122,41 @@ class PrivateAccessMiddleware(BaseMiddleware):
             ))
         await answer('Остальные разделы откроются после одобрения.' if not pending else body,
                              reply_markup=guest_keyboard())
+
+
+class ProfileAccessMiddleware(BaseMiddleware):
+    """The same profile gate for customer actions in Telegram, including old buttons."""
+    async def __call__(self, handler, event, data):
+        from community_bot.aliases import parse_trigger
+        from community_bot.profile_fill import profile_is_complete
+
+        if not event.from_user:
+            return await handler(event, data)
+        if isinstance(event, CallbackQuery):
+            action = event.data or ''
+            gated = action.startswith(('shop:', 'rsvp:', 'rsvpj:', 'evpay:', 'evpaygo:', 'evpayyes:'))
+            gated |= action in {'menu:shop'}
+            gated &= action not in {'shop:close'}
+        elif isinstance(event, Message):
+            parsed = parse_trigger(event.text or '')
+            gated = bool(parsed and parsed[0] in {'shop', 'store', 'buycookies', 'gift'})
+            gated |= event.text == '🛒 Магазин'
+        else:
+            gated = False
+        if isinstance(event, Message) and data.get('state'):
+            flow = await data['state'].get_data()
+            gated |= bool(flow.get('purchase_intent'))
+        if isinstance(event, CallbackQuery) and (event.data or '').startswith('rsvp:'):
+            if await data['db'].has_event_rsvp(event.data.split(':', 1)[1], event.from_user.id):
+                gated = False  # Existing participants must retain access to withdrawal/refund.
+        if gated:
+            user = await data['db'].get_user(event.from_user.id)
+            if not user or not profile_is_complete(user):
+                text = ('Заполни профиль на 100%: имя, возраст, увлечения, описание и фото. '
+                        'Затем откроются магазин и события.')
+                if isinstance(event, CallbackQuery):
+                    await event.answer(text, show_alert=True)
+                else:
+                    await event.answer(text)
+                return
+        return await handler(event, data)

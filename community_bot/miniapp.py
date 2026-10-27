@@ -66,6 +66,13 @@ async def protection(request, handler):
             if not await miniapp_allowed(request.app['db'], request.app['settings'], request['actor']['id']):
                 return web.json_response({'error': 'Миниапка пока доступна только администраторам'},
                                          status=403, headers={'Cache-Control': 'no-store'})
+            if request.path.startswith(('/api/shop/', '/api/events/')):
+                from community_bot.profile_fill import profile_is_complete
+
+                user = await request.app['db'].get_user(request['actor']['id'])
+                if not user or not profile_is_complete(user):
+                    return web.json_response({'error': 'Заполни профиль на 100% в ЛК, чтобы открыть магазин и события'},
+                                             status=403, headers={'Cache-Control': 'no-store'})
         response = await handler(request)
     except web.HTTPRequestEntityTooLarge:
         limit = 'Файл должен быть не больше 20 МБ' if request.path.startswith('/api/admin') else (
@@ -132,6 +139,11 @@ async def overview(request):
         'role': await role_title(db, role), 'timezone': getattr(settings, 'timezone', 'Europe/Moscow'),
         'blocks': [{'title': label, 'filled': filled} for _, label, filled in profile_block_states(user)],
     }
+    from community_bot.domain import reputation_tier as tier_for
+
+    levels = [{'label': label, 'range': span, 'discount': tier_for(value).discount,
+               'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus}
+              for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
     history = await db.list_transactions(user['user_id'], 20)
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
@@ -141,6 +153,7 @@ async def overview(request):
         'admin_available': await has_permission(
             db, settings, user['user_id'], 'admin.panel',
         ),
+        'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         'categories': [{'id': c['slug'], 'title': c['title']} for c in cats], 'products': products, 'events': events,
