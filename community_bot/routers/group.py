@@ -62,7 +62,6 @@ from community_bot.helpers import (
 )
 from community_bot.keyboards import (
     admin_panel_keyboard,
-    cookie_order_review_keyboard,
     cookie_packages_keyboard,
     flow_reply_keyboard,
     freebie_keyboard,
@@ -952,7 +951,7 @@ async def _shop_home_text(db: Database, user: dict[str, object], settings: Setti
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
         "Откройте полку — у каждого товара цена в 🍪. Покупка только после подтверждения. "
-        "В чате этот экран не исчезает через 30 секунд."
+        "Категории и покупки синхронизированы с миниапкой."
     )
 
 
@@ -1152,36 +1151,9 @@ async def receive_sbp_receipt(
         f"✅ Скриншот по заказу №{order_id} получен. Платёж взят в обработку.\n"
         "После проверки администратором бот сообщит результат."
     )
-    candidates = set(settings.reviewers)
-    for user in await db.list_all_users():
-        if str(user["role"]) in {"owner", "admin"}:
-            candidates.add(int(user["user_id"]))
-    recipients = {user_id for user_id in candidates if await has_permission(db, settings, user_id, PERM_PAYMENTS)}
-    caption = (
-        f"💳 <b>Заказ печенек №{order_id}</b>\n"
-        f"Пользователь: {user_link(message.from_user.id, message.from_user.full_name)}\n"
-        f"Пакет: <b>{cookies_phrase(amount)}</b> ({amount} 🍪) · сумма <b>{format_rub(rubles)}</b>"
-    )
-    for recipient_id in recipients:
-        try:
-            if media_type == "photo":
-                await bot.send_photo(
-                    recipient_id,
-                    file_id,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=cookie_order_review_keyboard(order_id),
-                )
-            else:
-                await bot.send_document(
-                    recipient_id,
-                    file_id,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=cookie_order_review_keyboard(order_id),
-                )
-        except (TelegramForbiddenError, TelegramBadRequest):
-            continue
+    from community_bot.shop_api import notify_cookie_order
+
+    await notify_cookie_order(bot, db, settings, order_id)
 
 
 @router.callback_query(F.data.startswith("cookie_order:"))

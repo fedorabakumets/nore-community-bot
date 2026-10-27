@@ -22,7 +22,7 @@ from community_bot.database import Database
 
 ROOT = Path(__file__).parent / 'web'
 ASSETS = Path(__file__).parent.parent / 'assets'
-BUYABLE = {'rep_shield', 'immunity_24h', 'immunity_7d', 'private_profile'}
+
 
 
 def validate_init_data(raw: str, token: str, now: float | None = None) -> dict:
@@ -79,7 +79,10 @@ async def protection(request, handler):
             'Фотография должна быть не больше 5 МБ'
         )
         response = web.json_response({'error': limit}, status=413)
-    except ValueError:
+    except ValueError as error:
+        if request.path.startswith('/api/shop/'):
+            return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
+                                     headers={'Cache-Control': 'no-store'})
         response = web.json_response(
             {'error': 'Проверь поля профиля, формат и размер фотографии (до 5 МБ)'}, status=400,
         )
@@ -103,17 +106,11 @@ async def actor(request):
 
 async def overview(request):
     from community_bot.event_access import current_event
-    from community_bot.routers.group import _shop_prices
+    from community_bot.shop_api import shop_data
 
     db, settings = request.app['db'], request.app['settings']
     user = await actor(request)
-    prices = await _shop_prices(db, user, settings)
-    cats = await db.list_shop_categories(enabled_only=True)
-    items = await db.list_shop_items(enabled_only=True)
-    available = {c['slug'] for c in cats}
-    products = [{'sku': i['sku'], 'title': i['title'], 'category': i['category_slug'],
-                 'price': prices.get(i['sku']), 'buyable': i['sku'] in BUYABLE and i['sku'] in prices}
-                for i in items if i['category_slug'] in available]
+    shop = await shop_data(db, user, settings)
     events = []
     current = await current_event(db)
     if current:
@@ -123,6 +120,11 @@ async def overview(request):
                        'count': await db.event_participant_count(eid),
                        'joined': await db.has_event_rsvp(eid, user['user_id']),
                        'paid': await db.has_event_payment(eid, user['user_id'])})
+    for product in shop['products']:
+        if product['sku'] == 'event_pass':
+            product.update(price=events[0]['price'] if events else None, buyable=bool(events),
+                           description=events[0]['title'] if events else 'Следи за анонсами в сообществе',
+                           reason='' if events else 'Сейчас нет опубликованного мероприятия')
     from community_bot.domain import reputation_tier
     from community_bot.helpers import effective_role, has_permission, role_title
     from community_bot.profile_fields import profile_revision
@@ -156,39 +158,34 @@ async def overview(request):
         'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
-        'categories': [{'id': c['slug'], 'title': c['title']} for c in cats], 'products': products, 'events': events,
+        **shop, 'events': events,
         'history': [{'amount': t['amount'], 'kind': t['kind'], 'date': t['created_at']} for t in history],
     })
 
 
 async def prepare(request):
-    from community_bot.routers.group import _shop_prices
+    from community_bot.shop_api import quote
 
-    user = await actor(request)
     data = await request.json()
     if not isinstance(data, dict):
-        raise ValueError("Ожидается объект")
-    sku = data.get('sku')
-    db = request.app['db']
-    prices = await _shop_prices(db, user, request.app['settings'])
-    if sku not in BUYABLE or sku not in prices:
-        raise ValueError('Этот товар оформляется в боте')
-    token = await db.create_wallet_intent(user['user_id'], sku, prices[sku])
-    item = await db.get_shop_item(sku)
-    return web.json_response({'token': token, 'price': prices[sku], 'title': item['title']})
+        raise ValueError('Ожидается объект')
+    return web.json_response(await quote(request.app['db'], request.app['settings'], await actor(request), data))
 
 
 async def confirm(request):
-    user = await actor(request)
+    from community_bot.shop_api import purchase
+
     data = await request.json()
-    if not isinstance(data, dict):
-        raise ValueError("Ожидается объект")
+    if not isinstance(data, dict) or not isinstance(data.get('token'), str):
+        raise ValueError('Открой подтверждение покупки заново')
     db = request.app['db']
-    intent = await db.get_wallet_intent(user['user_id'], data.get('token', ''))
-    if not intent or intent['item'] not in BUYABLE:
-        return web.json_response({'error': 'Подтверждение уже использовано или устарело'}, status=409)
-    ok, message = await db.buy_item(user['user_id'], intent['item'], intent['price'], intent_id=data['token'])
-    return web.json_response({'ok': ok, 'message': 'Покупка готова!' if ok else message}, status=200 if ok else 409)
+    from community_bot.rsvp import event_lock
+
+    async with event_lock(db, 'shop:'+data['token']):
+        ok, message = await purchase(
+            db, request.app['settings'], request.app['bot'], await actor(request), data['token'],
+        )
+    return web.json_response({'ok': ok, 'message': message}, status=200 if ok else 409)
 
 
 async def join_event(request):
@@ -315,10 +312,16 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
+    from community_bot import shop_api
+
+    app.router.add_post('/api/shop/video', shop_api.upload_video)
+    app.router.add_get('/api/shop/media/{sku}', shop_api.product_image)
+    app.router.add_post('/api/shop/topup/prepare', shop_api.topup_prepare)
+    app.router.add_post('/api/shop/topup/receipt', shop_api.topup_receipt)
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('app.js', 'admin.js', 'style.css'):
+    for name in ('app.js', 'shop.js', 'admin.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app

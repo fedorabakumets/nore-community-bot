@@ -971,14 +971,16 @@ class Database:
             await db.commit()
 
     async def list_shop_categories(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
-        if enabled_only:
-            return await self.fetchall(
-                "SELECT * FROM shop_categories WHERE enabled = 1 ORDER BY sort_order, title"
-            )
-        return await self.fetchall("SELECT * FROM shop_categories ORDER BY sort_order, title")
+        from community_bot.shop_text import catalogue_row
+
+        where = 'WHERE enabled = 1' if enabled_only else ''
+        rows = await self.fetchall(f'SELECT * FROM shop_categories {where} ORDER BY sort_order, title')
+        return [catalogue_row(row) for row in rows]
 
     async def get_shop_category(self, slug: str) -> dict[str, Any] | None:
-        return await self.fetchone("SELECT * FROM shop_categories WHERE slug = ?", (slug,))
+        from community_bot.shop_text import catalogue_row
+
+        return catalogue_row(await self.fetchone('SELECT * FROM shop_categories WHERE slug = ?', (slug,)))
 
     async def upsert_shop_category(
         self,
@@ -1046,17 +1048,22 @@ class Database:
         if priced_only:
             clauses.append("price IS NOT NULL AND price > 0")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        return await self.fetchall(
+        from community_bot.shop_text import catalogue_row
+
+        rows = await self.fetchall(
             f"SELECT * FROM shop_items {where} ORDER BY sort_order, title",
             tuple(params),
         )
+        return [catalogue_row(row) for row in rows]
 
     async def get_shop_item(self, sku: str) -> dict[str, Any] | None:
         from community_bot.shop_catalog import RETIRED_PROFILE_SKUS
 
         if sku in RETIRED_PROFILE_SKUS:
             return None
-        return await self.fetchone("SELECT * FROM shop_items WHERE sku = ?", (sku,))
+        from community_bot.shop_text import catalogue_row
+
+        return catalogue_row(await self.fetchone("SELECT * FROM shop_items WHERE sku = ?", (sku,)))
 
     async def upsert_shop_item(
         self,
@@ -1796,6 +1803,37 @@ class Database:
                 return "Товар больше недоступен."
             if catalog["updated_at"] != row["catalog_version"]:
                 return "Условия товара изменились. Откройте товар и подтвердите покупку заново."
+        payload = json.loads(row["payload_json"])
+        if payload.get("shop_quote"):
+            from community_bot.domain import discounted_price, reputation_tier
+            from community_bot.shop_catalog import item_discount
+
+            cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            payer = dict(await cursor.fetchone())
+            discount = reputation_tier(payer["reputation"], int(payload["restricted_threshold"])).discount
+            cursor = await db.execute("SELECT price FROM shop_items WHERE sku = ?", (item,))
+            current_item = await cursor.fetchone()
+            base = payload.get("base_amount") if item == "support" else (
+                current_item["price"] if current_item else None
+            )
+            if not base or discounted_price(int(base), item_discount(item, discount)) != price:
+                return "Цена или скидка изменились. Откройте товар и подтвердите покупку заново."
+            feature = payload.get("feature")
+            if feature:
+                cursor = await db.execute("SELECT enabled FROM feature_flags WHERE key = ?", (feature,))
+                flag = await cursor.fetchone()
+                if not flag or not flag["enabled"]:
+                    return "Эта функция временно выключена. Списания не было."
+        elif item == "cookie_topup":
+            from community_bot.shop_catalog import normalize_cookie_shop
+
+            cursor = await db.execute("SELECT value FROM bot_state WHERE key='cookie_shop'")
+            config_row = await cursor.fetchone()
+            config = normalize_cookie_shop(json.loads(config_row["value"]) if config_row else None)
+            if not config["enabled"] or payload.get("amount") not in config["packs"] or (
+                payload.get("rate") != config["rate_rub"] or payload["amount"] * config["rate_rub"] != price
+            ):
+                return "Условия пакета изменились. Откройте оплату заново."
         await db.execute(
             "UPDATE wallet_intents SET status = 'completed', completed_at = ? WHERE token = ?",
             (utcnow(), token),
@@ -2063,7 +2101,7 @@ class Database:
         elif item == "reset_limits":
             await db.execute(
                 "DELETE FROM reputation_actions WHERE actor_id = ? AND action_date = ?",
-                (user_id, datetime.now().date().isoformat()),
+                (user_id, datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()),
             )
         elif item == "forgive":
             await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
