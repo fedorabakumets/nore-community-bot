@@ -367,7 +367,7 @@ async def _delete_message_ids(bot: Bot, chat_id: int, message_ids: list[int]) ->
 @router.message(command_or_alias("question"), F.chat.type.in_({"group", "supergroup"}))
 async def question_in_group(message: Message) -> None:
     notice = await message.reply(
-        "Тикет открывается в личке с ботом: напишите «вопрос» или нажмите «🎫 Тикет». Сообщение в чате остаётся."
+        "Тикет открывается в личке с ботом: напишите «вопрос» или нажмите «🎫 Тикет»."
     )
     asyncio.create_task(_delete_later(notice))
 
@@ -460,17 +460,16 @@ async def staff_user_card(message: Message, db: Database, settings: Settings) ->
     pet = await db.get_pet(int(target["user_id"]), settle=False)
     note = str(target.get("moderator_note") or "").strip() or "нет"
     pet_line = str(pet["name"]) if pet else "нет"
-    with keep_in_chat():
-        await _respond(
-            message,
-            f"👤 <b>{html.escape(person_label(target))}</b> · <code>{target['user_id']}</code>\n"
-            f"Роль: {html.escape(str(target['role']))}\n"
-            f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
-            f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
-            f"Питомец: {html.escape(str(pet_line))}\n"
-            f"Заметка: {html.escape(note)}",
-            parse_mode="HTML",
-        )
+    await _respond(
+        message,
+        f"👤 <b>{html.escape(person_label(target))}</b> · <code>{target['user_id']}</code>\n"
+        f"Роль: {html.escape(str(target['role']))}\n"
+        f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
+        f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
+        f"Питомец: {html.escape(str(pet_line))}\n"
+        f"Заметка: {html.escape(note)}",
+        parse_mode="HTML",
+    )
 
 
 @router.message(command_or_alias("id"))
@@ -994,15 +993,14 @@ async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
     user = await register_telegram_user(db, message.from_user)
-    with keep_in_chat():
-        sent = await answer_block(
-            message,
-            "shop",
-            await _shop_home_text(db, user, settings),
-            parse_mode="HTML",
-            reply_markup=await _shop_home_markup(db),
-        )
-        await bind_ui_owner(db, sent, message.from_user.id, "shop")
+    sent = await answer_block(
+        message,
+        "shop",
+        await _shop_home_text(db, user, settings),
+        parse_mode="HTML",
+        reply_markup=await _shop_home_markup(db),
+    )
+    await bind_ui_owner(db, sent, message.from_user.id, "shop")
 
 
 @router.callback_query(F.data == "shop:home")
@@ -1591,15 +1589,14 @@ async def freebie_offer(message: Message, settings: Settings) -> None:
     if not settings.freebie_channel_url:
         await _respond(message, "Бонус за подписку ещё не настроен владельцем.")
         return
-    with keep_in_chat():
-        await _respond(
-            message,
-            "🎁 <b>Бесплатные печеньки</b>\n\n"
-            "Подпишитесь на канал и нажмите «Проверить подписку». "
-            "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
-            parse_mode="HTML",
-            reply_markup=freebie_keyboard(settings.freebie_channel_url),
-        )
+    await _respond(
+        message,
+        "🎁 <b>Бесплатные печеньки</b>\n\n"
+        "Подпишитесь на канал и нажмите «Проверить подписку». "
+        "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
+        parse_mode="HTML",
+        reply_markup=freebie_keyboard(settings.freebie_channel_url),
+    )
 
 
 @router.callback_query(F.data == "freebie:check", F.message.chat.type.in_({"group", "supergroup"}))

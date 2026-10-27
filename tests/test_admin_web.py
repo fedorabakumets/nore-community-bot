@@ -311,3 +311,21 @@ async def test_close_admin_panel_returns_to_lk_and_cancels_draft(env):
     assert closed['exit'] is True
     assert await (await env.bridge.context(7)).get_state() is None
     assert not env.telegram.calls
+
+
+async def test_bug_report_details_preserve_text_and_attachment_and_enforce_access(env):
+    body = '<b>Это текст сообщения, а не HTML</b> ' + 'ошибка ' * 350 + 'КОНЕЦ СООБЩЕНИЯ'
+    report_id = await env.db.create_report(7, 8, -100123, 555, body, 'БАГ · не работает кнопка',
+                                           attachment=('photo', 'saved-photo'))
+    root = await env.bridge.open(env.actor, reset=True)
+    queue = await click(env, root, 'Очередь')
+    reports = await click(env, queue, 'Репорты')
+    detail = await click(env, reports, f'Открыть #{report_id}')
+    rendered = '\n'.join(c['html'] for c in detail['cards'])
+    assert 'Баг #' in rendered and 'https://t.me/c/123/555' in rendered
+    assert '&lt;b&gt;Это текст' in rendered and rendered.count('ошибка') >= 349 and 'КОНЕЦ СООБЩЕНИЯ' in rendered
+    assert any(c.get('media') for c in detail['cards'])
+    assert not any(c.__api_method__ == 'sendPhoto' for c in env.telegram.calls)
+    reviewed = await click(env, detail, '✅')
+    assert await env.db.list_pending_reports() == []
+    assert 'Очередь пуста' in '\n'.join(c['html'] for c in reviewed['cards'])

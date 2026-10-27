@@ -4,9 +4,9 @@ from __future__ import annotations
 import html
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from community_bot.aliases import command_or_alias
 from community_bot.helpers import has_permission, register_telegram_user, user_link
 from community_bot.permissions import PERM_EVENT_PARTICIPANTS
 
@@ -82,8 +82,7 @@ async def roster(db, event_id, page=0, ledger=False):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-@router.message(Command("participants"))
-@router.message(F.text.casefold() == "участники")
+@router.message(command_or_alias("participants"))
 async def participants(message: Message, db, settings):
     if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_EVENT_PARTICIPANTS):
         await message.answer("Недостаточно прав: нужен доступ к участникам мероприятий.")
