@@ -137,7 +137,16 @@ async def wallet_prepare(request):
     body = await request.json()
     action = body.get("action") if isinstance(body, dict) else None
     if action == "transfer":
-        target, label = await recipient(db, user["user_id"], body.get("recipient"))
+        friend_id = body.get('friend_id')
+        if friend_id is not None:
+            from community_bot.friends_api import accepted
+
+            if (type(friend_id) is not int or friend_id <= 0 or body.get('recipient')
+                    or not await accepted(db, user['user_id'], friend_id)):
+                raise ValueError('Выбери друга из актуального списка')
+            target, label = await recipient(db, user['user_id'], str(friend_id))
+        else:
+            target, label = await recipient(db, user["user_id"], body.get("recipient"))
         amount = body.get("amount")
         if target == user["user_id"] or type(amount) is not int or not 1 <= amount <= 1_000_000:
             raise ValueError("Укажи другого участника и целую сумму от 1 до 1 000 000")
@@ -151,7 +160,7 @@ async def wallet_prepare(request):
             "transfer",
             amount,
             target_id=target,
-            payload={"transfer_id": transfer_id, "percent": percent},
+            payload={"transfer_id": transfer_id, "percent": percent, **({"friend_id": friend_id} if friend_id else {})},
         )
         return web.json_response(
             {"token": token, "amount": amount, "received": received, "percent": percent, "recipient": label}

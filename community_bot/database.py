@@ -541,12 +541,13 @@ class Database:
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
+        from community_bot.social_profiles import SCHEMA as presence_schema
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         async with self.connect() as db:
             await db.executescript(SCHEMA)
             # Additive, independent game tables: existing balances, party games and pets stay shared.
-            await db.executescript(friends_schema + mafia_schema + rocket_schema + seasonal_schema)
+            await db.executescript(friends_schema + mafia_schema + rocket_schema + seasonal_schema + presence_schema)
             event_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(studio_events)")).fetchall()
             }
@@ -1717,6 +1718,14 @@ class Database:
                     return False, error, 0
                 cursor = await db.execute('SELECT payload_json FROM wallet_intents WHERE token=?', (intent_id,))
                 payload = json.loads((await cursor.fetchone())['payload_json'])
+                if payload.get('friend_id') is not None:
+                    from community_bot.friends_api import accepted_in_connection
+
+                    if payload['friend_id'] != transfer['receiver_id'] or not await accepted_in_connection(
+                        db, sender_id, transfer['receiver_id'],
+                    ):
+                        await db.rollback()
+                        return False, 'Дружба изменилась. Выберите получателя заново.', 0
                 if payload.get('percent') != percent or payload.get('transfer_id') != transfer_id:
                     await db.rollback()
                     return False, 'Комиссия изменилась. Подтвердите перевод заново.', 0

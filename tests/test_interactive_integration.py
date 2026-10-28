@@ -35,6 +35,7 @@ class Request(dict):
 
 
 @pytest.mark.parametrize('path', [
+    '/api/presence', '/api/people', '/api/people/8', '/api/people/8/avatar',
     '/api/friends', '/api/friends/action', '/api/mafia', '/api/mafia/action',
     '/api/rocket', '/api/rocket/prepare', '/api/rocket/launch', '/api/rocket/cashout',
 ])

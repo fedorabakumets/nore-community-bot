@@ -81,7 +81,8 @@ async def protection(request, handler):
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
-                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/seasonal')):
+                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/seasonal',
+                                    '/api/people', '/api/presence')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -328,6 +329,13 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/seasonal/draw/confirm', seasonal.draw_confirm)
     app.router.add_get('/seasonal/guardian-season1.jpg', lambda _: web.FileResponse(
         ASSETS / 'seasonal' / 'guardian-season1.jpg'))
+    from community_bot import social_profiles
+
+    app.router.add_get('/api/presence', social_profiles.status)
+    app.router.add_post('/api/presence', social_profiles.update)
+    app.router.add_get('/api/people', social_profiles.profile)
+    app.router.add_get('/api/people/{user_id}', social_profiles.profile)
+    app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
     app.router.add_get('/api/mafia', mafia_api.status)
@@ -356,7 +364,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('intro.js', 'app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'style.css'):
+    for name in ('intro.js', 'app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'people.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
