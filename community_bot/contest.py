@@ -41,6 +41,7 @@ def contest_home_keyboard(*, has_open: bool) -> InlineKeyboardMarkup:
         rows.append([ibtn("🏆 Подвести итог", "admin:contest:draw", STYLE_FUN)])
         rows.append([ibtn("👥 Участники", "admin:contest:list")])
         rows.append([ibtn("✖️ Снять конкурс", "admin:contest:cancel", STYLE_CLOSE)])
+    rows.append([ibtn("Сезон 1 · Багровый Страж Норы", "admin:season:home")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
