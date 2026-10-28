@@ -398,3 +398,62 @@ async def contest_join(callback: CallbackQuery, db: Database) -> None:
         await callback.answer(error)
         return
     await callback.answer(f"Вы участвуете. Всего: {count}")
+
+
+@router.callback_query(F.data.startswith('admin:season:'))
+async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settings):
+    from community_bot.keyboards import back_btn, ibtn
+    from community_bot.seasonal import ITEM, TITLE, can_manage, draw, prepare_draw, snapshot
+
+    if not callback.message or not await can_manage(db, settings, callback.from_user.id):
+        await callback.answer('Недостаточно прав', show_alert=True)
+        return
+    uid = callback.from_user.id
+    action = (callback.data or '').removeprefix('admin:season:')
+    buttons = []
+    try:
+        if action == 'prepare':
+            quote = await prepare_draw(db, settings, uid)
+            text = (f'<b>Выбрать победителя?</b>\n\nУчастников: {quote["count"]}. '
+                    'Выбор случайный, один победитель. Запись закроется, повторить выбор будет невозможно.')
+            buttons.append([ibtn('Завершить и выбрать победителя', 'admin:season:draw:'+quote['token'])])
+        elif action.startswith('draw:'):
+            await draw(db, settings, uid, action.removeprefix('draw:'))
+            result = await snapshot(db, settings, uid)
+            text = f'<b>Итог сохранён</b>\n\n{TITLE}\nПобедитель: {html.escape(result["winner"] or "Участник")}'
+        elif action.startswith('list:'):
+            raw = action.removeprefix('list:')
+            if not raw.isdigit() or len(raw)>6:
+                raise ValueError('Некорректная страница')
+            offset = int(raw)
+            rows = await db.fetchall('SELECT u.profile_name,u.telegram_name,u.username,e.joined_at '
+                                     'FROM seasonal_entries e JOIN users u ON u.user_id=e.user_id '
+                                     'WHERE e.raffle_id=? ORDER BY e.joined_at,u.user_id LIMIT 11 OFFSET ?',
+                                     (ITEM, offset))
+            text = '<b>Участники · Багровый Страж Норы</b>\n\n' + ('\n'.join(
+                f'{offset+i+1}. {html.escape(row["profile_name"] or row["telegram_name"])}'
+                + (f' · @{html.escape(row["username"])}' if row['username'] else '')
+                for i, row in enumerate(rows[:10])) or 'Пока нет заявок')
+            if offset:
+                buttons.append([ibtn('← Назад', f'admin:season:list:{max(0,offset-10)}')])
+            if len(rows)>10:
+                buttons.append([ibtn('Далее →', f'admin:season:list:{offset+10}')])
+        else:
+            result = await snapshot(db, settings, uid)
+            text = (f'<b>{TITLE}</b>\nСезон 1 · бесплатный розыгрыш физической игрушки\n\n'
+                    f'Участников: {result["count"]}\n'
+                    + ('Идёт запись.' if result['status']=='open' else
+                       f'Победитель: {html.escape(result["winner"] or "итог сохранён")}'))
+            buttons.append([ibtn('Участники', 'admin:season:list:0')])
+            if result['status']=='open':
+                buttons.append([ibtn('Подвести итоги…', 'admin:season:prepare')])
+    except ValueError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+    await callback.answer()
+    buttons.append([back_btn('admin:contest:home' if action=='home' else 'admin:season:home')])
+    from aiogram.types import InlineKeyboardMarkup
+
+    await callback.message.edit_text(
+        text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )

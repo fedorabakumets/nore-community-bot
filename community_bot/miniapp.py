@@ -81,7 +81,7 @@ async def protection(request, handler):
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
-                                    '/api/friends', '/api/mafia', '/api/rocket')):
+                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/seasonal')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -319,8 +319,15 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
-    from community_bot import cabinet_api, friends_api, mafia_api, rocket_api, shop_api
+    from community_bot import cabinet_api, friends_api, mafia_api, rocket_api, seasonal, shop_api
 
+    app.router.add_get('/api/seasonal', seasonal.status)
+    app.router.add_post('/api/seasonal/join', seasonal.participate)
+    app.router.add_get('/api/seasonal/manage', seasonal.manage)
+    app.router.add_post('/api/seasonal/draw/prepare', seasonal.draw_prepare)
+    app.router.add_post('/api/seasonal/draw/confirm', seasonal.draw_confirm)
+    app.router.add_get('/seasonal/guardian-season1.jpg', lambda _: web.FileResponse(
+        ASSETS / 'seasonal' / 'guardian-season1.jpg'))
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
     app.router.add_get('/api/mafia', mafia_api.status)
