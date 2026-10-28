@@ -42,13 +42,19 @@ async def test_join_is_concurrent_once_and_does_not_charge_or_expose_roster(env)
         "image",
         "author",
         "author_url",
+        "image_alt",
+        "description",
+        "links",
         "eligible",
         "can_manage",
         "winner",
         "won",
         "drawn_at",
     }
+    entries = await env.db.fetchall("SELECT * FROM seasonal_entries ORDER BY user_id")
+    assert entries[0]["raffle_id"] == "season1-crimson-guardian"
     await env.db.initialize()
+    assert await env.db.fetchall("SELECT * FROM seasonal_entries ORDER BY user_id") == entries
     assert (await snapshot(env.db, env.settings, 8))["count"] == 1
 
 
@@ -94,7 +100,7 @@ async def test_draw_freezes_winner_and_cannot_reroll_even_concurrently_or_after_
     with pytest.raises(ValueError, match="уже определён"):
         await draw(env.db, env.settings, 7, q1["token"])
     assert (await env.db.fetchone("SELECT COUNT(*) n FROM notify_inbox WHERE user_id=?", (winners[0],)))["n"] == 1
-    assert "Багровый" in json.dumps(await snapshot(env.db, env.settings, 8), ensure_ascii=False)
+    assert "Розовый Хранитель" in json.dumps(await snapshot(env.db, env.settings, 8), ensure_ascii=False)
 
 
 async def test_changed_participants_expiry_and_permissions_invalidate_confirmation(env, monkeypatch):
