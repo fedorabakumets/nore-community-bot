@@ -356,8 +356,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'style.css'):
+    for name in ('intro.js', 'app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
+    app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
 
