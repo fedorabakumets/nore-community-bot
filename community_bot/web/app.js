@@ -10,7 +10,7 @@ function eventCard(e){return `<article class="card event"><span class="eyebrow">
 function navIcon(id){if(id==='interactive')return window.NoraInteractive?.icon('game')||'';const paths={home:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',shop:'M4 8h16v13H4z M8 8V5a4 4 0 0 1 8 0v3',events:'M4 5h16v16H4z M4 10h16 M8 2v5 M16 2v5',wallet:'M3 6h17v15H3z M3 6V3h14 M15 12h6v5h-6z',pet:'M8 11c-2 0-4 3-4 5s2 3 4 2c2-1 2-1 4-1s2 0 4 1c2 1 4 0 4-2s-2-5-4-5c-2 0-2 1-4 1s-2-1-4-1z M5 5v2 M10 3v3 M15 3v3 M20 5v2',lk:'M5 21v-2a7 7 0 0 1 14 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="${paths[id]}"/></svg>`}
 const labels={loan:'НОРА — СТАРТЕР-ПАК',loan_repay:'Возврат стартер-пака',sbp_payment:'Пополнение СБП',pet_shop:'Припасы питомцу',pet_expedition:'Находка из похода',transfer:'Перевод',profile_complete:'Бонус за заполнение профиля',shop:'Покупка в магазине',rsvp:'Участие в мероприятии',rsvp_refund:'Возврат залога',transfer_in:'Входящий перевод',transfer_out:'Перевод',bonus:'Бонус',daily_leader:'Бонус за активность',admin:'Начисление',debt_repay:'Возврат долга'};
 function transactions(){return data.history.length?data.history.map(t=>`<div class="transaction"><span class="tx-icon">${t.amount>0?'↙':'↗'}</span><div class="tx-info"><b>${esc(labels[t.kind]||'Операция с печеньками')}</b><span>${esc(new Date(t.date).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</span></div><strong class="${t.amount>0?'positive':''}">${t.amount>0?'+':''}${number(t.amount)} 🍪</strong></div>`).join(''):'<div class="empty">Пока без операций.<br>Твоя история появится здесь.</div>'}
-function render(){const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
+function render(){pressFeedback.clear();const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=`<p class="greeting">Привет, ${esc(name)}.</p><h1>Твоя Нора.<br><em>Всё рядом.</em></h1><div class="stats"><div class="stat"><span class="eyebrow">Твои печеньки</span><b class="num ${Number(u.cookies)===0?'red-number':''}">${number(u.cookies)} <small>🍪</small></b><small>На приятные штуки</small></div><button class="stat rep-stat" data-reputation><span class="eyebrow">Репутация</span><b class="num ${Number(u.reputation)<70?'red-number':''}">${number(u.reputation)}</b><small>Твой вклад в сообщество ›</small></button></div><section class="hero unlock-hero"><span class="eyebrow">${data.profile.fill_percent<100?'Доступ частично <em>ограничен</em>':'Профиль заполнен · доступ <em>открыт</em>'}</span><h2>${data.profile.fill_percent<100?'Получить<br>доступ и 🍪':'Ты в Норе.<br>Добро пожаловать.'}</h2><p>${data.profile.fill_percent<100?'Чтобы получить доступ к <em>Норе</em>, пожалуйста, заполните описание профиля':'Магазин и события доступны. Бонус за заполнение профиля — 10 🍪 один раз.'}</p><img src="/art/update.webp" alt="Бабушка Нора с подарком"><button class="small-action" data-tab="${data.profile.fill_percent<100?'lk':'shop'}">${data.profile.fill_percent<100?'Залезть в нору':'Открыть магазин'} <svg class="cta-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13 13 3M4 3h9v9" fill="none" stroke="currentColor" stroke-width="2"/></svg></button></section><div class="row"><h2>Встретимся?</h2><button class="text-btn" data-tab="events">События ↗</button></div>${data.events.length?eventCard(data.events[0]):'<div class="card empty">Скоро будет повод собраться.<br>Следи за анонсами в чате.</div>'}<div class="row"><h2>Для тебя</h2><button class="text-btn" data-tab="shop">Весь магазин ↗</button></div>${products(data.products.slice(0,2))}`;
 if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=`<p class="eyebrow">Хорошая компания</p><h1>Повод<br><em>собраться.</em></h1>${data.events.length?data.events.map(eventCard).join(''):'<div class="card empty"><img src="/art/event.webp" alt="Бабушка-диджей">Пока без анонсов.<br>Новая встреча появится здесь.</div>'}`;
@@ -23,7 +23,7 @@ if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
 $('#app').innerHTML=`<header><div><div class="brand">N<i>O</i>RA</div><div class="city">Санкт-Петербург · свои рядом</div></div><div class="header-actions">${window.NoraCabinet?.header()||''}<button class="avatar profile-pulse" data-profile aria-label="Открыть личный кабинет"><span>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||name.slice(0,1)).toUpperCase())}</span></button></div></header>${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;loadAvatar();if(tab==='admin')window.NoraAdmin?.mount();
 const selected=['interactive','games','pet','mafia','rocket'].includes(tab)?'interactive':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['events','События'],['interactive','Интерактив']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${navIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount()}
-function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
+function sheet(html){pressFeedback.clear();$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
 async function product(sku){await window.NoraShop?.product(sku)}
 async function perform(path,payload){
   if(busy)return;
@@ -48,6 +48,60 @@ async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebrow">Репутация в Норе</span><h2>Твой вклад —<br>твои возможности</h2><p class="sub">Сейчас у тебя ${number(data.user.reputation)} / 100. Поддержка участников даёт +5 репутации, отрицательная оценка — −5. Себе менять репутацию нельзя. Одного человека можно отметить один раз в день.</p>${levels.map(l=>`<section class="rep-level"><h3>${esc(l.label)} · ${esc(l.range)}</h3><p>Скидка ${number(l.discount)}% · ${number(l.daily_actions)} действий в день.<br>${l.can_minus?'Можно поддерживать и понижать репутацию.':'Можно только поддерживать участников.'}</p></section>`).join('')}<p class="sub">Серебро — от 70, золото — от 90. Чтобы расти выше 69, заполни все пять блоков профиля. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников. Ниже порога ограничений взаимодействия недоступны.</p><h2>Для твоей репутации</h2>${products(data.products.filter(p=>p.category==='reputation'))}`)}
-function pressGlow(target){const node=target.closest('button,a.admin-control');if(!node||node.disabled)return;const box=node.getBoundingClientRect(),glow=document.createElement('span');glow.className='press-glow';Object.assign(glow.style,{left:box.left+'px',top:box.top+'px',width:box.width+'px',height:box.height+'px',borderRadius:getComputedStyle(node).borderRadius});document.body.append(glow);setTimeout(()=>glow.remove(),650)}
-document.addEventListener('pointerdown',e=>pressGlow(e.target),true);
-document.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')pressGlow(e.target)},true);
+// Feedback belongs to the activated control, never to a viewport overlay.
+const pressFeedback = (() => {
+  let gesture = null;
+  const active = new Map();
+  function clear() {
+    for (const [node, timer] of active) {
+      clearTimeout(timer);
+      node.classList.remove('press-feedback');
+    }
+    active.clear();
+  }
+  function cancel() {
+    if (gesture) gesture.cancelled = true;
+    clear();
+  }
+  document.addEventListener('pointerdown', e => {
+    clear();
+    if (!e.isPrimary || e.button !== 0) { cancel(); return; }
+    gesture = {id:e.pointerId,x:e.clientX,y:e.clientY,
+      node:e.target.closest?.('button,a.admin-control'),cancelled:false,ended:false};
+  }, {capture:true,passive:true});
+  document.addEventListener('pointermove', e => {
+    if (gesture?.id === e.pointerId && Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>8) cancel();
+  }, {capture:true,passive:true});
+  document.addEventListener('pointercancel', cancel, {capture:true,passive:true});
+  document.addEventListener('pointerup', e => {
+    if (gesture?.id === e.pointerId) {
+      if (Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>8) cancel();
+      gesture.ended = true;
+    }
+  }, {capture:true,passive:true});
+  document.addEventListener('click', e => {
+    const node = e.target.closest?.('button,a.admin-control');
+    const tap = gesture;
+    gesture = null;
+    if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return;
+    if (e.detail !== 0 && (!tap || !tap.ended || tap.cancelled || tap.node !== node)) return;
+    // Let every screen/modal action finish before deciding whether this control is still visible.
+    queueMicrotask(() => {
+      const dialog = document.querySelector('dialog[open]');
+      if (!node.isConnected || node.disabled || (dialog && !dialog.contains(node))) return;
+      clear();
+      node.classList.add('press-feedback');
+      active.set(node,setTimeout(() => {
+        node.classList.remove('press-feedback');
+        active.delete(node);
+      },220));
+    });
+  }, true);
+  document.addEventListener('scroll', cancel, {capture:true,passive:true});
+  document.addEventListener('visibilitychange', cancel);
+  document.addEventListener('close', clear, true);
+  window.addEventListener('blur', cancel);
+  window.addEventListener('popstate', cancel);
+  new MutationObserver(clear).observe(document.querySelector('#sheet'), {attributes:true,attributeFilter:['open']});
+  return {clear};
+})();
