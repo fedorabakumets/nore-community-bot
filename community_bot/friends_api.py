@@ -105,14 +105,14 @@ async def inbox_in_connection(connection, uid: int, text: str) -> int:
     return int(cursor.lastrowid)
 
 
-async def deliver_notice(bot, db, inbox_id: int, uid: int, text: str) -> None:
+async def deliver_notice(bot, db, inbox_id: int, uid: int, text: str, *, reply_markup=None, force=False) -> None:
     """Best effort after commit. Never repeat a successful action when Telegram fails."""
     if bot is None:
         return
     try:
-        if not await db.notify_channel_on(uid, "games") or await db.notify_digest_on(uid, "games"):
+        if not force and (not await db.notify_channel_on(uid, "games") or await db.notify_digest_on(uid, "games")):
             return
-        await bot.send_message(uid, text, parse_mode="HTML", disable_notification=True)
+        await bot.send_message(uid, text, parse_mode="HTML", disable_notification=True, reply_markup=reply_markup)
         await db.notify_mark_delivered(inbox_id)
     except Exception as error:
         logger.warning("Friend/game invitation kept in inbox: %s", type(error).__name__)

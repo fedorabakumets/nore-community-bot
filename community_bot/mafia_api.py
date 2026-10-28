@@ -591,7 +591,11 @@ async def _invite(conn, db, settings, room, uid, body, now):
         "Открой Интерактив → Игры → Мафия, чтобы принять приглашение."
     )
     notice = await inbox_in_connection(conn, target, text)
-    return {"id": notice, "uid": target, "text": text}
+    await conn.execute(
+        "INSERT INTO bot_state(key,value) VALUES(?,?)",
+        (f"mafia_notice:{notice}", room["id"]),
+    )
+    return {"id": notice, "uid": target, "text": text, "room_id": room["id"]}
 
 
 async def _start(conn, db, settings, room, uid, now):
@@ -759,10 +763,11 @@ async def apply_action(db, settings, uid, body, now=None):
                     await _start(conn, db, settings, room, uid, now)
                     message = "Игра началась. Твоя роль доступна только тебе"
                 elif action_name == "cancel":
-                    if room["status"] != "lobby" or room["host_id"] != uid:
-                        raise ValueError("Закрыть комнату может хозяин до начала игры")
+                    if room["host_id"] != uid:
+                        raise ValueError("Удалить комнату может только её создатель")
                     await _finish(conn, room, None, now, cancelled=True)
-                    message = "Комната закрыта"
+                    focus = None
+                    message = "Ты вышел, комната удалена из текущих игр"
                 elif action_name == "leave":
                     await _leave(conn, room, own, now)
                     focus = None
@@ -813,7 +818,11 @@ async def action(request):
         return web.json_response({"error": str(error)}, status=409)
     if notice:
         from community_bot.friends_api import deliver_notice
+        from community_bot.mafia_notifications import invitation_keyboard
 
-        await deliver_notice(request.app.get("bot"), db, notice["id"], notice["uid"], notice["text"])
+        await deliver_notice(
+            request.app.get("bot"), db, notice["id"], notice["uid"], notice["text"],
+            reply_markup=invitation_keyboard(notice["room_id"]), force=True,
+        )
     result = await read_status(db, uid, room_id=focus)
     return web.json_response({**result, "message": message})

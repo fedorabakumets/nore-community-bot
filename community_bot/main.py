@@ -459,7 +459,9 @@ async def main() -> None:
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     from community_bot.event_access import router as event_router
+    from community_bot.mafia_notifications import router as mafia_notifications_router
 
+    dispatcher.include_router(mafia_notifications_router)
     dispatcher.include_router(event_router)
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)

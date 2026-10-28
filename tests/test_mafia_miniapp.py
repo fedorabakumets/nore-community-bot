@@ -376,3 +376,82 @@ async def test_invitation_user_text_is_escaped_for_telegram_and_owner_is_initial
     result = await mafia.action(Request(actor={"id": 99, "first_name": "Новый владелец"}))
     assert result.status == 200
     assert (await env.db.get_user(99))["telegram_name"] == "Новый владелец"
+
+
+async def test_creator_can_leave_and_delete_active_room_releasing_every_player(env):
+    room = await started(env)
+    with pytest.raises(ValueError, match="создатель"):
+        await send(env, 8, "cancel", room)
+    focus, _, _ = await send(env, 7, "cancel", room)
+    assert focus is None
+    assert (await env.db.get_user(7))["cookies"] == 20
+    assert (await view(env, 8))["room"] is None
+    assert (await env.db.fetchone("SELECT status FROM mini_mafia_rooms WHERE id=?", (room,)))["status"] == "cancelled"
+    new_room, _, _ = await send(env, 7, "create")
+    assert new_room != room
+
+
+async def test_invite_notices_have_actor_bound_buttons_and_do_not_survive_response(env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from community_bot.cabinet_api import notices
+    from community_bot.mafia_notifications import invitation_keyboard, respond
+
+    monkeypatch.setattr(mafia.time, "time", lambda: env.now)
+    room, _, _ = await send(env, 7, "create")
+    _, _, notice = await send(env, 7, "invite", room, user_id=8)
+    assert notice["room_id"] == room
+    keyboard = invitation_keyboard(room)
+    assert [b.text for b in keyboard.inline_keyboard[0]] == ["Принять", "Отклонить"]
+
+    class Request(dict):
+        def __init__(self, uid):
+            super().__init__(actor={"id": uid, "first_name": "Друг"})
+            self.app = {"db": env.db, "settings": env.settings, "bot": None}
+
+    payload = json.loads((await notices(Request(8))).body)
+    assert next(n for n in payload["items"] if n["id"] == notice["id"])["mafia_invite"]["room_id"] == room
+    assert not json.loads((await notices(Request(9))).body)["mafia_invites"]
+    callback = SimpleNamespace(
+        id="987654321123456789",
+        data=f"mfin:y:{room}",
+        from_user=SimpleNamespace(id=9),
+        message=SimpleNamespace(chat=SimpleNamespace(type="private"), edit_reply_markup=AsyncMock()),
+        answer=AsyncMock(),
+    )
+    await respond(callback, env.db, env.settings)
+    assert (await view(env, 9))["room"] is None
+    callback.from_user.id = 8
+    await respond(callback, env.db, env.settings)
+    assert (await view(env, 8))["room"]["id"] == room
+    await respond(callback, env.db, env.settings)  # replay remains harmless
+    assert (await env.db.fetchone("SELECT COUNT(*) n FROM mini_mafia_members WHERE user_id=8"))["n"] == 1
+    payload = json.loads((await notices(Request(8))).body)
+    assert not payload["mafia_invites"]
+    assert all(not n["mafia_invite"] for n in payload["items"])
+
+
+async def test_invitation_is_sent_with_direct_buttons_even_if_games_digest_is_off(env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from community_bot.friends_api import deliver_notice
+    from community_bot.mafia_notifications import invitation_keyboard, respond
+
+    monkeypatch.setattr(mafia.time, "time", lambda: env.now)
+    room, _, _ = await send(env, 7, "create")
+    _, _, notice = await send(env, 7, "invite", room, user_id=8)
+    bot = SimpleNamespace(send_message=AsyncMock())
+    await deliver_notice(
+        bot, env.db, notice["id"], 8, notice["text"], reply_markup=invitation_keyboard(room), force=True
+    )
+    assert bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0][1].callback_data == f"mfin:n:{room}"
+    callback = SimpleNamespace(
+        id="987654321123456788",
+        data=f"mfin:n:{room}",
+        from_user=SimpleNamespace(id=8),
+        message=SimpleNamespace(chat=SimpleNamespace(type="private"), edit_reply_markup=AsyncMock()),
+        answer=AsyncMock(),
+    )
+    await respond(callback, env.db, env.settings)
+    assert not (await view(env, 8))["invites"]
+    assert (await view(env, 8))["room"] is None
