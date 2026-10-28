@@ -287,10 +287,18 @@ async def notices(request):
         "SELECT id,channel,text,created_at,read FROM notify_inbox WHERE user_id=? ORDER BY id DESC LIMIT 40",
         (user["user_id"],),
     )
+    from community_bot.mafia_api import read_status
+
+    invitations = {item["room_id"]: item for item in (await read_status(db, user["user_id"]))["invites"]}
+    for row in rows:
+        room_id = await db.get_bot_state(f"mafia_notice:{row['id']}")
+        row["mafia_invite"] = invitations.get(room_id)
     prefs = await db.notify_prefs_map(user["user_id"])
     return web.json_response(
         {
             "items": [dict(row, text=plain_shop_text(row["text"])) for row in rows],
+            "mafia_invites": [item for key, item in invitations.items()
+                              if not any(row.get("mafia_invite") == item for row in rows)],
             "unread": await db.notify_unread_count(user["user_id"]),
             "channels": [
                 {
