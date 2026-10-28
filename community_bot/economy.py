@@ -25,6 +25,8 @@ TRANSACTION_LABELS = {
     "cookie_game_win": "Выигрыш в игре",
     "cookie_game_refund": "Возврат ставки",
     "cookie_game_restake": "Пересчёт ставки",
+    "rocket_bet": "Ракетка · ставка",
+    "rocket_payout": "Ракетка · выплата",
     "loan": "НОРА — СТАРТЕР-ПАК",
     "loan_repay": "Возврат стартер-пака",
     "debt_repay": "Погашение просроченного долга",

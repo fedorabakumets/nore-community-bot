@@ -80,7 +80,8 @@ async def protection(request, handler):
         )
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
-        if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices')):
+        if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
+                                    '/api/friends', '/api/mafia', '/api/rocket')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -318,7 +319,20 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
-    from community_bot import cabinet_api, shop_api
+    from community_bot import cabinet_api, friends_api, mafia_api, rocket_api, shop_api
+
+    app.router.add_get('/api/friends', friends_api.status)
+    app.router.add_post('/api/friends/action', friends_api.action)
+    app.router.add_get('/api/mafia', mafia_api.status)
+    app.router.add_post('/api/mafia/action', mafia_api.action)
+    app.router.add_get('/api/rocket', rocket_api.status)
+    app.router.add_post('/api/rocket/prepare', rocket_api.prepare)
+    app.router.add_post('/api/rocket/launch', rocket_api.launch)
+    app.router.add_post('/api/rocket/cashout', rocket_api.cashout)
+
+    from community_bot.interactive_runtime import lifecycle
+
+    app.cleanup_ctx.append(lifecycle)
 
     app.router.add_post('/api/pet/prepare', cabinet_api.pet_prepare)
     app.router.add_post('/api/pet/action', cabinet_api.pet_action)
@@ -335,7 +349,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('app.js', 'shop.js', 'cabinet.js', 'admin.js', 'style.css'):
+    for name in ('app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
