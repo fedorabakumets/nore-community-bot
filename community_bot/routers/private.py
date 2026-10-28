@@ -237,6 +237,9 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
         return
     await register_telegram_user(db, message.from_user)
     await state.clear()
+    if message.chat.type == "private" and (message.text or "").partition(" ")[2].strip() == "idea":
+        await open_ticket(message, state, db, settings, message.bot)
+        return
     await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
 
 

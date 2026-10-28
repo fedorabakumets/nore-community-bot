@@ -62,13 +62,24 @@ async def test_shop_prepare_never_debits_and_confirmation_is_actor_bound_and_onc
     assert (await db.get_user(8))['cookies'] == 100
 
 
-async def test_overview_exposes_only_allowlisted_own_fields(db):
-    response = await overview(Request(db))
+async def test_overview_exposes_only_allowlisted_own_fields(db, monkeypatch):
+    from community_bot import updates
+
+    monkeypatch.setattr(updates, 'UPDATES', (updates.BotUpdate(
+        number=900, slug='public-test', title='Статья участникам', summary='Публичное описание',
+        details=('Возможности для участников',), staff_details=('INTERNAL_ONLY_SENTINEL',),
+    ),))
+    request = Request(db)
+    request.app['settings'].community_invite_url = 'javascript:alert(1)'
+    response = await overview(request)
     data = json.loads(response.body)
     assert data['user']['user_id'] == 7
     assert 'moderator_note' not in data['user']
     assert 'bot_token' not in response.text
     assert 'telegraph_token' not in response.text
+    assert 'INTERNAL_ONLY_SENTINEL' not in response.text
+    assert data['home']['community_url'] == ''
+    assert data['home']['news'][0]['details'] == ['Возможности для участников']
 
 
 async def test_role_gate_accepts_staff_and_rejects_signed_member_and_revoked_admin(db):

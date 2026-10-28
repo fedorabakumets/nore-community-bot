@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from datetime import datetime
 from io import BytesIO
@@ -154,6 +155,18 @@ async def overview(request):
                'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus}
               for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
     history = await db.list_transactions(user['user_id'], 20)
+    from community_bot.updates import UPDATES
+
+    # Only member-facing articles: staff_details and operational notes are never exposed here.
+    news = [{'number': item.number, 'title': item.title, 'summary': item.summary,
+             'intro': item.article_intro or item.summary,
+             'sections': [{'heading': section.heading, 'body': section.body, 'example': section.example}
+                          for section in item.sections],
+             'details': list(item.details) if not item.sections else []}
+            for item in reversed(UPDATES[-5:])]
+    community_url = str(getattr(settings, 'community_invite_url', '') or '').strip()
+    if not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
+        community_url = ''
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
                                         'cookies', 'cookie_debt', 'reputation', 'profile_bio',
@@ -167,6 +180,7 @@ async def overview(request):
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
         'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
+        'home': {'community_url': community_url, 'news': news},
         'history': [{'amount': t['amount'], 'kind': t['kind'], 'date': t['created_at']} for t in history],
     })
 
@@ -364,13 +378,15 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
-    for name in ('intro.js', 'app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'people.js', 'style.css'):
+    for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
+                 'interactive.js', 'people.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft-LICENSE.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
+    app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
 
