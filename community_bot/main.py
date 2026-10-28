@@ -443,6 +443,9 @@ async def main() -> None:
     bot = Bot(settings.bot_token)
     bot.community_db = db  # type: ignore[attr-defined]
     bot.community_settings = settings  # type: ignore[attr-defined]
+    from community_bot.profile_maintenance import run_requested_reset
+
+    await run_requested_reset(db, settings, bot)
     from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMiddleware
 
     bot.session.middleware.register(OnboardingKeyboardMiddleware())
