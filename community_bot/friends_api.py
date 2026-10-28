@@ -170,6 +170,11 @@ async def snapshot(db, settings, uid: int) -> dict:
             "friends" if row["status"] == "accepted" else "outgoing" if row["requester_id"] == uid else "incoming"
         )
         result[category].append(item)
+    from community_bot.social_profiles import presence_map
+
+    statuses = await presence_map(db, [p['id'] for p in result['friends']])
+    for person in result['friends']:
+        person['presence'] = statuses.get(person['id'], {'visible': False, 'online': False, 'last_seen': None})
     result["counts"] = {key: len(value) for key, value in result.items()}
     result["limits"] = {
         "max_friends": MAX_FRIENDS, "max_pending": MAX_PENDING,

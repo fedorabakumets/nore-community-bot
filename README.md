@@ -17,6 +17,7 @@
 - [Передача проекта](docs/MIGRATION.md)
 - [Кабинет и экономика: изменения и проверки](docs/CABINET_ECONOMY.md)
 - [Интерактив, друзья и правила игр](docs/INTERACTIVE.md)
+- [Профили друзей, активность и переводы](docs/SOCIAL_PROFILES.md)
 - [Сезон 1: Багровый Страж Норы](docs/SEASON_ONE.md)
 - [Студия постов и запись на события](docs/STUDIO_RSVP.md)
 - [Стикеры и их автоматическая отправка](docs/STICKERS.md)
