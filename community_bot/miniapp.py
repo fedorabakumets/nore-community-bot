@@ -366,6 +366,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/join', join_event)
     for name in ('intro.js', 'app.js', 'shop.js', 'cabinet.js', 'admin.js', 'interactive.js', 'people.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
+    app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
+    app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Monocraft-LICENSE.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
