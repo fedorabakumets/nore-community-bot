@@ -409,7 +409,7 @@ async def test_abstract_event_system_setting_is_removed_and_stale_button_redirec
 async def test_seasonal_raffle_management_is_reachable_from_contest_panel(env):
     root = await env.bridge.open(env.actor)
     contest = await click(env, root, 'Конкурс')
-    seasonal = await click(env, contest, 'Багровый Страж')
+    seasonal = await click(env, contest, 'Розовый Хранитель')
     assert 'физической игрушки' in ''.join(c['html'] for c in seasonal['cards'])
     members = await click(env, seasonal, 'Участники')
     assert 'Пока нет заявок' in ''.join(c['html'] for c in members['cards'])

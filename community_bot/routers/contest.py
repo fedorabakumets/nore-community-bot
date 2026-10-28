@@ -430,7 +430,7 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
                                      'FROM seasonal_entries e JOIN users u ON u.user_id=e.user_id '
                                      'WHERE e.raffle_id=? ORDER BY e.joined_at,u.user_id LIMIT 11 OFFSET ?',
                                      (ITEM, offset))
-            text = '<b>Участники · Багровый Страж Норы</b>\n\n' + ('\n'.join(
+            text = f'<b>Участники · {html.escape(TITLE)}</b>\n\n' + ('\n'.join(
                 f'{offset+i+1}. {html.escape(row["profile_name"] or row["telegram_name"])}'
                 + (f' · @{html.escape(row["username"])}' if row['username'] else '')
                 for i, row in enumerate(rows[:10])) or 'Пока нет заявок')

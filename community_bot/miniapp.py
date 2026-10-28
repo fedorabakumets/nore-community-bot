@@ -327,8 +327,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/seasonal/manage', seasonal.manage)
     app.router.add_post('/api/seasonal/draw/prepare', seasonal.draw_prepare)
     app.router.add_post('/api/seasonal/draw/confirm', seasonal.draw_confirm)
-    app.router.add_get('/seasonal/guardian-season1.jpg', lambda _: web.FileResponse(
-        ASSETS / 'seasonal' / 'guardian-season1.jpg'))
+    app.router.add_get('/seasonal/pink-guardian-season1.jpg', lambda _: web.FileResponse(
+        ASSETS / 'seasonal' / 'pink-guardian-season1.jpg'))
     from community_bot import social_profiles
 
     app.router.add_get('/api/presence', social_profiles.status)

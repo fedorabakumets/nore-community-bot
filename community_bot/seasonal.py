@@ -14,8 +14,18 @@ from community_bot.helpers import has_permission
 from community_bot.permissions import PERM_ADMIN_PANEL, PERM_CONTEST
 from community_bot.profile_fill import profile_is_complete
 
+# Persistent raffle identity: changing the displayed prize must never reset entries or results.
 ITEM = "season1-crimson-guardian"
-TITLE = "Багровый Страж Норы"
+TITLE = "Розовый Хранитель Норы"
+AUTHOR = "Пушистая Лавка"
+LINKS = [
+    {"label": "Заказать игрушку · @Sdt_order_bot", "url": "https://t.me/Sdt_order_bot"},
+    {"label": "Склад · игрушки в наличии", "url": "https://clck.ru/3VYkJA"},
+    {"label": "Отзывы покупателей", "url": "https://clck.ru/3VYkLX"},
+    {"label": "TikTok · Пушистая Лавка", "url": "https://www.tiktok.com/@pushistaya_lavka?_r=1&_t=ZP-99LURFF60pa"},
+    {"label": "YouTube · Sadkittytime", "url": "https://www.youtube.com/@Sadkittytime"},
+    {"label": "ВКонтакте · Sadkittytime", "url": "https://vk.com/sadkittytime229508710"},
+]
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS seasonal_raffles (
  id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','drawn')),
@@ -64,9 +74,14 @@ async def snapshot(db, settings, uid):
         "status": row["status"],
         "joined": bool(joined),
         "count": count["n"],
-        "image": "/seasonal/guardian-season1.jpg",
-        "author": "Buffy Crochet",
-        "author_url": "https://t.me/buffy_crochet",
+        "image": "/seasonal/pink-guardian-season1.jpg",
+        "image_alt": "Розовый плюшевый мишка с чёрным бантом и глазом-пуговицей — Пушистая Лавка",
+        "description": "Мягкий снаружи, с характером внутри. Розовый мишка с глазом-пуговицей, "
+                       "контрастными стежками и чёрным бантом — новый хранитель первой главы Норы. "
+                       "Игрушка от «Пушистой Лавки» станет призом этого розыгрыша.",
+        "author": AUTHOR,
+        "author_url": "https://t.me/sadkittytime",
+        "links": LINKS,
         "eligible": bool(user and profile_is_complete(user)),
         "can_manage": await can_manage(db, settings, uid),
         "winner": (winner["profile_name"] or winner["telegram_name"]) if winner else None,
