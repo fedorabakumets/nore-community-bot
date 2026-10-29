@@ -120,3 +120,35 @@ nav{background:#121214f5;padding-top:10px;gap:4px}nav button{font-family:var(--b
 .home-news-article{display:block;text-align:left;width:100%;border:1px solid var(--line);border-radius:13px;background:#18171b;padding:17px;margin:12px 0}.home-news-article b{display:block;font-size:17px;line-height:1.4;margin:7px 0}.home-news-article p{font-size:14px;color:#bbb5c2;line-height:1.6}.home-news-article small{font-size:12px;color:#c5a3b0}.home-article{margin-top:17px}.home-article>p,.home-article section p,.home-article li{font-size:15px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}.home-article section h3{font-size:17px;margin-top:24px}.home-article .eyebrow{display:block;margin-top:16px}
 @media(max-width:360px){.city{max-width:none;font-size:12px}.home-intro h1{font-size:31px}.home-tagline{font-size:14px}.home-meetup{padding:14px;min-height:260px;gap:65px}.home-meetup-content h2{font-size:25px}.home-meetup-footer .primary{font-size:13px;padding:10px}.home-meetup-footer>span{font-size:11px}.home-section-heading h2,.home-community h2{font-size:20px}.home-section-heading .text-btn{font-size:12px}.home-community-grid>button{gap:7px;padding:12px 9px;flex-wrap:wrap}.home-community-grid>button>svg:last-child{display:none}.home-community-grid b{font-size:12px}.home-community-grid small{font-size:11px}.home-idea{gap:8px}.home-idea b{font-size:12px}.home-idea>span{font-size:11px}.lk-summary{font-size:11px}.lk-tile b{font-size:20px}.lk-identity-copy h2{font-size:20px}}
 @media(min-width:600px){.home-meetup{min-height:345px;padding:24px;gap:120px}.home-meetup-content h2{font-size:37px}.home-meetup-badge{font-size:13px}.home-meetup-footer>span{font-size:15px}.home-meetup-footer .primary{font-size:17px;padding:13px 20px}.home-community-grid b{font-size:16px}.home-community-grid small{font-size:13px}.home-community-grid>button{padding:20px}.home-news-row{padding:17px 0}.home-news-row b{font-size:18px}.home-news-row small{font-size:15px}.home-idea{padding:18px}.home-idea b{font-size:16px}.home-idea>span{font-size:15px}}
+
+/* Community: daily results, staff and the shared friends directory. */
+nav button{font-size:clamp(9px,2.5vw,12px)}
+nav button[data-tab="community"] svg{width:29px;height:29px}
+.community-heading h1{font-size:clamp(24px,6.8vw,44px);overflow-wrap:anywhere}
+.community-table{border:1px solid var(--line);background:#1a1a1d;border-radius:18px;margin:12px 0;overflow:hidden}
+.community-table summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:19px 16px;font-weight:650;list-style:none;font-size:15px}
+.community-table summary::-webkit-details-marker{display:none}
+.community-table summary:focus-visible{outline:2px solid var(--red);outline-offset:-4px}
+.community-chevron{font-size:21px;transition:transform .18s}
+.community-table[open] .community-chevron{transform:rotate(180deg)}
+.community-staff summary{background:var(--red);color:white;letter-spacing:1.5px}
+.community-table-body{padding:0 14px 10px}
+.community-person{display:flex;align-items:center;gap:8px;padding:13px 0;border-bottom:1px solid var(--line)}
+.community-person .person-visit{flex:1;min-width:0;gap:10px}
+.community-person .person-visit>span:last-child{min-width:0}
+.community-person b,.directory-person b{overflow-wrap:anywhere;font-size:14px}
+.community-person small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.community-person>strong{font-size:17px;text-align:right;flex-shrink:0}
+.community-rank{color:var(--muted);font-size:11px;width:14px;flex-shrink:0}
+.community-winner{font-size:13px;line-height:1.6;padding-top:6px}
+.community-winner button{color:var(--red);font-size:inherit;padding:0}
+.community-online{width:9px;height:9px;border-radius:50%;background:#72727b;flex-shrink:0;margin:0 4px}
+.community-online.online{background:#72df93;box-shadow:0 0 9px #72df9344}
+.community-find{width:100%;margin:0 0 20px}
+#community-boards{margin-bottom:30px}
+#community-search{width:100%;margin-top:10px}
+#community-search-results{min-height:100px}
+.person-avatar{border-radius:50%;isolation:isolate}
+.person-avatar img[data-mini-avatar]{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;background:#252529;z-index:1}
+.person-avatar .host-dot{z-index:2}
+@media(prefers-reduced-motion:reduce){.community-chevron{transition:none}}
