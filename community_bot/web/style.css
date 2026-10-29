@@ -170,3 +170,5 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:nav-profile-glow 1.3s ease-in-out infinite}
 @keyframes nav-profile-glow{0%,100%{border-color:#a73a50;box-shadow:0 0 0 1px #f3284330,0 0 3px #f3284320}50%{border-color:#ff6179;box-shadow:0 0 0 2px #f3284366,0 0 12px 3px #f3284380}}
 @media(prefers-reduced-motion:reduce){nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:none;border-color:#f32843;box-shadow:0 0 0 1px #f3284350}}
+
+.community-place-1{background:#d8a93d1c;border-radius:12px}.community-place-2{background:#bbc7dc1b;border-radius:12px}.community-place-3{background:#bd80511d;border-radius:12px}.community-place-1 .community-rank{color:#f5d479}.community-place-2 .community-rank{color:#d9e1ef}.community-place-3 .community-rank{color:#dda77d}
