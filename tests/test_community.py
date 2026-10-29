@@ -54,22 +54,24 @@ async def test_directory_unicode_pagination_known_members_and_private_fields(env
     assert not json.loads((await directory(Request(env, query={'q': "%'; DROP TABLE users;--"}))).body)['items']
 
 
-async def test_board_completed_day_all_speakers_actual_reward_no_new_credit(env):
+async def test_board_today_top_five_actual_yesterday_reward_no_new_credit(env):
     today, yesterday = day_window()
     await env.db.execute('DELETE FROM daily_scores')
     for uid in range(1, 16):
         await env.db.execute('INSERT INTO daily_scores VALUES(?,?,?,?)', (uid, yesterday.isoformat(), -100, 20))
-    await env.db.execute('INSERT INTO daily_scores VALUES(?,?,?,?)', (16, today.isoformat(), -100, 999))
+    for uid in range(16, 24):
+        await env.db.execute('INSERT INTO daily_scores VALUES(?,?,?,?)', (uid, today.isoformat(), -100, 100-uid))
     await env.db.execute('INSERT INTO daily_scores VALUES(?,?,?,?)', (17, yesterday.isoformat(), -999, 999))
     await env.db.execute('INSERT INTO daily_scores VALUES(?,?,?,?)', (18, yesterday.isoformat(), -100, 0))
     initial = json.loads((await status(Request(env))).body)
-    assert len(initial['leaders']) == 15 and initial['leaders'][0]['id'] == 1
+    assert [p['id'] for p in initial['leaders']] == [16, 17, 18, 19, 20]
     assert initial['winner'] is None and not initial['awarded']
     # Recipient comes from ledger, even if ranking was corrected later.
     await env.db.add_cookies(3, 1, 'daily_chat', yesterday.isoformat())
     for _ in range(2):
         result = json.loads((await status(Request(env))).body)
-        assert result['winner']['id'] == 3 and result['day'] == yesterday.isoformat()
+        assert result['winner']['id'] == 3 and result['day'] == today.isoformat()
+        assert result['winner_day'] == yesterday.isoformat()
     assert (await env.db.get_user(3))['cookies'] == 1
     assert [p['id'] for p in result['staff']] == [1, 2, 6, 3, 4]
 
@@ -105,3 +107,30 @@ def test_midnight_is_moscow_not_utc():
     after, yesterday = day_window(datetime(2026, 10, 28, 21, 0, tzinfo=UTC))
     assert after == before + timedelta(days=1)
     assert yesterday == before and previous == before - timedelta(days=1)
+
+
+async def test_bot_accounts_excluded_from_directory_board_and_direct_profiles(env):
+    await env.db.ensure_user(20, 'WeatherBot', 'Weather')
+    await env.db.ensure_user(21, None, 'Another Bot')
+    await env.db.set_bot_state('telegram_is_bot:21', '1')
+    found = json.loads((await directory(Request(env))).body)
+    assert not {20, 21} & {p['id'] for p in found['items']}
+    board = json.loads((await status(Request(env))).body)
+    assert not {20, 21} & {p['id'] for p in board['leaders']}
+    with pytest.raises(web.HTTPNotFound):
+        await avatar(Request(env, target='21'))
+
+
+async def test_bot_identity_from_telegram_and_friend_lists(env):
+    from aiogram.types import User
+
+    from community_bot.friends_api import snapshot
+    from community_bot.helpers import register_telegram_user
+
+    await register_telegram_user(env.db, User(id=22, is_bot=True, first_name='Robot'))
+    await env.db.execute(
+        "INSERT INTO mini_friendships VALUES(5,22,5,'accepted','token','now','now',0,9999999999)"
+    )
+    result = await snapshot(env.db, env.settings, 5)
+    assert 22 not in [item['id'] for item in result['friends']]
+    assert await env.db.get_bot_state('telegram_is_bot:22') == '1'

@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
-    return await db.ensure_user(user.id, user.username, user.full_name)
+    row = await db.ensure_user(user.id, user.username, user.full_name)
+    if user.is_bot:
+        await db.set_bot_state(f"telegram_is_bot:{user.id}", "1")
+    return row
 
 
 def lobby_count_ok(count: int, minimum: int, maximum: int, staff: bool) -> bool:

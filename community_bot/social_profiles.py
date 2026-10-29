@@ -126,7 +126,10 @@ async def target_for(request):
     else:
         target = int(raw)
     row = await db.get_user(target)
-    if not row:
+    from community_bot.bot_identity import is_bot
+
+    bot = request.app.get('bot')
+    if not row or await is_bot(db, row, getattr(bot, 'id', None)):
         raise web.HTTPNotFound()
     block = await db.fetchone(
         "SELECT 1 FROM mini_friend_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",

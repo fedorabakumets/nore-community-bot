@@ -27,8 +27,13 @@ async def people(db, settings, viewer):
         "OR (b.blocked_id=? AND b.blocker_id=u.user_id))",
         (chat, chat, viewer, viewer),
     )
+    from community_bot.bot_identity import likely_bot, marked_bots
+
+    known_bots = await marked_bots(db)
     result = []
     for row in rows:
+        if likely_bot(row) or str(row['user_id']) in known_bots:
+            continue
         if settings.is_owner(row['user_id']):
             row.update(role='owner', role_name='Владелец', rank=1000)
         elif row['user_id'] in settings.moderator_ids and row['role'] == 'member':
@@ -73,11 +78,12 @@ async def status(request):
     chat = int(getattr(settings, 'community_chat_id', 0) or 0)
     rows = await people(db, settings, viewer)
     by_id = {r['user_id']: r for r in rows}
-    board = await db.daily_message_board(day.isoformat(), chat, limit=-1)
+    board = await db.daily_message_board(today.isoformat(), chat, limit=-1)
     leaders = []
     for row in board:
         if row['user_id'] in by_id:
             leaders.append({**await card(db, settings, viewer, by_id[row['user_id']]), 'messages': row['messages']})
+    leaders = leaders[:5]
     # Show the recipient actually credited by the existing midnight job, never guess or issue another reward.
     winner = await db.fetchone(
         "SELECT user_id FROM transactions WHERE kind='daily_chat' AND details=? AND amount>0 ORDER BY id LIMIT 1",
@@ -90,7 +96,8 @@ async def status(request):
     for row in sorted(rows, key=lambda r: (-r['rank'], str(r['profile_name'] or r['telegram_name']).casefold())):
         if row['rank'] > 0:
             staff.append({**await card(db, settings, viewer, row), 'role': row['role_name'] or row['role']})
-    return web.json_response({'day': day.isoformat(), 'revision_day': today.isoformat(),
+    return web.json_response({'day': today.isoformat(), 'winner_day': day.isoformat(),
+                              'revision_day': today.isoformat(),
                               'timezone': 'Europe/Moscow', 'leaders': leaders, 'staff': staff,
                               'winner': winner_card, 'awarded': bool(winner)})
 

@@ -159,7 +159,12 @@ async def snapshot(db, settings, uid: int) -> dict:
         (uid,),
     )
     result = {"friends": [], "incoming": [], "outgoing": [], "blocked": []}
+    from community_bot.bot_identity import likely_bot, marked_bots
+
+    known_bots = await marked_bots(db)
     for row in [*rows, *blocks]:
+        if likely_bot(row) or str(row['user_id']) in known_bots:
+            continue
         other = int(row["user_id"])
         item = {
             "id": other,
@@ -210,6 +215,11 @@ async def _recipient(db, value):
         raise ValueError("Укажи точный @username или Telegram ID участника")
     if len(rows) != 1:
         raise ValueError("Участник не найден. Он должен сначала открыть бота; проверь @username или ID")
+    row = await db.get_user(int(rows[0]["user_id"]))
+    from community_bot.bot_identity import is_bot
+
+    if await is_bot(db, row):
+        raise ValueError("Участник не найден")
     return int(rows[0]["user_id"])
 
 
