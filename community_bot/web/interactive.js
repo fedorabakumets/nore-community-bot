@@ -66,7 +66,7 @@ window.NoraInteractive = (() => {
     );
   }
   function go(view) {
-    if (!views.has(view) && view !== "pet" && view !== "lk") return;
+    if (!views.has(view) && view !== "pet" && view !== "lk" && view !== "community") return;
     tab = view;
     NoraShop.tabChanged(view);
     render();
@@ -79,7 +79,7 @@ window.NoraInteractive = (() => {
         games: "interactive",
         mafia: "games",
         rocket: "games",
-        friends: "lk",
+        friends: "community",
       }[view] || null
     );
   }
@@ -114,11 +114,11 @@ window.NoraInteractive = (() => {
       outgoing: [["cancel", "Отозвать"]],
       blocked: [["unblock", "Разблокировать"]],
     }[section];
-    return `<article class="friend-row"><div class="friend-person"><button class="person-visit" data-person-view="${person.id}" aria-label="Открыть профиль ${esc(person.name)}"><span class="person-avatar">${initials(person.name)}</span><span><b>${esc(person.name)}</b><small>${person.username ? "@" + esc(person.username) : "Участник Норы"}</small>${section==='friends'?`<small class="person-presence ${person.presence?.online?'online':''}">${esc(window.NoraPeople?.presenceLine(person.presence)||'')}</small>`:''}</span></button>${section === "friends" && person.available !== false ? `<button class="icon-button" data-friend-play="${person.id}" aria-label="Пригласить ${esc(person.name)} в игру">${icon("game")}</button>` : ""}</div><div class="friend-row-actions">${section==='friends'?`<button class="text-btn" data-friend-transfer="${person.id}" data-friend-name="${esc(person.name)}">Перевести 🍪</button>`:''}${actions.map(([action, label]) => `<button class="${action === "accept" ? "friend-accept" : "text-btn"}" data-friend-action="${action}" data-person-id="${person.id}" ${pending ? "disabled" : ""}>${label}</button>`).join("")}</div></article>`;
+    return `<article class="friend-row"><div class="friend-person"><button class="person-visit" data-person-view="${person.id}" aria-label="Открыть профиль ${esc(person.name)}"><span class="person-avatar" data-person-avatar="${person.id}" ${person.has_avatar===false?"data-avatar-unavailable":""}>${initials(person.name)}</span><span><b>${esc(person.name)}</b><small>${person.username ? "@" + esc(person.username) : "Участник Норы"}</small>${section==='friends'?`<small class="person-presence ${person.presence?.online?'online':''}">${esc(window.NoraPeople?.presenceLine(person.presence)||'')}</small>`:''}</span></button>${section === "friends" && person.available !== false ? `<button class="icon-button" data-friend-play="${person.id}" aria-label="Пригласить ${esc(person.name)} в игру">${icon("game")}</button>` : ""}</div><div class="friend-row-actions">${section==='friends'?`<button class="text-btn" data-friend-transfer="${person.id}" data-friend-name="${esc(person.name)}">Перевести 🍪</button>`:''}${actions.map(([action, label]) => `<button class="${action === "accept" ? "friend-accept" : "text-btn"}" data-friend-action="${action}" data-person-id="${person.id}" ${pending ? "disabled" : ""}>${label}</button>`).join("")}</div></article>`;
   }
   function friendsScreen() {
     const f = state.friends;
-    return `${back("lk", "Личный кабинет")}<div class="play-title-row"><div><p class="eyebrow">Близкие по духу</p><h1>Свои<em>.</em></h1></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.</p>${errorBox("friends")}<form id="friend-add-form" class="card play-form"><label for="friend-recipient">Имя в Telegram или ID</label><div class="inline-form"><input id="friend-recipient" name="recipient" maxlength="40" placeholder="@username" autocomplete="off" required value="${esc(drafts.friend)}"><button type="submit" class="primary" ${pending ? "disabled" : ""}>Добавить</button></div><button type="button" class="text-btn profile-lookup" id="profile-lookup">Открыть профиль по нику или ID</button><p class="footer-note">Сейчас миниапка открыта команде от роли модератора. Приглашать можно участников с доступом.</p></form>${!f ? '<div class="empty">Загружаем друзей…</div>' : ""}${f?.incoming?.length ? `<section class="friend-section"><h2>Зовут дружить ${badge(f.incoming.length, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}<section class="friend-section"><h2>Друзья ${badge(f?.friends?.length || 0)}</h2>${f?.friends?.length ? f.friends.map((p) => friendRow(p, "friends")).join("") : '<div class="card empty">Список пока пуст.<br>Начни с одного знакомого имени.</div>'}</section>${f?.outgoing?.length ? `<section class="friend-section"><h2>Ждём ответа</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
+    return `${tab === "community" ? "" : back("community", "Коммьюнити")}<div class="play-title-row"><div><p class="eyebrow">Близкие по духу</p><h2>Друзья<em>.</em></h2></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.</p>${errorBox("friends")}<button class="secondary community-find" data-community-search>⌕ Найти участников</button>${!f ? '<div class="empty">Загружаем друзей…</div>' : ""}${f?.incoming?.length ? `<section class="friend-section"><h2>Зовут дружить ${badge(f.incoming.length, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}<section class="friend-section"><h2>Друзья ${badge(f?.friends?.length || 0)}</h2>${f?.friends?.length ? f.friends.map((p) => friendRow(p, "friends")).join("") : '<div class="card empty">Список пока пуст.<br>Начни с одного знакомого имени.</div>'}</section>${f?.outgoing?.length ? `<section class="friend-section"><h2>Ждём ответа</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
   }
   function roleExplanation(role) {
     return (
@@ -182,7 +182,7 @@ window.NoraInteractive = (() => {
     );
   }
   function players(room) {
-    return `<div class="mafia-players">${room.players.map((p) => `<div class="mafia-player ${!p.alive && room.status !== "lobby" ? "out" : ""} ${p.id === room.self.id ? "you" : ""}"><span class="person-avatar">${initials(p.name)}${p.id === room.host_id ? '<i class="host-dot" title="Создатель комнаты"></i>' : ""}</span><b>${esc(p.name)}</b><small>${p.left ? "Вышел" : room.status === "lobby" ? (p.ready ? "Готов" : "Собирается") : p.role ? esc(roleNames[p.role] || p.role) : p.alive ? "В игре" : "Выбыл"}${p.id === room.self.id ? " · ты" : ""}</small>${p.voted && room.phase === "vote" ? '<span class="player-voted" aria-label="Голос принят">✓</span>' : ""}</div>`).join("")}</div>`;
+    return `<div class="mafia-players">${room.players.map((p) => `<div class="mafia-player ${!p.alive && room.status !== "lobby" ? "out" : ""} ${p.id === room.self.id ? "you" : ""}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}${p.id === room.host_id ? '<i class="host-dot" title="Создатель комнаты"></i>' : ""}</span><b>${esc(p.name)}</b><small>${p.left ? "Вышел" : room.status === "lobby" ? (p.ready ? "Готов" : "Собирается") : p.role ? esc(roleNames[p.role] || p.role) : p.alive ? "В игре" : "Выбыл"}${p.id === room.self.id ? " · ты" : ""}</small>${p.voted && room.phase === "vote" ? '<span class="player-voted" aria-label="Голос принят">✓</span>' : ""}</div>`).join("")}</div>`;
   }
   function roleCard(room) {
     if (!room.self.role) return "";
@@ -218,7 +218,7 @@ window.NoraInteractive = (() => {
       .filter((p) => available.includes(p.id))
       .map(
         (p) =>
-          `<button class="target-button ${selected && target === p.id ? "chosen" : ""}" data-mafia-target="${p.id}" data-target-action="${room.phase === "vote" ? "vote" : "night"}" ${pending ? "disabled" : ""}><span class="person-avatar">${initials(p.name)}</span><span>${esc(p.name)}${p.id === room.self.id ? " · ты" : ""}</span>${selected && target === p.id ? "<b>✓</b>" : ""}</button>`,
+          `<button class="target-button ${selected && target === p.id ? "chosen" : ""}" data-mafia-target="${p.id}" data-target-action="${room.phase === "vote" ? "vote" : "night"}" ${pending ? "disabled" : ""}><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span>${esc(p.name)}${p.id === room.self.id ? " · ты" : ""}</span>${selected && target === p.id ? "<b>✓</b>" : ""}</button>`,
       )
       .join(
         "",
@@ -289,7 +289,8 @@ window.NoraInteractive = (() => {
   }
   function patch() {
     const el = $("#interactive-content");
-    if (!el || !views.has(tab) || el.dataset.interactiveView !== tab) return;
+    const view = tab === "community" ? "friends" : tab;
+    if (!el || !views.has(view) || el.dataset.interactiveView !== view) return;
     const focused = document.activeElement,
       focusId = focused?.id,
       selection = focused?.selectionStart;
@@ -301,7 +302,7 @@ window.NoraInteractive = (() => {
         !log || log.scrollHeight - log.scrollTop - log.clientHeight < 40,
       scroll = log?.scrollTop || 0;
     const y = window.scrollY;
-    el.outerHTML = screen(tab);
+    el.outerHTML = screen(view);
     for (const key of open) {
       const node = $(`[data-detail="${key}"]`);
       if (node) node.open = true;
@@ -371,11 +372,11 @@ window.NoraInteractive = (() => {
         );
         if (epoch !== (epochs[view] || 0)) return;
         acceptSnapshot(view, response);
-        if (tab === view || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
+        if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
       } catch (e) {
         if (epoch !== (epochs[view] || 0)) return;
         errors[view] = "Связь прервалась. " + e.message;
-        if (tab === view || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
+        if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
       }
     })();
     fetching[view] = request;
@@ -470,6 +471,7 @@ window.NoraInteractive = (() => {
       cancelAnimationFrame(frame);
       if (tab !== "mafia") roleOpen = false;
       if (tab !== "mafia") roomFocus = null;
+      if (tab === "community") load("friends", true);
       if (liveViews.has(tab)) load(tab, true);
       if (["games", "interactive"].includes(tab)) load("mafia", true, null);
       if (tab === "mafia" && !state.friends) load("friends", true);
@@ -479,7 +481,7 @@ window.NoraInteractive = (() => {
   }
   function schedule() {
     clearTimeout(pollTimer);
-    if (document.hidden || !(liveViews.has(tab) || ["games", "interactive"].includes(tab))) return;
+    if (document.hidden || !(liveViews.has(tab) || ["games", "interactive", "community"].includes(tab))) return;
     const interval =
       tab === "rocket" && state.rocket?.round
         ? 900
@@ -488,13 +490,13 @@ window.NoraInteractive = (() => {
           : 10000;
     pollTimer = setTimeout(async () => {
       if (!pending && !document.hidden && !$("#sheet").open)
-        await load(["games", "interactive"].includes(tab) ? "mafia" : tab, true);
+        await load(tab === "community" ? "friends" : ["games", "interactive"].includes(tab) ? "mafia" : tab, true);
       schedule();
     }, interval);
   }
   function refreshCurrent() {
-    if (liveViews.has(tab) || ["games", "interactive"].includes(tab)) {
-      load(["games", "interactive"].includes(tab) ? "mafia" : tab, true);
+    if (liveViews.has(tab) || ["games", "interactive", "community"].includes(tab)) {
+      load(tab === "community" ? "friends" : ["games", "interactive"].includes(tab) ? "mafia" : tab, true);
       return true;
     }
     return false;
@@ -524,7 +526,7 @@ window.NoraInteractive = (() => {
       if (close) $("#sheet").close();
       if (response.message && !quiet) toast(response.message);
       if (view === "friends") await load("friends", true);
-      if (tab === view || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
+      if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
       return response;
     } catch (e) {
       toast(e.message);
@@ -535,7 +537,7 @@ window.NoraInteractive = (() => {
       controls.forEach(([b, disabled]) => {
         if (b.isConnected) b.disabled = disabled;
       });
-      if (tab === view || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
+      if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && ["games", "interactive"].includes(tab))) patch();
       schedule();
     }
   }
@@ -607,7 +609,7 @@ window.NoraInteractive = (() => {
       (p) => p.available !== false && !r.players.some((x) => x.id === p.id),
     );
     sheet(
-      `<span class="eyebrow">Собираем своих</span><h2>Позвать в «Мафию»</h2><p class="sub">${esc(r.title)} · ${r.players.length} / 12 игроков</p>${list.length ? list.map((p) => `<button class="invite-person ${p.id === preselect ? "preselected" : ""}" data-invite-person="${p.id}"><span class="person-avatar">${initials(p.name)}</span><span><b>${esc(p.name)}</b><small>Пригласить в комнату</small></span>${icon("arrow")}</button>`).join("") : '<p class="sub">Все доступные друзья уже за столом или список пока пуст.</p>'}<button class="secondary" id="friends-from-invite">Добавить друзей</button>`,
+      `<span class="eyebrow">Собираем своих</span><h2>Позвать в «Мафию»</h2><p class="sub">${esc(r.title)} · ${r.players.length} / 12 игроков</p>${list.length ? list.map((p) => `<button class="invite-person ${p.id === preselect ? "preselected" : ""}" data-invite-person="${p.id}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span><b>${esc(p.name)}</b><small>Пригласить в комнату</small></span>${icon("arrow")}</button>`).join("") : '<p class="sub">Все доступные друзья уже за столом или список пока пуст.</p>'}<button class="secondary" id="friends-from-invite">Добавить друзей</button>`,
     );
   }
   async function rocketPrepare(form) {
@@ -792,8 +794,8 @@ window.NoraInteractive = (() => {
       roleOpen = false;
       cancelAnimationFrame(frame);
       clearTimeout(pollTimer);
-    } else if (liveViews.has(tab) || ["games", "interactive"].includes(tab)) {
-      load(["games", "interactive"].includes(tab) ? "mafia" : tab, true);
+    } else if (liveViews.has(tab) || ["games", "interactive", "community"].includes(tab)) {
+      load(tab === "community" ? "friends" : ["games", "interactive"].includes(tab) ? "mafia" : tab, true);
       animation();
       schedule();
     }

@@ -175,6 +175,16 @@ async def profile(request):
     return web.json_response(result)
 
 
+def thumbnail(photo):
+    from PIL import Image
+
+    with Image.open(BytesIO(photo)) as source:
+        source.thumbnail((96, 96))
+        output = BytesIO()
+        source.save(output, format="JPEG", quality=82)
+        return output.getvalue()
+
+
 async def avatar(request):
     from community_bot.miniapp import normalized_photo
 
@@ -187,6 +197,8 @@ async def avatar(request):
         output = BytesIO()
         await request.app["bot"].download(target["avatar_file_id"], destination=output)
         photo = await asyncio.to_thread(normalized_photo, output.getvalue())
+        if request.query.get("size") == "thumb":
+            photo = await asyncio.to_thread(thumbnail, photo)
         fresh = await target_for(request)
         if not await can_view_profile(request.app["db"], request.app["settings"], request["actor"]["id"], fresh):
             raise web.HTTPForbidden()

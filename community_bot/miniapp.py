@@ -83,7 +83,7 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/friends', '/api/mafia', '/api/rocket', '/api/seasonal',
-                                    '/api/people', '/api/presence')):
+                                    '/api/people', '/api/presence', '/api/community')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -343,8 +343,11 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/seasonal/draw/confirm', seasonal.draw_confirm)
     app.router.add_get('/seasonal/pink-guardian-season1.jpg', lambda _: web.FileResponse(
         ASSETS / 'seasonal' / 'pink-guardian-season1.jpg'))
-    from community_bot import social_profiles
+    from community_bot import community_api, social_profiles
 
+    app.router.add_get('/api/community', community_api.status)
+    app.router.add_get('/api/community/people', community_api.directory)
+    app.router.add_get('/api/community/presence', community_api.presence)
     app.router.add_get('/api/presence', social_profiles.status)
     app.router.add_post('/api/presence', social_profiles.update)
     app.router.add_get('/api/people', social_profiles.profile)
@@ -379,7 +382,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'people.js', 'style.css'):
+                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))

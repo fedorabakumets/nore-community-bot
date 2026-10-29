@@ -140,16 +140,20 @@ async def _counts(connection, uid: int, now: float) -> tuple[int, int]:
 
 
 async def snapshot(db, settings, uid: int) -> dict:
+    from community_bot.helpers import can_view_profile
+
     now = time.time()
     rows = await db.fetchall(
-        "SELECT f.*,u.user_id,u.profile_name,u.telegram_name,u.username FROM mini_friendships f "
+        "SELECT f.*,u.user_id,u.profile_name,u.telegram_name,u.username,"
+        "u.avatar_file_id,u.avatar_media_type,u.profile_private FROM mini_friendships f "
         "JOIN users u ON u.user_id=CASE WHEN f.low_id=? THEN f.high_id ELSE f.low_id END "
         "WHERE (f.low_id=? OR f.high_id=?) AND "
         "(f.status='accepted' OR (f.status='pending' AND f.expires_at>?)) ORDER BY f.updated_at DESC",
         (uid, uid, uid, now),
     )
     blocks = await db.fetchall(
-        "SELECT b.token,b.created_at,u.user_id,u.profile_name,u.telegram_name,u.username "
+        "SELECT b.token,b.created_at,u.user_id,u.profile_name,u.telegram_name,u.username,"
+        "u.avatar_file_id,u.avatar_media_type,u.profile_private "
         "FROM mini_friend_blocks b JOIN users u ON u.user_id=b.blocked_id "
         "WHERE b.blocker_id=? ORDER BY b.created_at DESC",
         (uid,),
@@ -159,6 +163,8 @@ async def snapshot(db, settings, uid: int) -> dict:
         other = int(row["user_id"])
         item = {
             "id": other,
+            "has_avatar": bool(row["avatar_file_id"] and row["avatar_media_type"] == "photo"
+                               and await can_view_profile(db, settings, uid, row)),
             "name": row["profile_name"] or row["telegram_name"] or row["username"] or "Участник",
             "username": row["username"],
             "token": row["token"],
@@ -302,7 +308,8 @@ async def mutate(db, settings, uid: int, body: dict) -> tuple[str, list[tuple[in
             )
             me = await _one(connection, "SELECT profile_name,telegram_name FROM users WHERE user_id=?", (uid,))
             name = html.escape(me["profile_name"] or me["telegram_name"] or "Участник")
-            text = f"{name} хочет добавить тебя в друзья. Открой ЛК → Друзья, чтобы принять или отклонить запрос."
+            text = (f"{name} хочет добавить тебя в друзья. "
+                    "Открой Коммьюнити → Друзья, чтобы принять или отклонить запрос.")
             notice.append((await inbox_in_connection(connection, other, text), other, text))
             message = "Запрос отправлен. Дружба появится после подтверждения"
         else:
@@ -328,7 +335,7 @@ async def mutate(db, settings, uid: int, body: dict) -> tuple[str, list[tuple[in
                 )
                 me = await _one(connection, "SELECT profile_name,telegram_name FROM users WHERE user_id=?", (uid,))
                 name = html.escape(me["profile_name"] or me["telegram_name"] or "Участник")
-                text = f"{name} принял(а) запрос дружбы. Теперь можно приглашать друг друга в «Мафию»."
+                text = f"{name} принял(а) запрос дружбы. Теперь можно взаимодействовать друг с другом."
                 notice.append((await inbox_in_connection(connection, other, text), other, text))
                 message = "Теперь вы друзья — можно играть вместе"
             else:

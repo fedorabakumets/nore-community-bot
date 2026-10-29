@@ -59,7 +59,7 @@ async def test_mutual_consent_owns_actions_and_private_snapshot(env):
     assert not await accepted(env.db, 1, 2)
     row = await relation(env, 2, "incoming")
     assert row["id"] == 1
-    assert set(row) == {"id", "name", "username", "token", "created_at", "updated_at", "available"}
+    assert set(row) == {"id", "name", "username", "token", "created_at", "updated_at", "available", "has_avatar"}
     assert "private note" not in json.dumps(await snapshot(env.db, env.settings, 2))
     with pytest.raises(ValueError, match="получатель"):
         await do(env, 1, "accept", 2, token=row["token"])
