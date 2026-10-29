@@ -23,7 +23,7 @@ if(tab==='pet')content=window.NoraCabinet?.petScreen()||'';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
-$('#app').innerHTML=`<header><div><div class="brand">N<i>O</i>RA</div><div class="city">Санкт-Петербург</div></div><div class="header-actions">${window.NoraCabinet?.header()||''}<button class="avatar profile-pulse" data-profile aria-label="Открыть личный кабинет"><span>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||name.slice(0,1)).toUpperCase())}</span></button></div></header>${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
+$('#app').innerHTML=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
 const selected=tab==='friends'?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span>`:navIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraCommunity?.mount();window.NoraEvents?.mount();pressFeedback.restore(feedback);loadAvatar()}
 
 function sheet(html){pressFeedback.clear();$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
