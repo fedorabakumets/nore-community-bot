@@ -1,7 +1,7 @@
 'use strict';
 window.NoraPeople = (() => {
   const session=crypto.randomUUID();
-  let seq=0,started=false,heartbeatTimer=null,person=null,avatarURL=null,generation=0,loading=false;
+  let seq=0,started=false,heartbeatTimer=null,person=null,avatarURL=null,generation=0,loading=false,privacyRequest=0;
   function presenceLine(p) {
     if(!p?.visible)return 'Активность скрыта';
     if(p.online)return 'В сети в Норе';
@@ -65,7 +65,7 @@ window.NoraPeople = (() => {
       }
     }catch{discardAvatar();person=null;$('#sheet-content').innerHTML='<h2>Профиль недоступен</h2><p class="sub">Доступ или настройки приватности изменились.</p>'}
   },15000);
-  document.addEventListener('close',()=>{generation++;person=null;discardAvatar()},true);
+  document.addEventListener('close',e=>{if(e.target!==$('#sheet'))return;generation++;privacyRequest++;person=null;discardAvatar()},true);
   document.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(!b)return;
     if(b.dataset.personView)visit(Number(b.dataset.personView));
@@ -73,8 +73,9 @@ window.NoraPeople = (() => {
     if(b.id==='profile-lookup'){const recipient=document.querySelector('#friend-recipient')?.value.trim();if(recipient)visit(recipient);else toast('Укажи точный @username или ID')}
     if(b.hasAttribute('data-privacy-toggle')){await perform('profile/privacy',{hidden:!data.user.profile_private});return}
     if(b.hasAttribute('data-privacy-locked')){sheet('<h2>Закрытый профиль</h2><p class="sub">Купи закрытый профиль в магазине, чтобы скрывать и открывать его в настройках.</p><button class="primary" data-product="private_profile">Посмотреть в магазине</button>');return}
-    if(b.id==='presence-settings'||b.hasAttribute('data-lk-privacy')){
-      try{const s=await api('presence');sheet(`<h2>Приватность</h2><div class="card"><h3>${data.user.profile_private?'Профиль скрыт':'Профиль открыт'}</h3><p class="sub">${data.privacy_owned?'Скрывай и открывай профиль без повторной покупки. Сотрудники с правом просмотра сохраняют доступ.':'Чтобы скрывать профиль, купи «Закрытый профиль» в магазине.'}</p><button class="secondary" ${data.privacy_owned?'data-privacy-toggle':'data-privacy-locked'}>${data.privacy_owned?(data.user.profile_private?'Открыть профиль':'Скрыть профиль'):'🔒 Скрыть профиль'}</button></div><h3 class="lk-presence-title">Видимость активности</h3><p class="sub">Друзья видят, когда у тебя открытa Нора. Это не статус во всём Telegram. Закрытый профиль скрывает активность автоматически.</p><label class="presence-choice"><span>Показывать активность друзьям</span><input type="checkbox" id="presence-visible" ${s.hidden?'':'checked'}></label>`)}catch(err){toast(err.message)}
+    if(b.hasAttribute('data-presence-settings')||b.hasAttribute('data-lk-privacy')){
+      const request=++privacyRequest;
+      try{const s=await api('presence');if(request!==privacyRequest)return;sheet(`<h2>Приватность</h2><div class="card"><h3>${data.user.profile_private?'Профиль скрыт':'Профиль открыт'}</h3><p class="sub">${data.privacy_owned?'Скрывай и открывай профиль без повторной покупки. Сотрудники с правом просмотра сохраняют доступ.':'Чтобы скрывать профиль, купи «Закрытый профиль» в магазине.'}</p><button class="secondary" ${data.privacy_owned?'data-privacy-toggle':'data-privacy-locked'}>${data.privacy_owned?(data.user.profile_private?'Открыть профиль':'Скрыть профиль'):'🔒 Скрыть профиль'}</button></div><h3 class="lk-presence-title">Видимость активности</h3><p class="sub">Друзья видят, когда у тебя открыта Нора. Это не статус во всём Telegram. Закрытый профиль скрывает активность автоматически.</p><label class="presence-choice"><span>Показывать активность друзьям</span><input type="checkbox" id="presence-visible" ${s.hidden?'':'checked'}></label>`)}catch(err){toast(err.message)}
     }
   });
   document.addEventListener('change',async e=>{if(e.target.id!=='presence-visible')return;const el=e.target;el.disabled=true;try{await api('presence',{hidden:!el.checked});toast('Видимость активности сохранена')}catch(err){el.checked=!el.checked;toast(err.message)}finally{el.disabled=false}});
