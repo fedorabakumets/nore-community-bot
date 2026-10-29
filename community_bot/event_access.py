@@ -17,7 +17,8 @@ async def current_event(db):
     selected = await db.get_bot_state("current_studio_event")
     if selected:
         event = await db.get_studio_event(selected)
-        return event if event and event['status'] == 'active' else None
+        if event and event['status'] == 'active':
+            return event
     return await db.fetchone("SELECT * FROM studio_events WHERE status='active' ORDER BY created_at DESC LIMIT 1")
 
 

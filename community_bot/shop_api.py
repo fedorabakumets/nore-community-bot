@@ -17,7 +17,7 @@ from aiohttp import web
 from community_bot.domain import discounted_price, reputation_tier
 from community_bot.pets_talk import SPECIES
 from community_bot.rsvp import event_lock
-from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, PET_SUPPLIES, item_discount
+from community_bot.shop_catalog import GIFTABLE_ITEMS, ITEM_LABELS, PET_SUPPLIES, gift_price, item_discount
 from community_bot.shop_text import plain_shop_text
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,9 @@ async def quote(db, settings, user, data):
     )
     if feature and not await db.feature_enabled(feature):
         raise ValueError('Эта функция временно выключена')
+    if target != user['user_id']:
+        price = gift_price(item['price'])
+        payload['gift'] = True
     payload['feature'] = feature
     if sku == 'tamagotchi':
         name, species = data.get('name'), data.get('species')
@@ -164,6 +167,7 @@ async def quote(db, settings, user, data):
     token = await db.create_wallet_intent(user['user_id'], sku, price, target_id=target, payload=payload)
     return {'token': token, 'price': price, 'title': plain_shop_text(item['title']), 'recipient': label,
             'description': plain_shop_text(item['description']) or DESCRIPTIONS.get(sku, ''),
+            'gift': target != user['user_id'], 'base_price': item['price'],
             'needs_video': sku == 'video_avatar'}
 
 

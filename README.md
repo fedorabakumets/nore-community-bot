@@ -20,6 +20,7 @@
 - [Профили друзей, активность и переводы](docs/SOCIAL_PROFILES.md)
 - [Сезон 1: Розовый Хранитель Норы](docs/SEASON_ONE.md)
 - [Студия постов и запись на события](docs/STUDIO_RSVP.md)
+- [Конструктор мероприятий и цены подарков](docs/EVENT_CONSTRUCTOR.md)
 - [Стикеры и их автоматическая отправка](docs/STICKERS.md)
 - [Иллюстрации статей Telegraph](docs/TELEGRAPH.md)
 
