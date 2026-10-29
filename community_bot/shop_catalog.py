@@ -251,3 +251,8 @@ SAMPLE_SHOP_PRICES = {
 }
 
 BASE_SHOP_PRICES = SAMPLE_SHOP_PRICES
+
+
+def gift_price(base: int) -> int:
+    """Gift surcharge is 10% of catalogue price, rounded up to whole cookies."""
+    return (int(base) * 110 + 99) // 100

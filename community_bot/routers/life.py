@@ -123,12 +123,21 @@ async def _deliver_shop(
 async def _confirm_gift(
     message: Message, db: Database, buyer_id: int, target: dict[str, object], item: str, price: int,
 ) -> None:
+    from community_bot.shop_catalog import gift_price
+
+    if buyer_id != int(target["user_id"]):
+        product = await db.get_shop_item(item)
+        if not product or not product["price"]:
+            await message.answer("Цена подарка не задана. Открой магазин заново.")
+            return
+        price = gift_price(product["price"])
     token = await db.create_wallet_intent(
         buyer_id, item, price, target_id=int(target["user_id"]), payload={"gift": True},
     )
     await message.answer(
         f"🎁 <b>Подтвердите подарок</b>\n{html.escape(ITEM_LABELS.get(item, item))}\n"
-        f"Получатель: {html.escape(person_label(target))}\nСпишется: <b>{price} 🍪</b>.",
+        f"Получатель: {html.escape(person_label(target))}\n"
+        f"Наценка подарка 10%, без скидки уровня.\nСпишется: <b>{price} 🍪</b>.",
         parse_mode="HTML", reply_markup=shop_confirm_keyboard(token, price),
     )
 

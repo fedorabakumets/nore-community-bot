@@ -329,10 +329,25 @@ async def sync_content(bot, db, eid):
         "disabled": "⏸ <b>Запись на мероприятие приостановлена</b>\n\n",
     }.get(event["status"], "")
     text = cancelled + f"<b>{html.escape(event['title'])}</b>{when}\n\n{html.escape(description)}"
+    import json
+
+    from community_bot.events_api import config, config_key, render_post
+
+    cfg = await config(db, eid)
+    if cfg:
+        text = cancelled + render_post(event, cfg, int(offer['price']) if offer else 0)
     try:
         with keep_in_chat():
             kwargs = {"chat_id": event["chat_id"], "message_id": event["message_id"], "parse_mode": "HTML"}
-            if event["media_type"]:
+            if cfg.get('media_id') and cfg.get('media_id') != cfg.get('applied_media_id'):
+                from aiogram.types import InputMediaPhoto, InputMediaVideo
+
+                media_class = InputMediaPhoto if cfg['media_type'] == 'photo' else InputMediaVideo
+                await bot.edit_message_media(chat_id=event['chat_id'], message_id=event['message_id'],
+                                             media=media_class(media=cfg['media_id'], caption=text, parse_mode='HTML'))
+                cfg['applied_media_id'] = cfg['media_id']
+                await db.set_bot_state(config_key(eid), json.dumps(cfg, ensure_ascii=False))
+            elif event["media_type"]:
                 await bot.edit_message_caption(caption=text, **kwargs)
             else:
                 try:

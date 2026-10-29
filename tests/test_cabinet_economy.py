@@ -215,14 +215,15 @@ async def test_concurrent_video_messages_only_apply_one_paid_value(db):
 
 async def test_gift_requires_confirmation_and_only_delivers_once(db, monkeypatch):
     await db.ensure_user(8, telegram_name="Борис")
+    await db.upsert_shop_item("rep_shield", price=10, enabled=1)
     message = SimpleNamespace(answer=AsyncMock())
     await life._confirm_gift(message, db, 7, await db.get_user(8), "rep_shield", 12)
     assert (await db.get_user(7))["cookies"] == 150
     data = message.answer.call_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
     token = data.removeprefix("shop:pay:")
     assert (await db.get_wallet_intent(7, token))["target_id"] == 8
-    assert (await db.buy_item(7, "rep_shield", 12, target_id=8, intent_id=token))[0]
-    assert not (await db.buy_item(7, "rep_shield", 12, target_id=8, intent_id=token))[0]
+    assert (await db.buy_item(7, "rep_shield", 11, target_id=8, intent_id=token))[0]
+    assert not (await db.buy_item(7, "rep_shield", 11, target_id=8, intent_id=token))[0]
     assert (await db.get_user(8))["hate_shields"] == 1
 
 

@@ -71,7 +71,7 @@ async def test_shared_shop_effects_and_history_are_delivered_once(env, sku, colu
     assert 'shop_first' in await env.db.list_achievements(7)
 
 
-async def test_gift_uses_payer_discount_and_changes_only_exact_recipient(env):
+async def test_gift_uses_surcharge_and_changes_only_exact_recipient(env):
     q = await prepared(env, 'rep_shield', recipient='@boris_nora', price=1, target_id=7)
     assert q['recipient'] == 'Имя 8' and q['price'] > 1
     assert (await paid(env, q['token'], uid=8)).status == 409

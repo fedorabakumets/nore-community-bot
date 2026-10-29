@@ -1851,7 +1851,7 @@ class Database:
         payload = json.loads(row["payload_json"])
         if payload.get("shop_quote"):
             from community_bot.domain import discounted_price, reputation_tier
-            from community_bot.shop_catalog import item_discount
+            from community_bot.shop_catalog import gift_price, item_discount
 
             cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
             payer = dict(await cursor.fetchone())
@@ -1861,7 +1861,9 @@ class Database:
             base = payload.get("base_amount") if item == "support" else (
                 current_item["price"] if current_item else None
             )
-            if not base or discounted_price(int(base), item_discount(item, discount)) != price:
+            expected = (gift_price(base) if row["target_id"] != user_id else
+                        discounted_price(int(base), item_discount(item, discount))) if base else None
+            if expected != price:
                 return "Цена или скидка изменились. Откройте товар и подтвердите покупку заново."
             feature = payload.get("feature")
             if feature:
@@ -1869,6 +1871,13 @@ class Database:
                 flag = await cursor.fetchone()
                 if not flag or not flag["enabled"]:
                     return "Эта функция временно выключена. Списания не было."
+        elif payload.get('gift') and row['target_id'] != user_id:
+            from community_bot.shop_catalog import gift_price
+
+            cursor = await db.execute("SELECT price FROM shop_items WHERE sku=?", (item,))
+            gift_item = await cursor.fetchone()
+            if not gift_item or not gift_item['price'] or gift_price(gift_item['price']) != price:
+                return "Цена подарка изменилась. Откройте подарок заново."
         elif item == 'pet_action':
             cursor = await db.execute("SELECT enabled FROM feature_flags WHERE key='tamagotchi'")
             flag = await cursor.fetchone()
@@ -3491,6 +3500,10 @@ class Database:
             if await cursor.fetchone():
                 await db.rollback()
                 return False, "Вы уже оплатили участие." if stake > 0 else "Вы уже отметились."
+            from community_bot.events_api import has_room
+
+            if not await has_room(db, event_id):
+                return False, "Все места на мероприятие уже заняты."
             if stake > 0:
                 cursor = await db.execute(
                     "UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?",
@@ -3614,6 +3627,10 @@ class Database:
             row = await cursor.fetchone()
             if row and (row["kind"] == "payment" or (row["kind"] == "legacy" and int(row["stake"]) > 0)):
                 return False, "Вы уже оплатили участие.", 0
+            from community_bot.events_api import has_room
+
+            if not row and not await has_room(db, event_id):
+                return False, "Все места на мероприятие уже заняты.", 0
             deposit = int(row["stake"]) if row else 0
             charge = expected_price - deposit
             now = utcnow()

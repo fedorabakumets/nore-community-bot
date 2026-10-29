@@ -90,7 +90,7 @@ async def refresh_event_markup(bot, db: Database, event_id: str) -> bool:
 
 
 async def sync_event_counters(bot, db: Database) -> None:
-    rows = await db.fetchall("SELECT event_id FROM studio_events WHERE markup_dirty = 1 LIMIT 50")
+    rows = await db.fetchall("SELECT event_id FROM studio_events WHERE markup_dirty = 1 AND message_id > 0 LIMIT 50")
     for row in rows:
         event_id = str(row["event_id"])
         async with event_lock(db, event_id):

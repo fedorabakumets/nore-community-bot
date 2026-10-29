@@ -67,7 +67,7 @@ async def protection(request, handler):
             if not await miniapp_allowed(request.app['db'], request.app['settings'], request['actor']['id']):
                 return web.json_response({'error': 'Миниапка пока доступна модераторам и администраторам'},
                                          status=403, headers={'Cache-Control': 'no-store'})
-            if request.path.startswith(('/api/shop/', '/api/events/')):
+            if request.path.startswith('/api/shop/') or request.path == '/api/events/join':
                 from community_bot.profile_fill import profile_is_complete
 
                 user = await request.app['db'].get_user(request['actor']['id'])
@@ -76,7 +76,8 @@ async def protection(request, handler):
                                              status=403, headers={'Cache-Control': 'no-store'})
         response = await handler(request)
     except web.HTTPRequestEntityTooLarge:
-        limit = 'Файл должен быть не больше 20 МБ' if request.path.startswith('/api/admin') else (
+        large = request.path.startswith(('/api/admin', '/api/events/upload'))
+        limit = 'Файл должен быть не больше 20 МБ' if large else (
             'Фотография должна быть не больше 5 МБ'
         )
         response = web.json_response({'error': limit}, status=413)
@@ -109,25 +110,16 @@ async def actor(request):
 
 async def overview(request):
     from community_bot.cabinet_api import pet_data, wallet_data
-    from community_bot.event_access import current_event
     from community_bot.shop_api import shop_data
-    from community_bot.shop_text import plain_shop_text
 
     db, settings = request.app['db'], request.app['settings']
     user = await actor(request)
     pet = await pet_data(db, user)
     user = await db.get_user(user['user_id'])
     shop = await shop_data(db, user, settings)
-    events = []
-    current = await current_event(db)
-    if current:
-        eid = current['event_id']
-        offer = await db.get_event_offer(eid)
-        events.append({'id': eid, 'title': current['title'], 'price': int(offer['price']) if offer else 0,
-                       'count': await db.event_participant_count(eid),
-                       'joined': await db.has_event_rsvp(eid, user['user_id']),
-                       'description': plain_shop_text(current['description']), 'starts_at': current['starts_at'],
-                       'paid': await db.has_event_payment(eid, user['user_id'])})
+    from community_bot.events_api import allowed, public_events
+
+    events = await public_events(db, user['user_id'])
     for product in shop['products']:
         if product['sku'] == 'event_pass':
             product.update(price=events[0]['price'] if events else None, buyable=bool(events),
@@ -180,6 +172,7 @@ async def overview(request):
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
         'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
+        'events_admin': await allowed(db, settings, user['user_id']),
         'home': {'community_url': community_url, 'news': news},
         'history': [{'amount': t['amount'], 'kind': t['kind'], 'date': t['created_at']} for t in history],
     })
@@ -211,7 +204,6 @@ async def confirm(request):
 
 
 async def join_event(request):
-    from community_bot.event_access import current_event
     from community_bot.rsvp import event_lock, refresh_event_markup
 
     user = await actor(request)
@@ -219,8 +211,8 @@ async def join_event(request):
     data = await request.json()
     if not isinstance(data, dict):
         raise ValueError("Ожидается объект")
-    event = await current_event(db)
-    if not event or data.get('event_id') != event['event_id']:
+    event = await db.get_studio_event(str(data.get('event_id', '')))
+    if not event or event['status'] != 'active':
         return web.json_response({'error': 'Мероприятие изменилось. Обновите экран'}, status=409)
     eid = event['event_id']
     async with event_lock(db, eid):
@@ -334,7 +326,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
-    from community_bot import cabinet_api, friends_api, mafia_api, rocket_api, seasonal, shop_api
+    from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, seasonal, shop_api
 
     app.router.add_get('/api/seasonal', seasonal.status)
     app.router.add_post('/api/seasonal/join', seasonal.participate)
@@ -381,8 +373,14 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/shop/prepare', prepare)
     app.router.add_post('/api/shop/confirm', confirm)
     app.router.add_post('/api/events/join', join_event)
+    app.router.add_get('/api/events/manage', events_api.editor)
+    app.router.add_post('/api/events/save', events_api.save)
+    app.router.add_post('/api/events/publish', events_api.publish)
+    app.router.add_post('/api/events/delete', events_api.delete)
+    app.router.add_post('/api/events/upload', events_api.upload)
+    app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'style.css'):
+                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'events.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
