@@ -166,7 +166,7 @@ nav button[data-tab="community"] svg{width:29px;height:29px}
 .community-tiles{width:100%;max-width:none;margin-inline:0;gap:8px}.community-tile{padding:14px;border-radius:16px}.community-tile strong{font-size:clamp(18px,4.5vw,23px)}.community-tile small{font-size:10px}.community-tile-icon{width:38%;height:38%}
 
 /* Respect Telegram's full-screen content inset after removing the top header. */
-main{padding-top:max(25px,env(safe-area-inset-top,0px),var(--tg-content-safe-area-inset-top,0px))}
+main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px)) + max(56px,var(--tg-content-safe-area-inset-top,0px)) + 12px)}
 nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:nav-profile-glow 1.3s ease-in-out infinite}
 @keyframes nav-profile-glow{0%,100%{border-color:#a73a50;box-shadow:0 0 0 1px #f3284330,0 0 3px #f3284320}50%{border-color:#ff6179;box-shadow:0 0 0 2px #f3284366,0 0 12px 3px #f3284380}}
 @media(prefers-reduced-motion:reduce){nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:none;border-color:#f32843;box-shadow:0 0 0 1px #f3284350}}
