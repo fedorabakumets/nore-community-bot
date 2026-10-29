@@ -161,3 +161,38 @@ async def test_removed_friend_cannot_be_paid_by_a_stale_friend_quote(env):
         await wallet_prepare(Request(env, uid=7, body={"action": "transfer", "friend_id": 8, "amount": 20}))
     with pytest.raises(ValueError):
         await wallet_prepare(Request(env, uid=7, body={"action": "transfer", "friend_id": True, "amount": 20}))
+
+
+async def test_privacy_requires_purchase_and_survives_reopening(env):
+    from community_bot.miniapp import profile_privacy
+
+    denied = await profile_privacy(Request(env, body={'hidden': True}))
+    assert denied.status == 403
+    assert not (await env.db.get_user(8))['profile_private']
+    ok, _ = await env.db.buy_item(8, 'private_profile', 10)
+    assert ok
+    before = (await env.db.get_user(8))['cookies']
+    for hidden in (False, True, True, False):
+        response = await profile_privacy(Request(env, body={'hidden': hidden}))
+        assert response.status == 200
+        assert bool((await env.db.get_user(8))['profile_private']) == hidden
+    assert await env.db.owns_profile_privacy(8)
+    ok, _ = await env.db.buy_item(8, 'private_profile', 10)
+    assert not ok
+    assert (await env.db.get_user(8))['cookies'] == before
+    with pytest.raises(ValueError):
+        await profile_privacy(Request(env, body={'hidden': 'false'}))
+    with pytest.raises(ValueError):
+        await profile_privacy(Request(env, body={'hidden': True, 'user_id': 9}))
+
+
+async def test_privacy_gifts_and_legacy_hidden_profiles(env):
+    ok, _ = await env.db.buy_item(7, 'private_profile', 10, target_id=9)
+    assert ok
+    await env.db.update_profile(9, 'profile_private', 0)
+    assert await env.db.owns_profile_privacy(9)
+    assert not await env.db.owns_profile_privacy(7)
+    await env.db.update_profile(8, 'profile_private', 1)
+    assert await env.db.set_profile_privacy(8, False)
+    reopened = Database(env.db.path)
+    assert await reopened.set_profile_privacy(8, True)

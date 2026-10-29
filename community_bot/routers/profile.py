@@ -118,7 +118,7 @@ async def edit_profile(callback: CallbackQuery, state: FSMContext, db: Database)
         await callback.answer("Можно редактировать только свой профиль.", show_alert=True)
         return
     if field == "public":
-        await db.update_profile(user_id, "profile_private", 0)
+        await db.set_profile_privacy(user_id, False)
         await callback.answer("Профиль снова открыт.")
         user = await db.get_user(user_id)
         if user and callback.message:

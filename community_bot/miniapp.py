@@ -169,6 +169,7 @@ async def overview(request):
         ),
         'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
+        'privacy_owned': await db.owns_profile_privacy(user['user_id']),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
         'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
@@ -243,6 +244,16 @@ def normalized_photo(raw: bytes) -> bytes:
             return output.getvalue()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
         raise ValueError('Не удалось прочитать фотографию') from error
+
+
+async def profile_privacy(request):
+    user = await actor(request)
+    payload = await request.json()
+    if not isinstance(payload, dict) or set(payload) != {'hidden'} or type(payload['hidden']) is not bool:
+        raise ValueError('Укажи настройку приватности')
+    if not await request.app['db'].set_profile_privacy(user['user_id'], payload['hidden']):
+        return web.json_response({'error': 'Сначала купи закрытый профиль в магазине'}, status=403)
+    return web.json_response({'ok': True, 'message': 'Настройки профиля сохранены'})
 
 
 async def save_profile(request):
@@ -324,6 +335,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
     app.router.add_post('/api/profile', save_profile)
+    app.router.add_post('/api/profile/privacy', profile_privacy)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
     from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, seasonal, shop_api
