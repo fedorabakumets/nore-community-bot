@@ -419,6 +419,10 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("📝 Заметка", f"admin:edit:note:{user_id}"),
             ],
             [
+                ibtn("Очистить имя", f"admin:edit:clear_name:{user_id}"),
+                ibtn("Очистить описание", f"admin:edit:clear_bio:{user_id}"),
+            ],
+            [
                 ibtn("✏️ Имя", f"admin:edit:name:{user_id}"),
                 ibtn("🎂 Возраст", f"admin:edit:age:{user_id}"),
             ],

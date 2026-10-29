@@ -1796,6 +1796,10 @@ async def admin_begin_user_edit(
     prompts = {
         "cookies": "Введите точный новый баланс от 0 до 1 000 000.",
         "add_cookies": "Сколько печенек начислить? От 1 до 1 000 000.",
+        "clear_name": "Имя будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                      "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
+        "clear_bio": "Описание будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                     "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
         "name": "Введите новое имя (до 50 символов).",
         "age": "Введите новый возраст числом от 14 до 120.",
         "avatar": "Отправьте новую фотографию или видео профиля.",
@@ -1956,6 +1960,16 @@ async def admin_save_user_edit(
             await db.update_profile(user_id, "avatar_file_id", message.photo[-1].file_id)
             await db.update_profile(user_id, "avatar_media_type", "photo")
         result = "Аватар обновлён."
+    elif action in {"clear_name", "clear_bio"}:
+        if (message.text or "").strip() != "ОЧИСТИТЬ":
+            await message.answer("Для подтверждения введите ОЧИСТИТЬ или отмените действие.")
+            return
+        field = "profile_name" if action == "clear_name" else "profile_bio"
+        await db.execute(
+            f"UPDATE users SET {field} = '', updated_at = ? WHERE user_id = ?",
+            (datetime.now(UTC).isoformat(), user_id),
+        )
+        result = "Поле очищено. Участнику нужно заполнить профиль заново для доступа к магазину и событиям."
     elif action == "name":
         value = (message.text or "").strip()
         if not 1 <= len(value) <= 50:
