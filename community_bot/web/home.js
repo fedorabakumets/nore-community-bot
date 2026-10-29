@@ -37,3 +37,21 @@ function profileWizard(index){
   };
 }
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-profile-wizard'))profileWizard();if(b.hasAttribute('data-wizard-done'))$('#sheet').close()});
+
+// Autoscroll only while the news strip is visible and idle. Manual scrolling resets the delay.
+(()=>{
+  let lastInteraction=Date.now(),touching=false;
+  document.addEventListener('pointerdown',e=>{if(e.target.closest('.home-updates')){touching=true;lastInteraction=Date.now()}},{passive:true});
+  document.addEventListener('pointerup',()=>{if(touching){touching=false;lastInteraction=Date.now()}},{passive:true});
+  document.addEventListener('pointercancel',()=>{if(touching){touching=false;lastInteraction=Date.now()}},{passive:true});
+  document.addEventListener('wheel',e=>{if(e.target.closest('.home-updates'))lastInteraction=Date.now()},{passive:true});
+  document.addEventListener('keydown',e=>{if(e.target.closest('.home-updates'))lastInteraction=Date.now()});
+  setInterval(()=>{
+    const strip=document.querySelector('.home-updates');
+    if(!strip||document.hidden||touching||Date.now()-lastInteraction<6500||matchMedia('(prefers-reduced-motion: reduce)').matches||strip.contains(document.activeElement))return;
+    const rect=strip.getBoundingClientRect(),cards=[...strip.querySelectorAll('.home-news-article')];
+    if(rect.bottom<=0||rect.top>=innerHeight||cards.length<2)return;
+    const current=cards.reduce((best,card,i)=>Math.abs(card.offsetLeft-strip.scrollLeft)<Math.abs(cards[best].offsetLeft-strip.scrollLeft)?i:best,0);
+    strip.scrollTo({left:cards[(current+1)%cards.length].offsetLeft,behavior:'smooth'});lastInteraction=Date.now();
+  },1000);
+})();
