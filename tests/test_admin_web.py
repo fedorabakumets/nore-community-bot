@@ -414,3 +414,28 @@ async def test_seasonal_raffle_management_is_reachable_from_contest_panel(env):
     members = await click(env, seasonal, 'Участники')
     assert 'Пока нет заявок' in ''.join(c['html'] for c in members['cards'])
     assert not env.telegram.calls
+
+
+@pytest.mark.parametrize('label,field', [('Очистить имя', 'profile_name'), ('Очистить описание', 'profile_bio')])
+async def test_clear_profile_field_requires_confirmation_and_no_repeat_bonus(env, label, field):
+    from community_bot.profile_fill import profile_fill_percent
+
+    await env.db.execute("UPDATE users SET profile_name='Имя',age=25,hobbies='Кино',"
+                         "profile_bio='Описание',avatar_file_id='avatar',reputation=95 WHERE user_id=8")
+    await env.db.reward_complete_profile(8)
+    before = await env.db.get_user(8)
+    view = await click(env, await env.bridge.open(env.actor), 'Люди')
+    view = await click(env, view, 'Найти')
+    view = await text(env, view, '8')
+    # Search exposes the participant card as a capability, not an arbitrary callback.
+    view = await click(env, view, 'Имя')
+    view = await click(env, view, label)
+    view = await text(env, view, 'нет')
+    assert (await env.db.get_user(8))[field] == before[field]
+    await text(env, view, 'ОЧИСТИТЬ')
+    after = await env.db.get_user(8)
+    assert after[field] == '' and profile_fill_percent(after) == 80
+    assert after['cookies'] == before['cookies'] and after['reputation'] == before['reputation']
+    await env.db.update_profile(8, field, before[field])
+    assert profile_fill_percent(await env.db.get_user(8)) == 100
+    assert (await env.db.get_user(8))['cookies'] == before['cookies']
