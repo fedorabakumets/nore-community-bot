@@ -28,7 +28,7 @@ DESCRIPTIONS = {
     'forgive': 'Очистить предупреждения и снять мут в чате.',
     'rep_shield': 'Один щит поглощает одно понижение репутации.',
     'immunity_24h': 'Защита от отрицательных оценок на 24 часа. Повторная покупка продлевает срок.',
-    'private_profile': 'Скрыть профиль от других участников. Открыть его снова можно в боте.',
+    'private_profile': 'Скрывай и открывай профиль в настройках приватности после покупки.',
     'ornate_profile': 'Включить особое оформление карточки профиля в боте.',
     'video_avatar': 'Установить видео вместо фотографии в карточке профиля. Файл до 20 МБ.',
     'tamagotchi': 'Выбрать питомца и придумать ему имя. Один питомец на человека.',
@@ -65,8 +65,8 @@ async def shop_data(db, user, settings):
             reason = 'Сначала заведи питомца'
         elif sku == 'video_avatar' and not flags['profile_video']:
             reason = 'Видео-профили временно выключены'
-        elif sku == 'private_profile' and user['profile_private']:
-            reason = 'Профиль уже скрыт'
+        elif sku == 'private_profile' and await db.owns_profile_privacy(user['user_id']):
+            reason = 'Уже куплено — управляй в настройках приватности'
         elif sku == 'ornate_profile' and user['profile_ornate']:
             reason = 'Оформление уже куплено'
         products.append({

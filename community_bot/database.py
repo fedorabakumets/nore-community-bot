@@ -2138,6 +2138,35 @@ class Database:
             await db.commit()
             return True, "ok"
 
+    async def owns_profile_privacy(self, user_id: int) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 FROM users WHERE user_id=? AND (profile_private=1 OR "
+            "EXISTS(SELECT 1 FROM bot_state WHERE key=? AND value='1') OR "
+            "EXISTS(SELECT 1 FROM transactions WHERE kind='shop' AND "
+            "((user_id=? AND details='private_profile') OR details=?)))",
+            (user_id, f"profile_privacy_owned:{user_id}", user_id, f"private_profile->{user_id}"),
+        )
+        return bool(row)
+
+    async def set_profile_privacy(self, user_id: int, hidden: bool) -> bool:
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT 1 FROM users WHERE user_id=? AND (profile_private=1 OR "
+                "EXISTS(SELECT 1 FROM bot_state WHERE key=? AND value='1') OR "
+                "EXISTS(SELECT 1 FROM transactions WHERE kind='shop' AND "
+                "((user_id=? AND details='private_profile') OR details=?)))",
+                (user_id, f"profile_privacy_owned:{user_id}", user_id, f"private_profile->{user_id}"),
+            )
+            if not await cursor.fetchone():
+                return False
+            await db.execute("INSERT INTO bot_state(key,value) VALUES (?,'1') "
+                             "ON CONFLICT(key) DO UPDATE SET value='1'", (f"profile_privacy_owned:{user_id}",))
+            await db.execute("UPDATE users SET profile_private=?,updated_at=? WHERE user_id=?",
+                             (int(hidden), utcnow(), user_id))
+            await db.commit()
+            return True
+
     async def _apply_shop_effect(
         self, db: aiosqlite.Connection, user_id: int, item: str, now: str,
     ) -> str | None:
@@ -2170,9 +2199,15 @@ class Database:
                 (now, user_id),
             )
         elif item == "private_profile":
-            cursor = await db.execute("SELECT profile_private FROM users WHERE user_id = ?", (user_id,))
-            if (await cursor.fetchone())["profile_private"]:
-                return "Профиль уже скрыт."
+            cursor = await db.execute(
+                "SELECT 1 FROM users WHERE user_id=? AND (profile_private=1 OR "
+                "EXISTS(SELECT 1 FROM bot_state WHERE key=? AND value='1') OR "
+                "EXISTS(SELECT 1 FROM transactions WHERE kind='shop' AND "
+                "((user_id=? AND details='private_profile') OR details=?)))",
+                (user_id, f"profile_privacy_owned:{user_id}", user_id, f"private_profile->{user_id}"),
+            )
+            if await cursor.fetchone():
+                return "Закрытый профиль уже куплен. Управляй им в настройках приватности."
             await db.execute(
                 "UPDATE users SET profile_private = 1, updated_at = ? WHERE user_id = ?",
                 (now, user_id),
