@@ -54,7 +54,7 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
-        "Тамагочи — ваш талисман, который сыщет для вас самые редкие вещи!\n"
+        "Питомец найдёт для вас редкие вещи!\n"
         "Через него в сообществе появляются сезонные находки, коллекционные награды "
         "и особые призы с мероприятий.\n\n"
         f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
@@ -62,7 +62,7 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n\n"
         f"{_expedition_line(pet, words, timezone)}"
-        "Печеньки талисман приносит только из экспедиции — сам по себе он их не фармит."
+        "Печеньки питомец приносит только из экспедиции — сам по себе он их не фармит."
     )
 
 
@@ -161,7 +161,7 @@ async def _show_pet(
 ) -> None:
     pet = await db.get_pet(user_id)
     if not pet:
-        text = "У вас пока нет тамагочи. Откройте магазин снизу."
+        text = "У вас пока нет питомца. Откройте магазин снизу."
         if replace:
             from community_bot.blocks import replace_block
 
@@ -177,7 +177,7 @@ async def _show_pet(
 
 
 @router.message(command_or_alias("pet"))
-@router.message(F.text == "🐾 Тамагочи")
+@router.message(F.text.in_({"🐾 Тамагочи", "🐾 Питомец"}))
 async def show_pet(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -189,7 +189,7 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
     if not callback.data or not callback.message:
         return
     if not await db.feature_enabled("tamagotchi"):
-        await callback.answer("Тамагочи временно выключены администрацией.", show_alert=True)
+        await callback.answer("Питомцы временно выключены администрацией.", show_alert=True)
         return
     parts = callback.data.split(":")
     if len(parts) != 4:
@@ -255,7 +255,9 @@ async def create_pet(message: Message, state: FSMContext, db: Database, settings
 @router.callback_query(F.data.startswith("pet:custom"))
 @router.callback_query(F.data.startswith("pet:look"))
 async def stale_pet_custom(callback: CallbackQuery) -> None:
-    await callback.answer("Кастомизация тамагочи больше недоступна. Теперь это талисман экспедиций.", show_alert=True)
+    await callback.answer(
+        "Кастомизация питомца больше недоступна. Питомец ищет находки в экспедициях.", show_alert=True,
+    )
 
 
 @router.callback_query(F.data.startswith("pet:use:"))
@@ -317,7 +319,7 @@ async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settin
     until = str((pet or {}).get("expedition_until") or "")
     if until:
         left = remaining_label(until, settings.timezone)
-        await callback.answer(f"Талисман ещё в экспедиции ({left}).", show_alert=True)
+        await callback.answer(f"Питомец ещё в экспедиции ({left}).", show_alert=True)
         return
     ok, error, _reward = await db.start_expedition(callback.from_user.id, timezone=settings.timezone)
     if not ok:
@@ -326,7 +328,7 @@ async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settin
     from community_bot.life import unlock
 
     await unlock(db, callback.from_user.id, "expedition")
-    await callback.answer("Талисман ушёл искать редкие вещи на 24 часа.")
+    await callback.answer("Питомец ушёл искать редкие вещи на 24 часа.")
     pet = await db.get_pet(callback.from_user.id, settle=False)
     if pet:
         await refresh_pet_card(callback.message, pet, db, settings)
@@ -346,7 +348,7 @@ async def pet_shop(callback: CallbackQuery, db: Database, settings: Settings) ->
     prices = shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
     await callback.answer()
     header = shop_header_lines(await db.shop_header())
-    title = str((category or {}).get("title") or "🐾 Тамагочи")
+    title = str((category or {}).get("title") or "🐾 Питомец")
     intro = str((category or {}).get("description") or "")
     sent = await callback.message.answer(
         f"{header}{title}\nБаланс: {user['cookies']} 🍪\n\n{intro}",

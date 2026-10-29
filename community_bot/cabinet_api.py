@@ -80,7 +80,7 @@ async def pet_prepare(request):
     if action not in {"food", "water", "expedition", "rename"} or not await db.feature_enabled("tamagotchi"):
         raise ValueError("Это действие питомца сейчас недоступно")
     if not await db.get_pet(user["user_id"], settle=False):
-        raise ValueError("Сначала заведи тамагочи в магазине")
+        raise ValueError("Сначала заведи питомца в магазине")
     payload = {"action": action}
     if action == "rename":
         name = body.get("name")

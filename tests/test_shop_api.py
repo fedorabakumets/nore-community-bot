@@ -164,11 +164,13 @@ async def test_support_requires_server_calculated_amount_and_is_once(env):
 
 async def test_catalogue_sync_repairs_mojibake_and_excludes_disabled_categories(env):
     corrupt = '🐾 Тамагочи'.encode().decode('cp1251')
-    await env.db.upsert_shop_category('pets', corrupt, '<b>Забота</b> о питомце')
-    assert (await env.db.get_shop_category('pets'))['title'] == '🐾 Тамагочи'
+    await env.db.upsert_shop_category('pets', corrupt, '<b>Талисман</b> сообщества')
+    assert (await env.db.get_shop_category('pets'))['title'] == '🐾 Питомец'
     data = json.loads((await overview(Request(env))).body)
     category = next(c for c in data['categories'] if c['id'] == 'pets')
-    assert category['title'] == '🐾 Тамагочи' and category['description'] == 'Забота о питомце'
+    assert category['title'] == '🐾 Питомец' and category['description'] == 'Питомец сообщества'
+    stored = await env.db.fetchone("SELECT title, description FROM shop_categories WHERE slug='pets'")
+    assert stored['title'] == corrupt and stored['description'] == '<b>Талисман</b> сообщества'
     assert len(data['species']) == 5
     await env.db.upsert_shop_category('pets', '🐾 Тамагочи', enabled=0)
     data = json.loads((await overview(Request(env))).body)

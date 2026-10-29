@@ -1316,7 +1316,7 @@ async def buy_shop_item(
         return
     if item == "tamagotchi":
         if not await db.feature_enabled("tamagotchi"):
-            await callback.answer("Тамагочи временно выключены.", show_alert=True)
+            await callback.answer("Питомцы временно выключены.", show_alert=True)
             return
         if await db.get_pet(callback.from_user.id, settle=False):
             await callback.answer("У вас уже есть питомец.", show_alert=True)
