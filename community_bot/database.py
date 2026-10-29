@@ -1882,7 +1882,7 @@ class Database:
             cursor = await db.execute("SELECT enabled FROM feature_flags WHERE key='tamagotchi'")
             flag = await cursor.fetchone()
             if not flag or not flag['enabled']:
-                return 'Тамагочи временно выключены.'
+                return 'Питомцы временно выключены.'
         elif item == "cookie_topup":
             from community_bot.shop_catalog import normalize_cookie_shop
 
@@ -2770,7 +2770,7 @@ class Database:
             pet = await cursor.fetchone()
             if not pet:
                 await db.rollback()
-                return False, "Сначала заведите тамагочи.", None
+                return False, "Сначала заведите питомца.", None
             if int(pet[stat]) >= 100:
                 await db.rollback()
                 return False, "Этот показатель питомца уже на максимуме. Списания не было.", None
@@ -4031,7 +4031,7 @@ class Database:
 
         pet = await self.get_pet(user_id)
         if not pet:
-            return False, "Сначала заведите тамагочи.", 0
+            return False, "Сначала заведите питомца.", 0
         until = expedition_until_iso()
         now = utcnow()
         async with self.connect() as db:
@@ -4054,7 +4054,7 @@ class Database:
                 row = await cursor.fetchone()
                 await db.rollback()
                 leftover = remaining_label(str(dict(row).get("expedition_until") if row else ""), timezone)
-                return False, f"Талисман ещё в экспедиции ({leftover}).", 0
+                return False, f"Питомец ещё в экспедиции ({leftover}).", 0
             await db.commit()
         return True, "ok", 0
 

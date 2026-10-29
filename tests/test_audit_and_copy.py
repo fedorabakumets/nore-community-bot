@@ -192,7 +192,8 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     assert "кубик" in lowered
     assert "рейс" in lowered
     assert "капкан" in lowered
-    assert "тамагочи" in STORE_HELP_TEXT.casefold()
+    assert "питомец" in STORE_HELP_TEXT.casefold()
+    assert "талисман" not in STORE_HELP_TEXT.casefold()
     assert "приватный" in STORE_HELP_TEXT.casefold()
     assert "кастомн" in STORE_HELP_TEXT.casefold()
     for word in ("подарить", "репорт", "почта", "доска", "экспедиция", "витрина", "набор"):

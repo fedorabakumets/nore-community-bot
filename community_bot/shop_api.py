@@ -60,7 +60,7 @@ async def shop_data(db, user, settings):
         elif sku == 'tamagotchi' and pet:
             reason = 'У тебя уже есть питомец'
         elif sku in {'tamagotchi', 'pet_meal', 'pet_drink', 'season_pack'} and not flags['tamagotchi']:
-            reason = 'Тамагочи временно выключены'
+            reason = 'Питомцы временно выключены'
         elif sku in {'pet_meal', 'pet_drink', 'season_pack'} and not pet:
             reason = 'Сначала заведи питомца'
         elif sku == 'video_avatar' and not flags['profile_video']:

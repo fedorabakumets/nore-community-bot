@@ -239,7 +239,7 @@ def is_group_command_to_sweep(message: Message) -> bool:
         return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
     if not parsed:
         # Reply-keyboard shortcuts have their own handlers outside the alias filter.
-        if text in {"🛒 Магазин", "🐾 Тамагочи", "👤 Мой профиль", "🛡 Админ-панель"}:
+        if text in {"🛒 Магазин", "🐾 Тамагочи", "🐾 Питомец", "👤 Мой профиль", "🛡 Админ-панель"}:
             return True
         from community_bot.domain import reputation_delta, transfer_amount
         from community_bot.nora import strip_address

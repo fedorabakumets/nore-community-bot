@@ -306,7 +306,7 @@ def _format_board(week_id: str, board: dict) -> str:
         f"🏆 <b>Доска недели {html.escape(week_id)}</b>\n\n"
         f"<b>Голос чата</b> (сообщения)\n{lines(board.get('messages') or [], 'messages')}\n\n"
         f"<b>Кого плюсовали</b>\n{lines(board.get('plus') or [], 'score')}\n\n"
-        f"<b>Находки тамагочи</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
+        f"<b>Находки питомца</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
     )
 
 

@@ -14,7 +14,7 @@ ITEM_LABELS = {
     "video_avatar": "Видео-аватар профиля",
     "private_profile": "Приватный профиль",
     "ornate_profile": "Кастомный профиль",
-    "tamagotchi": "Завести тамагочи",
+    "tamagotchi": "Завести питомца",
     "pet_meal": "Обед питомцу +40",
     "pet_drink": "Поилка питомцу +50",
     "season_pack": "Сезонный набор: щит + обед",
@@ -34,8 +34,8 @@ IMMUNITY_HOURS = {
 SEED_CATEGORIES = (
     {
         "slug": "pets",
-        "title": "🐾 Тамагочи",
-        "description": "Талисман сообщества, припасы и сезонный набор.",
+        "title": "🐾 Питомец",
+        "description": "Питомец, припасы и сезонный набор.",
         "sort_order": 10,
     },
     {

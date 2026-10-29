@@ -16,8 +16,8 @@ TRANSACTION_LABELS = {
     "sbp_payment": "Пополнение СБП",
     "roulette": "Рулетка",
     "subscription_freebie": "Халява",
-    "pet_farm": "Фарм тамагочи",
-    "pet_expedition": "Экспедиция тамагочи",
+    "pet_farm": "Находки питомца",
+    "pet_expedition": "Экспедиция питомца",
     "pet_shop": "Магазин питомца",
     "rsvp": "Мероприятие",
     "rsvp_refund": "Возврат залога за мероприятие",
@@ -55,13 +55,13 @@ def loan_repay_amount(principal: int, interest_percent: int) -> int:
 
 def pet_status_line(pet: dict[str, object] | None) -> str:
     if not pet:
-        return "Тамагочи нет. Завести можно в магазине — это талисман, который ищет редкие вещи."
-    name = str(pet.get("name") or "Тамагочи")
+        return "Питомца пока нет. Завести его можно в магазине."
+    name = str(pet.get("name") or "Питомец")
     until = str(pet.get("expedition_until") or "")
     if until:
         return f"🗺 {name} сейчас в экспедиции и ищет редкие находки."
     return (
-        f"🐾 {name} — талисман сообщества. Печеньки он приносит только из экспедиции "
+        f"🐾 {name} — питомец сообщества. Печеньки он приносит только из экспедиции "
         f"(раз в 24 часа), сам по себе не фармит."
     )
 

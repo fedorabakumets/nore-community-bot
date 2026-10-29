@@ -1018,7 +1018,7 @@ async def admin_features_reset_ask(callback: CallbackQuery, db: Database, settin
     await callback.message.edit_text(
         "♻️ <b>Сброс функций</b>\n\n"
         "Вернуть все переключатели к заводским значениям?\n"
-        "Игры, тамагочи, видео-профили и награды за активность — включены.\n"
+        "Игры, питомцы, видео-профили и награды за активность — включены.\n"
         "Антифлуд, фильтры ссылок/медиа/стикеров, ночной и рейд-режим — выключены.",
         parse_mode="HTML",
         reply_markup=feature_reset_keyboard(),

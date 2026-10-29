@@ -132,7 +132,7 @@ def result_text(
     who = f" к {mention}" if mention else ""
     return (
         f"🗺 <b>{name}</b> {returned} из экспедиции{who}.\n"
-        f"Результат: талисман сыскал награду.\n"
+        f"Результат: питомец сыскал награду.\n"
         f"Находка: <b>{prize}</b>."
     )
 
@@ -153,7 +153,7 @@ async def announce_expedition_result(
     from community_bot.pets_talk import pet_pronouns
 
     words = pet_pronouns(str(pet.get("species") or ""))
-    pet_name = str(pet.get("name") or "Тамагочи")
+    pet_name = str(pet.get("name") or "Питомец")
     owner = await db.get_user(user_id)
     owner_name = str(
         (owner or {}).get("profile_name")
