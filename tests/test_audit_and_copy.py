@@ -101,10 +101,10 @@ def test_media_payloads_are_not_swept_as_group_commands() -> None:
     assert is_group_command_to_sweep(payload(photo=object(), caption="/shop"))
     assert is_group_command_to_sweep(payload(text="баланс"))
     assert not is_group_command_to_sweep(payload(text="Вопрос к чату, почему удалили?"))
-    assert not is_group_command_to_sweep(payload(text="вопрос"))
-    assert not is_group_command_to_sweep(payload(text="Вопрос"))
+    assert is_group_command_to_sweep(payload(text="вопрос"))
+    assert is_group_command_to_sweep(payload(text="Вопрос"))
     assert not is_group_command_to_sweep(payload(text="закрыть тему"))
-    assert not is_group_command_to_sweep(payload(text="/question"))
+    assert is_group_command_to_sweep(payload(text="/question"))
     assert is_group_command_to_sweep(payload(text="команды"))
     assert is_group_command_to_sweep(payload(text="магазин"))
     assert is_game_callback("cg:join:8")
@@ -192,12 +192,100 @@ def test_commands_help_hides_staff_and_has_aliases() -> None:
     assert "кубик" in lowered
     assert "рейс" in lowered
     assert "капкан" in lowered
-    assert "тамагочи" in STORE_HELP_TEXT.casefold()
+    assert "питомец" in STORE_HELP_TEXT.casefold()
+    assert "талисман" not in STORE_HELP_TEXT.casefold()
     assert "приватный" in STORE_HELP_TEXT.casefold()
     assert "кастомн" in STORE_HELP_TEXT.casefold()
     for word in ("подарить", "репорт", "почта", "доска", "экспедиция", "витрина", "набор"):
         assert word in lowered
     assert "сезонный набор" in STORE_HELP_TEXT.casefold()
+
+
+def test_commands_page_is_detailed_and_the_card_is_short() -> None:
+    from community_bot.commands_guide import COMMANDS_CARD_TEXT, commands_guide_nodes, commands_keyboard
+
+    assert len(COMMANDS_CARD_TEXT) <= 1024
+    assert "не удаляется" in COMMANDS_CARD_TEXT
+    page = "\n".join(
+        "".join(str(child) for child in node.get("children", []))
+        for node in commands_guide_nodes()
+    )
+    lowered = page.casefold()
+    assert "Пример. кубик 25" in page
+    assert "Пример. Нора, какой фильм посмотреть" in page
+    assert "пример." in lowered
+    for word in (
+        "магазин",
+        "вопрос",
+        "тикет",
+        "рулетка",
+        "рейс",
+        "капкан",
+        "подарить",
+        "репорт",
+        "почта",
+        "доска",
+        "экспедиц",
+        "витрин",
+        "набор",
+        "погода",
+    ):
+        assert word in lowered
+    for leaked in ("/mute", "/warn", "/kick", "/ban", "/purge", "tmdb", "api"):
+        assert leaked not in lowered
+    button = commands_keyboard("https://telegra.ph/Komandy").inline_keyboard[0][0]
+    assert button.text == "Читать команды"
+    assert button.url == "https://telegra.ph/Komandy"
+
+
+async def test_commands_card_sends_one_photo_with_a_page_button(monkeypatch) -> None:
+    from community_bot.commands_guide import send_commands_card
+
+    async def publish(_db):
+        return "https://telegra.ph/Komandy"
+
+    monkeypatch.setattr("community_bot.telegraph.publish_commands_guide", publish)
+    sent: list[dict] = []
+
+    class Message:
+        async def answer_photo(self, photo, **kwargs):
+            sent.append({"photo": photo, **kwargs})
+            return self
+
+        async def answer(self, text, **kwargs):
+            sent.append({"text": text, **kwargs})
+            return self
+
+    await send_commands_card(Message(), db=None)
+    assert len(sent) == 1
+    assert len(sent[0]["caption"]) <= 1024
+    assert sent[0]["reply_markup"].inline_keyboard[0][0].url == "https://telegra.ph/Komandy"
+
+
+async def test_commands_page_is_published_once(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from community_bot.database import Database
+    from community_bot.telegraph import publish_commands_guide
+
+    db = Database(Path(tmp_path) / "commands.db")
+    await db.initialize()
+    calls: list[str] = []
+
+    async def token(_db):
+        return "token"
+
+    async def call(method, payload):
+        calls.append(method)
+        assert payload["title"] == "Команды НОРЫ"
+        assert any(node.get("tag") == "blockquote" for node in payload["content"])
+        return {"url": "https://telegra.ph/Komandy", "path": "Komandy"}
+
+    monkeypatch.setattr("community_bot.telegraph.ensure_token", token)
+    monkeypatch.setattr("community_bot.telegraph._call", call)
+    assert await publish_commands_guide(db) == "https://telegra.ph/Komandy"
+    assert await publish_commands_guide(db) == "https://telegra.ph/Komandy"
+    assert calls == ["createPage"]
 
 
 def test_post_templates_and_buttons() -> None:
@@ -223,8 +311,9 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 14
+    assert latest.number == 20
     text = updates_text()
+    assert "№15" in text
     assert "№14" in text
     assert "№13" in text
     assert "№12" in text
@@ -256,13 +345,13 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №14" in pin
+    assert "Обновление №20" in pin
     details = member_details_text(latest)
-    assert "утро" in details.casefold() or "погод" in details.casefold()
-    assert "петербург" in details.casefold()
+    assert "ОБНОВА" in details
+    assert "стикер" in details.casefold()
     assert "админка" not in details.casefold()
     staff = staff_announcement(latest)
-    assert "morning" in staff.casefold() or "9:00" in staff
+    assert "Служебные стикеры" in staff
     assert "Админка" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
     assert "рулетка" in labels

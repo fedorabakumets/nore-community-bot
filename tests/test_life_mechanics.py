@@ -38,13 +38,13 @@ def test_public_update_omits_staff_and_has_member_copy() -> None:
     item = latest_update()
     pin = community_announcement(item)
     staff = staff_announcement(item)
-    assert item.number == 14
-    assert "Обновление №14" in pin
+    assert item.number == 20
+    assert f"Обновление №{item.number}" in pin
     assert "Админское" not in pin
-    assert "утро" in pin.casefold() or "погод" in pin.casefold()
+    assert "стикер" in pin.casefold() and "vstickere" in pin
     assert "Витрина после выбора" not in pin
-    assert "Админское обновление №14" in staff
-    assert "morning" in staff.casefold() or "9:00" in staff
+    assert f"Админское обновление №{item.number}" in staff
+    assert "Служебные стикеры" in staff
     assert len(pin) <= 1024
 
 
@@ -84,6 +84,7 @@ async def test_season_pack_and_lottery(tmp_path) -> None:
     await db.ensure_user(2, telegram_name="Two")
     await db.add_cookies(1, 80, "test")
     await db.add_cookies(2, 80, "test")
+    assert (await db.purchase_pet(1, "cat", "Булочка", 10))[0]
     ok, _ = await db.buy_item(1, "season_pack", 28)
     assert ok is True
     assert int((await db.get_user(1))["hate_shields"]) == 1
@@ -125,7 +126,8 @@ async def test_vitrine_stock_and_achievements(tmp_path) -> None:
     title = await unlock(db, 1, "shop_first")
     assert title == "Покупатель"
     user = await db.get_user(1)
-    assert user["profile_title"] == "Покупатель"
+    assert not user["profile_title"]
+    assert "shop_first" in await db.list_achievements(1)
     assert await unlock(db, 1, "shop_first") is None
 
 
@@ -161,6 +163,11 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
         return None
 
     monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
+
+    async def no_staff(_db, _item):
+        return None
+
+    monkeypatch.setattr("community_bot.main.publish_staff_update", no_staff)
     settings = SimpleNamespace(community_chat_id=-100)
     await announce_latest_update(FakeBot(), db, settings)
     chats = [chat_id for chat_id, _ in dms]
@@ -170,4 +177,4 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
     public = [text for chat_id, text in dms if chat_id == -100]
     assert staff_texts and "Админское" in staff_texts[0]
     assert public and "Админское" not in public[0]
-    assert "Обновление №14" in public[0]
+    assert "Обновление №20" in public[0]

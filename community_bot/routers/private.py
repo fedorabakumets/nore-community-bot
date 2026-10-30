@@ -4,9 +4,11 @@ import asyncio
 import contextlib
 import html
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
@@ -22,6 +24,7 @@ from aiogram.types import (
     LinkPreviewOptions,
     Message,
     User,
+    WebAppInfo,
 )
 
 from community_bot.aliases import command_or_alias
@@ -82,6 +85,7 @@ from community_bot.permissions import (
     PERM_AUTOMESSAGES,
     PERM_BROADCAST,
     PERM_CHAT_LOCK,
+    PERM_EVENT_PARTICIPANTS,
     PERM_FEATURES,
     PERM_MENTION,
     PERM_PAYMENTS,
@@ -101,7 +105,6 @@ from community_bot.texts import (
     APPLICATION_INTRO,
     APPLICATION_QUESTIONS,
     APPLICATION_REJECTED_INTERVIEW,
-    GROUP_COMMANDS_TEXT,
     REPUTATION_HELP_TEXT,
     STORE_HELP_TEXT,
     WELCOME_MEMBER_TEXT,
@@ -125,8 +128,9 @@ EMERGENCY_STOP_KEYBOARD = InlineKeyboardMarkup(
 
 
 async def _private_keyboard(user_id: int, db: Database, settings: Settings):
-    del user_id, db, settings
-    return main_private_keyboard()
+    from community_bot.access import private_keyboard
+
+    return await private_keyboard(db, settings, user_id)
 
 
 async def _panel_markup(db: Database, settings: Settings, user_id: int):
@@ -134,7 +138,10 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
 
 
 async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
-    cover = settings.welcome_cover
+    from community_bot.menu_art import menu_cover
+
+    bundled = menu_cover("welcome")
+    cover = str(bundled) if bundled else settings.welcome_cover
     user_id = message.from_user.id if message.from_user else 0
     apply_markup = None
     if await db.has_approved_application(user_id):
@@ -230,6 +237,9 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
         return
     await register_telegram_user(db, message.from_user)
     await state.clear()
+    if message.chat.type == "private" and (message.text or "").partition(" ")[2].strip() == "idea":
+        await open_ticket(message, state, db, settings, message.bot)
+        return
     await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
 
 
@@ -245,18 +255,13 @@ async def private_weather(message: Message, settings: Settings) -> None:
     )
 
 
-@router.message(command_or_alias("help", "commands"))
-async def help_command(message: Message, db: Database, settings: Settings) -> None:
+@router.message(command_or_alias("help", "commands"), F.chat.type == "private")
+async def help_command(message: Message, db: Database) -> None:
     if not message.from_user:
         return
-    await answer_block(
-        message,
-        "commands",
-        GROUP_COMMANDS_TEXT,
-        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
-        parse_mode="HTML",
-        reply_markup=await _private_keyboard(message.from_user.id, db, settings),
-    )
+    from community_bot.commands_guide import send_commands_card
+
+    await send_commands_card(message, db)
 
 
 @router.message(command_or_alias("store"))
@@ -318,7 +323,7 @@ async def menu_wallet(callback: CallbackQuery, db: Database, settings: Settings)
     from community_bot.routers.wallet import send_wallet
 
     await callback.answer()
-    await send_wallet(callback.message, db, settings)
+    await send_wallet(callback.message, db, settings, actor=callback.from_user, replace=True)
 
 
 @router.callback_query(F.data == "menu:question")
@@ -332,18 +337,19 @@ async def menu_question(
     if not callback.message:
         return
     await callback.answer()
-    await open_ticket(callback.message, state, db, settings, bot)
+    await open_ticket(callback.message, state, db, settings, bot, actor=callback.from_user)
 
 
 @router.callback_query(F.data == "menu:shop")
 async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not callback.from_user:
         return
+    from community_bot.blocks import replace_block
     from community_bot.routers.group import _shop_home_markup, _shop_home_text
 
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await replace_block(
         callback.message,
         "shop",
         await _shop_home_text(db, user, settings),
@@ -362,11 +368,28 @@ async def menu_pet(callback: CallbackQuery, db: Database, settings: Settings) ->
     await _show_pet(callback.message, db, callback.from_user.id, settings, replace=True)
 
 
+async def _web_admin_markup(db: Database, settings: Settings, user_id: int):
+    from community_bot.access import miniapp_allowed
+
+    url = os.getenv("MINIAPP_URL", "")
+    if url.startswith("https://") and await miniapp_allowed(db, settings, user_id):
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Открыть админ-панель", web_app=WebAppInfo(url=url.split("#", 1)[0]+"?view=admin"),
+            ),
+        ]])
+    return None
+
+
 @router.callback_query(F.data == "menu:admin")
 async def menu_admin(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
     await callback.answer()
+    web_markup = await _web_admin_markup(db, settings, callback.from_user.id)
+    if web_markup:
+        await callback.message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
+        return
     await callback.message.answer(
         await _admin_panel_text(db),
         parse_mode="HTML",
@@ -409,6 +432,10 @@ async def _admin_panel_text(db: Database) -> str:
 @router.message(F.text == "🛡 Админ-панель")
 async def admin_panel(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        return
+    web_markup = await _web_admin_markup(db, settings, message.from_user.id)
+    if web_markup:
+        await message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
         return
     await answer_block(
         message,
@@ -458,6 +485,73 @@ async def admin_queue(callback: CallbackQuery, db: Database, settings: Settings)
     )
 
 
+@router.callback_query(F.data.startswith("admin:tickets:"))
+async def admin_tickets(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    raw = (callback.data or "").rsplit(":", 1)[-1]
+    page = int(raw) if raw.isdigit() else 0
+    rows = await db.fetchall(
+        "SELECT t.id, u.telegram_name FROM tickets t JOIN users u ON u.user_id=t.user_id "
+        "WHERE t.status='open' ORDER BY t.updated_at DESC LIMIT 11 OFFSET ?", (page * 10,),
+    )
+    buttons = [[InlineKeyboardButton(text=f"№{row['id']} · {row['telegram_name'] or 'Участник'}"[:60],
+                                     callback_data=f"admin:ticket:{row['id']}:0")] for row in rows[:10]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:tickets:{page-1}"))
+    if len(rows) > 10:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:tickets:{page+1}"))
+    if paging:
+        buttons.append(paging)
+    buttons.append([InlineKeyboardButton(text="К очереди", callback_data="admin:queue")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎫 <b>Тикеты</b>\n\nВыберите диалог." if rows else "🎫 <b>Тикеты</b>\n\nОткрытых диалогов нет.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:ticket:"))
+async def admin_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    _, _, raw_id, raw_page = (callback.data or "").split(":")
+    ticket_id, page = int(raw_id), int(raw_page)
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден", show_alert=True)
+        return
+    records = await db.fetchall(
+        "SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id DESC LIMIT 6 OFFSET ?",
+        (ticket_id, page * 5),
+    )
+    await callback.answer()
+    await callback.message.answer(f"🎫 <b>Диалог №{ticket_id}</b>", parse_mode="HTML")
+    for record in reversed(records[:5]):
+        sender = "Участник" if record["sender_kind"] == "user" else "Модератор"
+        body = f"<b>{sender}</b>\n{html.escape(str(record['text'] or ''))}"
+        media_type, file_id = record.get("media_type"), record.get("media_file_id")
+        method = getattr(bot, f"send_{media_type}", None) if media_type in {
+            "photo", "video", "document", "audio", "voice", "animation",
+        } else None
+        if method and file_id:
+            await method(callback.from_user.id, file_id, caption=body[:1024], parse_mode="HTML")
+        else:
+            await callback.message.answer(body, parse_mode="HTML")
+    rows = [[InlineKeyboardButton(text="Ответить", callback_data=f"ticket:reply:{ticket_id}"),
+             InlineKeyboardButton(text="Закрыть тикет", callback_data=f"ticket:close:{ticket_id}", style="danger")]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="Новее", callback_data=f"admin:ticket:{ticket_id}:{page-1}"))
+    if len(records) > 5:
+        paging.append(InlineKeyboardButton(text="Раньше", callback_data=f"admin:ticket:{ticket_id}:{page+1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="К тикетам", callback_data="admin:tickets:0")])
+    await callback.message.answer("Действия с диалогом", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
 @router.callback_query(F.data == "admin:reports")
 async def admin_reports(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
@@ -468,7 +562,7 @@ async def admin_reports(callback: CallbackQuery, db: Database, settings: Setting
         lines.append("Очередь пуста.")
     for row in rows:
         snippet = html.escape((str(row.get("text") or "")[:80]).replace("\n", " "))
-        reason = html.escape(str(row.get("reason") or ""))
+        reason = html.escape(str(row.get("reason") or "")[:80])
         lines.append(f"#{row['id']} на {row['target_id']} · {reason}")
         if snippet:
             lines.append(f"<i>{snippet}</i>")
@@ -489,7 +583,44 @@ async def admin_report_review(callback: CallbackQuery, db: Database, settings: S
     if len(parts) < 4:
         await callback.answer("Нет.", show_alert=True)
         return
+    if not parts[3].isdigit() or parts[2] not in {"view", "ok", "no"}:
+        await callback.answer("Неизвестное действие.", show_alert=True)
+        return
     action, report_id = parts[2], int(parts[3])
+    if action == "view":
+        import json
+
+        from community_bot.helpers import telegram_message_link
+
+        row = await db.fetchone("SELECT * FROM reports WHERE id = ?", (report_id,))
+        if not row:
+            await callback.answer("Запись не найдена.", show_alert=True)
+            return
+        await callback.answer()
+        heading = "Баг" if str(row["reason"]).startswith("БАГ · ") else "Репорт"
+        link = ""
+        if row["chat_id"] and row["message_id"] and str(row["chat_id"]).startswith("-100"):
+            link = f'\n<a href="{telegram_message_link(row["chat_id"], row["message_id"])}">Оригинал сообщения ↗</a>'
+        await callback.message.answer(
+            f"<b>{heading} #{report_id}</b> · {html.escape(row['created_at'][:16])} UTC\n"
+            f"Автор записи: <code>{row['reporter_id']}</code>\n"
+            f"{html.escape(row['reason'])}{link}", parse_mode="HTML",
+        )
+        body = str(row["text"] or "[Без текста]")
+        for offset in range(0, len(body), 2000):
+            await callback.message.answer(body[offset:offset+2000], parse_mode=None)
+        attachment = await db.get_bot_state(f"report_attachment:{report_id}")
+        if attachment:
+            kind, file_id = json.loads(attachment)
+            if kind in {"photo", "video", "animation", "document", "audio", "voice", "sticker", "video_note"}:
+                try:
+                    await getattr(callback.bot, f"send_{kind}")(
+                        chat_id=callback.message.chat.id, **{kind: file_id},
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    await callback.message.answer("Вложение сейчас недоступно. Текст и ссылка сохранены в журнале.")
+        await callback.message.answer("Действия с записью", reply_markup=admin_reports_keyboard([row]))
+        return
     status = "approved" if action == "ok" else "rejected"
     if not await db.review_report(report_id, callback.from_user.id, status):
         await callback.answer("Уже разобрали.", show_alert=True)
@@ -595,7 +726,7 @@ async def admin_people(callback: CallbackQuery, db: Database, settings: Settings
         return
     await callback.answer()
     await callback.message.edit_text(
-        "👤 <b>Люди</b>\n\nПоиск, роли, карточка, заметка и титул недели.",
+        "👤 <b>Люди</b>\n\nПоиск, роли, карточки и заметки.",
         parse_mode="HTML",
         reply_markup=admin_people_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
@@ -607,7 +738,7 @@ async def admin_chatroom(callback: CallbackQuery, db: Database, settings: Settin
         return
     await callback.answer()
     await callback.message.edit_text(
-        "💬 <b>Чат</b>\n\nПост, автосообщения, мут, упоминание, рассылка и флаги.",
+        "💬 <b>Чат</b>\n\nПосты, события и участники, автосообщения, мут, упоминание, рассылка и флаги.",
         parse_mode="HTML",
         reply_markup=admin_chat_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
@@ -758,18 +889,6 @@ async def admin_search_begin(
     await callback.message.answer("Имя, @username или Telegram ID:", reply_markup=flow_reply_keyboard())
 
 
-@router.callback_query(F.data.startswith("admin:weekstar:"))
-async def admin_weekstar(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _admin_callback(callback, db, settings, PERM_USERS_EDIT):
-        return
-    user_id = int(callback.data.rsplit(":", 1)[1])
-    if not await db.get_user(user_id):
-        await callback.answer("Пользователь не найден.", show_alert=True)
-        return
-    await db.set_weekly_star(user_id)
-    await callback.answer("Титул недели выдан.", show_alert=True)
-
-
 @router.callback_query(F.data == "admin:vitrine")
 async def admin_vitrine(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
@@ -873,17 +992,9 @@ async def admin_eventtitle_begin(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
-        return
-    await state.set_state(AdminFlow.user_value)
-    await state.set_data({"admin_action": "eventtitle", "target_user_id": 0})
-    await callback.answer()
-    current = await db.get_bot_state("event_title")
-    await callback.message.answer(
-        f"Текущее название: {html.escape(current or 'не задано')}\nВведите новое (2–80 символов).",
-        parse_mode="HTML",
-        reply_markup=flow_reply_keyboard(),
-    )
+    # Retire stale system controls: all event operations live in Chat → Events.
+    await state.clear()
+    await admin_event_list(callback, db, settings)
 
 
 @router.callback_query(F.data == "admin:features")
@@ -907,7 +1018,7 @@ async def admin_features_reset_ask(callback: CallbackQuery, db: Database, settin
     await callback.message.edit_text(
         "♻️ <b>Сброс функций</b>\n\n"
         "Вернуть все переключатели к заводским значениям?\n"
-        "Игры, тамагочи, видео-профили и награды за активность — включены.\n"
+        "Игры, питомцы, видео-профили и награды за активность — включены.\n"
         "Антифлуд, фильтры ссылок/медиа/стикеров, ночной и рейд-режим — выключены.",
         parse_mode="HTML",
         reply_markup=feature_reset_keyboard(),
@@ -960,12 +1071,15 @@ async def admin_morning(callback: CallbackQuery, db: Database, settings: Setting
     from community_bot.morning import publish_morning_digest
 
     try:
-        await publish_morning_digest(bot, db, settings, force=True)
+        pinned = await publish_morning_digest(bot, db, settings, force=True)
     except Exception:
         logger.exception("Не удалось отправить утренний пост вручную")
         await callback.message.answer("Сводку собрать не удалось. Повторю в 9:00.")
         return
-    await callback.message.answer("Утренний пост отправлен в чат и закреплён.")
+    await callback.message.answer(
+        "Утренний пост отправлен в чат и закреплён." if pinned else
+        "Пост отправлен, но закрепить его не удалось. Проверьте право бота закреплять сообщения.",
+    )
 
 
 @router.callback_query(F.data == "admin:health")
@@ -1198,13 +1312,12 @@ async def _notify_application_decision(
             f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
             f"{html.escape(settings.community_invite_url)}</a>"
         )
-    is_staff = await has_permission(db, settings, int(application["user_id"]), PERM_ADMIN_PANEL)
     await safe_send(
         bot,
         int(application["user_id"]),
         f"{result}.{reason_text}{invite}",
         parse_mode="HTML",
-        reply_markup=main_private_keyboard(is_staff),
+        reply_markup=await _private_keyboard(int(application["user_id"]), db, settings),
     )
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
@@ -1587,6 +1700,9 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
         await callback.answer("Нельзя выдать роль не ниже своей.", show_alert=True)
         return
     await db.set_role(user_id, new_role)
+    from community_bot.access import sync_menu
+
+    await sync_menu(bot, db, settings, user_id)
     label = str(role["name"])
     await callback.answer(f"Новая роль: {label}.")
     roles = await db.list_staff_roles()
@@ -1652,7 +1768,6 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
         f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
         f"Репутация: <b>{user['reputation']}</b> · щиты {int(user.get('hate_shields') or 0)}\n"
-        f"Титул: {html.escape(str(user.get('profile_title') or 'нет'))}\n"
         f"Возраст: {user['age'] or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Предупреждения: <b>{user['warnings']}</b>\n"
@@ -1681,6 +1796,10 @@ async def admin_begin_user_edit(
     prompts = {
         "cookies": "Введите точный новый баланс от 0 до 1 000 000.",
         "add_cookies": "Сколько печенек начислить? От 1 до 1 000 000.",
+        "clear_name": "Имя будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                      "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
+        "clear_bio": "Описание будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                     "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
         "name": "Введите новое имя (до 50 символов).",
         "age": "Введите новый возраст числом от 14 до 120.",
         "avatar": "Отправьте новую фотографию или видео профиля.",
@@ -1711,6 +1830,11 @@ async def admin_save_user_edit(
     data = await state.get_data()
     user_id = int(data.get("target_user_id") or 0)
     action = str(data["admin_action"])
+    if action.startswith('event_meta:'):
+        from community_bot.event_manager import save_field
+
+        await save_field(message, state, db, settings, bot)
+        return
     if action == "search":
         if not actor_role:
             await state.clear()
@@ -1731,17 +1855,8 @@ async def admin_save_user_edit(
         )
         return
     if action == "eventtitle":
-        if not actor_role:
-            await state.clear()
-            await message.answer("Недостаточно прав.")
-            return
-        title = (message.text or "").strip()
-        if not 2 <= len(title) <= 80:
-            await message.answer("Название от 2 до 80 символов.")
-            return
-        await db.set_bot_state("event_title", title)
         await state.clear()
-        await message.answer(f"✅ Мероприятие теперь: {html.escape(title)}", parse_mode="HTML")
+        await message.answer("Настройка перенесена: Админ-панель → Чат → События и участники.")
         return
     if action == "stopword_add":
         if not actor_role or not await has_permission(db, settings, message.from_user.id, PERM_FEATURES):
@@ -1845,6 +1960,16 @@ async def admin_save_user_edit(
             await db.update_profile(user_id, "avatar_file_id", message.photo[-1].file_id)
             await db.update_profile(user_id, "avatar_media_type", "photo")
         result = "Аватар обновлён."
+    elif action in {"clear_name", "clear_bio"}:
+        if (message.text or "").strip() != "ОЧИСТИТЬ":
+            await message.answer("Для подтверждения введите ОЧИСТИТЬ или отмените действие.")
+            return
+        field = "profile_name" if action == "clear_name" else "profile_bio"
+        await db.execute(
+            f"UPDATE users SET {field} = '', updated_at = ? WHERE user_id = ?",
+            (datetime.now(UTC).isoformat(), user_id),
+        )
+        result = "Поле очищено. Участнику нужно заполнить профиль заново для доступа к магазину и событиям."
     elif action == "name":
         value = (message.text or "").strip()
         if not 1 <= len(value) <= 50:
@@ -1984,6 +2109,98 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
     await message.answer(f"✅ Рассылка завершена. Доставлено: {delivered}, недоступно: {failed}.")
 
 
+@router.callback_query(F.data.startswith("admin:events:"))
+async def admin_event_list(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    from community_bot.event_manager import can_read
+
+    if not callback.message or not await can_read(db, settings, callback.from_user.id):
+        return
+    raw = (callback.data or "").rsplit(":", 1)[-1]
+    if not raw.isdigit():
+        await callback.answer("Некорректная страница.", show_alert=True)
+        return
+    page = int(raw)
+    from community_bot.event_manager import visible_events
+
+    events = await visible_events(db, page * 8, 9)
+    rows = [[InlineKeyboardButton(
+        text=f"{event['title'][:42]} ({event['participants']})",
+        callback_data=f"admin:event:view:{event['event_id']}",
+    )] for event in events[:8]]
+    if await has_permission(db, settings, callback.from_user.id, PERM_POST):
+        rows.insert(0, [InlineKeyboardButton(text="＋ Добавить мероприятие", callback_data="admin:event:new:0")])
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:events:{page - 1}"))
+    if len(events) > 8:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:events:{page + 1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="← Чат", callback_data="admin:chatroom")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎟 <b>События и участники</b>\n\n"
+        + ("Выберите пост. В скобках — число записавшихся." if events else "Опубликованных событий пока нет."),
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:attendees:"))
+async def admin_event_participants(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_EVENT_PARTICIPANTS):
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4 or not parts[3].isdigit():
+        await callback.answer("Некорректная страница.", show_alert=True)
+        return
+    event_id, page = parts[2], int(parts[3])
+    event = await db.get_studio_event(event_id) or await db.get_event_offer(event_id)
+    count = await db.event_participant_count(event_id)
+    if event is None and count == 0:
+        await callback.answer("Событие не найдено.", show_alert=True)
+        return
+    page = min(page, max(0, (count - 1) // 10))
+    people = await db.list_rsvps(event_id, offset=page * 10, limit=10)
+    title = str(event["title"]) if event else f"Архивное событие {event_id}"
+    lines = [f"🎟 <b>{html.escape(title)}</b>", f"Участники: <b>{count}</b>", ""]
+    for index, person in enumerate(people, start=page * 10 + 1):
+        link = user_link(int(person["user_id"]), person_label(person))
+        username = f" · @{html.escape(str(person['username']))}" if person.get("username") else ""
+        stake = int(person["stake"])
+        if person["kind"] == "payment":
+            status = f"оплачено {stake} 🍪"
+        elif person["kind"] == "legacy" and stake:
+            status = f"внесено {stake} 🍪 (архив)"
+        else:
+            status = f"залог {stake} 🍪" if stake else "записан"
+        lines.append(f"{index}. {link}{username} — {status}")
+    if not people:
+        lines.append("Пока никто не записался.")
+    rows = []
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:attendees:{event_id}:{page - 1}"))
+    if (page + 1) * 10 < count:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:attendees:{event_id}:{page + 1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="Журнал оплат", callback_data=f"eventlist:{event_id}:1:0")])
+    rows.append([InlineKeyboardButton(text="Обновить", callback_data=f"admin:attendees:{event_id}:{page}")])
+    if event and str(event["chat_id"]).startswith("-100"):
+        rows.append([InlineKeyboardButton(
+            text="Открыть пост", url=f"https://t.me/c/{str(event['chat_id'])[4:]}/{event['message_id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="← События", callback_data="admin:events:0")])
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    except TelegramBadRequest as error:
+        if "message is not modified" not in error.message.casefold():
+            raise
+
+
 @router.callback_query(F.data == "admin:post")
 async def admin_begin_community_post(
     callback: CallbackQuery,
@@ -2004,6 +2221,7 @@ async def admin_begin_community_post(
             "post_file_id": None,
             "post_buttons": [],
             "post_poll": None,
+            "post_draft": uuid4().hex,
         }
     )
     await callback.answer()
@@ -2018,10 +2236,14 @@ async def admin_begin_community_post(
 
 @router.callback_query(F.data == "post:cancel")
 async def admin_post_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
     await state.clear()
     await callback.answer("Отменено")
     if callback.message:
-        await callback.message.answer("Публикация отменена.")
+        await callback.message.answer(
+            "Пост уже опубликован. Незавершённые шаги закрыты; опубликованный пост сохранён."
+            if data.get("post_sent_id") else "Публикация отменена.",
+        )
 
 
 @router.callback_query(F.data.startswith("post:tpl:"))
@@ -2156,7 +2378,7 @@ async def _show_post_preview(message: Message, data: dict[str, Any], bot: Bot) -
     html_text = (
         html_text + poll_preview_block(data.get("post_poll")) + rsvp_preview_block(data.get("post_rsvp"))
     ).strip() or " "
-    markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"))
+    markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"), preview=True)
     preview = preview_keyboard()
     if markup:
         try:
@@ -2319,6 +2541,9 @@ async def admin_post_rsvp_no(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
+    if await state.get_state() != AdminFlow.post_rsvp_ask.state:
+        await callback.answer("Этот шаг уже завершён. Продолжите текущий черновик.", show_alert=True)
+        return
     await state.update_data(post_rsvp=None)
     await state.set_state(AdminFlow.post_preview)
     await callback.answer()
@@ -2335,7 +2560,10 @@ async def admin_post_rsvp_yes(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
-    event_id = f"e{int(datetime.now(UTC).timestamp())}"
+    if await state.get_state() != AdminFlow.post_rsvp_ask.state:
+        await callback.answer("Этот шаг уже завершён. Продолжите текущий черновик.", show_alert=True)
+        return
+    event_id = f"e{uuid4().hex[:20]}"
     await state.update_data(post_rsvp=event_id)
     await state.set_state(AdminFlow.post_preview)
     await callback.answer()
@@ -2360,20 +2588,37 @@ async def admin_post_send(
     settings: Settings,
     bot: Bot,
 ) -> None:
+    from community_bot.rsvp import event_lock
+
+    async with event_lock(db, f"studio:{callback.from_user.id}"):
+        await _admin_post_send(callback, state, db, settings, bot)
+
+
+async def _admin_post_send(
+    callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot,
+) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_preview.state:
+        await callback.answer("Этот черновик уже отправлен или закрыт.", show_alert=True)
         return
     if not settings.community_chat_id:
         await callback.answer("ID чата сообщества не настроен.", show_alert=True)
         return
-    from community_bot.posting import compose_post_markup, render_post, send_studio_poll, send_studio_post
+    from community_bot.posting import compose_post_markup, post_title, render_post, send_studio_poll, send_studio_post
 
     data = await state.get_data()
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
     markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"))
+    if markup and not html_text.strip() and not data.get("post_file_id"):
+        await callback.answer("Для кнопок нужен пост: добавьте текст или медиа в новом черновике.", show_alert=True)
+        return
     poll = data.get("post_poll")
-    sent = None
+    sent_id = int(data.get("post_sent_id") or 0)
+    event_id = str(data.get("post_rsvp") or data.get("post_event_id") or f"e{uuid4().hex[:20]}")
+    await state.update_data(post_event_id=event_id)
     try:
-        if html_text.strip() or data.get("post_file_id"):
+        if not sent_id and (html_text.strip() or data.get("post_file_id")):
             sent = await send_studio_post(
                 bot,
                 settings.community_chat_id,
@@ -2382,10 +2627,29 @@ async def admin_post_send(
                 data.get("post_file_id"),
                 markup,
             )
-        if poll:
+            if data.get("post_template") == "event":
+                await db.set_bot_state("current_studio_event", event_id)
+            sent_id = int(sent.message_id)
+            await state.update_data(post_sent_id=sent_id)
+        if sent_id and (data.get("post_rsvp") or data.get("post_template") == "event"):
+            raw_stake = await db.get_bot_state("rsvp_stake") or "0"
+            await db.save_studio_event(
+                event_id, settings.community_chat_id, sent_id, post_title(str(data.get("post_body") or "")),
+                list(data.get("post_buttons") or []), int(raw_stake) if raw_stake.isdigit() else 0,
+                callback.from_user.id, rsvp_enabled=bool(data.get("post_rsvp")),
+                description=str(data.get("post_body") or ""), media_type=str(data.get("post_media_type") or ""),
+            )
+        if sent_id and (data.get("post_template") == "event" or data.get("post_rsvp")):
+            from community_bot.stickers import send_context_sticker
+
+            await send_context_sticker(bot, db, settings.community_chat_id, "event", sent_id)
+        if poll and not data.get("post_poll_sent"):
             await send_studio_poll(bot, settings.community_chat_id, dict(poll))
+            await state.update_data(post_poll_sent=True)
     except TelegramBadRequest:
-        await callback.answer("Telegram не принял это сообщение или опрос.", show_alert=True)
+        await callback.answer(
+            "Telegram не принял сообщение или опрос. Повторите попытку или создайте новый черновик.", show_alert=True,
+        )
         return
     await db.log_admin_action(
         callback.from_user.id,
@@ -2396,7 +2660,6 @@ async def admin_post_send(
         reason=str(data.get("post_template") or "пост"),
     )
     template = str(data.get("post_template") or "")
-    event_id = str(data.get("post_rsvp") or "")
     await callback.answer("Опубликовано")
     from community_bot.notify import fanout
 
@@ -2404,16 +2667,14 @@ async def admin_post_send(
     if len(preview) > 180:
         preview = preview[:177] + "…"
     await fanout(bot, db, "events", f"📣 Новый пост студии.\n{preview}" if preview else "📣 Новый пост студии.")
-    if template == "event" and sent is not None:
+    if template == "event" and sent_id:
         from community_bot.posting import pay_ask_keyboard
 
-        if not event_id:
-            event_id = f"e{int(datetime.now(UTC).timestamp())}"
         await state.set_state(AdminFlow.post_pay_ask)
         await state.set_data(
             {
-                "pay_chat_id": int(sent.chat.id),
-                "pay_message_id": int(sent.message_id),
+                "pay_chat_id": settings.community_chat_id,
+                "pay_message_id": sent_id,
                 "pay_event_id": event_id,
                 "pay_body": html_text,
                 "pay_buttons": list(data.get("post_buttons") or []),
@@ -2431,15 +2692,25 @@ async def admin_post_send(
 
 
 @router.callback_query(F.data == "post:pay:no")
-async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext) -> None:
+async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_pay_ask.state:
+        await callback.answer("Этот шаг уже завершён.", show_alert=True)
+        return
     await state.clear()
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Ок, пост без кнопки оплаты.")
+        await callback.message.answer("Ок, мероприятие бесплатное; запись доступна в магазине.")
 
 
 @router.callback_query(F.data == "post:pay:yes")
-async def admin_post_pay_yes(callback: CallbackQuery, state: FSMContext) -> None:
+async def admin_post_pay_yes(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_pay_ask.state:
+        await callback.answer("Этот шаг уже завершён.", show_alert=True)
+        return
     await state.set_state(AdminFlow.post_pay_text)
     await callback.answer()
     if callback.message:
@@ -2465,7 +2736,10 @@ async def admin_post_pay_text(message: Message, state: FSMContext, db: Database)
 
 
 @router.message(AdminFlow.post_pay_price)
-async def admin_post_pay_price(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
+async def admin_post_pay_price(message: Message, state: FSMContext, db: Database, bot: Bot, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_POST):
+        await state.clear()
+        return
     if not message.from_user or not message.text or not message.text.isdigit():
         await message.answer("Введите цену целым числом печенек.")
         return
@@ -2482,31 +2756,30 @@ async def admin_post_pay_price(message: Message, state: FSMContext, db: Database
         await state.clear()
         await message.answer("Не удалось привязать кнопку к посту.")
         return
-    from community_bot.posting import compose_post_markup
+    from community_bot.rsvp import event_lock, refresh_event_markup
 
-    await db.save_event_offer(
-        event_id,
-        chat_id,
-        message_id,
-        button_text,
-        price,
-        message.from_user.id,
-        title="Мероприятие",
-        body=str(data.get("pay_body") or ""),
-    )
-    markup = compose_post_markup(
-        list(data.get("pay_buttons") or []),
-        data.get("pay_rsvp"),
-        pay=(button_text, event_id),
-    )
-    try:
-        await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
-    except TelegramBadRequest:
-        await state.clear()
-        await message.answer("Пост опубликован, но кнопку под ним отредактировать не удалось.")
-        return
+    async with event_lock(db, event_id):
+        event = await db.get_studio_event(event_id)
+        if not event:
+            await state.clear()
+            await message.answer("Не найден опубликованный пост. Создайте новый через студию.")
+            return
+        await db.save_event_offer(
+            event_id, chat_id, message_id, button_text, price, message.from_user.id,
+            title=str(event["title"]), body=str(data.get("pay_body") or ""),
+        )
+        await db.execute("UPDATE studio_events SET markup_dirty = 1 WHERE event_id = ?", (event_id,))
+        refreshed = await refresh_event_markup(bot, db, event_id)
     await state.clear()
-    await message.answer(f"✅ Кнопка «{html.escape(button_text)}» добавлена. Участие стоит {price} 🍪.")
+    await message.answer(
+        f"✅ Кнопка «{html.escape(button_text)}» добавлена. Участие стоит {price} 🍪." if refreshed
+        else "Оплата сохранена. Telegram пока не обновил кнопку; бот повторит попытку автоматически.",
+    )
+
+
+@router.callback_query(F.data == "post:rsvp:preview")
+async def admin_post_rsvp_preview(callback: CallbackQuery) -> None:
+    await callback.answer("Это предпросмотр. Запись откроется после публикации в сообществе.", show_alert=True)
 
 
 @router.callback_query(F.data == "admin:mention")
@@ -2666,11 +2939,15 @@ async def admin_delete_automessage(callback: CallbackQuery, db: Database, settin
 
 @router.message(command_or_alias("question"))
 @router.message(F.text == "❓ Задать вопрос")
-async def open_ticket(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
-    if not message.from_user:
+async def open_ticket(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot,
+    *, actor: User | None = None,
+) -> None:
+    actor = actor or message.from_user
+    if not actor or actor.is_bot:
         return
-    await register_telegram_user(db, message.from_user)
-    ticket_id, created = await db.get_or_create_ticket(message.from_user.id)
+    await register_telegram_user(db, actor)
+    ticket_id, created = await db.get_or_create_ticket(actor.id)
     await state.set_state(TicketForm.active)
     await state.set_data({"ticket_id": ticket_id})
     if created:
@@ -2679,7 +2956,7 @@ async def open_ticket(message: Message, state: FSMContext, db: Database, setting
                 bot,
                 reviewer_id,
                 f"🎫 Открыт тикет №{ticket_id} пользователем "
-                f"{user_link(message.from_user.id, message.from_user.full_name)}.",
+                f"{user_link(actor.id, actor.full_name)}.",
                 parse_mode="HTML",
                 reply_markup=ticket_keyboard(ticket_id),
             )
@@ -2743,7 +3020,7 @@ async def relay_ticket_message(message: Message, state: FSMContext, db: Database
 
 @router.callback_query(F.data.startswith("ticket:reply:"))
 async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)
@@ -2761,8 +3038,9 @@ async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Dat
 
 
 @router.message(ModeratorReply.ticket_message)
-async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
-    if not message.from_user:
+async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_TICKETS):
+        await state.clear()
         return
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
@@ -2787,7 +3065,7 @@ async def send_ticket_reply(message: Message, state: FSMContext, db: Database, b
 
 @router.callback_query(F.data.startswith("ticket:close:"))
 async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)
@@ -2807,3 +3085,27 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
     await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
+
+
+@router.callback_query(F.data.startswith("admin:event:"))
+async def admin_manage_event(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot):
+    from community_bot.event_manager import handle
+
+    await handle(callback, state, db, settings, bot)
+
+
+async def begin_event_creation(callback, state, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.clear()
+    await state.set_state(AdminFlow.post_body)
+    await state.set_data({
+        "post_template": "event", "post_body": "", "post_media_type": None,
+        "post_file_id": None, "post_buttons": [], "post_poll": None, "post_draft": uuid4().hex,
+    })
+    await callback.answer()
+    await callback.message.answer(
+        "Новое мероприятие. Пришлите название первой строкой, ниже — описание. "
+        "Затем можно добавить фото, кнопки, RSVP и проверить предпросмотр. "
+        "В чат ничего не отправится до кнопки «Опубликовать».",
+    )

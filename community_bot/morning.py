@@ -7,11 +7,17 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import aiohttp
+
+if TYPE_CHECKING:
+    from community_bot.day_note import DayEvent
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,7 @@ SPB_LONGITUDE = 30.3141
 MORNING_HOUR = 9
 CATCHUP_MINUTES = 150
 CAPTION_LIMIT = 1000
+MORNING_LAYOUT = "city-quotes-v1"
 
 WEATHER_URL = (
     "https://api.open-meteo.com/v1/forecast"
@@ -31,8 +38,12 @@ WEATHER_URL = (
 )
 TRAFFIC_URL = "https://export.yandex.ru/bar/reginfo.xml?region=2"
 NEWS_URL = "https://www.fontanka.ru/rss-feeds/zen-news.xml"
+NEWS_FEEDS = (
+    ("Фонтанка", NEWS_URL),
+    ("47news", "https://47news.ru/rss/"),
+    ("ТАСС", "https://tass.ru/rss/v2.xml"),
+)
 METRO_URL = "https://metro.spb.ru/rejimrabotystancii.html"
-FALLBACK_CLOSED_STATIONS = ("Парк Победы", "Фрунзенская")
 _CONTENT_TAG = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
 PHOTOS = Path(__file__).resolve().parent.parent / "assets" / "morning"
@@ -60,29 +71,6 @@ LINE_NAMES = {
     4: "оранжевой",
     5: "фиолетовой",
 }
-
-FACTS = (
-    "В Петербурге насчитывается более 300 мостов, но разводных среди них значительно меньше.",
-    "Петропавловская крепость заложена 27 мая 1703 года — с этой даты ведут историю города.",
-    "Метро открылось 15 ноября 1955 года: первой стала Кировско-Выборгская линия.",
-    "Белые ночи длятся примерно с конца мая до середины июля, когда солнце почти не уходит за горизонт.",
-    "Развод мостов на Неве идёт ночью в навигацию, обычно с апреля по ноябрь.",
-    "Кунсткамера, открытая в 1714 году, считается старейшим музеем России.",
-    "Исаакиевский собор строили с 1818 по 1858 год — сорок лет.",
-    "Невский проспект тянется примерно на 4,5 километра от Адмиралтейства до Александро-Невской лавры.",
-    "Город назывался Петроградом в 1914–1924 годах и Ленинградом в 1924–1991 годах.",
-    "Ростральные колонны на стрелке Васильевского острова когда-то служили маяками.",
-    "Крейсер «Аврора» стоит у Петроградской набережной.",
-    "Летний сад разбил ещё Пётр I, и он остаётся одним из старейших парков города.",
-    "Дворцовая площадь сложилась как главный парадный двор Зимнего дворца.",
-    "Медный всадник — памятник Петру I работы Фальконе, открытый в 1782 году.",
-    "Казанский собор выходит колоннадой на Невский проспект.",
-    "В дельте Невы десятки островов, и город до сих пор живёт между реками и каналами.",
-    "Эрмитаж вырос из частной коллекции Екатерины II и занимает Зимний дворец.",
-    "Стрелка Васильевского острова — место, где Нева делится на Большую и Малую.",
-    "Петропавловский собор долго был самым высоким зданием города.",
-    "Навигация и белые ночи — два сезона, ради которых в город специально приезжают.",
-)
 
 CRIME_RE = re.compile(
     r"убил|убийств|задержан|арестова|приговор|колони|мошеннич|наркот|изнасил|"
@@ -139,6 +127,7 @@ class NewsItem:
     categories: tuple[str, ...] = ()
     link: str = ""
     lead: str = ""
+    source: str = ""
 
     @property
     def body(self) -> str:
@@ -163,6 +152,9 @@ class MorningBrief:
     night: list[str] = field(default_factory=list)
     day_news: list[NewsItem] = field(default_factory=list)
     closed_stations: list[str] = field(default_factory=list)
+    news_available: bool = True
+    metro_available: bool = True
+    history: DayEvent | None = None
 
     @property
     def photo(self) -> Path | None:
@@ -245,10 +237,6 @@ def clock(iso_stamp: str) -> str:
         return iso_stamp[-5:]
 
 
-def fact_for(day: date) -> str:
-    return FACTS[day.toordinal() % len(FACTS)]
-
-
 def due_morning(now: datetime, posted_day: str | None) -> bool:
     if posted_day == now.date().isoformat():
         return False
@@ -288,7 +276,6 @@ def _markup(node: ET.Element) -> str:
     parts = [node.text or ""]
     for child in list(node):
         parts.append(ET.tostring(child, encoding="unicode"))
-        parts.append(child.tail or "")
     return "".join(parts)
 
 
@@ -309,10 +296,18 @@ def news_lead(raw: str) -> str:
 
 
 def clean_link(url: str) -> str:
-    return url.split("?", 1)[0].strip()
+    try:
+        parts = urlsplit(url.strip())
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+            return ""
+        query = [(key, value) for key, value in parse_qsl(parts.query)
+                 if not key.startswith("utm_") and key not in {"from", "yclid", "fbclid"}]
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+    except ValueError:
+        return ""
 
 
-def parse_rss(xml_text: str) -> list[NewsItem]:
+def parse_rss(xml_text: str, source: str = "") -> list[NewsItem]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
@@ -324,8 +319,11 @@ def parse_rss(xml_text: str) -> list[NewsItem]:
         if not title or not raw_date:
             continue
         try:
-            published = parsedate_to_datetime(raw_date).astimezone(UTC)
-        except (TypeError, ValueError, IndexError):
+            parsed = parsedate_to_datetime(raw_date)
+            if parsed.tzinfo is None:
+                continue
+            published = parsed.astimezone(UTC)
+        except (TypeError, ValueError, IndexError, OverflowError):
             continue
         categories = tuple((item.text or "").strip() for item in node.findall("category") if item.text)
         encoded = node.find(_CONTENT_TAG)
@@ -338,6 +336,7 @@ def parse_rss(xml_text: str) -> list[NewsItem]:
                 categories=categories,
                 link=clean_link(node.findtext("link") or ""),
                 lead=lead,
+                source=source,
             )
         )
     return items
@@ -507,7 +506,70 @@ def parse_closed_stations(page: str) -> list[str] | None:
     return stations
 
 
-DAY_NEWS_SKIP_RE = re.compile(r"убил|убийств|изнасил|расчлен|маньяк", re.IGNORECASE)
+DAY_NEWS_SKIP_RE = re.compile(
+    r"убил|убийств|изнасил|расчлен|маньяк|сожител|избил|избива|насили|"
+    r"полици|арестова|задержан|приговор|мошеннич|наркот|ножом|стрельб|ограб|"
+    r"попал[аи]? в больниц|госпитализ|получил\w* травм", re.IGNORECASE,
+)
+CITY_NEWS_RE = re.compile(
+    r"петербург|\bспб\b|петроград|кронштадт|колпино|сестрорецк|василеостров|"
+    r"купчино|коломяж|невский проспект|набережн\w* (?:мойки|фонтанки)|пулково", re.IGNORECASE,
+)
+REGION_NEWS_RE = re.compile(
+    r"ленобласт|ленинградск\w* област|всеволож|гатчин|выборг|кингисепп|"
+    r"соснов\w* бор|тихвин|тосно|кириш|мурино|кудрово", re.IGNORECASE,
+)
+RUSSIA_NEWS_RE = re.compile(
+    r"росси[яиюй]|россиян|госдум|федеральн\w* закон|москв|казан|новосибир|екатеринбург|"
+    r"нижн\w* новгород|владивосток|калининград", re.IGNORECASE,
+)
+
+
+def news_region(item: NewsItem) -> int | None:
+    # A publisher being based in SPb does not make every article local.
+    for text in (item.title, f"{item.title} {item.lead} {' '.join(item.categories)}"):
+        if CITY_NEWS_RE.search(text):
+            return 0
+        if REGION_NEWS_RE.search(text):
+            return 1
+    return 2 if RUSSIA_NEWS_RE.search(f"{item.title} {item.lead} {' '.join(item.categories)}") else None
+
+
+def _same_story(left: NewsItem, right: NewsItem) -> bool:
+    if clean_link(left.link) and clean_link(left.link) == clean_link(right.link):
+        return True
+    # Separate follow-up articles about the same road's congestion should occupy
+    # one slot, even when their headlines use different verbs.
+    left_title, right_title = left.title.casefold(), right.title.casefold()
+    common_road = any(re.search(pattern, left_title) and re.search(pattern, right_title)
+                      for pattern in (r"\bкад\b", r"\bзсд\b", r"невск\w* проспект"))
+    if common_road and any(re.search(pattern, left_title) and re.search(pattern, right_title)
+                           for pattern in (r"ремонт|перекры", r"пробк|затор|затруднен")):
+        return True
+    generic = {"в", "на", "и", "петербурге", "петербург", "санкт", "спб", "новый", "новую", "новая", "открыли"}
+    a = " ".join(word for word in re.findall(r"[а-яёa-z0-9]+", left.title.casefold()) if word not in generic)
+    b = " ".join(word for word in re.findall(r"[а-яёa-z0-9]+", right.title.casefold()) if word not in generic)
+    if not a or not b:
+        return left.title.casefold() == right.title.casefold()
+    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.72
+
+
+def news_value(item: NewsItem, now: datetime) -> int | None:
+    title = item.title.casefold()
+    # The feed mixes breaking news with archive reprints and historical features.
+    # A fresh publication date alone does not make a 1917 event today's news.
+    years = re.findall(r"\b((?:17|18|19|20)\d{2})\s*(?:году|года|г\.)", title)
+    retrospective = any(int(year) < now.year for year in years)
+    current_action = re.search(r"сегодня|завтра|откро|откры|возобнов|покаж|ремонт|реставр|восстанов", title)
+    if retrospective and not current_action:
+        return None
+    if re.search(r"лет назад|этот день|гороскоп|знак\w* зодиака|рецепт|драка|подрались", title):
+        return None
+    if re.search(r"перекры|маршрут|проезд|ремонт|откры|запуст|школ|больниц|поликлиник|музе|выстав|закон", title):
+        return 2
+    if re.search(r"погод|температур|потепл|похолод", title):
+        return 0  # A separate weather block already covers ordinary weather.
+    return 1
 
 
 def select_day_news(items: list[NewsItem], now: datetime, limit: int = 2) -> list[NewsItem]:
@@ -516,22 +578,37 @@ def select_day_news(items: list[NewsItem], now: datetime, limit: int = 2) -> lis
     fresh = [
         item
         for item in items
-        if start <= item.published <= moment + timedelta(minutes=5)
+        if item.published.tzinfo is not None and start <= item.published <= moment
         and not DAY_NEWS_SKIP_RE.search(f"{item.title} {item.lead}")
+        and clean_link(item.link) and news_region(item) is not None
+        and news_value(item, now) is not None
     ]
-    fresh.sort(key=lambda item: item.published, reverse=True)
-    local = [item for item in fresh if _local(f"{item.title} {item.lead}")]
-    return (local or fresh)[:limit]
+    fresh.sort(key=lambda item: (news_region(item), -int(news_value(item, now) or 0), -item.published.timestamp()))
+    selected: list[NewsItem] = []
+    if not fresh or limit <= 0:
+        return selected
+    # Keep the best available geography tier: never pad a single local story
+    # with an unrelated national headline just to fill a second slot.
+    tier = news_region(fresh[0])
+    for item in fresh:
+        if news_region(item) != tier:
+            break
+        if selected and news_value(item, now) == 0:
+            continue
+        if not any(_same_story(item, old) for old in selected):
+            selected.append(item)
+        if len(selected) >= min(limit, 2):
+            break
+    return selected
 
 
 def render_news_line(item: NewsItem) -> str:
-    text = html.escape(item.body)
+    title = html.escape(_short(item.title, 85))
+    body = html.escape(_short(item.body, 160)) if item.body != item.title else ""
     link = clean_link(item.link)
-    if not link:
-        return text
-    url = html.escape(link, quote=True)
-    visible = html.escape(link)
-    return f"{text} (<a href=\"{url}\">{visible}</a>)"
+    source = html.escape(item.source or "Источник")
+    citation = f'<a href="{html.escape(link, quote=True)}">{source}</a>' if link else ""
+    return "\n".join(part for part in (f"<b>{title}</b>", body, citation) if part)
 
 
 def upcoming_lines(payload: dict[str, object], now: datetime, count: int = 4) -> list[str]:
@@ -612,61 +689,87 @@ def brief_title(moment: datetime) -> str:
 
 
 def render_brief(brief: MorningBrief) -> str:
-    day = brief.when.astimezone(ZoneInfo("Europe/Moscow")).date()
-    weather_lines = ["🌤 Погода сейчас недоступна."]
-    sun = "—"
-    moon = "—"
+    # Budget plain text before escaping. Never truncate a finished HTML document,
+    # and never mutate the brief while trying shorter layouts.
+    for detail_limit in (240, 170, 125, 80, 40):
+        text = _render_compact_brief(brief, detail_limit)
+        if telegram_length(text) <= CAPTION_LIMIT:
+            return text
+    raise ValueError("Morning brief exceeds the Telegram caption budget")
+
+
+def telegram_length(text: str) -> int:
+    plain = html.unescape(re.sub(r"<[^>]+>", "", text))
+    return len(plain.encode("utf-16-le")) // 2
+
+
+def _quote(parts: list[str]) -> str:
+    return '<blockquote expandable>' + "\n".join(part for part in parts if part) + '</blockquote>'
+
+
+def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
+    local = brief.when.astimezone(ZoneInfo("Europe/Moscow"))
+    day = local.date()
+    parts = [brief_title(local) + ", Петербург", format_day(day), ""]
     if brief.weather:
+        weather = brief.weather
         emoji = {"clear": "☀️", "cloudy": "🌥", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}[
-            brief.weather.kind
+            weather.kind
         ]
-        weather_lines = [
-            f"{emoji} {format_temp(brief.weather.temperature)}, {weather_label(brief.weather.code).lower()}",
-        ]
-        sun = clock(brief.weather.sunrise)
-        moon = clock(brief.weather.sunset)
-    if brief.day_news:
-        news = ["📰 <b>За сутки</b>", *[render_news_line(item) for item in brief.day_news[:2]]]
+        advice = clothing_advice(weather).split(".", 1)[0] + "."
+        if weather.kind in {"rain", "storm"}:
+            advice += " Зонт пригодится."
+        parts.extend([
+            f"{emoji} {format_temp(weather.temperature)}, {weather_label(weather.code).lower()} · "
+            f"ощущается {format_temp(weather.feels_like)}",
+            html.escape(advice),
+        ])
     else:
-        news = ["📰 <b>За сутки</b>", "За сутки в ленте Фонтанки нет новых материалов."]
-    parts = [
-        brief_title(brief.when),
-        "",
-        *weather_lines,
-        _traffic_line(brief.traffic_level, brief.traffic_hint),
-        _closed_stations_line(brief.closed_stations),
-        "",
-        *news,
-        "",
-        "🕐 <b>Сегодня</b>",
-        f"📅 {format_day(day)}",
-        f"🌅 Рассвет — {sun}",
-        f"🌇 Закат — {moon}",
-        "",
-        "🏛 <b>Факт дня</b>",
-        html.escape(fact_for(day)),
-    ]
-    text = "\n".join(parts)
-    if len(text) > CAPTION_LIMIT and len(brief.day_news) > 1:
-        brief.day_news.pop()
-        return render_brief(brief)
-    if len(text) > CAPTION_LIMIT:
-        return text[: CAPTION_LIMIT - 1].rsplit("\n", 1)[0]
-    return text
+        parts.append("🌤 Погоду сейчас получить не удалось.")
+    transport = []
+    if brief.traffic_level is not None:
+        transport.append(f"пробки {brief.traffic_level}/10")
+    if brief.metro_available and brief.closed_stations:
+        transport.append("закрыты: " + _short(", ".join(brief.closed_stations), 65))
+    if transport:
+        parts.append("🚦 " + html.escape(" · ".join(transport)))
+    if brief.day_news:
+        parts.extend(["", "<b>За сутки</b>"])
+        for item in brief.day_news[:2]:
+            link = clean_link(item.link)
+            source = html.escape(item.source or "Источник")
+            citation = f'<a href="{html.escape(link, quote=True)}">{source}</a>' if link else ""
+            body = _short(item.body, detail_limit) if item.body != item.title else ""
+            parts.append(_quote([
+                "<b>" + html.escape(_short(item.title, 72)) + "</b>",
+                html.escape(body), citation,
+            ]))
+    elif not brief.news_available:
+        parts.extend(["", "Новости пока не загрузились."])
+    else:
+        parts.extend(["", "Подходящих новостей за сутки в доступных лентах не нашлось."])
+    parts.extend(["", "<b>Этот день в Петербурге</b>"])
+    event = brief.history
+    if event and event.year < day.year and (event.month, event.day) == (day.month, day.day):
+        from community_bot.day_note import years_ago
+
+        link = clean_link(event.url)
+        citation = f'<a href="{html.escape(link, quote=True)}">Подробнее</a>' if link else ""
+        parts.append(_quote([
+            f"<b>{event.year} · {html.escape(_short(event.title or 'Событие в городе', 55))}</b>",
+            f"{day.day} {MONTHS[day.month - 1]} · {years_ago(day.year - event.year)}",
+            html.escape(_short(event.text, 155)),
+            html.escape(_short(event.context, detail_limit)), citation,
+        ]))
+    else:
+        parts.append("Подтверждённого события на эту дату пока нет.")
+    return "\n".join(parts)
 
 
 async def _get_text(session: aiohttp.ClientSession, url: str) -> str:
-    try:
-        async with session.get(url) as response:
-            response.raise_for_status()
-            return await response.text()
-    except aiohttp.ClientSSLError:
-        if "metro.spb.ru" not in url:
-            raise
-        logger.warning("Сертификат metro.spb.ru не прошёл проверку, повторяю запрос к официальной странице")
-        async with session.get(url, ssl=False) as response:
-            response.raise_for_status()
-            return await response.text()
+    async with session.get(url) as response:
+        response.raise_for_status()
+        return await response.text()
 
 
 async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, object]:
@@ -676,16 +779,41 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, objec
     return payload if isinstance(payload, dict) else {}
 
 
+async def collect_news(session: aiohttp.ClientSession) -> tuple[list[NewsItem], bool]:
+    responses = await asyncio.gather(
+        *(_get_text(session, url) for _, url in NEWS_FEEDS), return_exceptions=True,
+    )
+    items: list[NewsItem] = []
+    available = False
+    for (source, _), raw in zip(NEWS_FEEDS, responses, strict=True):
+        if not isinstance(raw, str):
+            logger.warning("Лента %s не ответила", source)
+            continue
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError:
+            logger.warning("Лента %s вернула невалидный RSS", source)
+            continue
+        if root.tag.rsplit("}", 1)[-1].lower() not in {"rss", "rdf"}:
+            continue
+        available = True
+        items.extend(parse_rss(raw, source))
+    return items, available
+
+
 async def collect_brief(now: datetime) -> MorningBrief:
+    from community_bot.day_note import DayEvent, city_event_for
+
     brief = MorningBrief(when=now)
     timeout = aiohttp.ClientTimeout(total=12)
     headers = {"User-Agent": "NoraMorning/1.0"}
-    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-        weather_raw, traffic_raw, news_raw, metro_raw = await asyncio.gather(
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=True) as session:
+        weather_raw, traffic_raw, news_raw, metro_raw, history = await asyncio.gather(
             _get_json(session, WEATHER_URL),
             _get_text(session, TRAFFIC_URL),
-            _get_text(session, NEWS_URL),
+            collect_news(session),
             _get_text(session, METRO_URL),
+            city_event_for(now.astimezone(ZoneInfo("Europe/Moscow")).date()),
             return_exceptions=True,
         )
     if isinstance(weather_raw, dict):
@@ -696,24 +824,45 @@ async def collect_brief(now: datetime) -> MorningBrief:
         brief.traffic_level, brief.traffic_hint = parse_traffic_xml(traffic_raw)
     else:
         logger.warning("Утренние пробки не ответили")
-    if isinstance(news_raw, str):
-        brief.day_news = select_day_news(parse_rss(news_raw), now)
+    if isinstance(news_raw, tuple):
+        items, brief.news_available = news_raw
+        brief.day_news = select_day_news(items, now)
     else:
-        logger.warning("Утренняя лента новостей не ответила")
+        brief.news_available = False
     if isinstance(metro_raw, str):
         stations = parse_closed_stations(metro_raw)
-        brief.closed_stations = list(FALLBACK_CLOSED_STATIONS) if stations is None else stations
+        brief.metro_available = stations is not None
+        brief.closed_stations = stations or []
     else:
         logger.warning("Сводка метро не ответила")
-        brief.closed_stations = list(FALLBACK_CLOSED_STATIONS)
+        brief.metro_available = False
+    if isinstance(history, DayEvent):
+        brief.history = history
     return brief
+
+
+async def news_digest(now: datetime, limit: int = 2) -> str:
+    timeout = aiohttp.ClientTimeout(total=12)
+    headers = {"User-Agent": "NoraMorning/1.0"}
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=True) as session:
+            raw, available = await collect_news(session)
+        if not available:
+            return "Новости сейчас не открылись. Попробуй через минуту."
+        items = select_day_news(raw, now, max(1, limit))
+    except (aiohttp.ClientError, TimeoutError):
+        logger.warning("Новости для Норы не ответили")
+        return "Новости сейчас не открылись. Попробуй через минуту."
+    if not items:
+        return "📰 <b>За сутки</b>\nПодходящих новостей в доступных лентах не нашлось."
+    return "\n".join(["📰 <b>За сутки</b>", *[_quote([render_news_line(item)]) for item in items]])
 
 
 async def weather_reply(now: datetime) -> str:
     timeout = aiohttp.ClientTimeout(total=12)
     headers = {"User-Agent": "NoraMorning/1.0"}
     try:
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=True) as session:
             payload = await _get_json(session, WEATHER_URL)
         text = render_weather_command(payload, now)
     except (aiohttp.ClientError, TimeoutError):
@@ -725,38 +874,113 @@ async def weather_reply(now: datetime) -> str:
 
 
 async def publish_morning_digest(bot, db, settings, *, force: bool = False) -> bool:
+    # The scheduler and the manual button share one Bot instance.
+    lock = getattr(bot, "_morning_publish_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        bot._morning_publish_lock = lock
+    async with lock:
+        return await _publish_morning_digest(bot, db, settings, force=force)
+
+
+async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> bool:
     if not settings.community_chat_id:
         return True
     if not force and not await db.feature_enabled("morning_digest"):
         return True
     timezone = ZoneInfo(settings.timezone)
     now = datetime.now(timezone)
+    today = now.date().isoformat()
     posted = await db.get_bot_state("morning_digest_day")
+    if not force and posted == today and await db.get_bot_state("morning_layout_version") != MORNING_LAYOUT:
+        return await _refresh_today(bot, db, settings, now)
     if not force and not due_morning(now, posted):
         return True
+    pending_day = await db.get_bot_state("morning_pending_day")
+    pending_id = await db.get_bot_state("morning_pending_message_id")
+    # A sent but unpinned post is retried in place, rather than sent a second time.
+    if pending_day == today and pending_id:
+        return await _pin_morning(bot, db, settings.community_chat_id, int(pending_id), today)
+
     brief = await collect_brief(now)
     text = render_brief(brief)
     from aiogram.types import FSInputFile
 
+    from community_bot.ephemeral import keep_in_chat
+
     chat_id = settings.community_chat_id
     photo = brief.photo
-    if photo:
-        sent = await bot.send_photo(chat_id, FSInputFile(photo), caption=text, parse_mode="HTML")
-    else:
-        sent = await bot.send_message(chat_id, text, parse_mode="HTML")
+    with keep_in_chat():
+        if photo:
+            sent = await bot.send_photo(chat_id, FSInputFile(photo), caption=text, parse_mode="HTML")
+        else:
+            from aiogram.types import LinkPreviewOptions
+
+            sent = await bot.send_message(
+                chat_id, text, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+    await db.set_bot_state("morning_pending_message_id", str(sent.message_id))
+    await db.set_bot_state("morning_pending_day", today)
+    if brief.history:
+        await db.set_bot_state("morning_history_day", today)
+    return await _pin_morning(bot, db, chat_id, sent.message_id, today)
+
+
+async def _refresh_today(bot, db, settings, now: datetime) -> bool:
+    """Migrate today's known morning caption in place, preserving its photo and pin."""
+    from aiogram.exceptions import TelegramBadRequest
+
+    message_id = await db.get_bot_state("morning_pin_message_id")
+    if not message_id:
+        return False  # Never create an unsolicited duplicate if the old post cannot be identified.
+    brief = await collect_brief(now)
+    text = render_brief(brief)
+    try:
+        await bot.edit_message_caption(
+            chat_id=settings.community_chat_id, message_id=int(message_id), caption=text, parse_mode="HTML",
+        )
+    except TelegramBadRequest as exc:
+        reason = str(exc).casefold()
+        if "message is not modified" in reason:
+            pass
+        elif "no caption" in reason:
+            from aiogram.types import LinkPreviewOptions
+
+            await bot.edit_message_text(
+                chat_id=settings.community_chat_id, message_id=int(message_id), text=text, parse_mode="HTML",
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        else:
+            logger.warning("Не удалось обновить подпись существующего утреннего закрепа")
+            return False
+    await db.set_bot_state("morning_layout_version", MORNING_LAYOUT)
+    if brief.history:
+        await db.set_bot_state("morning_history_day", now.date().isoformat())
+    logger.info("Утренний закреп обновлён до %s без повторной отправки", MORNING_LAYOUT)
+    return True
+
+
+async def _pin_morning(bot, db, chat_id: int, message_id: int, today: str) -> bool:
+    from community_bot.stickers import send_context_sticker
+
+    await send_context_sticker(bot, db, chat_id, "morning", message_id)
     old_pin = await db.get_bot_state("morning_pin_message_id")
-    if old_pin:
+    try:
+        await bot.pin_chat_message(chat_id, message_id, disable_notification=True)
+    except Exception:
+        logger.warning("Утренний пост ушёл в чат, но закрепить его не удалось")
+        return False
+    await db.set_bot_state("morning_pin_message_id", str(message_id))
+    await db.set_bot_state("morning_digest_day", today)
+    await db.set_bot_state("morning_layout_version", MORNING_LAYOUT)
+    await db.set_bot_state("morning_pending_day", "")
+    await db.set_bot_state("morning_pending_message_id", "")
+    if old_pin and int(old_pin) != message_id:
         try:
             await bot.unpin_chat_message(chat_id, int(old_pin))
         except Exception:
-            logger.info("Старый утренний закреп уже снят")
-    try:
-        await bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
-        await db.set_bot_state("morning_pin_message_id", str(sent.message_id))
-    except Exception:
-        logger.warning("Утренний пост ушёл в чат, но закрепить его не удалось")
-    await db.set_bot_state("morning_digest_day", now.date().isoformat())
-    logger.info("Сводка за %s отправлена в чат", now.date().isoformat())
+            logger.info("Старый утренний закреп уже снят или недоступен")
+    logger.info("Сводка за %s отправлена и закреплена", today)
     return True
 
 

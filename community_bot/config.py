@@ -45,6 +45,9 @@ class Settings:
     freebie_channel_id: int
     freebie_channel_url: str
     community_invite_url: str
+    tmdb_api_key: str
+    gemini_api_key: str
+    groq_api_key: str
 
     def is_owner(self, user_id: int) -> bool:
         return user_id in self.owner_ids
@@ -79,6 +82,9 @@ def load_settings() -> Settings:
             "COMMUNITY_INVITE_URL",
             "https://t.me/+MfMowwQUlZlkMDIy",
         ).strip(),
+        tmdb_api_key=os.getenv("TMDB_API_KEY", "").strip(),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+        groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")

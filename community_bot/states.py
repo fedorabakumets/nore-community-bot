@@ -26,7 +26,6 @@ class ProfileEdit(StatesGroup):
     bio = State()
     avatar = State()
     video_avatar = State()
-    custom_status = State()
 
 
 class CookiePurchase(StatesGroup):
@@ -90,3 +89,7 @@ class AdminFlow(StatesGroup):
     automessage_interval = State()
     role_name = State()
     role_rename = State()
+
+
+class CommandStudio(StatesGroup):
+    value = State()

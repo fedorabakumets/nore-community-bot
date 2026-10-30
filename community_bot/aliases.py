@@ -44,6 +44,9 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "card": ("карточка",),
     "gift": ("подарить",),
     "report": ("репорт", "жалоба"),
+    "bug": ("баг",),
+    "participants": ("участники",),
+    "stickers": ("стикеры", "стикерпак"),
     "mail": ("почта", "письмо"),
     "board": ("доска", "таблица"),
     "lottery": ("розыгрыш", "лотерея"),
@@ -56,13 +59,13 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "ban": ("бан", "забанить"),
     "unban": ("разбан",),
     "role": ("роль",),
-    "setstatus": ("сетстатус",),
     "givecookies": ("выдатьпеченьки",),
     "setcookies": ("сетпеченьки",),
 }
 
 MULTIWORD_ALIASES: dict[str, str] = {
     "купить печеньки": "buycookies",
+    "выдать печеньки": "givecookies",
     "задать вопрос": "question",
     "заполнить анкету": "apply",
     "отменить игру": "gamecancel",
@@ -86,7 +89,12 @@ def canonical_command(token: str) -> str | None:
     cleaned = _PUNCT.sub("", token).casefold()
     if not cleaned:
         return None
-    return _ALIAS_TO_COMMAND.get(cleaned)
+    from community_bot.command_registry import resolve_alias
+
+    resolved = resolve_alias(cleaned)
+    if resolved:
+        return resolved
+    return None
 
 
 # Bare aliases that must match the whole message, not the first word.
@@ -111,6 +119,8 @@ _EXACT_TEXT_COMMANDS = {
     "mail",
     "pet",
     "pogoda",
+    "participants",
+    "stickers",
     "profile",
     "question",
     "reputation",
@@ -123,7 +133,7 @@ _EXACT_TEXT_COMMANDS = {
 
 # These only do something in a private chat. Do not delete them from the group:
 # a sentence or a lone «вопрос» is not a reason to erase the message.
-_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "question", "start"})
+_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "start"})
 
 
 def parse_trigger(text: str) -> tuple[str, str] | None:
@@ -132,6 +142,16 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     if not raw:
         return None
     folded = raw.casefold()
+    from community_bot.command_registry import is_exact_slug, phrase_command
+
+    phrase = phrase_command(folded)
+    if phrase:
+        command, alias = phrase
+        if folded == alias:
+            return command, ""
+        if command in _EXACT_TEXT_COMMANDS or is_exact_slug(command):
+            return None
+        return command, raw[len(alias) :].strip()
     for alias, command in sorted(MULTIWORD_ALIASES.items(), key=lambda item: -len(item[0])):
         if folded == alias:
             return command, ""
@@ -147,9 +167,17 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     command = canonical_command(token)
     if not command:
         return None
-    if command in _EXACT_TEXT_COMMANDS and not slash:
+    if (command in _EXACT_TEXT_COMMANDS or is_exact_slug(command)) and not slash:
         body = _PUNCT.sub("", raw).casefold()
-        allowed = {command, *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ()))}
+        from community_bot.command_registry import get_command
+
+        view = get_command(command)
+        live_aliases = view.aliases if view else ()
+        allowed = {
+            command,
+            *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ())),
+            *(alias.casefold() for alias in live_aliases),
+        }
         if body not in allowed:
             return None
         return command, ""
@@ -210,7 +238,17 @@ def is_group_command_to_sweep(message: Message) -> bool:
     if source[:1] in {"/", "／"}:
         return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
     if not parsed:
-        return False
+        # Reply-keyboard shortcuts have their own handlers outside the alias filter.
+        if text in {"🛒 Магазин", "🐾 Тамагочи", "🐾 Питомец", "👤 Мой профиль", "🛡 Админ-панель"}:
+            return True
+        from community_bot.domain import reputation_delta, transfer_amount
+        from community_bot.nora import strip_address
+
+        replied = getattr(message, "reply_to_message", None)
+        if replied and getattr(replied, "from_user", None) and text:
+            if reputation_delta(text) is not None or transfer_amount(text) is not None:
+                return True
+        return bool(text and strip_address(text) is not None)
     return parsed[0] not in _PRIVATE_CHAT_COMMANDS
 
 
@@ -227,6 +265,15 @@ class CommandOrAlias(Filter):
             return False
         name, args = parsed
         if name not in self.commands:
+            return False
+        from community_bot.command_registry import get_command
+
+        view = get_command(name)
+        chat = getattr(message, "chat", None)
+        chat_type = str(getattr(chat, "type", "") or "")
+        if view is not None and not view.enabled:
+            return False
+        if view is not None and chat_type and not view.allows(chat_type):
             return False
         return {
             "command": CommandObject(

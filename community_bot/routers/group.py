@@ -18,6 +18,8 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     ChatPermissions,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     LinkPreviewOptions,
     Message,
 )
@@ -60,7 +62,6 @@ from community_bot.helpers import (
 )
 from community_bot.keyboards import (
     admin_panel_keyboard,
-    cookie_order_review_keyboard,
     cookie_packages_keyboard,
     flow_reply_keyboard,
     freebie_keyboard,
@@ -88,7 +89,6 @@ from community_bot.permissions import (
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
-    TITLE_ITEMS,
     cookie_rate_line,
     cookie_shop_member_text,
     format_rub,
@@ -98,7 +98,7 @@ from community_bot.shop_catalog import (
     shop_prices_for,
 )
 from community_bot.states import CookiePurchase, FlexiblePurchase, ProfileEdit
-from community_bot.texts import GROUP_COMMANDS_TEXT, REPUTATION_HELP_TEXT, STORE_HELP_TEXT
+from community_bot.texts import REPUTATION_HELP_TEXT, STORE_HELP_TEXT
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="community")
@@ -366,20 +366,16 @@ async def _delete_message_ids(bot: Bot, chat_id: int, message_ids: list[int]) ->
 @router.message(command_or_alias("question"), F.chat.type.in_({"group", "supergroup"}))
 async def question_in_group(message: Message) -> None:
     notice = await message.reply(
-        "Тикет открывается в личке с ботом: напишите «вопрос» или нажмите «🎫 Тикет». Сообщение в чате остаётся."
+        "Тикет открывается в личке с ботом: напишите «вопрос» или нажмите «🎫 Тикет»."
     )
     asyncio.create_task(_delete_later(notice))
 
 
 @router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
-async def group_commands(message: Message) -> None:
-    await answer_block(
-        message,
-        "commands",
-        GROUP_COMMANDS_TEXT,
-        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
-        parse_mode="HTML",
-    )
+async def group_commands(message: Message, db: Database) -> None:
+    from community_bot.commands_guide import send_commands_card
+
+    await send_commands_card(message, db)
 
 
 @router.message(command_or_alias("pogoda"), F.chat.type.in_({"group", "supergroup"}))
@@ -387,12 +383,11 @@ async def group_weather(message: Message, settings: Settings) -> None:
     from community_bot.morning import weather_reply
 
     now = datetime.now(ZoneInfo(settings.timezone))
-    with keep_in_chat():
-        await message.answer(
-            await weather_reply(now),
-            parse_mode="HTML",
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-        )
+    await message.answer(
+        await weather_reply(now),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 @router.message(command_or_alias("reputation"), F.chat.type.in_({"group", "supergroup"}))
@@ -430,12 +425,15 @@ async def open_admin_from_group(message: Message, db: Database, settings: Settin
         f"Анкет на проверке: <b>{pending}</b>\n"
         f"Платежей на проверке: <b>{int(orders['count']) if orders else 0}</b>"
     )
+    from community_bot.routers.private import _web_admin_markup
+
+    web_markup = await _web_admin_markup(db, settings, message.from_user.id)
     try:
         await bot.send_message(
             message.from_user.id,
             text,
             parse_mode="HTML",
-            reply_markup=admin_panel_keyboard(
+            reply_markup=web_markup or admin_panel_keyboard(
                 await user_permissions(db, settings, message.from_user.id),
                 await db.dashboard_stats(),
             ),
@@ -461,18 +459,16 @@ async def staff_user_card(message: Message, db: Database, settings: Settings) ->
     pet = await db.get_pet(int(target["user_id"]), settle=False)
     note = str(target.get("moderator_note") or "").strip() or "нет"
     pet_line = str(pet["name"]) if pet else "нет"
-    with keep_in_chat():
-        await _respond(
-            message,
-            f"👤 <b>{html.escape(person_label(target))}</b> · <code>{target['user_id']}</code>\n"
-            f"Роль: {html.escape(str(target['role']))}\n"
-            f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
-            f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
-            f"Титул: {html.escape(str(target.get('profile_title') or 'нет'))}\n"
-            f"Питомец: {html.escape(str(pet_line))}\n"
-            f"Заметка: {html.escape(note)}",
-            parse_mode="HTML",
-        )
+    await _respond(
+        message,
+        f"👤 <b>{html.escape(person_label(target))}</b> · <code>{target['user_id']}</code>\n"
+        f"Роль: {html.escape(str(target['role']))}\n"
+        f"Репутация: <b>{target['reputation']}</b> · 🍪 {target['cookies']}\n"
+        f"Варны: {target['warnings']} · щиты: {int(target.get('hate_shields') or 0)}\n"
+        f"Питомец: {html.escape(str(pet_line))}\n"
+        f"Заметка: {html.escape(note)}",
+        parse_mode="HTML",
+    )
 
 
 @router.message(command_or_alias("id"))
@@ -939,28 +935,6 @@ async def change_role(message: Message, db: Database, settings: Settings) -> Non
     )
 
 
-@router.message(command_or_alias("setstatus"), F.chat.type.in_({"group", "supergroup"}))
-async def admin_set_status(message: Message, db: Database, settings: Settings) -> None:
-    if not await _require_perm(message, db, settings, PERM_USERS_EDIT) or not message.from_user:
-        return
-    target = await resolve_reply_target(message, db)
-    status = " ".join(remainder_args(message.text or "")).strip()[:50]
-    if not target or not status:
-        await _respond(message, "Ответьте на сообщение: /setstatus Новый статус")
-        return
-    await db.update_profile(int(target["user_id"]), "custom_status", status)
-    await db.log_admin_action(
-        message.from_user.id,
-        "set_status",
-        str(target["user_id"]),
-        status,
-        actor_name=message.from_user.full_name,
-        target_name=person_label(target),
-        reason=status,
-    )
-    await _respond(message, "Кастомный статус установлен.")
-
-
 async def _shop_prices(db: Database, user: dict[str, object], settings: Settings) -> dict[str, int]:
     return shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
 
@@ -977,7 +951,7 @@ async def _shop_home_text(db: Database, user: dict[str, object], settings: Setti
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Уровень: {tier.emoji} · скидка {tier.discount}%\n\n"
         "Откройте полку — у каждого товара цена в 🍪. Покупка только после подтверждения. "
-        "В чате этот экран не исчезает через 30 секунд."
+        "Категории и покупки синхронизированы с миниапкой."
     )
 
 
@@ -1018,15 +992,14 @@ async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
     user = await register_telegram_user(db, message.from_user)
-    with keep_in_chat():
-        sent = await answer_block(
-            message,
-            "shop",
-            await _shop_home_text(db, user, settings),
-            parse_mode="HTML",
-            reply_markup=await _shop_home_markup(db),
-        )
-        await bind_ui_owner(db, sent, message.from_user.id, "shop")
+    sent = await answer_block(
+        message,
+        "shop",
+        await _shop_home_text(db, user, settings),
+        parse_mode="HTML",
+        reply_markup=await _shop_home_markup(db),
+    )
+    await bind_ui_owner(db, sent, message.from_user.id, "shop")
 
 
 @router.callback_query(F.data == "shop:home")
@@ -1178,36 +1151,9 @@ async def receive_sbp_receipt(
         f"✅ Скриншот по заказу №{order_id} получен. Платёж взят в обработку.\n"
         "После проверки администратором бот сообщит результат."
     )
-    candidates = set(settings.reviewers)
-    for user in await db.list_all_users():
-        if str(user["role"]) in {"owner", "admin"}:
-            candidates.add(int(user["user_id"]))
-    recipients = {user_id for user_id in candidates if await has_permission(db, settings, user_id, PERM_PAYMENTS)}
-    caption = (
-        f"💳 <b>Заказ печенек №{order_id}</b>\n"
-        f"Пользователь: {user_link(message.from_user.id, message.from_user.full_name)}\n"
-        f"Пакет: <b>{cookies_phrase(amount)}</b> ({amount} 🍪) · сумма <b>{format_rub(rubles)}</b>"
-    )
-    for recipient_id in recipients:
-        try:
-            if media_type == "photo":
-                await bot.send_photo(
-                    recipient_id,
-                    file_id,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=cookie_order_review_keyboard(order_id),
-                )
-            else:
-                await bot.send_document(
-                    recipient_id,
-                    file_id,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=cookie_order_review_keyboard(order_id),
-                )
-        except (TelegramForbiddenError, TelegramBadRequest):
-            continue
+    from community_bot.shop_api import notify_cookie_order
+
+    await notify_cookie_order(bot, db, settings, order_id)
 
 
 @router.callback_query(F.data.startswith("cookie_order:"))
@@ -1268,11 +1214,25 @@ async def buy_shop_item(
         await callback.answer("Этот товар больше не продаётся.", show_alert=True)
         return
     raw = callback.data
-    confirmed = raw.startswith("shop:ok:")
-    item = raw.split(":", 2)[2] if confirmed else raw.split(":", 1)[1]
+    if raw.startswith("shop:ok:"):
+        await callback.answer("Старая кнопка покупки. Откройте товар заново — списания не было.", show_alert=True)
+        return
+    confirmed = raw.startswith("shop:pay:")
+    token = raw.removeprefix("shop:pay:") if confirmed else None
+    intent = await db.get_wallet_intent(callback.from_user.id, token) if token else None
+    if confirmed and not intent:
+        await callback.answer("Подтверждение устарело или уже выполнено. Откройте товар заново.", show_alert=True)
+        return
+    item = str(intent["item"]) if intent else raw.split(":", 1)[1]
     user = await register_telegram_user(db, callback.from_user)
     prices = await _shop_prices(db, user, settings)
-    if item in {"event_pass", "support"}:
+    if item == "event_pass":
+        from community_bot.event_access import open_event_purchase
+
+        await state.clear()
+        await open_event_purchase(callback, db)
+        return
+    if item in {"event_pass", "support"} and not confirmed:
         tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
         discount = item_discount(item, tier.discount)
         await state.set_state(FlexiblePurchase.amount)
@@ -1293,11 +1253,35 @@ async def buy_shop_item(
     if catalog_item and not int(catalog_item.get("enabled") or 0):
         await callback.answer("Товар выключен.", show_alert=True)
         return
-    if item not in prices:
+    flexible = item in {"event_pass", "support"}
+    if item not in prices and not flexible:
         await callback.answer("Товар временно недоступен.", show_alert=True)
         return
-    price = prices[item]
+    price = int(intent["price"]) if intent else prices[item]
+    if confirmed and not flexible and price != prices[item]:
+        await callback.answer("Цена изменилась. Откройте товар и подтвердите новую цену.", show_alert=True)
+        return
+    if confirmed and intent["payload"].get("gift"):
+        from community_bot.routers.life import _deliver_shop
+
+        ok, error = await _deliver_shop(
+            db, settings, bot, callback.from_user.id, int(intent["target_id"]), item, price, intent_id=token,
+        )
+        if not ok:
+            await callback.answer(error, show_alert=True)
+            return
+        await callback.answer("Подарок доставлен.")
+        await edit_block(
+            callback.message,
+            f"🎁 Подарок «{html.escape(item_label(item))}» доставлен.\nСписано <b>{price} 🍪</b>.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🛒 В магазин", callback_data="shop:home")],
+            ]),
+        )
+        return
     if not confirmed:
+        token = await db.create_wallet_intent(callback.from_user.id, item, price)
         label = item_label(item, str((catalog_item or {}).get("title") or ""))
         description = str((catalog_item or {}).get("description") or "").strip()
         header = shop_header_lines(await db.shop_header())
@@ -1310,9 +1294,9 @@ async def buy_shop_item(
             f"{extra}"
             f"Цена: <b>{price} 🍪</b>\n"
             f"Баланс: <b>{int(user['cookies'])} 🍪</b>\n\n"
-            "Нажмите «Купить», чтобы списать печеньки.",
+            "Нажмите «Подтвердить», чтобы списать печеньки.",
             parse_mode="HTML",
-            reply_markup=shop_confirm_keyboard(item, price),
+            reply_markup=shop_confirm_keyboard(token, price),
         )
         return
     if item == "video_avatar":
@@ -1323,7 +1307,7 @@ async def buy_shop_item(
             await callback.answer("Недостаточно печенек.", show_alert=True)
             return
         await state.set_state(ProfileEdit.video_avatar)
-        await state.set_data({"shop_price": price})
+        await state.set_data({"shop_price": price, "purchase_intent": token})
         await callback.answer()
         await callback.message.answer(
             "Отправьте короткое видео для карточки профиля. После сохранения спишется стоимость товара.",
@@ -1332,7 +1316,7 @@ async def buy_shop_item(
         return
     if item == "tamagotchi":
         if not await db.feature_enabled("tamagotchi"):
-            await callback.answer("Тамагочи временно выключены.", show_alert=True)
+            await callback.answer("Питомцы временно выключены.", show_alert=True)
             return
         if await db.get_pet(callback.from_user.id, settle=False):
             await callback.answer("У вас уже есть питомец.", show_alert=True)
@@ -1343,13 +1327,15 @@ async def buy_shop_item(
         await callback.answer()
         await callback.message.answer(
             f"Выберите питомца. Цена с вашей скидкой: {price} 🍪.",
-            reply_markup=pet_species_keyboard(price),
+            reply_markup=pet_species_keyboard(token),
         )
         return
     pet_items = PET_SUPPLIES
     if item in pet_items:
         kind, gain, label = pet_items[item]
-        ok, error, _ = await db.purchase_pet_supply(callback.from_user.id, kind, gain, price, item)
+        ok, error, _ = await db.purchase_pet_supply(
+            callback.from_user.id, kind, gain, price, item, intent_id=token,
+        )
         if not ok:
             await callback.answer(error, show_alert=True)
             return
@@ -1368,53 +1354,19 @@ async def buy_shop_item(
             reply_markup=await _shop_home_markup(db),
         )
         return
-    if item == "custom_status":
-        if int(user["cookies"]) < price:
-            await callback.answer("Недостаточно печенек.", show_alert=True)
-            return
-        await state.set_state(ProfileEdit.custom_status)
-        await state.set_data({"shop_price": price})
-        await callback.answer()
-        await callback.message.answer(
-            "Введите новый кастомный статус (до 50 символов).",
-            reply_markup=flow_reply_keyboard() if callback.message.chat.type == "private" else None,
-        )
-        return
     if item in IMMUNITY_HOURS:
-        ok, error = await db.buy_item(callback.from_user.id, item, price)
+        ok, error = await db.buy_item(callback.from_user.id, item, price, intent_id=token)
         if not ok:
             await callback.answer(error, show_alert=True)
             return
         hours = IMMUNITY_HOURS[item]
-        await db.set_immunity(callback.from_user.id, datetime.now(UTC) + timedelta(hours=hours))
         from community_bot.notify import vitrine_consumed
 
         await vitrine_consumed(bot, db, item)
         from community_bot.life import unlock
 
         await unlock(db, callback.from_user.id, "shop_first")
-        await callback.answer("Покупка выполнена.")
-        fresh = await db.get_user(callback.from_user.id) or user
-        await edit_block(
-            callback.message,
-            await _shop_home_text(db, fresh, settings),
-            parse_mode="HTML",
-            reply_markup=await _shop_home_markup(db),
-        )
-        return
-    if item in TITLE_ITEMS:
-        ok, error = await db.buy_item(callback.from_user.id, item, price)
-        if not ok:
-            await callback.answer(error, show_alert=True)
-            return
-        await db.update_profile(callback.from_user.id, "profile_title", TITLE_ITEMS[item])
-        from community_bot.notify import vitrine_consumed
-
-        await vitrine_consumed(bot, db, item)
-        from community_bot.life import unlock
-
-        await unlock(db, callback.from_user.id, "shop_first")
-        await callback.answer("Титул надет.")
+        await callback.answer(f"Иммунитет продлён на {hours} ч.")
         fresh = await db.get_user(callback.from_user.id) or user
         await edit_block(
             callback.message,
@@ -1429,7 +1381,7 @@ async def buy_shop_item(
     if item == "ornate_profile" and user.get("profile_ornate"):
         await callback.answer("Кастомный профиль уже куплен.", show_alert=True)
         return
-    ok, error = await db.buy_item(callback.from_user.id, item, price)
+    ok, error = await db.buy_item(callback.from_user.id, item, price, intent_id=token)
     if not ok:
         await callback.answer(error, show_alert=True)
         return
@@ -1450,7 +1402,7 @@ async def buy_shop_item(
                 parse_mode="HTML",
             )
     labels = {
-        "restore_rep": "Репутация поднята на +10 (не выше 100).",
+        "restore_rep": "Репутация поднята в пределах доступного максимума.",
         "immunity": "Иммунитет от отрицательной репутации включён на 24 часа.",
         "immunity_24h": "Плащ иммунитета на 24 часа.",
         "rep_shield": "Щит на один −реп добавлен.",
@@ -1494,34 +1446,22 @@ async def finish_flexible_purchase(
         await message.answer("Сумма должна быть от 1 до 1 000 000 🍪.")
         return
     data = await state.get_data()
-    item = str(data["flex_item"])
+    item = str(data.get("flex_item") or "")
+    if item not in {"event_pass", "support"}:
+        await message.answer("Откройте оплату заново — списания не было.")
+        return
     discount = int(data["flex_discount"])
     price = discounted_price(base_amount, discount)
-    ok, error = await db.buy_item(message.from_user.id, item, price)
-    if not ok:
-        await state.clear()
-        await message.answer(error)
-        return
+    token = await db.create_wallet_intent(
+        message.from_user.id, item, price, payload={"base_amount": base_amount, "discount": discount},
+    )
     label = "Оплата мероприятия" if item == "event_pass" else "Поддержка развития"
     await state.clear()
-    if item == "event_pass":
-        await message.answer(
-            f"✅ {label}: списано <b>{price} 🍪</b>. Скидка репутации на мероприятия не действует.",
-            parse_mode="HTML",
-        )
-    else:
-        await message.answer(
-            f"✅ {label}: выбрано {base_amount} 🍪, скидка {discount}%, списано <b>{price} 🍪</b>.",
-            parse_mode="HTML",
-        )
-    for owner_id in settings.owner_ids:
-        await safe_send(
-            bot,
-            owner_id,
-            f"💚 {user_link(message.from_user.id, message.from_user.full_name)} — {label.lower()}: "
-            f"{base_amount} 🍪, списано {price} 🍪 со скидкой {discount}%.",
-            parse_mode="HTML",
-        )
+    await message.answer(
+        f"<b>{label}</b>\nВыбрано: {base_amount} 🍪 · скидка {discount}%\n"
+        f"Спишется: <b>{price} 🍪</b>. Подтвердите оплату кнопкой.",
+        parse_mode="HTML", reply_markup=shop_confirm_keyboard(token, price),
+    )
 
 
 @router.message(ProfileEdit.video_avatar)
@@ -1530,37 +1470,20 @@ async def save_video_avatar(message: Message, state: FSMContext, db: Database) -
         await message.answer("Нужно отправить видеофайл как видео, не как документ.")
         return
     data = await state.get_data()
+    if not data.get("purchase_intent"):
+        await message.answer("Покупка устарела. Откройте товар заново.")
+        return
     price = int(data["shop_price"])
-    ok, error = await db.buy_item(message.from_user.id, "video_avatar", price)
+    ok, error = await db.buy_item(
+        message.from_user.id, "video_avatar", price,
+        intent_id=str(data["purchase_intent"]), profile_value=message.video.file_id,
+    )
     if not ok:
         await state.clear()
         await message.answer(error)
         return
-    await db.update_profile(message.from_user.id, "avatar_file_id", message.video.file_id)
-    await db.update_profile(message.from_user.id, "avatar_media_type", "video")
     await state.clear()
     await message.answer(f"✅ Видео-профиль установлен. Списано {price} 🍪.")
-
-
-@router.message(ProfileEdit.custom_status)
-async def save_purchased_status(message: Message, state: FSMContext, db: Database) -> None:
-    if not message.from_user or not message.text:
-        await message.answer("Введите статус текстом.")
-        return
-    status = message.text.strip()
-    if not 1 <= len(status) <= 50:
-        await message.answer("Статус должен содержать от 1 до 50 символов.")
-        return
-    data = await state.get_data()
-    price = int(data["shop_price"])
-    ok, error = await db.buy_item(message.from_user.id, "custom_status", price)
-    if not ok:
-        await state.clear()
-        await message.answer(error)
-        return
-    await db.update_profile(message.from_user.id, "custom_status", status)
-    await state.clear()
-    await message.answer(f"✅ Статус установлен. Списано {price} 🍪.")
 
 
 @router.message(command_or_alias("givecookies"), F.chat.type.in_({"group", "supergroup"}))
@@ -1638,15 +1561,14 @@ async def freebie_offer(message: Message, settings: Settings) -> None:
     if not settings.freebie_channel_url:
         await _respond(message, "Бонус за подписку ещё не настроен владельцем.")
         return
-    with keep_in_chat():
-        await _respond(
-            message,
-            "🎁 <b>Бесплатные печеньки</b>\n\n"
-            "Подпишитесь на канал и нажмите «Проверить подписку». "
-            "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
-            parse_mode="HTML",
-            reply_markup=freebie_keyboard(settings.freebie_channel_url),
-        )
+    await _respond(
+        message,
+        "🎁 <b>Бесплатные печеньки</b>\n\n"
+        "Подпишитесь на канал и нажмите «Проверить подписку». "
+        "Золотой уровень получит 10 🍪, остальные — 8 🍪. Награда выдаётся один раз.",
+        parse_mode="HTML",
+        reply_markup=freebie_keyboard(settings.freebie_channel_url),
+    )
 
 
 @router.callback_query(F.data == "freebie:check", F.message.chat.type.in_({"group", "supergroup"}))

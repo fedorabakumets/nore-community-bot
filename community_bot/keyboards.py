@@ -101,10 +101,14 @@ def private_menu_keyboard(
         notices = f"🔔 Уведомления ({unread})"
     rows = [
         [
+            ibtn("💼 Кошелёк", "menu:wallet"),
+            ibtn("🛒 Магазин", "menu:shop", STYLE_GO),
+        ],
+        [
             ibtn("👤 Профиль", "menu:profile", STYLE_FUN),
             ibtn("🐾 Питомец", "menu:pet", STYLE_FUN),
         ],
-        [ibtn(notices, "menu:notices")],
+        [ibtn(notices, "menu:notices"), ibtn("🎫 Поддержка", "menu:question")],
     ]
     if show_admin:
         rows.append([ibtn("🛡 Админ-панель", "menu:admin")])
@@ -178,6 +182,9 @@ def admin_queue_keyboard(permissions: list[str], stats: dict[str, int] | None = 
     if _allow(permissions, "payments"):
         n = int(stats.get("pending_orders") or 0)
         rows.append([ibtn(f"💳 Платежи ({n})" if n else "💳 Платежи", "admin:orders")])
+    if _allow(permissions, "tickets"):
+        n = int(stats.get("open_tickets") or 0)
+        rows.append([ibtn(f"🎫 Тикеты ({n})" if n else "🎫 Тикеты", "admin:tickets:0")])
     if _allow(permissions, "tickets") or _allow(permissions, "admin.panel"):
         n = int(stats.get("pending_reports") or 0)
         rows.append([ibtn(f"🚩 Репорты ({n})" if n else "🚩 Репорты", "admin:reports")])
@@ -217,7 +224,10 @@ def admin_chat_keyboard(permissions: list[str]) -> InlineKeyboardMarkup:
         rows.append(chat_row)
     if _allow(permissions, "chat.post"):
         rows.append([ibtn("📢 Сообщение в сообщество", "admin:post")])
+
         rows.append([ibtn("🎲 Розыгрыш", "admin:lottery")])
+    if _allow(permissions, "events.participants") or _allow(permissions, "chat.post"):
+        rows.append([ibtn("🎟 События и участники", "admin:events:0")])
     if _allow(permissions, "automessages"):
         rows.append([ibtn("⏱ Автосообщения", "admin:auto:list")])
     if _allow(permissions, "features"):
@@ -238,9 +248,10 @@ def admin_system_keyboard(permissions: list[str], *, is_owner: bool = False) -> 
     if _allow(permissions, "features") or _allow(permissions, "users.edit"):
         rows.append([ibtn("🛠 Управление магазином", "ashop:home", STYLE_GO)])
         rows.append([ibtn("⭐ Витрина магазина", "admin:vitrine")])
-        rows.append([ibtn("🎟 Название мероприятия", "admin:eventtitle")])
         rows.append([ibtn("🍪 Залог RSVP", "admin:rsvpstake")])
         rows.append([ibtn("🌅 Утренний пост сейчас", "admin:morning", STYLE_FUN)])
+    if _allow(permissions, "commands.studio"):
+        rows.append([ibtn("⌨️ Команды", "admin:cmds")])
     if is_owner:
         rows.append([ibtn("🔄 Перезапустить бота", "admin:restart", STYLE_CLOSE)])
     rows.append([back_btn("admin:panel")])
@@ -273,7 +284,8 @@ def admin_reports_keyboard(rows_data: list[dict[str, object]]) -> InlineKeyboard
         report_id = int(row["id"])
         rows.append(
             [
-                ibtn(f"✅ #{report_id}", f"admin:report:ok:{report_id}", STYLE_GO),
+                ibtn(f"Открыть #{report_id}", f"admin:report:view:{report_id}"),
+                ibtn("✅", f"admin:report:ok:{report_id}", STYLE_GO),
                 ibtn("❌", f"admin:report:no:{report_id}", STYLE_CLOSE),
             ]
         )
@@ -407,6 +419,10 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("📝 Заметка", f"admin:edit:note:{user_id}"),
             ],
             [
+                ibtn("Очистить имя", f"admin:edit:clear_name:{user_id}"),
+                ibtn("Очистить описание", f"admin:edit:clear_bio:{user_id}"),
+            ],
+            [
                 ibtn("✏️ Имя", f"admin:edit:name:{user_id}"),
                 ibtn("🎂 Возраст", f"admin:edit:age:{user_id}"),
             ],
@@ -414,7 +430,6 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
                 ibtn("🖼 Аватар", f"admin:edit:avatar:{user_id}"),
                 ibtn("⚠️ Нарушения", f"admin:edit:warnings:{user_id}"),
             ],
-            [ibtn("⭐ Титул недели", f"admin:weekstar:{user_id}", STYLE_FUN)],
             [back_btn("admin:people")],
         ]
     )
@@ -460,7 +475,9 @@ def ticket_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMarkup:
+def profile_keyboard(
+    user_id: int, is_private: bool = False, *, back_to_menu: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
         [
             ibtn("Имя", f"profile:name:{user_id}"),
@@ -475,7 +492,7 @@ def profile_keyboard(user_id: int, is_private: bool = False) -> InlineKeyboardMa
     ]
     if is_private:
         rows.append([ibtn("🌍 Сделать открытым", f"profile:public:{user_id}", STYLE_GO)])
-    rows.append([close_btn("ui:close")])
+    rows.append(([back_btn("menu:home")] if back_to_menu else []) + [close_btn("ui:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -575,7 +592,7 @@ def shop_home_keyboard(
     if shop.get("enabled"):
         button = str(shop.get("button") or DEFAULT_COOKIE_SHOP["button"])[:40]
         rows.append([ibtn(button, "shop:buy_cookies", STYLE_GO)])
-    rows.append([close_btn("shop:close")])
+    rows.append([back_btn("menu:home"), close_btn("shop:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -610,10 +627,10 @@ def shop_category_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def shop_confirm_keyboard(item: str, price: int) -> InlineKeyboardMarkup:
+def shop_confirm_keyboard(intent_id: str, price: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn(f"✅ Купить за {price} 🍪", f"shop:ok:{item}", STYLE_GO)],
+            [ibtn(f"✅ Подтвердить · {price} 🍪", f"shop:pay:{intent_id}", STYLE_GO)],
             [back_btn("shop:home"), close_btn("shop:close")],
         ]
     )
@@ -688,18 +705,18 @@ def transfer_keyboard(transfer_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def pet_species_keyboard(price: int) -> InlineKeyboardMarkup:
+def pet_species_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                ibtn("🐈 Кот", f"pet:species:cat:{price}", STYLE_FUN),
-                ibtn("🐕 Пёс", f"pet:species:dog:{price}", STYLE_FUN),
+                ibtn("🐈 Кот", f"pet:species:cat:{intent_id}", STYLE_FUN),
+                ibtn("🐕 Пёс", f"pet:species:dog:{intent_id}", STYLE_FUN),
             ],
             [
-                ibtn("🦝 Енот", f"pet:species:raccoon:{price}", STYLE_FUN),
-                ibtn("🦊 Лиса", f"pet:species:fox:{price}", STYLE_FUN),
+                ibtn("🦝 Енот", f"pet:species:raccoon:{intent_id}", STYLE_FUN),
+                ibtn("🦊 Лиса", f"pet:species:fox:{intent_id}", STYLE_FUN),
             ],
-            [ibtn("🐉 Дракончик", f"pet:species:dragon:{price}", STYLE_GO)],
+            [ibtn("🐉 Дракончик", f"pet:species:dragon:{intent_id}", STYLE_GO)],
             [ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE)],
         ]
     )
@@ -732,8 +749,8 @@ FEATURE_META = {
         "Рулетка, печеньки, мафия и бункер. Выключение прячет игровые команды.",
     ),
     "tamagotchi": (
-        "🐾 Тамагочи",
-        "Талисман сообщества и экспедиции за редкими находками. Не влияет на уже существующих питомцев в базе.",
+        "🐾 Питомец",
+        "Питомец и экспедиции за редкими находками. Не влияет на уже существующих питомцев в базе.",
     ),
     "profile_video": (
         "🎬 Видео-профили",
@@ -741,7 +758,7 @@ FEATURE_META = {
     ),
     "activity_rewards": (
         "🎁 Награды за активность",
-        "За каждые 120 сообщений в чате владелец тамагочи тихо получает еду и воду — без лички.",
+        "За каждые 120 сообщений в чате владелец питомца тихо получает еду и воду — без лички.",
     ),
     "anti_flood": (
         "🛡 Антифлуд",
@@ -791,7 +808,7 @@ def features_panel_text(flags: list[dict[str, object]]) -> str:
         "⚙️ <b>Функции и защита чата</b>",
         "",
         "🟢 включено · ⚪ выключено. Каждая кнопка — переключатель.",
-        "«Сброс» возвращает заводские значения (игры и тамагочи включены, фильтры выключены).",
+        "«Сброс» возвращает заводские значения (игры и питомцы включены, фильтры выключены).",
         "",
     ]
     for key, (title, description) in FEATURE_META.items():
@@ -1001,28 +1018,28 @@ def game_vote_keyboard(game_id: int, players: list[dict[str, object]]) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def wallet_keyboard(can_borrow: bool) -> InlineKeyboardMarkup:
-    loan_label = "🍪 Взять 100 в долг" if can_borrow else "🍪 Кредит уже открыт"
+def wallet_keyboard(can_borrow: bool, *, has_debt: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [ibtn("📜 История операций", "wallet:history", STYLE_FUN), ibtn("🍪 Пополнить", "shop:buy_cookies", STYLE_GO)],
+        [ibtn("💸 Перевести", "wallet:send"), ibtn("🛒 Магазин", "wallet:shop")],
+    ]
+    if has_debt:
+        rows.append([ibtn("💳 Погасить просроченный долг", "wallet:repay", STYLE_GO)])
+    elif can_borrow:
+        rows.append([ibtn("🍪 НОРА — СТАРТЕР-ПАК", "wallet:loan")])
+    rows.extend([
+        [ibtn("❓ Условия и комиссии", "wallet:help")],
+        [back_btn("menu:home"), close_btn("ui:close")],
+    ])
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                ibtn("📜 История", "wallet:history", STYLE_FUN),
-                ibtn("🛒 Пополнить", "wallet:shop", STYLE_GO),
-            ],
-            [
-                ibtn("💸 Перевести", "wallet:send"),
-                ibtn(loan_label, "wallet:loan", STYLE_GO if can_borrow else None),
-            ],
-            [ibtn("❓ Помощь по кошельку", "wallet:help")],
-            [close_btn("ui:close")],
-        ]
+        inline_keyboard=rows,
     )
 
 
-def wallet_loan_confirm_keyboard() -> InlineKeyboardMarkup:
+def wallet_loan_confirm_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ibtn("Да, взять 100 🍪", "wallet:loan:yes", STYLE_GO)],
+            [ibtn("Получить 100 🍪 с возвратом", f"wallet:loan:yes:{intent_id}", STYLE_GO)],
             [ibtn("Не надо", "wallet:back", STYLE_CLOSE)],
         ]
     )
