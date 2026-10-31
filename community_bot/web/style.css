@@ -100,9 +100,10 @@ main:has(.lk-screen) header{margin-bottom:14px}
 .seasonal-links{display:grid;gap:9px;margin-top:14px}.seasonal-links a{display:block;padding:7px 0;border-bottom:1px solid #ffffff12;font-size:11px;line-height:1.8}
 
 /* Community layout: pixel headings, native readable body typography. */
-:root{--body-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--heading-font:NoraCraft,monospace;--bg:#0b0b0d}
+:root{--body-font:Rubik,"Segoe UI",Roboto,Arial,sans-serif;--heading-font:Rubik,"Segoe UI",Roboto,Arial,sans-serif;--bg:#0b0b0d}
+@font-face{font-family:Rubik;src:url('/fonts/Rubik-Variable.ttf') format('truetype');font-style:normal;font-weight:100 900;font-display:swap}
 body{font-family:var(--body-font);line-height:1.5;background:radial-gradient(ellipse at 0 0,#18171b66,transparent 55%),var(--bg)}
-h1,h2,h3,.brand,.play-hero strong{font-family:var(--heading-font);font-weight:500}
+h1,h2,h3,.brand,.play-hero strong{font-family:var(--heading-font);font-weight:600}
 h1{font-size:clamp(29px,7vw,40px);line-height:1.3}h2{font-size:23px;line-height:1.35}h3{font-size:17px}
 .brand{font-size:26px;letter-spacing:1px}.city{font-size:13px;text-transform:none;letter-spacing:0;max-width:none;color:#aaa9b2;margin-top:0;line-height:1.6}header{margin-bottom:22px;padding:10px 0}
 .greeting{font-size:16px;font-weight:550;color:#a9a7b0}.eyebrow{font-size:11px;letter-spacing:.7px}.sub,.event p{font-size:14px;line-height:1.65}

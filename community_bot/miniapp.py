@@ -394,6 +394,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
                  'interactive.js', 'people.js', 'community.js', 'avatars.js', 'events.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
+    app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))
+    app.router.add_get('/fonts/Rubik-OFL.txt', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Rubik-OFL.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
     app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
