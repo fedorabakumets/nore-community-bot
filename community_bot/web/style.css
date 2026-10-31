@@ -100,9 +100,10 @@ main:has(.lk-screen) header{margin-bottom:14px}
 .seasonal-links{display:grid;gap:9px;margin-top:14px}.seasonal-links a{display:block;padding:7px 0;border-bottom:1px solid #ffffff12;font-size:11px;line-height:1.8}
 
 /* Community layout: pixel headings, native readable body typography. */
-:root{--body-font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;--heading-font:NoraCraft,monospace;--bg:#0b0b0d}
+:root{--body-font:Rubik,"Segoe UI",Roboto,Arial,sans-serif;--heading-font:Rubik,"Segoe UI",Roboto,Arial,sans-serif;--bg:#0b0b0d}
+@font-face{font-family:Rubik;src:url('/fonts/Rubik-Variable.ttf') format('truetype');font-style:normal;font-weight:100 900;font-display:swap}
 body{font-family:var(--body-font);line-height:1.5;background:radial-gradient(ellipse at 0 0,#18171b66,transparent 55%),var(--bg)}
-h1,h2,h3,.brand,.play-hero strong{font-family:var(--heading-font);font-weight:500}
+h1,h2,h3,.brand,.play-hero strong{font-family:var(--heading-font);font-weight:600}
 h1{font-size:clamp(29px,7vw,40px);line-height:1.3}h2{font-size:23px;line-height:1.35}h3{font-size:17px}
 .brand{font-size:26px;letter-spacing:1px}.city{font-size:13px;text-transform:none;letter-spacing:0;max-width:none;color:#aaa9b2;margin-top:0;line-height:1.6}header{margin-bottom:22px;padding:10px 0}
 .greeting{font-size:16px;font-weight:550;color:#a9a7b0}.eyebrow{font-size:11px;letter-spacing:.7px}.sub,.event p{font-size:14px;line-height:1.65}
@@ -187,3 +188,20 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .shop-rep-gold{border-color:#7a6322}.shop-rep-gold .shop-rep-copy b,.shop-rep-gold .shop-rep-arrow{color:#e8bd59}
 .shop-rep-silver{border-color:#58606d}.shop-rep-silver .shop-rep-copy b,.shop-rep-silver .shop-rep-arrow{color:#cbd3df}
 .shop-rep-bronze{border-color:#674d37}.shop-rep-bronze .shop-rep-copy b,.shop-rep-bronze .shop-rep-arrow{color:#cd986b}
+
+/* Compact headings on the shop and community tabs. */
+.shop-root-heading h1,.community-heading h1{margin-bottom:12px}
+.shop-balance{padding:10px 0 12px}
+.shop-rep{margin-bottom:12px}
+.community-heading{margin-bottom:4px}
+#community-boards{margin-bottom:20px}
+
+/* Floating round scroll toggle: to the very bottom, then to the very top. */
+#scroll-jump{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(84px + env(safe-area-inset-bottom));width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);color:var(--white);box-shadow:0 8px 22px #0009;z-index:50;opacity:0;pointer-events:none;transform:scale(.9);transition:opacity .18s ease,transform .18s ease}
+#scroll-jump.visible{opacity:1;pointer-events:auto;transform:none}
+#scroll-jump:active{transform:scale(.92)}
+#scroll-jump svg{width:22px;height:22px}
+#scroll-jump .jump-up{display:none}
+#scroll-jump.show-up .jump-down{display:none}
+#scroll-jump.show-up .jump-up{display:block}
+@media(prefers-reduced-motion:reduce){#scroll-jump{transition:none}}

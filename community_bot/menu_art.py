@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 ART = ASSETS / "art" / "grandma"
-FONT_PATH = ASSETS / "fonts" / "Monocraft.ttf"
+FONT_PATH = ASSETS / "fonts" / "Rubik-Variable.ttf"
 STYLE = "grandma-v1"
 CACHE = ASSETS / "menu-covers" / STYLE
 SIZE = (768, 512)
@@ -111,4 +111,4 @@ def menu_cover(key: str) -> Path | None:
 if __name__ == "__main__":
     for name in COVERS:
         render_cover(name)
-    print(f"Rendered {len(COVERS)} Nora covers: {SIZE[0]}x{SIZE[1]}, Monocraft {TITLE_SIZE}px")
+    print(f"Rendered {len(COVERS)} Nora covers: {SIZE[0]}x{SIZE[1]}, Rubik {TITLE_SIZE}px")
