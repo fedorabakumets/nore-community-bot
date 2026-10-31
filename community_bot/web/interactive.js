@@ -440,13 +440,44 @@ window.NoraInteractive = (() => {
             : "Забрать ≈ " + number(Math.floor(r.bet * multiplier)) + " 🍪";
         }
       } else {
-        multiplier = Number(
-          r.cashout_multiplier || r.proof?.crash_multiplier || 1,
-        );
-        progress = Math.min(
-          0.96,
-          0.12 + (Math.log(Math.max(1, multiplier)) / Math.log(10)) * 0.84,
-        );
+        const crash = Number(r.proof?.crash_multiplier || 0);
+        if (r.status === "cashed_out" && crash > 0 && r.starts_at) {
+          // Призрачный полёт: показываем, куда ракета долетела бы без забора.
+          const elapsed = now("rocket") / 1000 - r.starts_at;
+          const ghost = Math.exp(Math.max(0, elapsed) * s.rules.growth_rate);
+          const done = ghost >= crash;
+          multiplier = Math.min(crash, ghost);
+          progress = Math.min(
+            0.96,
+            0.12 + (Math.log(multiplier) / Math.log(10)) * 0.84,
+          );
+          const cashedAt = Number(r.cashout_multiplier || 1);
+          if ($("#rocket-flight-label"))
+            $("#rocket-flight-label").textContent = done
+              ? "Дальше ракета не улетела"
+              : "Ракета летит дальше";
+          if ($("#rocket-multiplier"))
+            $("#rocket-multiplier").textContent = "×" + multiplier.toFixed(2);
+          if ($("#rocket-flight-caption"))
+            $("#rocket-flight-caption").textContent = done
+              ? crash >= 10
+                ? "Без забора ракета улетела бы в лимит ×10"
+                : "Без забора срыв случился бы на ×" + crash.toFixed(2)
+              : "Забрано на ×" +
+                cashedAt.toFixed(2) +
+                " — смотрим, куда бы она долетела";
+          if ($("#rocket-ship"))
+            $("#rocket-ship").style.opacity = done ? ".2" : "";
+          $(".rocket-board")?.classList.toggle("rocket-crashed", done);
+        } else {
+          multiplier = Number(
+            r.cashout_multiplier || r.proof?.crash_multiplier || 1,
+          );
+          progress = Math.min(
+            0.96,
+            0.12 + (Math.log(Math.max(1, multiplier)) / Math.log(10)) * 0.84,
+          );
+        }
       }
     }
     const x = 22 + progress * 286,
