@@ -8,10 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 async def settle(db):
-    from community_bot import mafia_api, rocket_api
+    from community_bot import mafia_api, rocket_api, sea_api
 
     # A broken room must not stop another player's payout or the bot event loop.
-    for name, tick in (("rocket", rocket_api.tick), ("mafia", mafia_api.tick)):
+    for name, tick in (
+        ("rocket", rocket_api.tick),
+        ("mafia", mafia_api.tick),
+        ("sea", sea_api.tick),
+    ):
         try:
             await tick(db)
         except Exception:

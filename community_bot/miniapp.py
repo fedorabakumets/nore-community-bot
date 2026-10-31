@@ -83,7 +83,7 @@ async def protection(request, handler):
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
-                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/seasonal',
+                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/sea', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -338,7 +338,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile/privacy', profile_privacy)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
-    from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, seasonal, shop_api
+    from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, sea_api, seasonal, shop_api
 
     app.router.add_get('/api/seasonal', seasonal.status)
     app.router.add_post('/api/seasonal/join', seasonal.participate)
@@ -365,6 +365,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/rocket/prepare', rocket_api.prepare)
     app.router.add_post('/api/rocket/launch', rocket_api.launch)
     app.router.add_post('/api/rocket/cashout', rocket_api.cashout)
+    app.router.add_get('/api/sea', sea_api.status)
+    app.router.add_post('/api/sea/action', sea_api.action)
 
     from community_bot.interactive_runtime import lifecycle
 
@@ -392,7 +394,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'events.js', 'style.css'):
+                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))

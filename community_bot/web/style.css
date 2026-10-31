@@ -205,3 +205,25 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 #scroll-jump.show-up .jump-down{display:none}
 #scroll-jump.show-up .jump-up{display:block}
 @media(prefers-reduced-motion:reduce){#scroll-jump{transition:none}}
+
+/* Морской бой */
+.sea-hero{background:radial-gradient(ellipse at 100% 120%,#1d3a56 0,transparent 65%),#171b22;border-color:#2d4a66}
+.sea-hero .play-hero-art{color:#4a7aa2}
+.sea-board{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;width:100%;max-width:360px;aspect-ratio:1;margin:4px 0}
+.sea-cell{aspect-ratio:1;border-radius:5px;background:#222226;border:1px solid #34343a;color:transparent;font-size:0}
+.sea-cell.c1{background:#3d4d61;border-color:#54728c}
+.sea-cell.c2{background:var(--red);border-color:#ff5a70}
+.sea-cell.c3{background:#34343a;border-color:#4a4a52;position:relative}
+.sea-cell.c3::after{content:"";position:absolute;inset:40%;border-radius:50%;background:#7c7c89}
+.sea-cell.c4{background:#5e2430;border-color:#a13b51;position:relative}
+.sea-cell.c4::after{content:"×";position:absolute;inset:0;display:grid;place-items:center;color:#ffd6dd;font-size:14px}
+.sea-cell.mine{color:inherit}
+#sea-content{min-width:0}
+#sea-content h1{overflow-wrap:anywhere}
+.sea-boards{display:grid;grid-template-columns:1fr;gap:22px}
+.sea-boards h4{font-size:12px;color:var(--muted);margin:0 0 10px;letter-spacing:1px}
+.sea-turn{padding:15px 0 4px}
+.sea-turn.mine .eyebrow{color:var(--red)}
+.sea-turn .phase-timer{float:right}
+.sea-arena{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px}
+@media(min-width:560px){.sea-boards{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}}

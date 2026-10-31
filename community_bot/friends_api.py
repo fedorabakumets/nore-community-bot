@@ -119,13 +119,14 @@ async def deliver_notice(bot, db, inbox_id: int, uid: int, text: str, *, reply_m
 
 
 async def _revoke_invites(connection, uid: int, other: int) -> None:
-    exists = await _one(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mini_mafia_invites'")
-    if exists:
-        await connection.execute(
-            "UPDATE mini_mafia_invites SET status='revoked' WHERE status='pending' AND "
-            "((sender_id=? AND user_id=?) OR (sender_id=? AND user_id=?))",
-            (uid, other, other, uid),
-        )
+    for table in ("mini_mafia_invites", "mini_sea_invites"):
+        exists = await _one(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        if exists:
+            await connection.execute(
+                f"UPDATE {table} SET status='revoked' WHERE status='pending' AND "
+                "((sender_id=? AND user_id=?) OR (sender_id=? AND user_id=?))",
+                (uid, other, other, uid),
+            )
 
 
 async def _counts(connection, uid: int, now: float) -> tuple[int, int]:
