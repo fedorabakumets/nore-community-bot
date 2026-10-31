@@ -24,6 +24,8 @@ window.NoraIntro = (() => {
     video.removeAttribute('src');
     video.load();
     chrome('#101011');
+    // Main screen entrance starts as the intro fades away (see style.css: #app.app-enter).
+    app.classList.add('app-enter');
     const remove = () => {
       root.remove();
       app.removeAttribute('inert');
