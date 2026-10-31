@@ -25,14 +25,18 @@ HTTP-сервер Mini App (aiohttp), общая SQLite (том /app/data в Rai
 - Ветка: `cursor/nora-2-update-d133` (её разворачивает Railway), upstream
   `origin/cursor/nora-2-update-d133`.
 - Базовый коммит на 31.10.2026: `a671d92` — «feat: add smooth NORA app entrance
-  animation»; затем `f88a240` (правила handoff).
+  animation»; затем `f88a240` (правила handoff), `84c7e63` (топ-5 фон).
 - Перед `a671d92` — серия merge PR #48–#51 (community tiles, fullscreen nav/inset,
   live daily top five без бот-аккаунтов).
 - Рабочее дерево на момент проверки: чистое (изменения handoff закоммичены).
 
 ## Последние изменения (по Git)
 
-1. `f88a240` — правила handoff (`AGENTS.md` + этот файл).
+1. Новые SVG-иконки нижнего бара Mini App (home/shop/community/events) в
+   `community_bot/web/app.js` (`navTabShapes` + `navTabIcon`); вкладка «Профиль»
+   оставлена с фото. Цвета серый/красный — уже в `style.css` (`nav button` →
+   `#81818c`, `nav button.active` → `var(--red)`).
+2. `f88a240` — правила handoff (`AGENTS.md` + этот файл).
 2. `a671d92` — плавная анимация входа в Mini App (entrance animation).
 3. PR #51 (`17a3198`) — живой ежедневный топ-5 в community, скрытие бот-аккаунтов.
 3. PR #50 (`66fc9fe`) — fullscreen-контент не перекрывается Telegram-контролами.
@@ -41,8 +45,7 @@ HTTP-сервер Mini App (aiohttp), общая SQLite (том /app/data в Rai
 
 ## Незавершённые задачи
 
-- Открытых задач по документации нет. Реализация функций — по запросу владельца
-  в ветке `chatgpt/<task>` с merge в `cursor/nora-2-update-d133`.
+- Открытых задач нет.
 
 ## Исправление 31.10.2026 (топ-5 фон)
 
