@@ -540,6 +540,7 @@ class Database:
         from community_bot.friends_api import SCHEMA as friends_schema
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
+        from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
         from community_bot.social_profiles import SCHEMA as presence_schema
 
@@ -547,7 +548,7 @@ class Database:
         async with self.connect() as db:
             await db.executescript(SCHEMA)
             # Additive, independent game tables: existing balances, party games and pets stay shared.
-            await db.executescript(friends_schema + mafia_schema + rocket_schema + seasonal_schema + presence_schema)
+            await db.executescript(friends_schema + mafia_schema + rocket_schema + sea_schema + seasonal_schema + presence_schema)
             event_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(studio_events)")).fetchall()
             }
