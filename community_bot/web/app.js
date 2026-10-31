@@ -153,3 +153,23 @@ const pressFeedback = (() => {
   }
   return {clear,snapshot,restore};
 })();
+// Floating scroll toggle: jumps to the very bottom of the page and back to the top.
+(() => {
+  const btn = $('#scroll-jump');
+  if (!btn) return;
+  const atBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 24;
+  function update() {
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight > 24;
+    const down = !atBottom();
+    btn.classList.toggle('visible', scrollable);
+    btn.classList.toggle('show-up', !down);
+    btn.setAttribute('aria-label', down ? 'В самый низ' : 'В самый верх');
+  }
+  btn.addEventListener('click', () => {
+    window.scrollTo({top: atBottom() ? 0 : document.documentElement.scrollHeight, behavior: 'smooth'});
+  });
+  window.addEventListener('scroll', update, {passive: true});
+  window.addEventListener('resize', update);
+  new MutationObserver(update).observe($('#app'), {childList: true, subtree: true});
+  update();
+})();
