@@ -74,7 +74,8 @@ async def directory(request):
 
 async def status(request):
     db, settings, viewer = request.app['db'], request.app['settings'], request['actor']['id']
-    today, day = day_window()
+    now = datetime.now(ZoneInfo('Europe/Moscow'))
+    today, day = day_window(now)
     chat = int(getattr(settings, 'community_chat_id', 0) or 0)
     rows = await people(db, settings, viewer)
     by_id = {r['user_id']: r for r in rows}
@@ -99,7 +100,8 @@ async def status(request):
     return web.json_response({'day': today.isoformat(), 'winner_day': day.isoformat(),
                               'revision_day': today.isoformat(),
                               'timezone': 'Europe/Moscow', 'leaders': leaders, 'staff': staff,
-                              'winner': winner_card, 'awarded': bool(winner)})
+                              'winner': winner_card, 'awarded': bool(winner),
+                              'updated_at': now.isoformat(timespec='seconds')})
 
 
 async def presence(request):

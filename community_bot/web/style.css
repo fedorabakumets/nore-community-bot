@@ -167,9 +167,9 @@ nav button[data-tab="community"] svg{width:29px;height:29px}
 
 /* Respect Telegram's full-screen content inset after removing the top header. */
 main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px)) + max(56px,var(--tg-content-safe-area-inset-top,0px)) + 12px)}
-nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:nav-profile-glow 1.3s ease-in-out infinite}
+.nav-profile-wrap{position:relative;display:block;width:28px;height:28px;margin:0 auto 3px}.nav-profile-wrap .nav-profile-photo{margin:0}.nav-unread-dot{position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:var(--red);border:2px solid #121214;display:none}.nav-profile-wrap.has-unread .nav-unread-dot{display:block}.nav-profile-wrap.has-unread .nav-profile-photo{animation:nav-profile-glow 1.3s ease-in-out infinite}
 @keyframes nav-profile-glow{0%,100%{border-color:#a73a50;box-shadow:0 0 0 1px #f3284330,0 0 3px #f3284320}50%{border-color:#ff6179;box-shadow:0 0 0 2px #f3284366,0 0 12px 3px #f3284380}}
-@media(prefers-reduced-motion:reduce){nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:none;border-color:#f32843;box-shadow:0 0 0 1px #f3284350}}
+@media(prefers-reduced-motion:reduce){.nav-profile-wrap.has-unread .nav-profile-photo{animation:none;border-color:var(--red);box-shadow:0 0 0 1px #f3284350}}
 
 .community-place-1{background:#d8a93d1c;border-radius:12px;margin:0 -14px;padding-left:14px;padding-right:14px}.community-place-2{background:#bbc7dc1b;border-radius:12px;margin:0 -14px;padding-left:14px;padding-right:14px}.community-place-3{background:#bd80511d;border-radius:12px;margin:0 -14px;padding-left:14px;padding-right:14px}.community-place-1 .community-rank{color:#f5d479}.community-place-2 .community-rank{color:#d9e1ef}.community-place-3 .community-rank{color:#dda77d}
 
@@ -177,3 +177,13 @@ nav button .nav-profile-photo,nav button.active .nav-profile-photo{animation:nav
 #app.app-enter{animation:nora-app-enter .5s ease-out both}
 @keyframes nora-app-enter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#app.app-enter{animation:none}}
+/* Reputation chip on the shop screen: compact, tier-coloured, links to the existing reputation sheet. */
+.shop-rep{display:flex;align-items:center;gap:11px;width:100%;padding:12px 14px;background:linear-gradient(135deg,#26262a,#1b1b1e);border:1px solid #3a3a41;border-radius:15px;text-align:left;margin:0 0 16px}
+.shop-rep-medal{font-size:25px;line-height:1;flex-shrink:0;width:32px;text-align:center}
+.shop-rep-copy{flex:1;min-width:0}
+.shop-rep-copy small{display:block;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.shop-rep-copy b{font-size:14px;font-weight:760}
+.shop-rep-arrow{flex-shrink:0;display:grid;place-items:center}
+.shop-rep-gold{border-color:#7a6322}.shop-rep-gold .shop-rep-copy b,.shop-rep-gold .shop-rep-arrow{color:#e8bd59}
+.shop-rep-silver{border-color:#58606d}.shop-rep-silver .shop-rep-copy b,.shop-rep-silver .shop-rep-arrow{color:#cbd3df}
+.shop-rep-bronze{border-color:#674d37}.shop-rep-bronze .shop-rep-copy b,.shop-rep-bronze .shop-rep-arrow{color:#cd986b}
