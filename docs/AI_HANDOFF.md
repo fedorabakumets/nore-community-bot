@@ -25,17 +25,16 @@ HTTP-сервер Mini App (aiohttp), общая SQLite (том /app/data в Rai
 - Ветка: `cursor/nora-2-update-d133` (её разворачивает Railway), upstream
   `origin/cursor/nora-2-update-d133`.
 - Базовый коммит на 31.10.2026: `a671d92` — «feat: add smooth NORA app entrance
-  animation»; локальный и удалённый HEAD совпадали.
-- На нём — коммит с правилами handoff (`AGENTS.md` + этот файл), поэтому HEAD
-  может быть на 1 коммит новее; сверять через `git log -3 --oneline`.
+  animation»; затем `f88a240` (правила handoff).
 - Перед `a671d92` — серия merge PR #48–#51 (community tiles, fullscreen nav/inset,
   live daily top five без бот-аккаунтов).
 - Рабочее дерево на момент проверки: чистое (изменения handoff закоммичены).
 
 ## Последние изменения (по Git)
 
-1. `a671d92` — плавная анимация входа в Mini App (entrance animation).
-2. PR #51 (`17a3198`) — живой ежедневный топ-5 в community, скрытие бот-аккаунтов.
+1. `f88a240` — правила handoff (`AGENTS.md` + этот файл).
+2. `a671d92` — плавная анимация входа в Mini App (entrance animation).
+3. PR #51 (`17a3198`) — живой ежедневный топ-5 в community, скрытие бот-аккаунтов.
 3. PR #50 (`66fc9fe`) — fullscreen-контент не перекрывается Telegram-контролами.
 4. PR #49 (`143553a`) — выравнивание плиток community и навигация профиля в fullscreen.
 5. PR #48 — подписи/лейблы питомцев в community.
@@ -44,6 +43,19 @@ HTTP-сервер Mini App (aiohttp), общая SQLite (том /app/data в Rai
 
 - Открытых задач по документации нет. Реализация функций — по запросу владельца
   в ветке `chatgpt/<task>` с merge в `cursor/nora-2-update-d133`.
+
+## Исправление 31.10.2026 (топ-5 фон)
+
+- Проблема: фон призовых мест («Топ 5 сегодня», места 1–3) не доходил до краёв
+  карточки — `.community-place-*` применяется к `.community-person`, который
+  зажат паддингом 14px у `.community-table-body` (style.css:135).
+- Решение: в существующие правила `.community-place-1/2/3` (style.css:174)
+  добавлены `margin:0 -14px; padding-left/right:14px` — фон тянется на всю
+  ширину, текст остаётся на месте, радиус 12px сохранён. Цвета/логика не менялись.
+- Проверено в Chromium (тестовая страница с реальными style.css/community.js):
+  фон точно от границы до границы карточки на 320/360/393/430px, длинные имена
+  переносятся без горизонтального overflow, сдвиг текста 0. `node --check` ok.
+  tools/check_local.py не выполнялся — на машине нет Python/.venv (Store-заглушка).
 
 ## Известные проблемы / техдолг
 
