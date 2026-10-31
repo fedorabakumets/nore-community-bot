@@ -187,3 +187,10 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .shop-rep-gold{border-color:#7a6322}.shop-rep-gold .shop-rep-copy b,.shop-rep-gold .shop-rep-arrow{color:#e8bd59}
 .shop-rep-silver{border-color:#58606d}.shop-rep-silver .shop-rep-copy b,.shop-rep-silver .shop-rep-arrow{color:#cbd3df}
 .shop-rep-bronze{border-color:#674d37}.shop-rep-bronze .shop-rep-copy b,.shop-rep-bronze .shop-rep-arrow{color:#cd986b}
+
+/* Compact headings on the shop and community tabs. */
+.shop-root-heading h1,.community-heading h1{margin-bottom:12px}
+.shop-balance{padding:10px 0 12px}
+.shop-rep{margin-bottom:12px}
+.community-heading{margin-bottom:4px}
+#community-boards{margin-bottom:20px}
