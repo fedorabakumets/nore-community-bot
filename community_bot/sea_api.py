@@ -125,50 +125,119 @@ def _neighbors(index: int) -> list[int]:
     return result
 
 
-def place_board(rng) -> tuple[list[int], dict[int, int]]:
-    """Random classic placement: ships never touch, not even diagonally."""
-    for _ in range(200):
-        board = [0] * (SIZE * SIZE)
-        fleet: dict[int, int] = {}
-        ok = True
-        for ship_id, size in enumerate(SHIPS, start=1):
-            placed = False
-            for _ in range(400):
-                horizontal = rng.random() < 0.5
-                x = rng.randrange(SIZE - size + 1) if horizontal else rng.randrange(SIZE)
-                y = rng.randrange(SIZE) if horizontal else rng.randrange(SIZE - size + 1)
-                cells = (
-                    [_cell(x + dx, y) for dx in range(size)]
-                    if horizontal
-                    else [_cell(x, y + dy) for dy in range(size)]
-                )
-                ring = {n for c in cells for n in _neighbors(c)}
-                if ring & set(board):
-                    continue
-                for c in cells:
-                    board[c] = ship_id
-                fleet[ship_id] = size
-                placed = True
-                break
-            if not placed:
-                ok = False
-                break
-        if ok:
-            return board, fleet
-    # Deterministic fallback: ships sit on alternate rows, so nothing can touch.
+def _ship_cells(x: int, y: int, size: int, horizontal: bool) -> list[int]:
+    """Cells of a straight ship; the caller keeps it inside the board."""
+    if horizontal:
+        return [_cell(x + dx, y) for dx in range(size)]
+    return [_cell(x, y + dy) for dy in range(size)]
+
+
+def _can_place(cells: list[int], occupied: set[int]) -> bool:
+    """A ship may not overlap another ship nor touch it, diagonals included."""
+    for cell in cells:
+        if cell in occupied:
+            return False
+        if any(neighbour in occupied for neighbour in _neighbors(cell)):
+            return False
+    return True
+
+
+def validate_board(board: list[int], fleet: dict) -> bool:
+    """Strict classic-fleet check shared by the generator and the tests.
+
+    Confirms the exact composition (one 4-deck, two 3-deck, three 2-deck,
+    four single-deck ships), exactly 20 occupied cells, straight unbroken
+    hulls and a one-cell gap between every pair of ships (diagonals too).
+    """
+    if len(board) != SIZE * SIZE:
+        return False
+    if not isinstance(fleet, dict) or len(fleet) != len(SHIPS):
+        return False
+    if sorted(int(size) for size in fleet.values()) != sorted(SHIPS):
+        return False
+    cells_by_ship: dict[int, list[int]] = {}
+    for index, value in enumerate(board):
+        if value:
+            cells_by_ship.setdefault(int(value), []).append(index)
+    if set(cells_by_ship) != {int(ship_id) for ship_id in fleet}:
+        return False
+    for ship_id, size in fleet.items():
+        cells = sorted(cells_by_ship.get(int(ship_id), []))
+        if len(cells) != int(size):
+            return False
+        rows = {index // SIZE for index in cells}
+        columns = {index % SIZE for index in cells}
+        if len(rows) == 1:
+            line = [index % SIZE for index in cells]
+        elif len(columns) == 1:
+            line = [index // SIZE for index in cells]
+        else:
+            return False
+        if line != list(range(line[0], line[0] + len(line))):
+            return False
+    if sum(len(cells) for cells in cells_by_ship.values()) != sum(SHIPS):
+        return False
+    ship_ids = list(cells_by_ship)
+    for left in range(len(ship_ids)):
+        for right in range(left + 1, len(ship_ids)):
+            for a in cells_by_ship[ship_ids[left]]:
+                for b in cells_by_ship[ship_ids[right]]:
+                    if max(abs(a % SIZE - b % SIZE), abs(a // SIZE - b // SIZE)) <= 1:
+                        return False
+    return True
+
+
+def _fallback_board() -> tuple[list[int], dict[int, int]]:
+    """Deterministic layout on alternate rows, so ships can never touch."""
     layout = [
         (0, 0, True), (0, 2, True), (0, 4, True), (0, 6, True), (0, 8, True),
         (6, 0, True), (4, 2, True), (4, 4, True), (3, 6, True), (3, 8, True),
     ]
     board = [0] * (SIZE * SIZE)
-    fleet = {}
+    fleet: dict[int, int] = {}
     for ship_id, (x, y, horizontal) in enumerate(layout, start=1):
         size = SHIPS[ship_id - 1]
-        cells = [_cell(x + dx, y) for dx in range(size)] if horizontal else [_cell(x, y + dy) for dy in range(size)]
-        for c in cells:
-            board[c] = ship_id
+        for cell in _ship_cells(x, y, size, horizontal):
+            board[cell] = ship_id
         fleet[ship_id] = size
     return board, fleet
+
+
+def place_board(rng) -> tuple[list[int], dict[int, int]]:
+    """Random classic placement: every ship is straight and never touches.
+
+    Ships are placed one by one in random spots; if a ship cannot be placed
+    the whole board is regenerated. Bounded retries plus a deterministic
+    fallback guarantee the function always terminates with a valid fleet.
+    """
+    for _ in range(80):
+        board = [0] * (SIZE * SIZE)
+        fleet: dict[int, int] = {}
+        occupied: set[int] = set()
+        complete = True
+        for ship_id, size in enumerate(SHIPS, start=1):
+            placed = False
+            for _ in range(240):
+                horizontal = rng.random() < 0.5
+                if horizontal:
+                    x, y = rng.randrange(SIZE - size + 1), rng.randrange(SIZE)
+                else:
+                    x, y = rng.randrange(SIZE), rng.randrange(SIZE - size + 1)
+                cells = _ship_cells(x, y, size, horizontal)
+                if not _can_place(cells, occupied):
+                    continue
+                for cell in cells:
+                    board[cell] = ship_id
+                occupied.update(cells)
+                fleet[ship_id] = size
+                placed = True
+                break
+            if not placed:
+                complete = False
+                break
+        if complete and validate_board(board, fleet):
+            return board, fleet
+    return _fallback_board()
 
 
 def _new_player(user) -> dict:
@@ -209,12 +278,20 @@ def _opponent_id(room, uid: int):
     return None
 
 
-def _ship_sunk(shots: list[int], board: list[int], ship_id: int) -> bool:
-    return all(shots[c] == 2 for c, value in enumerate(board) if value == ship_id)
+def _ship_sunk(shots: list[int], board: list[int], ship_id) -> bool:
+    """A ship is sunk only when every one of its own decks has been hit.
+
+    Ship ids may arrive as strings after a JSON round-trip, so coerce them
+    before comparing with the integer values stored in the board.
+    """
+    ship_id = int(ship_id)
+    cells = [cell for cell, value in enumerate(board) if value == ship_id]
+    return bool(cells) and all(shots[cell] == 2 for cell in cells)
 
 
 def _all_sunk(shots: list[int], board: list[int]) -> bool:
-    return all(shots[c] == 2 for c, value in enumerate(board) if value)
+    cells = [cell for cell, value in enumerate(board) if value]
+    return bool(cells) and all(shots[cell] == 2 for cell in cells)
 
 
 def _log(room, text: str, now: float) -> None:
@@ -229,10 +306,27 @@ async def _save(conn, room, now: float) -> None:
     )
 
 
+def _normalize_state(state: dict) -> dict:
+    """JSON turns integer fleet keys into strings; restore them on load.
+
+    Without this, `_ship_sunk` compares string ids with integer board values
+    and treats every ship as sunk, so `ships_left` collapses to zero.
+    """
+    for player in state.get("players", {}).values():
+        fleet = player.get("fleet")
+        if isinstance(fleet, dict):
+            player["fleet"] = {int(ship_id): int(size) for ship_id, size in fleet.items()}
+        if isinstance(player.get("board"), list):
+            player["board"] = [int(value) for value in player["board"]]
+        if isinstance(player.get("shots"), list):
+            player["shots"] = [int(value) for value in player["shots"]]
+    return state
+
+
 async def _load(conn, room_id: str):
     room = await _one(conn, "SELECT * FROM mini_sea_rooms WHERE id=?", (room_id,))
     if room:
-        room["state"] = json.loads(room.pop("state_json"))
+        room["state"] = _normalize_state(json.loads(room.pop("state_json")))
     return room
 
 
@@ -298,13 +392,36 @@ def _apply_shot(attacker: dict, defender_board: list[int], index: int) -> tuple[
     return True, (ship_id if _ship_sunk(attacker["shots"], defender_board, ship_id) else None)
 
 
-def _bot_choice(attacker: dict, rng) -> int:
-    """Hunt/target: finish damaged ships first, otherwise random free cell."""
-    hits = [i for i, s in enumerate(attacker["shots"]) if s == 2]
-    candidates = [n for i in hits for n in _neighbors(i) if attacker["shots"][n] == 0]
+def _sunk_neighbours(shots: list[int], board: list[int], fleet: dict) -> set[int]:
+    """Cells around a fully sunk ship are guaranteed empty, so skip them."""
+    blocked: set[int] = set()
+    for ship_id in fleet:
+        if _ship_sunk(shots, board, ship_id):
+            blocked.update(
+                neighbour
+                for cell, value in enumerate(board)
+                if value == int(ship_id)
+                for neighbour in _neighbors(cell)
+            )
+    return blocked
+
+
+def _bot_choice(attacker: dict, defender_board: list[int], defender_fleet: dict, rng) -> int:
+    """Hunt/target: finish damaged ships first, otherwise a random free cell."""
+    shots = attacker["shots"]
+    blocked = _sunk_neighbours(shots, defender_board, defender_fleet or {})
+    hits = [index for index, state in enumerate(shots) if state == 2]
+    candidates = [
+        neighbour
+        for index in hits
+        for neighbour in _neighbors(index)
+        if shots[neighbour] == 0 and neighbour not in blocked
+    ]
     if candidates:
         return rng.choice(candidates)
-    free = [i for i, s in enumerate(attacker["shots"]) if s == 0]
+    free = [index for index, state in enumerate(shots) if state == 0 and index not in blocked]
+    if not free:
+        free = [index for index, state in enumerate(shots) if state == 0]
     return rng.choice(free)
 
 
@@ -315,7 +432,7 @@ async def _bot_shoot(conn, room, now: float) -> None:
     if victim is None or victim["left"]:
         return
     rng = secrets.SystemRandom()
-    index = _bot_choice(bot, rng)
+    index = _bot_choice(bot, victim["board"], victim["fleet"], rng)
     hit, sunk = _apply_shot(bot, victim["board"], index)
     label = f"{index % SIZE + 1}{chr(ord('А') + index // SIZE)}"
     if sunk:

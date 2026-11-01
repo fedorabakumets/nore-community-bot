@@ -1,6 +1,7 @@
 """Real SQLite Sea Battle lifecycle: boards, stakes, persistence and notifications."""
 
 import json
+import random
 import secrets
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -12,21 +13,37 @@ from community_bot.database import Database
 from community_bot.friends_api import mutate as friend_mutate
 
 
-def assert_no_touch(board, fleet):
+def assert_valid_fleet(board, fleet):
+    """Independent strict check: composition, geometry, gaps and bounds."""
     assert len(board) == sea.SIZE * sea.SIZE
+    assert len(fleet) == 10
+    assert sorted(fleet.values()) == [1, 1, 1, 1, 2, 2, 2, 3, 3, 4]
+    occupied = [index for index, value in enumerate(board) if value]
+    assert len(occupied) == 20
     assert set(board) - {0} == set(fleet)
     cells_by_ship = {}
     for index, value in enumerate(board):
         if value:
             cells_by_ship.setdefault(value, []).append(index)
     for ship_id, size in fleet.items():
-        assert len(cells_by_ship[ship_id]) == size
+        cells = sorted(cells_by_ship[ship_id])
+        assert len(cells) == size
+        assert all(0 <= cell < sea.SIZE * sea.SIZE for cell in cells)
+        rows = {cell // sea.SIZE for cell in cells}
+        columns = {cell % sea.SIZE for cell in cells}
+        assert len(rows) == 1 or len(columns) == 1  # straight, never diagonal
+        if len(rows) == 1:
+            line = [cell % sea.SIZE for cell in cells]
+        else:
+            line = [cell // sea.SIZE for cell in cells]
+        assert line == list(range(line[0], line[0] + len(line)))  # unbroken hull
     ship_ids = list(fleet)
-    for a in range(len(ship_ids)):
-        for b in range(a + 1, len(ship_ids)):
-            for i in cells_by_ship[ship_ids[a]]:
-                for j in cells_by_ship[ship_ids[b]]:
-                    assert max(abs(i // 10 - j // 10), abs(i % 10 - j % 10)) > 1
+    for left in range(len(ship_ids)):
+        for right in range(left + 1, len(ship_ids)):
+            for a in cells_by_ship[ship_ids[left]]:
+                for b in cells_by_ship[ship_ids[right]]:
+                    assert max(abs(a // sea.SIZE - b // sea.SIZE), abs(a % sea.SIZE - b % sea.SIZE)) > 1
+    assert sea.validate_board(board, fleet)
 
 
 @pytest.fixture
@@ -75,10 +92,15 @@ async def advance(env, seconds):
     await sea.tick(env.db, env.now)
 
 
-def test_placement_never_touches_and_stuck_layout_falls_back_safely():
-    for _ in range(50):
-        assert_no_touch(*sea.place_board(secrets.SystemRandom()))
+def test_placement_generates_1000_valid_classic_fleets():
+    rng = random.Random(20260101)
+    for _ in range(1000):
+        assert_valid_fleet(*sea.place_board(rng))
+    for _ in range(25):
+        assert_valid_fleet(*sea.place_board(secrets.SystemRandom()))
 
+
+def test_placement_stuck_rng_falls_back_to_valid_fleet():
     class Stuck:
         def random(self):
             return 1.0
@@ -86,7 +108,100 @@ def test_placement_never_touches_and_stuck_layout_falls_back_safely():
         def randrange(self, *args):
             return 0
 
-    assert_no_touch(*sea.place_board(Stuck()))
+    assert_valid_fleet(*sea.place_board(Stuck()))
+    assert_valid_fleet(*sea._fallback_board())
+
+
+def test_validate_board_rejects_broken_touching_and_wrong_counts():
+    board, fleet = sea._fallback_board()
+    assert sea.validate_board(board, fleet)
+
+    diagonal = list(board)
+    diagonal[3] = 0
+    diagonal[13] = 1  # ship 1 now bends diagonally
+    assert not sea.validate_board(diagonal, fleet)
+
+    split = list(board)
+    split[1] = 0
+    split[2] = 0  # ship 1 loses decks and is no longer a 4-deck hull
+    assert not sea.validate_board(split, fleet)
+
+    touching = list(board)
+    touching[63] = 0
+    touching[62] = 9  # single-deck ship 9 now touches ship 4
+    assert not sea.validate_board(touching, fleet)
+
+    assert not sea.validate_board(board[:-1], fleet)
+
+
+def test_hit_wound_sunk_and_win_use_every_deck():
+    board = [0] * (sea.SIZE * sea.SIZE)
+    board[0] = board[1] = board[2] = 1  # 3-deck ship
+    board[50] = 2  # single-deck ship
+    shots = [0] * (sea.SIZE * sea.SIZE)
+    attacker = {"shots": shots}
+
+    hit, sunk = sea._apply_shot(attacker, board, 0)
+    assert hit is True and sunk is None
+    assert shots[0] == 2 and not sea._ship_sunk(shots, board, 1)
+
+    hit, sunk = sea._apply_shot(attacker, board, 1)
+    assert hit is True and sunk is None
+    assert not sea._ship_sunk(shots, board, 1)
+
+    hit, sunk = sea._apply_shot(attacker, board, 2)
+    assert hit is True and sunk == 1
+    assert sea._ship_sunk(shots, board, 1)
+    assert sea._all_sunk(shots, board) is False  # the single-deck ship is still afloat
+
+    hit, sunk = sea._apply_shot(attacker, board, 50)
+    assert hit is True and sunk == 2
+    assert sea._ship_sunk(shots, board, 2)
+
+    hit, sunk = sea._apply_shot(attacker, board, 99)
+    assert hit is False and sunk is None and shots[99] == 1
+    assert sea._all_sunk(shots, board) is True
+
+
+def test_each_ship_sinks_only_after_all_its_decks():
+    board, fleet = sea._fallback_board()
+    shots = [0] * (sea.SIZE * sea.SIZE)
+    attacker = {"shots": shots}
+    for ship_id, size in fleet.items():
+        cells = [index for index, value in enumerate(board) if value == ship_id]
+        assert len(cells) == size
+        for cell in cells[:-1]:
+            hit, sunk = sea._apply_shot(attacker, board, cell)
+            assert hit is True and sunk is None
+            assert not sea._ship_sunk(shots, board, ship_id)
+        hit, sunk = sea._apply_shot(attacker, board, cells[-1])
+        assert hit is True and sunk == ship_id
+        assert sea._ship_sunk(shots, board, ship_id)
+    assert sea._all_sunk(shots, board) is True
+
+
+def test_win_requires_all_twenty_decks():
+    board, fleet = sea._fallback_board()
+    shots = [0] * (sea.SIZE * sea.SIZE)
+    attacker = {"shots": shots}
+    occupied = [index for index, value in enumerate(board) if value]
+    assert len(occupied) == 20
+    for index in occupied[:-1]:
+        hit, _ = sea._apply_shot(attacker, board, index)
+        assert hit is True
+        assert sea._all_sunk(shots, board) is False
+    hit, sunk = sea._apply_shot(attacker, board, occupied[-1])
+    assert hit is True and sunk is not None
+    assert sea._all_sunk(shots, board) is True
+
+
+def test_ship_sunk_accepts_string_ship_id_from_json():
+    board = [1, 1] + [0] * 98
+    shots = [2, 0] + [0] * 98
+    assert not sea._ship_sunk(shots, board, 1)
+    assert not sea._ship_sunk(shots, board, "1")
+    shots[1] = 2
+    assert sea._ship_sunk(shots, board, "1")
 
 
 async def test_bot_game_is_free_and_boards_are_private_until_finish(env):
@@ -99,7 +214,8 @@ async def test_bot_game_is_free_and_boards_are_private_until_finish(env):
     assert result["status"] == "active" and result["turn"] in {7, -1}
     me = next(p for p in result["players"] if p["id"] == 7)
     foe = next(p for p in result["players"] if p["id"] == -1)
-    assert set(me["board"]) and set(me["shots"]) == {False}
+    assert len(me["board"]) == sea.SIZE * sea.SIZE
+    assert all(not cell["fired"] for cell in me["shots"])
     assert "ships" not in foe and "board" not in foe
     assert await env.db.fetchall("SELECT * FROM transactions ORDER BY id") == ledger
 
@@ -118,6 +234,16 @@ async def test_bot_fires_after_player_miss_and_pass_turn(env):
     assert any(value for value in stored["players"]["bot"]["shots"])
 
 
+async def test_ships_left_survives_json_round_trip(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=0)
+    await send(env, 7, "start", room)
+    # Fleet ids are integer keys in memory but string keys inside JSON; the
+    # view must still count ten ships for both players after a reload.
+    result = (await view(env, 7, room))["room"]
+    assert result["ships_left"][7] == 10
+    assert result["ships_left"][-1] == 10
+
+
 async def test_friend_game_charges_then_refunds_both_on_draw(env):
     room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10)
     assert (await env.db.get_user(7))["cookies"] == 90
@@ -133,7 +259,7 @@ async def test_friend_game_charges_then_refunds_both_on_draw(env):
     assert (await env.db.get_user(7))["cookies"] == 100
     assert (await env.db.get_user(8))["cookies"] == 100
     kinds = [row["kind"] for row in await env.db.fetchall("SELECT kind FROM transactions WHERE user_id=7 ORDER BY id")]
-    assert kinds == ["sea_bet", "sea_refund"]
+    assert [kind for kind in kinds if kind.startswith("sea_")] == ["sea_bet", "sea_refund"]
 
 
 async def test_winner_takes_double_stake_and_finish_reveals_ships(env):
