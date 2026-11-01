@@ -115,7 +115,8 @@ window.NoraSea = (() => {
   function playerRow(p) {
     const ships = state.sea?.room?.ships_left?.[p.id] ?? "…";
     const turn = state.sea?.room?.turn === p.id;
-    return `<div class="mafia-player ${turn ? "you" : ""}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><b>${esc(p.name)}</b><small>${turn ? "Стреляет" : "Ждёт"} · кораблей: ${ships}${p.left ? " · вышел" : ""}</small></div>`;
+    const inLobby = state.sea?.room?.status === "lobby";
+    return `<div class="mafia-player ${turn ? "you" : ""}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><b>${esc(p.name)}</b><small>${inLobby ? (p.ready ? "Готов" : "Собирается") : turn ? "Стреляет" : "Ждёт"} · кораблей: ${ships}${p.left ? " · вышел" : ""}</small></div>`;
   }
 
   function lobbyView(r) {
@@ -123,10 +124,14 @@ window.NoraSea = (() => {
     const text = r.bot ? "Флот расставится случайно при старте." : "Пригласи друга — приглашение придёт в чат и в миниапку.";
     const stakeNote = r.stake ? `Ставка ${number(r.stake)} 🍪: с другом спишется у обоих при старте.` : "Партия бесплатная.";
     const inviteBtn = !r.bot ? `<button class="secondary" id="sea-invite">Пригласить друзей</button>` : "";
+    const me = r.players.find((p) => p.id === data.user.user_id);
+    const readyBtn = r.bot ? "" : `<button class="${me?.ready ? "secondary" : "primary"}" data-sea-ready="1" ${pending ? "disabled" : ""}>${me?.ready ? "Я пока не готов" : "Я готов"}</button>`;
+    const canStart = r.host_id === data.user.user_id && (r.bot || (r.players.length === 2 && r.players.every((p) => p.ready)));
     return (
       `<section class="card mafia-create"><span class="eyebrow">Комната готова</span><h2>${title}</h2>` +
       `<p class="sub">${text}</p>` +
-      `<div class="pet-action-row"><button class="primary" id="sea-start" ${pending || (r.players.length < 2 && !r.bot) ? "disabled" : ""}>Начать бой</button>${inviteBtn}</div>` +
+      `<div class="mafia-players">${r.players.map(playerRow).join("")}</div>` +
+      `<div class="pet-action-row"><button class="primary" id="sea-start" ${pending || !canStart ? "disabled" : ""}>Начать бой</button>${readyBtn}${inviteBtn}</div>` +
       `<p class="sub">${stakeNote}</p></section>`
     );
   }
@@ -323,13 +328,26 @@ window.NoraSea = (() => {
       inviteFriends();
       return;
     }
+    if (b.dataset.seaReady !== undefined) {
+      const me = state.sea?.room?.players.find((p) => p.id === data.user.user_id);
+      perform({ action: "ready", room_id: state.sea?.room?.id, ready: !me?.ready });
+      return;
+    }
     if (b.id === "sea-again" || b.id === "sea-home") {
       lastRoomId = "";
       load(true, null);
       return;
     }
     if (b.dataset.seaRespond) {
-      perform({ action: "respond", room_id: b.dataset.roomId, accept: b.dataset.seaRespond === "yes" });
+      const accept = b.dataset.seaRespond === "yes";
+      perform({ action: "respond", room_id: b.dataset.roomId, accept }).then((result) => {
+        if (tab === "notices") window.NoraCabinet?.reloadNotices();
+        if (result && accept) {
+          tab = "sea";
+          render();
+          window.scrollTo(0, 0);
+        }
+      });
       return;
     }
     if (b.dataset.seaInvitePerson) {

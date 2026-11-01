@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from community_bot.access import miniapp_allowed
 from community_bot.sea_api import apply_action
@@ -53,6 +54,16 @@ async def respond(callback: CallbackQuery, db, settings):
         await callback.answer(str(error), show_alert=True)
         return
     await callback.answer(message, show_alert=True)
+    if parts[1] == "y":
+        url = os.getenv("MINIAPP_URL", "")
+        if url.startswith("https://"):
+            try:
+                await callback.message.answer(
+                    "Ты в комнате. Открой лобби, подтверди готовность и дождись старта.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть лобби", web_app=WebAppInfo(url=url.split("#", 1)[0] + "?view=sea"))]]),
+                )
+            except TelegramAPIError:
+                pass
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except TelegramAPIError:
