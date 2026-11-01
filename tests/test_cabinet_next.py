@@ -198,7 +198,9 @@ async def test_notices_are_own_and_read_snapshot_does_not_swallow_new_notificati
     payload = json.loads((await notices(Request(env))).body)
     assert len(payload["items"]) == 1 and payload["items"][0]["text"] == "Находка"
     newer = await env.db.notify_inbox_add(7, "pet", "Новое")
-    assert (await notices_update(Request(env, {"action": "read", "through_id": old}))).status == 200
+    response = await notices_update(Request(env, {"action": "read", "through_id": old}))
+    assert response.status == 200
+    assert json.loads(response.body)["unread"] == 1
     assert await env.db.notify_unread_count(7) == 1
     assert (await env.db.fetchone("SELECT read FROM notify_inbox WHERE id=?", (other,)))["read"] == 0
     assert (await env.db.fetchone("SELECT read FROM notify_inbox WHERE id=?", (newer,)))["read"] == 0

@@ -341,6 +341,7 @@ async def notices_update(request):
         if type(through) is not int or through < 0:
             raise ValueError("Открой уведомления заново")
         await db.execute("UPDATE notify_inbox SET read=1 WHERE user_id=? AND id<=?", (user["user_id"], through))
+        return web.json_response({"ok": True, "unread": await db.notify_unread_count(user["user_id"])})
     else:
         channel, enabled, digest = body.get("channel"), body.get("enabled"), body.get("digest")
         if channel not in CHANNELS or type(enabled) is not bool or type(digest) is not bool:

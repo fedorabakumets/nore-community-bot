@@ -812,14 +812,6 @@ window.NoraInteractive = (() => {
         round_id: state.rocket.round.id,
       });
   });
-  window.addEventListener("popstate", () => {
-    const next = window.NoraShop?.route().view;
-    if (data && views.has(next)) {
-      tab = next;
-      render();
-      NoraShop.syncBack();
-    }
-  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       roleOpen = false;
