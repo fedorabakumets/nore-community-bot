@@ -87,10 +87,11 @@ async def shop_data(db, user, settings):
     if key and any(p['sku'] == key for p in products) and vitrine_active(stock, until):
         featured = {'sku': key, 'title': plain_shop_text(await db.get_bot_state('shop_featured_label')),
                     'stock': stock if stock and stock != '0' else None, 'until': until}
-    from community_bot.seasonal import snapshot
+    from community_bot.seasonal import all_items, snapshot
 
     return {
         'seasonal': await snapshot(db, settings, user['user_id']),
+        'seasonal_items': await all_items(db, settings, user['user_id']),
         'featured': featured,
         'categories': [{'id': c['slug'], 'title': plain_shop_text(c['title']),
                         'description': plain_shop_text(c['description'])} for c in categories],

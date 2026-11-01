@@ -97,7 +97,8 @@ async def protection(request, handler):
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; "
+        "img-src 'self' https: data: blob:; media-src 'self' blob:; connect-src 'self'; "
+        "font-src 'self'; base-uri 'none'; "
         "frame-ancestors https://web.telegram.org https://*.telegram.org"
     )
     return response
@@ -341,6 +342,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, sea_api, seasonal, shop_api
 
     app.router.add_get('/api/seasonal', seasonal.status)
+    app.router.add_get('/api/seasonal/items', seasonal.items_endpoint)
+    app.router.add_post('/api/seasonal/save', seasonal.save_endpoint)
+    app.router.add_post('/api/seasonal/buy/prepare', seasonal.buy_prepare_endpoint)
+    app.router.add_post('/api/seasonal/buy/confirm', seasonal.buy_confirm_endpoint)
     app.router.add_post('/api/seasonal/join', seasonal.participate)
     app.router.add_get('/api/seasonal/manage', seasonal.manage)
     app.router.add_post('/api/seasonal/draw/prepare', seasonal.draw_prepare)

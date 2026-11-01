@@ -1,12 +1,25 @@
 import asyncio
 import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
 
 from community_bot.database import Database
-from community_bot.seasonal import ITEM, draw, join, manage, prepare_draw, snapshot
+from community_bot.seasonal import (
+    ITEM,
+    all_items,
+    buy_confirm,
+    buy_prepare,
+    draw,
+    join,
+    manage,
+    prepare_draw,
+    save_item,
+    snapshot,
+    validate_metadata,
+)
 
 
 @pytest.fixture
@@ -118,3 +131,147 @@ async def test_changed_participants_expiry_and_permissions_invalidate_confirmati
     with pytest.raises(web.HTTPForbidden):
         await draw(env.db, revoked, 7, q["token"])
     assert (await snapshot(env.db, env.settings, 8))["status"] == "open"
+
+
+async def test_metadata_changes_keep_existing_entries_and_reject_unsafe_links(env):
+    await join(env.db, 8)
+    metadata = {"title": "Новый приз", "description": "Описание", "author": "Автор",
+                "author_url": "https://example.com", "image": "https://example.com/image.jpg",
+                "links": [{"label": "Источник", "url": "https://example.com/source"}]}
+    validated = validate_metadata(metadata)
+    await env.db.set_bot_state("seasonal_item_metadata", json.dumps(validated))
+    view = await snapshot(env.db, env.settings, 8)
+    assert view["title"] == "Новый приз" and view["joined"] and view["count"] == 1
+    metadata["links"][0]["url"] = "javascript:alert(1)"
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_metadata(metadata)
+
+
+async def test_paid_item_atomic_confirmation_and_price_change(env):
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "paid", "price": 30,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    with pytest.raises(web.HTTPForbidden):
+        await save_item(env.db, env.settings, 8, None, item)
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    assert len(await all_items(env.db, env.settings, 8)) == 2
+    with pytest.raises(ValueError, match="не розыгрыш"):
+        await prepare_draw(env.db, env.settings, 7, item_id)
+    with pytest.raises(ValueError, match="недоступен"):
+        await join(env.db, 8, item_id)
+    q = await buy_prepare(env.db, env.settings, 8, item_id)
+    item["price"] = 40
+    await save_item(env.db, env.settings, 7, item_id, item)
+    with pytest.raises(ValueError, match="изменились"):
+        await buy_confirm(env.db, 8, q["token"])
+    assert (await env.db.get_user(8))["cookies"] == 100
+    q = await buy_prepare(env.db, env.settings, 8, item_id)
+    q2 = await buy_prepare(env.db, env.settings, 8, item_id)
+    with pytest.raises(ValueError, match="подтверждение|устарело"):
+        await buy_confirm(env.db, 9, q["token"])
+    results = await asyncio.gather(buy_confirm(env.db, 8, q["token"]), buy_confirm(env.db, 8, q2["token"]),
+                                   return_exceptions=True)
+    assert results.count(item_id) == 1
+    assert sum(isinstance(x, ValueError) for x in results) == 1
+    assert (await env.db.get_user(8))["cookies"] == 60
+    assert (await snapshot(env.db, env.settings, 8, item_id))["joined"]
+    item.update(mode="raffle", price=0)
+    with pytest.raises(ValueError, match="Нельзя менять"):
+        await save_item(env.db, env.settings, 7, item_id, item)
+
+
+async def test_insufficient_funds_do_not_record_purchase(env):
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "paid", "price": 101,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    q = await buy_prepare(env.db, env.settings, 8, item_id)
+    with pytest.raises(ValueError, match="Недостаточно"):
+        await buy_confirm(env.db, 8, q["token"])
+    assert (await env.db.get_user(8))["cookies"] == 100
+    assert not (await snapshot(env.db, env.settings, 8, item_id))["joined"]
+    assert not await env.db.fetchall("SELECT * FROM transactions WHERE kind='seasonal_purchase'")
+
+
+async def test_purchase_ledger_failure_rolls_back_debit_and_confirmation(env):
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "paid", "price": 30,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    q = await buy_prepare(env.db, env.settings, 8, item_id)
+    await env.db.execute("CREATE TRIGGER reject_purchase BEFORE INSERT ON transactions "
+                         "WHEN NEW.kind='seasonal_purchase' BEGIN SELECT RAISE(ABORT, 'test'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="test"):
+        await buy_confirm(env.db, 8, q["token"])
+    assert (await env.db.get_user(8))["cookies"] == 100
+    assert not (await snapshot(env.db, env.settings, 8, item_id))["joined"]
+    await env.db.execute("DROP TRIGGER reject_purchase")
+    assert await buy_confirm(env.db, 8, q["token"]) == item_id
+
+
+async def test_hiding_item_stops_pending_purchases_but_admin_can_edit(env):
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "paid", "price": 30,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    q = await buy_prepare(env.db, env.settings, 8, item_id)
+    item["enabled"] = False
+    await save_item(env.db, env.settings, 7, item_id, item)
+    assert item_id not in [x["id"] for x in await all_items(env.db, env.settings, 8)]
+    assert item_id in [x["id"] for x in await all_items(env.db, env.settings, 7)]
+    with pytest.raises(ValueError, match="изменились"):
+        await buy_confirm(env.db, 8, q["token"])
+    assert (await env.db.get_user(8))["cookies"] == 100
+
+
+async def test_new_raffle_draw_confirmation_bound_to_item(env):
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "raffle", "price": 0,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    await join(env.db, 8, item_id)
+    await join(env.db, 8)
+    q = await prepare_draw(env.db, env.settings, 7, item_id)
+    with pytest.raises(ValueError, match="изменился"):
+        await draw(env.db, env.settings, 7, q["token"])
+    assert await draw(env.db, env.settings, 7, q["token"], item_id) == 8
+
+
+async def test_save_endpoint_requires_management_permission(env, monkeypatch):
+    from community_bot import miniapp, seasonal
+
+    class Request:
+        app = {"db": env.db, "settings": env.settings}
+
+        async def json(self):
+            return {"id": None, "item": {}}
+
+    async def actor(_):
+        return {"user_id": 8}
+
+    monkeypatch.setattr(miniapp, "actor", actor)
+    with pytest.raises(web.HTTPForbidden):
+        await seasonal.save_endpoint(Request())
+
+
+async def test_seasonal_http_handlers_create_and_complete_purchase(env, monkeypatch):
+    from community_bot import miniapp, seasonal
+
+    class Request:
+        app = {"db": env.db, "settings": env.settings}
+
+        def __init__(self, uid, body):
+            self.uid, self.body = uid, body
+
+        async def json(self):
+            return self.body
+
+    async def actor(request):
+        return {"user_id": request.uid}
+
+    monkeypatch.setattr(miniapp, "actor", actor)
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "paid", "price": 30,
+            "author_url": "https://example.com", "image": "https://example.com/a.jpg", "links": []}
+    response = await seasonal.save_endpoint(Request(7, {"id": None, "item": item}))
+    items = json.loads(response.text)["items"]
+    item_id = next(x["id"] for x in items if x["title"] == "Приз")
+    response = await seasonal.buy_prepare_endpoint(Request(8, {"id": item_id}))
+    token = json.loads(response.text)["token"]
+    response = await seasonal.buy_confirm_endpoint(Request(8, {"token": token}))
+    assert "администрация свяжется" in json.loads(response.text)["message"].lower()
+    assert (await env.db.get_user(8))["cookies"] == 70

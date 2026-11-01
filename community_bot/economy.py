@@ -13,6 +13,7 @@ TRANSACTION_LABELS = {
     "transfer": "Перевод",
     "admin_set": "Админ: баланс",
     "shop": "Магазин",
+    "seasonal_purchase": "Сезонный предмет",
     "sbp_payment": "Пополнение СБП",
     "roulette": "Рулетка",
     "subscription_freebie": "Халява",
@@ -85,6 +86,8 @@ def transaction_line(row: dict[str, object], timezone: str = "Europe/Moscow") ->
         label = ITEM_LABELS.get(sku, extra_labels.get(sku, label))
         if target.isdigit():
             label = "Подарок: " + label
+    elif kind == "seasonal_purchase" and details:
+        label = "Сезонный предмет: " + details
     elif kind == "transfer":
         label = "Перевод отправлен" if amount < 0 else "Перевод получен"
     elif kind == "loan_repay" and ";debt:" in details:

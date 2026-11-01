@@ -280,6 +280,8 @@ async def wallet_history(request):
         if kind in {"shop", "pet_shop"}:
             sku, _, target = details.partition("->")
             label = ITEM_LABELS.get(sku, label) + (" · подарок" if target else "")
+        elif kind == "seasonal_purchase" and details:
+            label = "Сезонный предмет: " + details
         elif kind == "transfer":
             label = "Перевод отправлен" if row["amount"] < 0 else "Перевод получен"
         items.append(

@@ -403,7 +403,7 @@ async def contest_join(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith('admin:season:'))
 async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settings):
     from community_bot.keyboards import back_btn, ibtn
-    from community_bot.seasonal import ITEM, TITLE, can_manage, draw, prepare_draw, snapshot
+    from community_bot.seasonal import ITEM, can_manage, draw, prepare_draw, snapshot
 
     if not callback.message or not await can_manage(db, settings, callback.from_user.id):
         await callback.answer('Недостаточно прав', show_alert=True)
@@ -420,7 +420,8 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
         elif action.startswith('draw:'):
             await draw(db, settings, uid, action.removeprefix('draw:'))
             result = await snapshot(db, settings, uid)
-            text = f'<b>Итог сохранён</b>\n\n{TITLE}\nПобедитель: {html.escape(result["winner"] or "Участник")}'
+            text = (f'<b>Итог сохранён</b>\n\n{html.escape(result["title"])}\n'
+                    f'Победитель: {html.escape(result["winner"] or "Участник")}')
         elif action.startswith('list:'):
             raw = action.removeprefix('list:')
             if not raw.isdigit() or len(raw)>6:
@@ -430,7 +431,8 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
                                      'FROM seasonal_entries e JOIN users u ON u.user_id=e.user_id '
                                      'WHERE e.raffle_id=? ORDER BY e.joined_at,u.user_id LIMIT 11 OFFSET ?',
                                      (ITEM, offset))
-            text = f'<b>Участники · {html.escape(TITLE)}</b>\n\n' + ('\n'.join(
+            result = await snapshot(db, settings, uid)
+            text = f'<b>Участники · {html.escape(result["title"])}</b>\n\n' + ('\n'.join(
                 f'{offset+i+1}. {html.escape(row["profile_name"] or row["telegram_name"])}'
                 + (f' · @{html.escape(row["username"])}' if row['username'] else '')
                 for i, row in enumerate(rows[:10])) or 'Пока нет заявок')
@@ -440,12 +442,13 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
                 buttons.append([ibtn('Далее →', f'admin:season:list:{offset+10}')])
         else:
             result = await snapshot(db, settings, uid)
-            text = (f'<b>{TITLE}</b>\nСезон 1 · бесплатный розыгрыш физической игрушки\n\n'
+            mode = 'покупка за печеньки' if result.get('mode') == 'paid' else 'бесплатный розыгрыш физической игрушки'
+            text = (f'<b>{html.escape(result["title"])}</b>\nСезон 1 · {mode}\n\n'
                     f'Участников: {result["count"]}\n'
                     + ('Идёт запись.' if result['status']=='open' else
                        f'Победитель: {html.escape(result["winner"] or "итог сохранён")}'))
             buttons.append([ibtn('Участники', 'admin:season:list:0')])
-            if result['status']=='open':
+            if result['status']=='open' and result.get('mode') != 'paid':
                 buttons.append([ibtn('Подвести итоги…', 'admin:season:prepare')])
     except ValueError as error:
         await callback.answer(str(error), show_alert=True)
