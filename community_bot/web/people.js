@@ -63,13 +63,13 @@ window.NoraPeople = (() => {
         person=p;const el=document.querySelector('.person-presence');
         if(el){el.textContent=presenceLine(p.presence);el.classList.toggle('online',!!p.presence?.online)}
       }
-    }catch{discardAvatar();person=null;$('#sheet-content').innerHTML='<h2>Профиль недоступен</h2><p class="sub">Доступ или настройки приватности изменились.</p>'}
+    }catch{if(version!==generation||!$('#sheet').open||!document.querySelector('#person-profile'))return;discardAvatar();person=null;$('#sheet-content').innerHTML='<h2>Профиль недоступен</h2><p class="sub">Не удалось обновить профиль. Открой его снова.</p>'}
   },15000);
   document.addEventListener('close',e=>{if(e.target!==$('#sheet'))return;generation++;privacyRequest++;person=null;discardAvatar()},true);
   document.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(!b)return;
     if(b.dataset.personView)visit(Number(b.dataset.personView));
-    if(b.dataset.personAdd){b.disabled=true;try{const r=await api('friends/action',{action:'request',recipient:b.dataset.personAdd});toast(r.message);b.textContent='Заявка отправлена'}catch(err){toast(err.message);b.disabled=false}}
+    if(b.dataset.personAdd){b.disabled=true;try{const r=await api('friends/action',{action:'request',recipient:b.dataset.personAdd});toast(r.message);if(b.isConnected){delete b.dataset.personAdd;b.textContent='К друзьям и заявкам';b.disabled=false;b.onclick=()=>{$('#sheet').close();tab='friends';NoraShop.tabChanged(tab);render()}}}catch(err){toast(err.message);b.disabled=false}}
     if(b.id==='profile-lookup'){const recipient=document.querySelector('#friend-recipient')?.value.trim();if(recipient)visit(recipient);else toast('Укажи точный @username или ID')}
     if(b.hasAttribute('data-privacy-toggle')){await perform('profile/privacy',{hidden:!data.user.profile_private});return}
     if(b.hasAttribute('data-privacy-locked')){sheet('<h2>Закрытый профиль</h2><p class="sub">Купи закрытый профиль в магазине, чтобы скрывать и открывать его в настройках.</p><button class="primary" data-product="private_profile">Посмотреть в магазине</button>');return}

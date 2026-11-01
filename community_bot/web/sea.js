@@ -8,6 +8,7 @@ window.NoraSea = (() => {
   const draft = { stake: "0" };
   let lastRoomId = "";
   let lastHtml = "";
+  let snapshotVersion = 0, serverTime = 0, syncedAt = 0;
 
   const ROWS = "АБВГДЕЖЗИК";
 
@@ -191,17 +192,28 @@ window.NoraSea = (() => {
     return `<div id="sea-content">${state.sea?.room ? room() : home()}</div>`;
   }
 
-  async function load(force = false, roomId = undefined) {
-    if (!auth || !data) return;
+  function syncClock(response) {
+    if (Number.isFinite(response.server_now)) {
+      serverTime = response.server_now;
+      syncedAt = performance.now();
+    }
+  }
+
+  async function load(force = false, roomId = undefined, recover = false) {
+    if (!auth || !data || (pending && !recover)) return;
+    const version = ++snapshotVersion;
     try {
       const selected = roomId === undefined ? lastRoomId : roomId;
       const response = await api("sea" + (selected ? "?room_id=" + encodeURIComponent(selected) : ""));
+      if (version !== snapshotVersion) return;
       state.sea = response;
+      syncClock(response);
       delete errors.sea;
       if (response.room?.id) lastRoomId = response.room.id;
       else if (roomId !== undefined) lastRoomId = "";
       if (tab === "sea") patch();
     } catch (e) {
+      if (version !== snapshotVersion) return;
       errors.sea = "Связь прервалась. " + e.message;
       if (tab === "sea") patch();
     }
@@ -232,7 +244,8 @@ window.NoraSea = (() => {
     const t = $("#sea-timer");
     const r = state.sea?.room;
     if (t && r?.deadline) {
-      const seconds = Math.max(0, Math.ceil((r.deadline - (state.sea.server_now || Date.now())) / 1000));
+      const now = serverTime ? serverTime + performance.now() - syncedAt : Date.now();
+      const seconds = Math.max(0, Math.ceil((r.deadline - now) / 1000));
       t.textContent = String(seconds) + "с";
       t.classList.toggle("urgent", seconds < 10);
     }
@@ -252,17 +265,21 @@ window.NoraSea = (() => {
   async function perform(body, opts = {}) {
     if (pending) return null;
     pending = true;
+    ++snapshotVersion;
     try {
       const response = await api("sea/action", body);
+      ++snapshotVersion;
       state.sea = { ...(state.sea || {}), ...response };
-      if (response.room?.id) lastRoomId = response.room.id;
+      syncClock(response);
+      lastRoomId = response.room?.id || "";
+      delete errors.sea;
       if (response.message && !opts.quiet) toast(response.message);
       if (opts.close) $("#sheet").close();
       patch();
       return response;
     } catch (e) {
       toast(e.message);
-      await load(true);
+      await load(true, undefined, true);
       return null;
     } finally {
       pending = false;
@@ -342,6 +359,7 @@ window.NoraSea = (() => {
       const accept = b.dataset.seaRespond === "yes";
       perform({ action: "respond", room_id: b.dataset.roomId, accept }).then((result) => {
         if (tab === "notices") window.NoraCabinet?.reloadNotices();
+        if (result && tab === "community") window.NoraCommunity?.reload();
         if (result && accept) {
           tab = "sea";
           render();
@@ -380,6 +398,8 @@ window.NoraSea = (() => {
       schedule();
     }
   });
+
+  setInterval(() => { if (!document.hidden && tab === "sea") timerTick(); }, 1000);
 
   window.addEventListener("popstate", () => {
     if (tab === "sea") schedule();
