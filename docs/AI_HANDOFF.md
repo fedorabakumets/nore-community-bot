@@ -24,14 +24,13 @@
 
 - Репозиторий: C:/Users/User/Projects/nore-community-bot, origin — GitHub
   fedorabakumets/nore-community-bot; доступ к исходникам и чтение GitHub проверены.
-- Задача: подготовка локальной разработки Codex; ветка chatgpt/codex-dev-setup.
+- Задача: подготовка разработки и совместимость проверок Windows; ветка chatgpt/codex-dev-setup.
 - Создана от актуальной origin/cursor/nora-2-update-d133; fetch и сравнение
   показали 0 опережающих / 0 отстающих коммитов на момент подготовки.
 - Upstream у feature-ветки снят, чтобы она не отслеживала production для push.
-- До задачи рабочее дерево было чистым. Подготовлены только AGENTS.md и этот
-  файл; бизнес-логика, зависимости pyproject.toml и production не изменялись.
-- Коммиты и публикация не выполнялись. Перед следующей независимой задачей
-  нужно решить судьбу этих локальных изменений; не смешивать их с новой задачей.
+- Документация закоммичена с разрешения владельца: c53b7ae; последующие
+  исправления проверок и этот handoff подготовлены к локальному коммиту.
+  Push/deploy не выполнялись. Фактические HEAD и status проверять через Git.
 
 ## Как проверять реальную production-версию
 
@@ -83,39 +82,29 @@
   Никогда не запускать community_bot.main / nore-bot и второй poller.
 - check_local.py сначала запускает Ruff; при ошибках прекращает работу до pytest.
   Для pytest он убирает BOT_TOKEN и блокирует Python socket connect/DNS.
-- На Windows эта блокировка мешает внутреннему socketpair asyncio. Для локальной
-  диагностики сохранён игнорируемый .venv/check_windows.py: использует GUARD из
-  штатного runner, разрешает connect только внутри socketpair в текущем потоке
-  на loopback, остальные подключения блокирует. Отключает .env, убирает BOT_TOKEN,
-  задаёт временную DATABASE_PATH. Тесты используют tmp_path и fake/mocked Bot.
-- Запуск: ./.venv/Scripts/python.exe .venv/check_windows.py
-  либо добавить -q tests/test_sea_miniapp.py --tb=short для конкретных тестов.
-  Это локальный helper: исчезнет при пересоздании .venv, не заменяет общий check_local.
+- На Windows runner допускает loopback только внутри создания socketpair asyncio;
+  обычные подключения и DNS остаются заблокированы. Отдельный тест проверяет
+  asyncio, запрет внешнего/локального соединения и DNS. Чтение .env отключено.
+- Ранее созданный .venv/check_windows.py устарел; использовать штатный runner.
 
-## Проверки этой задачи
+## Проверки и оставшиеся задачи (01.11.2026)
 
-- pip check: No broken requirements found.
-- node --check: все 12 JavaScript-файлов community_bot/web прошли.
-- tools/check_local.py: остановился на 14 существующих E501 в database.py,
-  sea_api.py и sea_notifications.py. Код не исправлялся в документационной задаче.
-- Отдельный pytest с неизменённым GUARD: 120 passed, 1 failed, 508 errors;
-  массовые ошибки setup вызваны заблокированным внутренним socketpair Windows.
-- Полный диагностический pytest с исключением для socketpair: 624 passed,
-  5 failed, 39 warnings (206.67 с). Четыре сбоя в profile_maintenance/release_backup:
-  os.fsync на открытом для чтения файле в release_backup.py:34 даёт на Windows
-  Bad file descriptor. Один в test_telegraph_images.py:49: symlink требует
-  прав Windows (WinError 1314). Ошибок setup после исключения для socketpair нет.
-- Локальный helper: проверка asyncio и запрета обычных внешних/loopback-соединений
-  прошла; tests/test_sea_miniapp.py — 21 passed.
-
-## Остаток и решения для владельца
-
-- Отдельной задачей согласовать исправление замечаний Ruff и переносимость
-  штатных проверок на Windows; не скрывать их исключениями в проектной конфигурации.
-- Для полного зелёного прогона отдельно исправить переносимость backup и решить
-  запуск symlink-теста (например, Linux/WSL либо согласованная настройка Windows).
-  Права Windows, тестовые ожидания и backup-код в этой задаче не менялись.
-- git diff проверен: изменены только два документа; git diff --check без замечаний.
-- Решить, когда коммитить и публиковать подготовленную документацию.
-- Production SQLite, её целостность, значения переменных Railway и backup/restore
-  не исследованы; знание схемы по коду не является проверкой рабочей базы.
+- Разрешённые исправления: backup открывает файл r+b перед fsync; Unix-права
+  строго проверяются на не-Windows, тесты Windows проверяют остальное; 14 E501
+  устранены. Сетевая блокировка адаптирована для socketpair Windows; отдельный
+  тест подтверждает блокировку обычного loopback, внешнего адреса и DNS.
+- Штатный tools/check_local.py: Ruff прошёл; pytest 629 passed, 1 failed,
+  39 warnings. Единственный сбой test_telegraph_images.py:49: WinError 1314,
+  не хватает права создания символической ссылки. Тест не отключён.
+- pip check прошёл. Переносы строк в трёх файлах сверены по AST без изменений.
+- Для полного зелёного прогона нужен Linux/WSL либо согласованная настройка
+  прав Windows на символические ссылки. Проверки прав Unix на Linux не запускались.
+- Следующая сессия: прочитать AGENTS.md и handoff, проверить status и log в
+  chatgpt/codex-dev-setup; после fetch сравнить с origin/cursor/nora-2-update-d133.
+- В Linux/WSL создать отдельное окружение и выполнить tools/check_local.py и
+  pip check с временной SQLite и fake Bot, включая тест symlink и Unix-прав;
+  не запускать production-бота. При отставании базы проверить diff и конфликты.
+- Для переноса в production получить отдельное разрешение владельца на push,
+  merge и deploy. После разрешённого выпуска проверить статус Railway, /healthz,
+  версию и polling; не считать успешный push подтверждением деплоя.
+- Production SQLite, значения переменных Railway и backup/restore не исследованы.

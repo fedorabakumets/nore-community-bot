@@ -548,7 +548,9 @@ class Database:
         async with self.connect() as db:
             await db.executescript(SCHEMA)
             # Additive, independent game tables: existing balances, party games and pets stay shared.
-            await db.executescript(friends_schema + mafia_schema + rocket_schema + sea_schema + seasonal_schema + presence_schema)
+            await db.executescript(
+                friends_schema + mafia_schema + rocket_schema + sea_schema + seasonal_schema + presence_schema
+            )
             event_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(studio_events)")).fetchall()
             }

@@ -67,7 +67,8 @@ RULES = {
         {
             "title": "Ход",
             "text": "Игроки по очереди стреляют по полю соперника. Попал — стреляешь снова, промах — ход переходит. "
-            "На ход даётся 60 секунд; пропустил время — ход переходит сопернику. Игра против бота идёт с паузами в пару секунд.",
+            "На ход даётся 60 секунд; пропустил время — ход "
+            "переходит сопернику. Игра против бота идёт с паузами в пару секунд.",
         },
         {
             "title": "Победа",
@@ -77,7 +78,8 @@ RULES = {
         {
             "title": "С ботом и с другом",
             "text": "Можно сыграть с ботом Норы или пригласить друга. Игра бесплатна, "
-            "либо обе стороны ставят одинаковую ставку печеньками: победитель забирает удвоенную ставку, при ничьей ставки возвращаются.",
+            "либо обе стороны ставят одинаковую ставку печеньками: "
+            "победитель забирает удвоенную ставку, при ничьей ставки возвращаются.",
         },
         {
             "title": "Ставки",
@@ -302,7 +304,14 @@ def _log(room, text: str, now: float) -> None:
 async def _save(conn, room, now: float) -> None:
     await conn.execute(
         "UPDATE mini_sea_rooms SET status=?,deadline=?,state_json=?,updated_at=?,finished_at=? WHERE id=?",
-        (room["status"], room["deadline"], json.dumps(room["state"], ensure_ascii=False), now, room.get("finished_at"), room["id"]),
+        (
+            room["status"],
+            room["deadline"],
+            json.dumps(room["state"], ensure_ascii=False),
+            now,
+            room.get("finished_at"),
+            room["id"],
+        ),
     )
 
 
@@ -342,13 +351,17 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
         if uid < 0:  # bot has no wallet
             continue
         if stake and not cancelled and winner is not None and uid == winner:
-            await conn.execute("UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?", (stake * 2, _stamp(now), uid))
+            await conn.execute(
+                "UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?", (stake * 2, _stamp(now), uid)
+            )
             await conn.execute(
                 "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES (?,?, 'sea_win',?,?)",
                 (uid, stake * 2, "room:" + room["id"], _stamp(now)),
             )
         elif stake and (cancelled or winner is None):
-            await conn.execute("UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?", (stake, _stamp(now), uid))
+            await conn.execute(
+                "UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?", (stake, _stamp(now), uid)
+            )
             await conn.execute(
                 "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES (?,?, 'sea_refund',?,?)",
                 (uid, stake, "room:" + room["id"], _stamp(now)),
@@ -366,7 +379,9 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
         if int(p["id"]) > 0:
             await inbox_in_connection(conn, int(p["id"]), f"{title}. {text}")
     await conn.execute("UPDATE mini_sea_members SET active=0 WHERE room_id=?", (room["id"],))
-    await conn.execute("UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],))
+    await conn.execute(
+        "UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],)
+    )
 
 
 def _set_turn(room, uid, now: float) -> None:
@@ -520,7 +535,9 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
     member = await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,))
     if member:
         raise Conflict("Ты уже в другой партии. Сначала заверши её или выйди")
-    count = await _one(conn, "SELECT COUNT(*) AS n FROM mini_sea_rooms WHERE host_id=? AND created_at>?", (uid, now - 600))
+    count = await _one(
+        conn, "SELECT COUNT(*) AS n FROM mini_sea_rooms WHERE host_id=? AND created_at>?", (uid, now - 600)
+    )
     if count["n"] >= 5:
         raise ValueError("Можно создать не больше пяти комнат за 10 минут")
     vs_bot = body.get("vs_bot") is True
@@ -567,11 +584,26 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
         room["state"]["players"]["bot"] = bot
     if stake:
         await _charge(conn, uid, stake, room_id, now)
-    _log(room, "Комната открыта. Приглашай друга или начинай." if not vs_bot else "Комната создана. Начинай, когда готов.", now)
+    _log(
+        room,
+        "Комната открыта. Приглашай друга или начинай." if not vs_bot else "Комната создана. Начинай, когда готов.",
+        now,
+    )
     await conn.execute(
         "INSERT INTO mini_sea_rooms(id,host_id,title,status,stake,bot,deadline,state_json,created_at,updated_at) "
         "VALUES(?,?,?,?,?,?,?,?,?,?)",
-        (room_id, uid, title, "lobby", stake, room["bot"], room["deadline"], json.dumps(room["state"], ensure_ascii=False), now, now),
+        (
+            room_id,
+            uid,
+            title,
+            "lobby",
+            stake,
+            room["bot"],
+            room["deadline"],
+            json.dumps(room["state"], ensure_ascii=False),
+            now,
+            now,
+        ),
     )
     await conn.execute("INSERT INTO mini_sea_members(room_id,user_id,joined_at) VALUES(?,?,?)", (room_id, uid, now))
     return room
@@ -587,7 +619,9 @@ async def _respond(conn, db, settings, room, uid: int, body: dict, now: float) -
     if type(body.get("accept")) is not bool:
         raise ValueError("Выбери принять или отклонить приглашение")
     if not body["accept"]:
-        await conn.execute("UPDATE mini_sea_invites SET status='declined' WHERE room_id=? AND user_id=?", (room["id"], uid))
+        await conn.execute(
+            "UPDATE mini_sea_invites SET status='declined' WHERE room_id=? AND user_id=?", (room["id"], uid)
+        )
         return "Приглашение отклонено"
     sender = _player(room, invite["sender_id"])
     if not sender or sender["left"] or not await accepted_in_connection(conn, uid, invite["sender_id"]):
@@ -624,7 +658,9 @@ async def _invite(conn, db, settings, room, uid: int, body: dict, now: float) ->
         raise ValueError("У друга пока нет доступа к миниапке")
     if str(target) in _players(room) and not _players(room)[str(target)]["left"]:
         raise Conflict("Друг уже в комнате")
-    previous = await _one(conn, "SELECT status FROM mini_sea_invites WHERE room_id=? AND user_id=?", (room["id"], target))
+    previous = await _one(
+        conn, "SELECT status FROM mini_sea_invites WHERE room_id=? AND user_id=?", (room["id"], target)
+    )
     if previous:
         raise Conflict("Этому другу приглашение в эту комнату уже отправляли")
     await conn.execute(
@@ -674,7 +710,9 @@ async def _start(conn, db, settings, room, uid: int, now: float) -> str:
         room["deadline"] = now + BOT_PAUSE
     first_name = (_player(room, first) or {}).get("name", BOT_NAME)
     _log(room, f"Бой начался. Флот расставлен случайно. Первым стреляет {first_name}.", now)
-    await conn.execute("UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],))
+    await conn.execute(
+        "UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],)
+    )
     return "Бой начался"
 
 
