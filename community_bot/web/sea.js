@@ -7,6 +7,7 @@ window.NoraSea = (() => {
     pending = false;
   const draft = { stake: "0" };
   let lastRoomId = "";
+  let lastHtml = "";
 
   const ROWS = "АБВГДЕЖЗИК";
 
@@ -200,11 +201,18 @@ window.NoraSea = (() => {
   }
 
   function patch() {
+    if (tab !== "sea") return;
     const el = $("#sea-content");
-    if (!el || tab !== "sea") return;
+    if (!el) return;
+    const html = screen();
+    if (html === lastHtml) {
+      timerTick();
+      return;
+    }
     const y = window.scrollY;
     const open = [...el.querySelectorAll("details[open]")].map((n) => n.dataset.detail);
-    el.outerHTML = screen();
+    el.outerHTML = html;
+    lastHtml = html;
     for (const key of open) {
       const node = $(`[data-detail="${key}"]`);
       if (node) node.open = true;
@@ -251,6 +259,7 @@ window.NoraSea = (() => {
       return null;
     } finally {
       pending = false;
+      patch();
       schedule();
     }
   }
@@ -361,6 +370,7 @@ window.NoraSea = (() => {
     parent: () => "games",
     load,
     inviteCard,
+    mount,
     handles: (view) => VIEWS.has(view),
     refreshCurrent: () => {
       if (tab !== "sea") return false;

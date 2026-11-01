@@ -192,10 +192,20 @@ def _active(room) -> list[dict]:
     return [p for p in _players(room).values() if not p["left"]]
 
 
+def _player(room, pid: int):
+    players = _players(room)
+    if str(pid) in players:
+        return players[str(pid)]
+    if pid == -1:
+        return players.get("bot")
+    return None
+
+
 def _opponent_id(room, uid: int):
-    for key in _players(room):
-        if int(key) != uid:
-            return int(key)
+    for p in _players(room).values():
+        pid = int(p["id"])
+        if pid != uid:
+            return pid
     return None
 
 
@@ -233,8 +243,8 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
     room["finished_at"] = now
     room["state"]["winner"] = winner
     stake = int(room["stake"] or 0)
-    for uid, _ in _players(room).items():
-        uid = int(uid)
+    for p in _players(room).values():
+        uid = int(p["id"])
         if uid < 0:  # bot has no wallet
             continue
         if stake and not cancelled and winner is not None and uid == winner:
@@ -255,12 +265,12 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
     elif winner is None:
         text = "Ничья: ставки возвращены." if stake else "Ничья: время партии истекло."
     else:
-        name = _players(room).get(str(winner), {}).get("name", "Соперник")
+        name = (_player(room, winner) or {}).get("name", "Соперник")
         text = f"Победил {name}." + (f" Забрано {stake * 2} 🍪." if stake else "")
     _log(room, text, now)
-    for uid in _players(room):
-        if int(uid) > 0:
-            await inbox_in_connection(conn, int(uid), f"{title}. {text}")
+    for p in _players(room).values():
+        if int(p["id"]) > 0:
+            await inbox_in_connection(conn, int(p["id"]), f"{title}. {text}")
     await conn.execute("UPDATE mini_sea_members SET active=0 WHERE room_id=?", (room["id"],))
     await conn.execute("UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],))
 
@@ -299,9 +309,9 @@ def _bot_choice(attacker: dict, rng) -> int:
 
 
 async def _bot_shoot(conn, room, now: float) -> None:
-    bot = _players(room)["bot"]
+    bot = _player(room, -1)
     victim_id = _opponent_id(room, -1)
-    victim = _players(room).get(str(victim_id)) if victim_id is not None else None
+    victim = _player(room, victim_id) if victim_id is not None else None
     if victim is None or victim["left"]:
         return
     rng = secrets.SystemRandom()
@@ -343,7 +353,7 @@ async def _advance(conn, room, now: float) -> None:
         if room["bot"] and turn == -1:
             await _bot_shoot(conn, room, at)
         else:
-            player = _players(room).get(str(turn))
+            player = _player(room, turn)
             if player and not player["left"]:
                 _log(room, f"{player['name']} думал слишком долго — ход перешёл.", at)
             other = _opponent_id(room, turn)
@@ -462,7 +472,7 @@ async def _respond(conn, db, settings, room, uid: int, body: dict, now: float) -
     if not body["accept"]:
         await conn.execute("UPDATE mini_sea_invites SET status='declined' WHERE room_id=? AND user_id=?", (room["id"], uid))
         return "Приглашение отклонено"
-    sender = _players(room).get(str(invite["sender_id"]))
+    sender = _player(room, invite["sender_id"])
     if not sender or sender["left"] or not await accepted_in_connection(conn, uid, invite["sender_id"]):
         raise Conflict("Приглашение больше не действует. Приглашать могут только друзья из этой партии")
     if not await miniapp_allowed(db, settings, uid):
@@ -535,7 +545,7 @@ async def _start(conn, db, settings, room, uid: int, now: float) -> str:
     if room["stake"] and not room["bot"]:
         opponent = next(p for p in players if p["id"] != uid)
         await _charge(conn, opponent["id"], room["stake"], room["id"], now)
-    bot = _players(room).get("bot")
+    bot = _player(room, -1)
     if bot is not None:
         board, fleet = place_board(secrets.SystemRandom())
         bot["board"], bot["fleet"] = board, fleet
@@ -545,7 +555,7 @@ async def _start(conn, db, settings, room, uid: int, now: float) -> str:
     _set_turn(room, first, now)
     if first == -1:
         room["deadline"] = now + BOT_PAUSE
-    first_name = _players(room).get(str(first), {}).get("name", BOT_NAME)
+    first_name = (_player(room, first) or {}).get("name", BOT_NAME)
     _log(room, f"Бой начался. Флот расставлен случайно. Первым стреляет {first_name}.", now)
     await conn.execute("UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND status='pending'", (room["id"],))
     return "Бой начался"
@@ -562,7 +572,7 @@ async def _shoot_action(conn, room, uid: int, body: dict, now: float) -> str:
         raise ValueError("Выбери клетку на поле соперника")
     attacker = _players(room)[str(uid)]
     target_id = _opponent_id(room, uid)
-    defender = _players(room).get(str(target_id)) if target_id is not None else None
+    defender = _player(room, target_id) if target_id is not None else None
     if defender is None or defender["left"]:
         raise Conflict("Соперник покинул партию")
     if attacker["shots"][index]:
@@ -594,7 +604,7 @@ async def _shoot_action(conn, room, uid: int, body: dict, now: float) -> str:
 
 
 def _view(room, uid: int) -> dict:
-    own = _players(room).get(str(uid))
+    own = _player(room, uid)
     if not own:
         raise ValueError("Эта комната доступна только её участникам")
     finished = room["status"] in ("finished", "cancelled")
@@ -653,7 +663,7 @@ async def read_status(db, uid: int, now: float | None = None, room_id: str | Non
         await conn.execute("BEGIN")
         if room_id:
             room = await _load(conn, room_id)
-            if room is None or str(uid) not in _players(room):
+            if room is None or _player(room, uid) is None:
                 raise ValueError("Комната не найдена")
         else:
             member = await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,))
@@ -743,7 +753,7 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                 if not body.get("accept"):
                     focus = None
             else:
-                own = _players(room).get(str(uid))
+                own = _player(room, uid)
                 if not own or own["left"]:
                     raise ValueError("Ты не участник этой партии")
                 if action_name == "invite":
