@@ -18,7 +18,7 @@ window.NoraSea = (() => {
   // Classes: c0 empty, c1 own ship, c2 hit, c3 miss, c4 sunk
   function ownBoardHtml(entry) {
     const cells = entry.board
-      .map((c) => `<span class="sea-cell ${c.sunk ? "c4" : c.hit ? (c.ship ? "c2" : "c3") : c.ship ? "c1" : "c0"}"></span>`)
+      .map((c) => `<span class="sea-cell ${c.sunk ? "c4" : c.hit ? "c2" : c.miss ? "c3" : c.ship ? "c1" : "c0"}"></span>`)
       .join("");
     return `<div class="sea-board">${cells}</div>`;
   }
@@ -26,7 +26,9 @@ window.NoraSea = (() => {
   function enemyBoardHtml(entry, interactive, reveal) {
     const cells = entry.shots
       .map((s, i) => {
-        const cls = reveal ? (s.hit ? "c2" : s.fired ? "c3" : reveal[i] ? "c1" : "c0") : !s.fired ? "c0" : s.hit ? "c2" : "c3";
+        const cls = reveal
+          ? (s.sunk ? "c4" : s.hit ? "c2" : s.fired ? "c3" : reveal[i] ? "c1" : "c0")
+          : !s.fired ? "c0" : s.sunk ? "c4" : s.hit ? "c2" : "c3";
         return interactive
           ? `<button class="sea-cell ${cls}" data-sea-shoot="${i}" aria-label="Клетка ${cellCoord(i)}" ${pending ? "disabled" : ""}></button>`
           : `<span class="sea-cell ${cls}"></span>`;

@@ -391,3 +391,32 @@ async def test_notices_expose_sea_invite_for_inbox_acceptance(env, monkeypatch):
         "stake": 10,
         "sender_name": "Игрок 7",
     }
+
+
+def test_view_marks_opponent_misses_and_sunk_ships():
+    """Own board reveals opponent hits/misses and sunk ships; own shots mark
+    the opponent's sunk ships so both boards cross them out after a kill."""
+    player = {
+        "id": 7, "name": "Игрок", "board": [1] + [0] * 99, "fleet": {1: 1},
+        "shots": [2] + [0] * 99, "ready": True, "left": False,
+    }
+    bot = {
+        "id": -1, "name": "Бот", "board": [1] + [0] * 99, "fleet": {1: 1},
+        "shots": [2, 1] + [0] * 98, "ready": True, "left": False,
+    }
+    room = {
+        "id": "room", "host_id": 7, "title": "test", "status": "active",
+        "stake": 0, "bot": 1, "deadline": 123.0,
+        "state": {
+            "players": {"7": player, "bot": bot},
+            "turn": 7, "started_at": 0.0, "winner": None, "timeline": [],
+        },
+    }
+    me = next(p for p in sea._view(room, 7)["players"] if p["id"] == 7)
+    # Opponent's shots on my board: cell 0 hit and sunk, cell 1 a miss.
+    assert me["board"][0]["hit"] and me["board"][0]["sunk"]
+    assert me["board"][1]["miss"] and not me["board"][1]["hit"]
+    assert not me["board"][2]["ship"] and not me["board"][2]["miss"]
+    # My shots on the opponent's board: cell 0 hit and sunk.
+    assert me["shots"][0]["hit"] and me["shots"][0]["sunk"]
+    assert not me["shots"][1]["fired"]

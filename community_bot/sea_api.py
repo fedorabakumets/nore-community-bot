@@ -730,18 +730,34 @@ def _view(room, uid: int) -> dict:
         entry = {"id": p["id"], "name": p["name"], "left": p["left"], "ready": p["ready"]}
         if p["id"] == uid:
             enemy_shots = [0] * (SIZE * SIZE)
+            enemy_board = [0] * (SIZE * SIZE)
+            enemy_fleet: dict = {}
             for other in _players(room).values():
                 if other["id"] != p["id"]:
                     enemy_shots = other["shots"]
-            # Own fleet with the opponent's hits; own shots reveal only hit/miss on the hidden enemy fleet.
+                    enemy_board = other["board"] or [0] * (SIZE * SIZE)
+                    enemy_fleet = other["fleet"] or {}
+            # Own fleet shows the opponent's hits and misses; own shots reveal
+            # only hit/miss/sunk on the hidden enemy fleet.
             entry["board"] = [
-                {"ship": bool(p["board"][i]), "hit": enemy_shots[i] == 2} for i in range(SIZE * SIZE)
+                {
+                    "ship": bool(p["board"][i]),
+                    "hit": enemy_shots[i] == 2,
+                    "miss": enemy_shots[i] == 1,
+                }
+                for i in range(SIZE * SIZE)
             ]
             sunk_ids = {s for s in (p["fleet"] or {}) if _ship_sunk(enemy_shots, p["board"], s)}
             for i, cell in enumerate(entry["board"]):
                 cell["sunk"] = bool(p["board"][i] in sunk_ids)
+            enemy_sunk_ids = {s for s in enemy_fleet if _ship_sunk(p["shots"], enemy_board, s)}
             entry["shots"] = [
-                {"fired": bool(v), "hit": v == 2} for _, v in enumerate(p["shots"])
+                {
+                    "fired": bool(v),
+                    "hit": v == 2,
+                    "sunk": bool(v == 2 and enemy_board[i] in enemy_sunk_ids),
+                }
+                for i, v in enumerate(p["shots"])
             ]
         elif finished:
             board = p["board"] or [0] * (SIZE * SIZE)
