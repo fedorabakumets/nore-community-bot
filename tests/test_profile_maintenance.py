@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -53,7 +54,9 @@ async def test_one_profile_reset_restores_onboarding_and_preserves_finances_hist
     assert await db.get_user(8) == other
     assert not await db.fetchall('SELECT * FROM mini_presence WHERE user_id=7')
     backups = list((db.path.parent / '.nora-backups').glob('*.sqlite3'))
-    assert len(backups) == 1 and backups[0].stat().st_mode & 0o777 == 0o600
+    assert len(backups) == 1
+    if os.name != "nt":
+        assert backups[0].stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(backups[0]) as original:
         assert original.execute('SELECT role FROM users WHERE user_id=7').fetchone() == ('admin',)
         assert original.execute('SELECT status FROM applications WHERE user_id=7').fetchone() == ('approved',)
