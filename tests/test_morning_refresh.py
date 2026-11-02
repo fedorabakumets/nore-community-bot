@@ -23,6 +23,7 @@ from community_bot.morning import (
     publish_morning_digest,
     render_brief,
     select_day_news,
+    select_road_incidents,
     telegram_length,
 )
 
@@ -129,7 +130,7 @@ def test_caption_is_balanced_collapsible_bounded_and_does_not_mutate():
     assert "&lt;" in first and "&amp;" in first
     parser = CheckHTML()
     parser.feed(first)
-    assert not parser.stack and parser.quotes == 3
+    assert not parser.stack and parser.quotes == 4
 
 
 def test_missing_sources_never_claim_no_news_or_fabricate_metro_or_history():
@@ -386,11 +387,11 @@ def test_daily_layout_has_two_sources_and_only_confirmed_transport():
     text = render_brief(brief)
     assert text.startswith("<b>NORA DAILY</b>\n")
     assert "Петербург" in text and "ощущается +5°" in text
-    assert "В пути" in text and "пробки 4/10" in text
+    assert "Пробки" in text and "пробки 4/10" in text
     assert "Неподтверждённая станция" not in text
     assert 'href="https://example.org/one"' in text and "Источник 1" in text
     assert 'href="https://example.org/two"' in text and "Источник 2" in text
-    assert "В пути" not in render_brief(MorningBrief(NOW, metro_available=False))
+    assert "данные о пробках недоступны" in render_brief(MorningBrief(NOW, metro_available=False))
 
 
 def test_daily_news_can_fill_second_place_from_another_region():
@@ -398,3 +399,17 @@ def test_daily_news_can_fill_second_place_from_another_region():
     region = article("В Гатчине открылся парк", link="https://example.org/region")
     assert select_day_news([region, city], NOW, allow_other_regions=True) == [city, region]
     assert select_day_news([region, city], NOW) == [city]
+
+
+def test_road_incidents_are_recent_local_linked_and_collapsible():
+    incident = article("ДТП перекрыло движение на КАД Петербурга", link="https://example.org/road")
+    old = article("ДТП на дороге Петербурга", age=25, link="https://example.org/old")
+    future = article("В Петербурге перекрыли дорогу", age=-1, link="https://example.org/future")
+    remote = article("ДТП перекрыло дорогу в Москве", link="https://example.org/moscow")
+    assert select_road_incidents([old, future, remote, incident], NOW) == [incident]
+    text = render_brief(MorningBrief(NOW, traffic_level=6, road_incidents=[incident]))
+    assert text.index("Пробки") < text.index("Этот день")
+    assert "пробки 6/10" in text and "ДТП перекрыло" in text
+    assert '<a href="https://example.org/road">Фонтанка</a>' in text
+    assert '<blockquote expandable>' in text
+    assert "Дорожные новости не загрузились" in render_brief(MorningBrief(NOW, news_available=False))

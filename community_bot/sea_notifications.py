@@ -60,7 +60,15 @@ async def respond(callback: CallbackQuery, db, settings):
             try:
                 await callback.message.answer(
                     "Ты в комнате. Открой лобби, подтверди готовность и дождись старта.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть лобби", web_app=WebAppInfo(url=url.split("#", 1)[0] + "?view=sea"))]]),
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="Открыть лобби", web_app=WebAppInfo(url=url.split("#", 1)[0] + "?view=sea")
+                                )
+                            ]
+                        ]
+                    ),
                 )
             except TelegramAPIError:
                 pass

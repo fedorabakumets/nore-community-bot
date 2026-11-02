@@ -30,7 +30,7 @@ def _snapshot(source: Path, destination: Path) -> None:
     try:
         with closing(_read_only(source)) as live, closing(sqlite3.connect(destination)) as backup:
             live.backup(backup, pages=256, sleep=0.01)
-        with destination.open("rb") as result:
+        with destination.open("r+b") as result:
             os.fsync(result.fileno())
     except BaseException:
         destination.unlink(missing_ok=True)  # Only the incomplete file just created here.

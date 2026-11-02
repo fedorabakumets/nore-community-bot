@@ -146,6 +146,7 @@ class MorningBrief:
     weather: WeatherNow | None = None
     traffic_level: int | None = None
     traffic_hint: str = ""
+    road_incidents: list[NewsItem] = field(default_factory=list)
     transport_notes: list[str] = field(default_factory=list)
     metro_lines: dict[int, str] = field(default_factory=dict)
     station_notes: list[str] = field(default_factory=list)
@@ -604,6 +605,27 @@ def select_day_news(
     return selected
 
 
+def select_road_incidents(items: list[NewsItem], now: datetime) -> list[NewsItem]:
+    """Recent local reports, not a live or exhaustive road status."""
+    moment = now.astimezone(UTC)
+    candidates = [item for item in items if item.published.tzinfo is not None
+                  and moment - timedelta(hours=24) <= item.published <= moment
+                  and news_region(item) in (0, 1) and clean_link(item.link)
+                  and news_value(item, now) is not None
+                  and re.search(r"дтп|авари|столкновен|перекры|ограничен\w* движен|"
+                                r"пробк|затор|затруднен\w* движен", item.title, re.IGNORECASE)
+                  and re.search(r"дтп|авари|столкновен|дорог|трасс|шоссе|улиц|проспект|"
+                                r"кад|зсд|мост|проезд|движен|пробк|затор", item.title, re.IGNORECASE)]
+    candidates.sort(key=lambda item: item.published, reverse=True)
+    selected: list[NewsItem] = []
+    for item in candidates:
+        if not any(_same_story(item, old) for old in selected):
+            selected.append(item)
+        if len(selected) == 2:
+            break
+    return selected
+
+
 def render_news_line(item: NewsItem) -> str:
     title = html.escape(_short(item.title, 85))
     body = html.escape(_short(item.body, 160)) if item.body != item.title else ""
@@ -728,13 +750,23 @@ def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
         ])
     else:
         parts.append("🌤 Погоду сейчас получить не удалось.")
-    transport = []
-    if brief.traffic_level is not None:
-        transport.append(f"пробки {brief.traffic_level}/10")
+    level = f"пробки {brief.traffic_level}/10" if brief.traffic_level is not None else "данные о пробках недоступны"
+    road_parts = [html.escape(level)]
+    if brief.road_incidents:
+        road_parts.append("Сообщения за сутки:")
+        for item in brief.road_incidents:
+            link = html.escape(clean_link(item.link), quote=True)
+            title = html.escape(_short(item.title, min(detail_limit, 100)))
+            source = html.escape(item.source or "Источник")
+            road_parts.append(f'{title} · <a href="{link}">{source}</a>')
+    elif brief.news_available:
+        road_parts.append("Сообщений о происшествиях в доступных лентах не найдено.")
+    else:
+        road_parts.append("Дорожные новости не загрузились.")
+    parts.extend(["", "🚦 <b>Пробки</b>", _quote(road_parts)])
     if brief.metro_available and brief.closed_stations:
-        transport.append("закрыты: " + _short(", ".join(brief.closed_stations), 65))
-    if transport:
-        parts.extend(["", "🚦 <b>В пути</b>", html.escape(" · ".join(transport))])
+        parts.extend(["", "🚇 <b>Метро</b>",
+                      html.escape("закрыты: " + _short(", ".join(brief.closed_stations), 65))])
     if brief.day_news:
         parts.extend(["", "📰 <b>За сутки</b>"])
         for item in brief.day_news[:2]:
@@ -828,7 +860,11 @@ async def collect_brief(now: datetime) -> MorningBrief:
         logger.warning("Утренние пробки не ответили")
     if isinstance(news_raw, tuple):
         items, brief.news_available = news_raw
-        brief.day_news = select_day_news(items, now, allow_other_regions=True)
+        brief.road_incidents = select_road_incidents(items, now)
+        brief.day_news = select_day_news(
+            [item for item in items if not any(_same_story(item, road) for road in brief.road_incidents)],
+            now, allow_other_regions=True,
+        )
     else:
         brief.news_available = False
     if isinstance(metro_raw, str):

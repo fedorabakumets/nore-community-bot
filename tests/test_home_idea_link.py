@@ -3,14 +3,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from community_bot import birthday
 from community_bot.routers import private
 
 
 @pytest.mark.parametrize('payload,opens_ticket', [('idea', True), ('', False)])
 async def test_start_idea_reuses_ticket_flow_without_changing_normal_start(monkeypatch, payload, opens_ticket):
-    message = SimpleNamespace(from_user=SimpleNamespace(id=7), chat=SimpleNamespace(type='private'),
+    message = SimpleNamespace(from_user=SimpleNamespace(id=7, username=None), chat=SimpleNamespace(type='private'),
                               text='/start '+payload, bot=object())
-    state, db, settings = AsyncMock(), object(), object()
+    state, db, settings = AsyncMock(), object(), SimpleNamespace(timezone="Europe/Moscow")
+    monkeypatch.setattr(birthday, "offer_special_on_contact", AsyncMock())
+    monkeypatch.setattr(birthday, "pending_gift", AsyncMock(return_value=None))
     register, ticket, welcome, keyboard = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(private, 'register_telegram_user', register)
     monkeypatch.setattr(private, 'open_ticket', ticket)

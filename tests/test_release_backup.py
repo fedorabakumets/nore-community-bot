@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 
 import pytest
@@ -37,8 +38,9 @@ async def test_backup_restores_wal_and_checks_upgrade_without_mutating_live_data
     assert await db.fetchone("SELECT name FROM sqlite_master WHERE name = 'wallet_intents'") is None
     assert (await db.fetchone("SELECT COUNT(*) AS count FROM users"))["count"] == 1
     backup = tmp_path / ".nora-backups" / "before-nora-release-17-test.sqlite3"
-    assert backup.stat().st_mode & 0o777 == 0o600
-    assert backup.parent.stat().st_mode & 0o777 == 0o700
+    if os.name != "nt":
+        assert backup.stat().st_mode & 0o777 == 0o600
+        assert backup.parent.stat().st_mode & 0o777 == 0o700
     report = json.loads(backup.with_suffix(".verified.json").read_text())
     assert report["integrity_ok"] and report["balances_preserved"] and report["replay_blocked"]
     assert not list(backup.parent.glob("restore-check-*"))

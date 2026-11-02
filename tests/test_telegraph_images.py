@@ -45,12 +45,22 @@ def test_public_artwork_is_pinned_to_deployed_commit_and_cannot_expose_other_fil
     private_image = tmp_path / "private.png"
     private_image.write_bytes(b"private")
     assert telegraph.public_image_url(private_image) is None
-    linked_image = updates / "linked.png"
-    linked_image.symlink_to(private_image)
-    assert telegraph.public_image_url(linked_image) is None
     secret = updates / "private.txt"
     secret.write_text("private")
     assert telegraph.public_image_url(secret) is None
+
+
+def test_artwork_symlink_cannot_expose_other_files(artwork, tmp_path):
+    private_image = tmp_path / "private.png"
+    private_image.write_bytes(b"private")
+    linked_image = artwork[0] / "linked.png"
+    try:
+        linked_image.symlink_to(private_image)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows account cannot create symbolic links")
+        raise
+    assert telegraph.public_image_url(linked_image) is None
 
 
 def test_missing_or_invalid_revision_falls_back_to_known_production_ref(artwork, monkeypatch):
