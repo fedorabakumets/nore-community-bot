@@ -48,6 +48,22 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
         blocks.append(InputRichBlockDetails(summary=summary, blocks=details))
     else:
         blocks.append(InputRichBlockParagraph(text="🌤 Погоду сейчас получить не удалось."))
+    traffic_summary = (f"🚦 Пробки · {brief.traffic_level} из 10 баллов"
+                       if brief.traffic_level is not None else "🚦 Пробки · данные недоступны")
+    road_details = []
+    if brief.road_incidents:
+        road_details.append(InputRichBlockParagraph(text="Сообщения за сутки:"))
+        for item in brief.road_incidents:
+            road_details.append(InputRichBlockParagraph(text=item.title))
+            if link := clean_link(item.link):
+                road_details.append(InputRichBlockParagraph(text=RichTextUrl(text=item.source or "Источник", url=link)))
+    else:
+        message = ("Сообщений о происшествиях в доступных лентах не найдено." if brief.news_available
+                   else "Дорожные новости не загрузились.")
+        road_details.append(InputRichBlockParagraph(text=message))
+    blocks.append(InputRichBlockDetails(summary=traffic_summary, blocks=road_details))
+    if brief.metro_available and brief.closed_stations:
+        blocks.append(InputRichBlockParagraph(text="🚇 Закрыты: " + ", ".join(brief.closed_stations)))
     if brief.photo:
         blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(brief.photo))))
     blocks.extend([InputRichBlockDivider(), InputRichBlockSectionHeading(text="📰 Свежие новости", size=2)])
@@ -83,14 +99,6 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
         blocks.append(InputRichBlockDetails(summary=summary, blocks=details))
     else:
         blocks.append(InputRichBlockParagraph(text="Подтверждённого события на эту дату пока нет."))
-    transport = []
-    if brief.traffic_level is not None:
-        transport.append(f"{brief.traffic_level} из 10 баллов")
-    if brief.metro_available and brief.closed_stations:
-        transport.append("закрыты: " + ", ".join(brief.closed_stations))
-    if transport:
-        blocks.extend([InputRichBlockDivider(), InputRichBlockSectionHeading(text="🚦 Пробки", size=3),
-                       InputRichBlockParagraph(text=" · ".join(transport))])
     if bot_username:
         blocks.extend([InputRichBlockDivider(), InputRichBlockButtons(
             buttons=[

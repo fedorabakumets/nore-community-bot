@@ -20,23 +20,25 @@ def test_rich_blocks_keep_complete_headlines_and_embedded_photo():
     brief = MorningBrief(
         NOW, weather=WeatherNow(8, 5, 3, 14, 0, "", ""), traffic_level=4,
         metro_available=False, closed_stations=["Неизвестная станция"],
+        road_incidents=[NewsItem("ДТП на КАД Петербурга", NOW, link="https://example.org/road", source="Источник")],
         day_news=[NewsItem(title, NOW, link="https://example.org/news", lead="Детали", source="Источник")],
         history=DayEvent(1930, "История", "Событие", "https://example.org/history", "Контекст", 10, 26),
     )
     rich = render_rich_brief(brief, "test_bot")
     assert rich.blocks and any(isinstance(block, InputRichBlockPhoto) for block in rich.blocks)
     details = [block for block in rich.blocks if isinstance(block, InputRichBlockDetails)]
-    assert details[1].summary == title and len(details) == 3
+    assert details[2].summary == title and len(details) == 4
+    assert details[1].summary == "🚦 Пробки · 4 из 10 баллов"
+    assert "ДТП на КАД" in details[1].blocks[1].text
     assert "Петербург" in details[0].summary
     assert rich.blocks[1].text == "📆 Понедельник • 26 октября"
-    assert [str(getattr(block, "text", "")) for block in rich.blocks].index("🚦 Пробки") > next(
-        i for i, block in enumerate(rich.blocks) if getattr(block, "text", "") == "Этот день в Петербурге"
-    )
+    assert rich.blocks.index(details[1]) == rich.blocks.index(details[0]) + 1
     bot = Bot(token="123456:TEST_TOKEN_FOR_LOCAL_SERIALIZATION")
     files = {}
     data = bot.session.prepare_value(rich, bot=bot, files=files)
     assert len(files) == 1 and "attach://" in data
     assert "https://example.org/news" in data and "https://example.org/history" in data
+    assert "https://example.org/road" in data
     assert "https://t.me/test_bot?start=private" in data
     assert '"text": "BOT"' in data
     assert "Неизвестная станция" not in data
@@ -120,3 +122,13 @@ async def test_uncertain_send_never_falls_back(tmp_path, monkeypatch):
     with pytest.raises(TimeoutError):
         await publish_morning_digest(bot, db, settings, force=True)
     assert not await publish_morning_digest(bot, db, settings, force=True)
+
+
+def test_rich_traffic_explains_missing_sources():
+    empty = render_rich_brief(MorningBrief(NOW))
+    traffic = next(block for block in empty.blocks if isinstance(block, InputRichBlockDetails))
+    assert "данные недоступны" in traffic.summary
+    assert "не найдено" in traffic.blocks[0].text
+    unavailable = render_rich_brief(MorningBrief(NOW, news_available=False))
+    traffic = next(block for block in unavailable.blocks if isinstance(block, InputRichBlockDetails))
+    assert "не загрузились" in traffic.blocks[0].text
