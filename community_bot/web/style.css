@@ -235,7 +235,11 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .events-heading{font-size:clamp(18px,5.6vw,34px);white-space:nowrap}
 .lk-title h1{color:var(--red)}
 .community-leaders{border-color:#e5c36c;background:linear-gradient(135deg,#8a5d16 0%,#e9c76d 18%,#fff0ac 32%,#b98428 51%,#f8dd87 72%,#a6701d 100%);color:#30200a;box-shadow:inset 0 1px 0 #fff3c2,0 3px 14px #bc872b33}
-.community-leaders .community-person{border-color:#77521655}
-.community-leaders .person-visit{color:#30200a}
-.community-leaders .community-person small,.community-leaders .community-rank,.community-leaders .sub{color:#624518}
+.community-leaders .community-person{margin:6px 0;padding:10px;border:1px solid #76777b;border-radius:12px;background:linear-gradient(135deg,#b9babd,#e0e0e1 48%,#a9aaad);color:#242429}
+.community-leaders .community-place-1{border-color:#a36b13;background:linear-gradient(135deg,#d6a33f,#ffe69a 48%,#c38a27)}
+.community-leaders .community-place-2{border-color:#9399a1;background:linear-gradient(135deg,#afb7c2,#f0f2f5 48%,#aab2bd)}
+.community-leaders .community-place-3{border-color:#a86436;background:linear-gradient(135deg,#c98550,#f3c59b 48%,#b87240)}
+.community-leaders .person-visit{color:#242429}
+.community-leaders .community-person small,.community-leaders .community-rank{color:#49433d}
+.community-leaders .sub{color:#624518}
 .community-leaders .community-winner button{color:#6c2119}
