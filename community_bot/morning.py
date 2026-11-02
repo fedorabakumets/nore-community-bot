@@ -26,7 +26,7 @@ SPB_LONGITUDE = 30.3141
 MORNING_HOUR = 9
 CATCHUP_MINUTES = 150
 CAPTION_LIMIT = 1000
-MORNING_LAYOUT = "city-quotes-v1"
+MORNING_LAYOUT = "nora-daily-v1"
 
 WEATHER_URL = (
     "https://api.open-meteo.com/v1/forecast"
@@ -572,7 +572,9 @@ def news_value(item: NewsItem, now: datetime) -> int | None:
     return 1
 
 
-def select_day_news(items: list[NewsItem], now: datetime, limit: int = 2) -> list[NewsItem]:
+def select_day_news(
+    items: list[NewsItem], now: datetime, limit: int = 2, *, allow_other_regions: bool = False,
+) -> list[NewsItem]:
     moment = now.astimezone(UTC)
     start = moment - timedelta(hours=24)
     fresh = [
@@ -587,11 +589,11 @@ def select_day_news(items: list[NewsItem], now: datetime, limit: int = 2) -> lis
     selected: list[NewsItem] = []
     if not fresh or limit <= 0:
         return selected
-    # Keep the best available geography tier: never pad a single local story
-    # with an unrelated national headline just to fill a second slot.
+    # Prefer local stories; the morning digest may use another geographic tier
+    # when it has fewer than two suitable local stories.
     tier = news_region(fresh[0])
     for item in fresh:
-        if news_region(item) != tier:
+        if news_region(item) != tier and not allow_other_regions:
             break
         if selected and news_value(item, now) == 0:
             continue
@@ -710,7 +712,7 @@ def _quote(parts: list[str]) -> str:
 def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
     local = brief.when.astimezone(ZoneInfo("Europe/Moscow"))
     day = local.date()
-    parts = [brief_title(local) + ", Петербург", format_day(day), ""]
+    parts = ["<b>NORA DAILY</b>", f"{format_day(day)} · Петербург", ""]
     if brief.weather:
         weather = brief.weather
         emoji = {"clear": "☀️", "cloudy": "🌥", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}[
@@ -722,7 +724,7 @@ def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
         parts.extend([
             f"{emoji} {format_temp(weather.temperature)}, {weather_label(weather.code).lower()} · "
             f"ощущается {format_temp(weather.feels_like)}",
-            html.escape(advice),
+            "На улицу: " + html.escape(advice),
         ])
     else:
         parts.append("🌤 Погоду сейчас получить не удалось.")
@@ -732,9 +734,9 @@ def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
     if brief.metro_available and brief.closed_stations:
         transport.append("закрыты: " + _short(", ".join(brief.closed_stations), 65))
     if transport:
-        parts.append("🚦 " + html.escape(" · ".join(transport)))
+        parts.extend(["", "🚦 <b>В пути</b>", html.escape(" · ".join(transport))])
     if brief.day_news:
-        parts.extend(["", "<b>За сутки</b>"])
+        parts.extend(["", "📰 <b>За сутки</b>"])
         for item in brief.day_news[:2]:
             link = clean_link(item.link)
             source = html.escape(item.source or "Источник")
@@ -826,7 +828,7 @@ async def collect_brief(now: datetime) -> MorningBrief:
         logger.warning("Утренние пробки не ответили")
     if isinstance(news_raw, tuple):
         items, brief.news_available = news_raw
-        brief.day_news = select_day_news(items, now)
+        brief.day_news = select_day_news(items, now, allow_other_regions=True)
     else:
         brief.news_available = False
     if isinstance(metro_raw, str):

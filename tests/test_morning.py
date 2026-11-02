@@ -133,7 +133,7 @@ def test_traffic_xml_and_caption_fit_photo() -> None:
         night=["Пожар на набережной Мойки локализован."] * 6,
     )
     text = render_brief(brief)
-    assert "Доброе утро" in text
+    assert "<b>NORA DAILY</b>" in text
     assert "пробки 6/10" in text
     assert "ощущается +5°" in text
     assert "Этот день в Петербурге" in text
