@@ -86,7 +86,8 @@ window.NoraWorld = (() => {
     trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
     const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
-    let actualDistance=5.7,opacity=1;
+    let actualDistance=5.7,opacity=1,jumpHeight=0,jumpVelocity=0;
+    const keys=new Set(), jumpButton=root.querySelector('.nora-world-jump');
     const stick={x:0,z:0}, joystick=root.querySelector('.nora-world-joystick'), knob=root.querySelector('.nora-world-knob');
     const controls=new AbortController(), on=(el,event,fn)=>el.addEventListener(event,fn,{signal:controls.signal});
     function resetStick(){stick.x=stick.z=0;joyId=null;knob.style.transform='translate(0px,0px)';}
@@ -97,7 +98,17 @@ window.NoraWorld = (() => {
     on(canvas,'pointerdown',e=>{if(orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
-    function reset(){resetStick();orbitId=null;previous=0;}
+    function jump(){if(jumpHeight===0&&jumpVelocity===0)jumpVelocity=4.4;}
+    on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
+    on(jumpButton,'click',jump);
+    on(window,'keydown',e=>{
+      if(!['KeyW','KeyA','KeyS','KeyD','Space'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
+      if(e.target?.closest?.('input,textarea,select,button,[contenteditable="true"]'))return;
+      e.preventDefault();
+      if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
+    });
+    on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
+    function reset(){resetStick();keys.clear();orbitId=null;previous=0;}
     on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     function nearDoor(){return Math.abs(player.position.x)<1.5&&(inside?player.position.z>3.3:player.position.z>2.55&&player.position.z<4.8);}
@@ -107,7 +118,7 @@ window.NoraWorld = (() => {
       scenery.indoor.visible=inside;scenery.outdoor.visible=!inside;landscape.visible=!inside;sun.visible=!inside;groundShadows.visible=!inside;
       scene.background.set(inside?'#3e3029':'#b2d5d2');scene.fog=new T.Fog(inside?'#66503c':'#b2d5d2',inside?14:12,inside?30:42);
       ambient.color.set(inside?'#ffe0b4':'#fff6df');ambient.groundColor.set(inside?'#795a43':'#71865f');sunlight.color.set(inside?'#ffd3a0':'#fff1cd');sunlight.intensity=inside?1.1:2.4;
-      player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
+      jumpHeight=0;jumpVelocity=0;player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
       root.querySelector('.nora-world-bar small').textContent=inside?'ТАВЕРНА':'ЛЕСНАЯ ПОЛЯНА';
       reset();
     });
@@ -118,14 +129,22 @@ window.NoraWorld = (() => {
       if(disposed)return;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
-        const dx=(stick.x*Math.cos(yaw)+stick.z*Math.sin(yaw))*1.7*dt;
-        const dz=(-stick.x*Math.sin(yaw)+stick.z*Math.cos(yaw))*1.7*dt;
+        let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
+        let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
+        const inputLength=Math.hypot(inputX,inputZ);if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
+        const dx=(inputX*Math.cos(yaw)+inputZ*Math.sin(yaw))*1.7*dt;
+        const dz=(-inputX*Math.sin(yaw)+inputZ*Math.cos(yaw))*1.7*dt;
         const oldX=player.position.x,oldZ=player.position.z;
         move(player.position,dx,dz,zone);
-        character.walk(Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt);
+        if(jumpVelocity!==0||jumpHeight>0){
+          jumpVelocity-=13*dt;jumpHeight+=jumpVelocity*dt;
+          if(jumpHeight<=0){jumpHeight=0;jumpVelocity=0;}
+        }
+        player.position.y=.017+jumpHeight;
+        character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt);
         if(Math.hypot(dx,dz)>.0001){const heading=Math.atan2(dx,dz),delta=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));player.rotation.y+=delta*(1-Math.exp(-16*dt));}
         playerShadow.position.set(player.position.x,.008,player.position.z);
-        target.set(player.position.x,1.1,player.position.z);
+        target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
         const wanted=inside?4.6:(camera.aspect<.7?5.7:5.1);
         direction.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
         const safe=cameraDistance(target,direction,wanted,zone.cameraBoxes);
