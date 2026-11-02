@@ -922,7 +922,8 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
     reply_markup = None
     if username:
         reply_markup = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="НОРА", url=f"https://t.me/{username}?start=private"),
+            InlineKeyboardButton(text="BOT", url=f"https://t.me/{username}?start=private"),
+            InlineKeyboardButton(text="APP", url=f"https://t.me/{username}?startapp"),
         ]])
     rich_send = getattr(bot, "send_rich_message", None)
     rich_message = render_rich_brief(brief, username) if callable(rich_send) else None

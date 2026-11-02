@@ -33,6 +33,8 @@ def test_rich_blocks_keep_complete_headlines_and_embedded_photo():
     assert len(files) == 1 and "attach://" in data
     assert "https://example.org/news" in data and "https://example.org/history" in data
     assert "https://t.me/test_bot?start=private" in data
+    assert "https://t.me/test_bot?startapp" in data
+    assert '"text": "BOT"' in data and '"text": "APP"' in data
     assert "Неизвестная станция" not in data
 
 
