@@ -78,9 +78,9 @@ window.NoraWorld = (() => {
     }
     return {update,dispose(){scene.remove(stars,leaves);stars.dispose();leaves.dispose();starsMaterial.dispose();leafMaterial.dispose();}};
   }
-  async function mount(canvas, root, outfit) {
+  async function mount(canvas, root, outfit, sounds) {
     const T = await import('/vendor/three.module.js');
-    if (!root.isConnected) return () => {};
+    if (!root.isConnected) { sounds?.stop(); return () => {}; }
     const renderer = new T.WebGLRenderer({canvas, antialias:false, powerPreference:'low-power'});
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = T.SRGBColorSpace;
@@ -185,7 +185,7 @@ window.NoraWorld = (() => {
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
-    function jump(){if(companion.panelOpen())return;if(jumpHeight===0&&jumpVelocity===0)jumpVelocity=4.4;}
+    function jump(){if(companion.panelOpen())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
     on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;actualDistance=4.6;syncView();});
     on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
     on(jumpButton,'click',jump);
@@ -204,7 +204,7 @@ window.NoraWorld = (() => {
     function nearDoor(){return Math.abs(player.position.x)<1.5&&(inside?player.position.z>3.3:player.position.z>2.55&&player.position.z<4.8);}
     on(action,'click',()=>{
       if(!nearDoor())return;
-      inside=!inside;zone=inside?scenery.indoorZone:scenery.outdoorZone;
+      inside=!inside;sounds?.door(inside);zone=inside?scenery.indoorZone:scenery.outdoorZone;
       scenery.indoor.visible=inside;scenery.outdoor.visible=!inside;landscape.visible=!inside;sun.visible=moon.visible=!inside;groundShadows.visible=!inside;
       lightingAt=-Infinity;updateLighting(Date.now());
       jumpHeight=0;jumpVelocity=0;player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
@@ -248,7 +248,7 @@ window.NoraWorld = (() => {
         move(player.position,dx,dz,zone);
         if(jumpVelocity!==0||jumpHeight>0){
           jumpVelocity-=13*dt;jumpHeight+=jumpVelocity*dt;
-          if(jumpHeight<=0){jumpHeight=0;jumpVelocity=0;}
+          if(jumpHeight<=0){jumpHeight=0;jumpVelocity=0;sounds?.land(inside);}
         }
         player.position.y=.017+jumpHeight;
         character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt,sprinting);
@@ -278,13 +278,15 @@ window.NoraWorld = (() => {
         }
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
-        atmosphere.update(dt,updateLighting(Date.now()),inside);
+        const daylight=updateLighting(Date.now());
+        sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
+        atmosphere.update(dt,daylight,inside);
         companion.update(dt,camera);
         renderer.render(scene,camera);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }

@@ -428,6 +428,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft-LICENSE.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
+    app.router.add_static('/game/sounds/', ASSETS / 'game' / 'sounds', show_index=False)
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)

@@ -28,7 +28,7 @@ try {
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}}; }
     emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); this.dispatchEvent(e); }
   }
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null})) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
@@ -44,7 +44,7 @@ try {
     window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player=result.group;return result;};
     vm.runInContext(companion, context);
     vm.runInContext(world, context);
-    const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes'});
+    const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes'}, sounds);
     for(let i=0;i<view;i++)root.querySelector('.nora-world-view').emit('click');
     const frames = count => {for(let i=0;i<count;i++)frame(time+=1000/fps);};
     frames(30);
@@ -54,6 +54,20 @@ try {
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
+  const soundEvents=[];
+  const sounds={update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
+    land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};
+  const audioWorld=await setup(0,60,undefined,sounds);
+  audioWorld.key('Space'); audioWorld.frames(60);
+  assert.ok(soundEvents.some(e=>e[0]==='jump'&&!e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='land'&&!e[1]));
+  audioWorld.player.position.set(0,.017,3.6);audioWorld.root.querySelector('.nora-world-action').emit('click');
+  audioWorld.frames(2);audioWorld.key('Space');audioWorld.frames(60);
+  assert.ok(soundEvents.some(e=>e[0]==='door'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='update'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='jump'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='land'&&e[1]));
+  audioWorld.stop();assert.equal(soundEvents.at(-1)[0],'stop');
   function screenDelta(h, delta) {
     const forward = h.camera().getWorldDirection(new Three.Vector3()); forward.y=0; forward.normalize();
     const right = new Three.Vector3(-forward.z,0,forward.x);

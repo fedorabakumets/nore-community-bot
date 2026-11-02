@@ -67,7 +67,7 @@
     function attach(parent) {
       button = document.createElement('button'); button.type = 'button'; button.className = 'nora-game-music';
       panel = document.createElement('div'); panel.className = 'nora-game-mixer';
-      panel.innerHTML = '<label>Громкость <input type="range" min="0" max="100" step="1" aria-label="Громкость музыки"></label><button type="button" class="nora-game-mute"></button>';
+      panel.innerHTML = '<label>Громкость <input type="range" min="0" max="100" step="1" aria-label="Громкость игры"></label><button type="button" class="nora-game-mute"></button>';
       slider = panel.querySelector('input'); muteButton = panel.querySelector('button');
       button.onclick = async () => { expanded = !expanded; update(); if(expanded) await ensureAudio(); update(); };
       slider.oninput = async () => { level = Number(slider.value)/100; muted = level===0; await ensureAudio(); volume(muted?0:level,.12); update(); };
@@ -80,7 +80,68 @@
       const old = context; volume(0, .15);
       setTimeout(() => { for (const source of sources) { try { source.stop(); } catch (_) {} } sources.clear(); old.close().catch(() => {}); }, 750);
     }
-    return {start,attach,close};
+    function worldAudio() {
+      let stopped = false, ambience = [], daylight = 1, indoors = false, distance = 0;
+      const buffers = new Map();
+      const names = ['birds_dawn', 'crickets', 'doorOpen_1', 'doorClose_1',
+        'footstep_grass_000', 'footstep_grass_001', 'footstep_wood_000', 'footstep_wood_001'];
+      function mix() {
+        if (!context || stopped) return;
+        for (const [i, item] of ambience.entries()) {
+          if (!item) continue;
+          item.gain.gain.setTargetAtTime(indoors ? 0 : (i === 0 ? daylight : 1-daylight)*.22, context.currentTime, 1.5);
+        }
+      }
+      async function load() {
+        await ensureAudio();
+        if (!context || stopped) return;
+        const audioContext = context;
+        await Promise.all(names.map(async name => {
+          try {
+            const response = await fetch(`/game/sounds/${name}.mp3`);
+            if (!response.ok) return;
+            const data = await audioContext.decodeAudioData(await response.arrayBuffer());
+            if (!stopped) buffers.set(name, data);
+          } catch (_) { /* An unavailable effect must not interrupt the game. */ }
+        }));
+        if (stopped || context !== audioContext) return;
+        for (const name of ['birds_dawn', 'crickets']) {
+          const buffer = buffers.get(name);
+          if (!buffer) { ambience.push(null); continue; }
+          const source = context.createBufferSource(), gain = context.createGain();
+          source.buffer = buffer; source.loop = true; gain.gain.value = 0;
+          source.connect(gain); gain.connect(master); source.start(); ambience.push({source, gain});
+        }
+        mix();
+      }
+      function play(name, gainValue = .55, rate = 1) {
+        const buffer = buffers.get(name);
+        if (stopped || !buffer || !context || context.state !== 'running') return;
+        const source = context.createBufferSource(), gain = context.createGain();
+        source.buffer = buffer; source.playbackRate.value = rate; gain.gain.value = gainValue;
+        source.connect(gain); gain.connect(master);
+        source.onended = () => { source.disconnect(); gain.disconnect(); };
+        source.start();
+      }
+      function step(inside, strength = 1) {
+        const surface = inside ? 'wood' : 'grass';
+        play(`footstep_${surface}_00${Math.random() < .5 ? 0 : 1}`, .5*strength, .92+Math.random()*.16);
+      }
+      load();
+      return {
+        update(inside, light, travelled, grounded) {
+          if (indoors !== inside || Math.abs(daylight-light) > .01) { indoors = inside; daylight = light; mix(); }
+          if (!grounded) { distance = 0; return; }
+          distance += travelled;
+          if (distance >= .65) { distance %= .65; step(inside); }
+        },
+        jump(inside) { distance = 0; step(inside, .8); },
+        land(inside) { distance = 0; step(inside, 1.15); },
+        door(inside) { play(inside ? 'doorOpen_1' : 'doorClose_1', .7); },
+        stop() { stopped = true; for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
+      };
+    }
+    return {start,attach,close,worldAudio};
   }
   function close() {
     active++;
@@ -103,10 +164,12 @@
     frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
+    const sounds = music?.worldAudio();
     try {
-      const stop = await window.NoraWorld.mount(root.querySelector('canvas'), root, outfit);
+      const stop = await window.NoraWorld.mount(root.querySelector('canvas'), root, outfit, sounds);
       if (root.isConnected) sceneStop = stop; else stop();
     } catch (_) {
+      sounds?.stop();
       if (root.isConnected) root.querySelector('.nora-world-help').textContent = 'Не удалось открыть 3D-мир. Закрой и открой игру снова.';
     }
   }
