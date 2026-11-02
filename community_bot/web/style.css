@@ -247,3 +247,8 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .community-leaders .community-place-1 small,.community-leaders .community-place-2 small,.community-leaders .community-place-3 small,.community-leaders .community-place-1 .community-rank,.community-leaders .community-place-2 .community-rank,.community-leaders .community-place-3 .community-rank{color:#49433d}
 .community-leaders .sub{color:#d4d0c8}
 .community-leaders .community-winner button{color:#ffb0a7}
+
+/* Align the main navigation headings and season labels. */
+.home-intro h1,.shop-root-heading h1,.community-heading h1,.events-heading,.lk-title h1{font-size:clamp(24px,6.8vw,34px);line-height:40px;margin:0 0 12px}
+.events-heading{font-size:clamp(18px,5.6vw,34px)}
+.lk-title{min-height:40px}.lk-title h1{margin:0}
