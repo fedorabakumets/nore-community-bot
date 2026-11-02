@@ -8,6 +8,7 @@ window.NoraSea = (() => {
   const draft = { stake: "0" };
   let lastRoomId = "";
   let lastHtml = "";
+  let serverClock = 0, receivedAt = 0;
 
   const ROWS = "АБВГДЕЖЗИК";
 
@@ -18,7 +19,7 @@ window.NoraSea = (() => {
   // Classes: c0 empty, c1 own ship, c2 hit, c3 miss, c4 sunk
   function ownBoardHtml(entry) {
     const cells = entry.board
-      .map((c) => `<span class="sea-cell ${c.sunk ? "c4" : c.hit ? "c2" : c.miss ? "c3" : c.ship ? "c1" : "c0"}"></span>`)
+      .map((c) => `<span class="sea-cell ${c.sunk ? "c4" : c.hit ? "c2" : c.miss ? "c3" : c.ship ? "c1" : "c0"}${c.last ? " last" : ""}"></span>`)
       .join("");
     return `<div class="sea-board">${cells}</div>`;
   }
@@ -29,9 +30,10 @@ window.NoraSea = (() => {
         const cls = reveal
           ? (s.sunk ? "c4" : s.hit ? "c2" : s.fired ? "c3" : reveal[i] ? "c1" : "c0")
           : !s.fired ? "c0" : s.sunk ? "c4" : s.hit ? "c2" : "c3";
-        return interactive
-          ? `<button class="sea-cell ${cls}" data-sea-shoot="${i}" aria-label="Клетка ${cellCoord(i)}" ${pending ? "disabled" : ""}></button>`
-          : `<span class="sea-cell ${cls}"></span>`;
+        const marked = cls + (s.last ? " last" : "");
+        return interactive && !s.fired
+          ? `<button class="sea-cell ${marked}" data-sea-shoot="${i}" aria-label="Клетка ${cellCoord(i)}" ${pending ? "disabled" : ""}></button>`
+          : `<span class="sea-cell ${marked}"></span>`;
       })
       .join("");
     return `<div class="sea-board">${cells}</div>`;
@@ -141,21 +143,16 @@ window.NoraSea = (() => {
   }
 
   function turnHead(r, myTurn, done, iWon, winnerName) {
-    let eyebrow = done ? "Партия завершена" : myTurn ? "Твой ход" : "Ход соперника";
-    let title = done ? (r.winner == null ? "Ничья" : iWon ? "Ты победил!" : "Победил " + esc(winnerName)) : myTurn ? "Выбери клетку на поле соперника" : "Ждём…";
-    let stakeOutcome = "";
-    if (done && r.stake) stakeOutcome = r.winner == null ? " · ставки возвращены" : iWon ? " · +" + number(r.stake) + " 🍪" : " · −" + number(r.stake) + " 🍪";
-    return `<section class="card sea-arena"><div class="sea-turn ${myTurn ? "mine" : ""}"><span class="eyebrow">${eyebrow}</span><h3>${title}${stakeOutcome}</h3>${done ? "" : deadlineBadge(r)}</div>`;
+    const title = r.winner == null ? "Ничья" : iWon ? "Ты победил!" : "Победил " + esc(winnerName);
+    const stakeOutcome = done && r.stake ? (r.winner == null ? " · ставки возвращены" : iWon ? " · +" + number(r.stake) + " 🍪" : " · −" + number(r.stake) + " 🍪") : "";
+    return `<section class="card sea-arena">${done ? `<div class="sea-turn"><h3>${title}${stakeOutcome}</h3></div>` : ""}`;
   }
 
   function boardsView(r, me, foe, myTurn) {
-    const foeLabel = foe?.id === -1 ? "Поле соперника · бот" : "Поле соперника";
+    const active = r.status === "active";
     const reveal = r.status === "finished" ? foe?.ships : null;
-    return (
-      `<div class="sea-boards"><div><h4>${foeLabel}</h4>${enemyBoardHtml(me, myTurn, reveal)}</div>` +
-      `<div><h4>Твой флот</h4>${ownBoardHtml(me)}</div></div>` +
-      `<div class="mafia-players">${r.players.map(playerRow).join("")}</div></section>`
-    );
+    const panel = (label, player, turn, board) => `<div class="sea-panel ${active ? (turn ? (myTurn ? "active" : "waiting") : "") : ""}"><div class="sea-panel-head"><strong>${label}</strong><span>Корабли ${r.ships_left?.[player?.id] ?? "…"}/10</span></div>${active ? `<div class="sea-panel-status"><span>${turn ? (myTurn ? "Ваш ход" : "Ход соперника") : "Ожидание"}</span>${turn ? deadlineBadge(r) : ""}</div>` : ""}${board}</div>`;
+    return `<div class="sea-boards">${panel(foe?.id === -1 ? "Соперник · бот" : "Поле соперника", foe, active && !myTurn, enemyBoardHtml(me, myTurn, reveal))}${panel("Ваш флот", me, active && myTurn, ownBoardHtml(me))}</div></section>`;
   }
 
   function controlsView(r) {
@@ -197,6 +194,8 @@ window.NoraSea = (() => {
       const selected = roomId === undefined ? lastRoomId : roomId;
       const response = await api("sea" + (selected ? "?room_id=" + encodeURIComponent(selected) : ""));
       state.sea = response;
+      serverClock = response.server_now || Date.now();
+      receivedAt = Date.now();
       delete errors.sea;
       if (response.room?.id) lastRoomId = response.room.id;
       else if (roomId !== undefined) lastRoomId = "";
@@ -232,11 +231,13 @@ window.NoraSea = (() => {
     const t = $("#sea-timer");
     const r = state.sea?.room;
     if (t && r?.deadline) {
-      const seconds = Math.max(0, Math.ceil((r.deadline - (state.sea.server_now || Date.now())) / 1000));
+      const seconds = Math.max(0, Math.ceil((r.deadline - (serverClock ? serverClock + Date.now() - receivedAt : Date.now())) / 1000));
       t.textContent = String(seconds) + "с";
       t.classList.toggle("urgent", seconds < 10);
     }
   }
+
+  setInterval(() => { if (tab === "sea" && !document.hidden) timerTick(); }, 1000);
 
   function schedule() {
     clearTimeout(pollTimer);
@@ -255,6 +256,7 @@ window.NoraSea = (() => {
     try {
       const response = await api("sea/action", body);
       state.sea = { ...(state.sea || {}), ...response };
+      if (response.server_now) { serverClock = response.server_now; receivedAt = Date.now(); }
       if (response.room?.id) lastRoomId = response.room.id;
       if (response.message && !opts.quiet) toast(response.message);
       if (opts.close) $("#sheet").close();

@@ -419,4 +419,53 @@ def test_view_marks_opponent_misses_and_sunk_ships():
     assert not me["board"][2]["ship"] and not me["board"][2]["miss"]
     # My shots on the opponent's board: cell 0 hit and sunk.
     assert me["shots"][0]["hit"] and me["shots"][0]["sunk"]
-    assert not me["shots"][1]["fired"]
+    assert me["shots"][1]["fired"] and not me["shots"][1]["hit"]
+
+async def test_timeout_passes_turn_and_bot_responds(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=0)
+    await send(env, 7, "start", room)
+    stored = await state(env, room)
+    stored["turn"] = 7
+    await env.db.execute(
+        "UPDATE mini_sea_rooms SET state_json=?,deadline=? WHERE id=?",
+        (json.dumps(stored), env.now + sea.MOVE_SECONDS, room),
+    )
+    await advance(env, sea.MOVE_SECONDS)
+    assert (await view(env, 7, room))["room"]["turn"] == -1
+    await advance(env, sea.BOT_PAUSE)
+    assert any((await state(env, room))["players"]["bot"]["shots"])
+
+
+async def test_sunk_perimeter_and_last_shots_in_both_views(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=0)
+    await send(env, 7, "start", room)
+    stored = await state(env, room)
+    for key in ("7", "bot"):
+        player = stored["players"][key]
+        player["board"] = [1 if i in (0, 1) else 2 if i == 99 else 0 for i in range(100)]
+        player["fleet"] = {1: 2, 2: 1}
+        player["shots"] = [2 if i in (0, 1) else 0 for i in range(100)]
+        player["last_shot"] = 1
+    await env.db.execute("UPDATE mini_sea_rooms SET state_json=? WHERE id=?", (json.dumps(stored), room))
+    me = next(p for p in (await view(env, 7, room))["room"]["players"] if p["id"] == 7)
+    perimeter = {2, 10, 11, 12}
+    assert {i for i, c in enumerate(me["board"]) if c["miss"]} == perimeter
+    assert {i for i, c in enumerate(me["shots"]) if c["fired"] and not c["hit"]} == perimeter
+    assert [i for i, c in enumerate(me["board"]) if c["last"]] == [1]
+    assert [i for i, c in enumerate(me["shots"]) if c["last"]] == [1]
+
+
+async def test_friend_timeout_passes_turn_at_deadline(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0)
+    await send(env, 7, "invite", room, user_id=8)
+    await send(env, 8, "respond", room, accept=True)
+    for uid in (7, 8):
+        await send(env, uid, "ready", room, ready=True)
+    await send(env, 7, "start", room)
+    first = (await view(env, 7, room))["room"]["turn"]
+    await advance(env, sea.MOVE_SECONDS - 1)
+    assert (await view(env, 7, room))["room"]["turn"] == first
+    await advance(env, 1)
+    result = (await view(env, 7, room))["room"]
+    assert result["turn"] == ({7, 8} - {first}).pop()
+    assert result["deadline"] == (env.now + sea.MOVE_SECONDS) * 1000

@@ -387,6 +387,7 @@ def _eligible_reason(conn, user) -> str:
 def _apply_shot(attacker: dict, defender_board: list[int], index: int) -> tuple[bool, int | None]:
     ship_id = defender_board[index]
     attacker["shots"][index] = 2 if ship_id else 1
+    attacker["last_shot"] = index
     if not ship_id:
         return False, None
     return True, (ship_id if _ship_sunk(attacker["shots"], defender_board, ship_id) else None)
@@ -732,18 +733,23 @@ def _view(room, uid: int) -> dict:
             enemy_shots = [0] * (SIZE * SIZE)
             enemy_board = [0] * (SIZE * SIZE)
             enemy_fleet: dict = {}
+            enemy_last_shot = None
             for other in _players(room).values():
                 if other["id"] != p["id"]:
                     enemy_shots = other["shots"]
+                    enemy_last_shot = other.get("last_shot")
                     enemy_board = other["board"] or [0] * (SIZE * SIZE)
                     enemy_fleet = other["fleet"] or {}
+            own_blocked = _sunk_neighbours(enemy_shots, p["board"], p["fleet"] or {})
+            enemy_blocked = _sunk_neighbours(p["shots"], enemy_board, enemy_fleet)
             # Own fleet shows the opponent's hits and misses; own shots reveal
             # only hit/miss/sunk on the hidden enemy fleet.
             entry["board"] = [
                 {
                     "ship": bool(p["board"][i]),
                     "hit": enemy_shots[i] == 2,
-                    "miss": enemy_shots[i] == 1,
+                    "miss": enemy_shots[i] == 1 or (i in own_blocked and not p["board"][i]),
+                    "last": i == enemy_last_shot,
                 }
                 for i in range(SIZE * SIZE)
             ]
@@ -753,7 +759,8 @@ def _view(room, uid: int) -> dict:
             enemy_sunk_ids = {s for s in enemy_fleet if _ship_sunk(p["shots"], enemy_board, s)}
             entry["shots"] = [
                 {
-                    "fired": bool(v),
+                    "fired": bool(v) or (i in enemy_blocked and not enemy_board[i]),
+                    "last": i == p.get("last_shot"),
                     "hit": v == 2,
                     "sunk": bool(v == 2 and enemy_board[i] in enemy_sunk_ids),
                 }
