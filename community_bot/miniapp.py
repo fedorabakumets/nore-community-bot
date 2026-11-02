@@ -323,6 +323,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
     app.update(db=db, settings=settings, bot=bot)
     app.router.add_get('/', index)
+    app.router.add_get('/game/nora-theme.mp3', lambda _: web.FileResponse(
+        ASSETS / 'game' / 'nora-theme.mp3', headers={'Content-Type': 'audio/mpeg'}))
     app.router.add_get('/healthz', lambda _: web.json_response({'ok': True}))
     from community_bot import admin_web
 

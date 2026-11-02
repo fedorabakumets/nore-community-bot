@@ -3,9 +3,80 @@
   let overlay = null, active = 0, requestedFullscreen = false, sceneStop = null;
   const defaults = { shirt: 'white', pants: 'blue_slim', shoes: 'white_stripes' };
   let outfit = { ...defaults };
+  let music = null;
   const logo = '<span class="nora-game-logo">N<span>O</span>RA</span>';
+  function createMusic() {
+    let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
+    let button = null, nextStart = 0, overlap = 0;
+    const sources = new Set();
+    function update() {
+      if (!button) return;
+      const silent = muted || blocked;
+      button.setAttribute('aria-label', silent ? 'Включить музыку' : 'Выключить музыку');
+      button.setAttribute('aria-pressed', String(silent));
+      button.innerHTML = silent ? '<span aria-hidden="true">🔇</span>' : '<span aria-hidden="true">🔊</span>';
+    }
+    function volume(value, seconds) {
+      if (!context || !master) return;
+      const t = context.currentTime;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setTargetAtTime(value, t, seconds);
+    }
+    function schedule() {
+      if (closed || !buffer) return;
+      const source = context.createBufferSource(), gain = context.createGain();
+      const start = Math.max(context.currentTime + .02, nextStart), end = start + buffer.duration;
+      source.buffer = buffer; source.connect(gain); gain.connect(master);
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(1, start + overlap);
+      gain.gain.setValueAtTime(1, end - overlap);
+      gain.gain.linearRampToValueAtTime(0, end);
+      sources.add(source); source.onended = () => { sources.delete(source); source.disconnect(); gain.disconnect(); if (!closed) schedule(); };
+      source.start(start); nextStart = start + buffer.duration - overlap;
+    }
+    async function start() {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) { blocked = true; update(); return; }
+      try {
+        context = new AudioContext(); master = context.createGain(); master.gain.value = 0; master.connect(context.destination);
+        await context.resume();
+        if (closed) return;
+        const response = await fetch('/game/nora-theme.mp3');
+        if (!response.ok) throw Error('audio unavailable');
+        const bytes = await response.arrayBuffer();
+        buffer = await context.decodeAudioData(bytes);
+        if (closed) return;
+        if (!Number.isFinite(buffer.duration) || buffer.duration < .2) throw Error('invalid audio');
+        overlap = Math.min(3, buffer.duration / 3);
+        nextStart = context.currentTime + .03; schedule(); schedule();
+        blocked = context.state !== 'running'; update();
+        if (!muted) volume(.4, .6);
+      } catch (_) { if (!closed) { blocked = true; update(); } }
+    }
+    function attach(parent) {
+      button = document.createElement('button'); button.type = 'button'; button.className = 'nora-game-music';
+      button.onclick = async () => {
+        if (!context) { blocked = false; start(); return; }
+        if (blocked || context.state !== 'running') {
+          try { await context.resume(); blocked = context.state !== 'running'; } catch (_) { blocked = true; }
+          if (!blocked && !buffer) { context.close(); context = null; start(); }
+          if (!blocked) { muted = false; volume(.4, .25); }
+        } else { muted = !muted; volume(muted ? 0 : .4, .25); }
+        update();
+      };
+      parent.appendChild(button); update();
+    }
+    function close() {
+      closed = true; button = null;
+      if (!context) return;
+      const old = context; volume(0, .15);
+      setTimeout(() => { for (const source of sources) { try { source.stop(); } catch (_) {} } sources.clear(); old.close().catch(() => {}); }, 750);
+    }
+    return {start,attach,close};
+  }
   function close() {
     active++;
+    music?.close(); music = null;
     sceneStop?.(); sceneStop = null;
     overlay?.remove(); overlay = null;
     if (requestedFullscreen) { try { tg?.exitFullscreen?.(); } catch (_) {} }
@@ -18,6 +89,7 @@
     overlay.classList.toggle('nora-world-active', content.includes('class="nora-world"'));
     overlay.innerHTML = `<div class="nora-game-inner"><button type="button" class="nora-game-back" aria-label="Вернуться к играм">← Игры</button><div class="nora-game-body">${content}</div><div class="nora-game-foot">NORA / НОВЫЙ МИР</div></div>`;
     overlay.querySelector('.nora-game-back').onclick = close;
+    music?.attach(overlay);
   }
   async function world(nickname) {
     frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик — идти · Проведи по экрану — обзор</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
@@ -71,6 +143,7 @@
     overlay = document.createElement('section'); overlay.className = 'nora-game-screen';
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Игра НОРА');
     document.body.appendChild(overlay);
+    music = createMusic(); music.start();
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
     try { const result = await api('nora-game'); if (version === active) { outfit = result.outfit || { ...defaults }; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
