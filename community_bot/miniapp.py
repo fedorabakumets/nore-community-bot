@@ -412,8 +412,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'interactive.js', 'nora-voxel.js', 'nora-game.js', 'people.js', 'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
-    app.router.add_get('/vendor/three.module.js', lambda _: web.FileResponse(
-        ROOT / 'vendor' / 'three.module.js', headers={'Content-Type': 'text/javascript'}))
+    for name in ('three.module.js', 'three.core.js'):
+        app.router.add_get('/vendor/' + name, lambda r, n=name: web.FileResponse(
+            ROOT / 'vendor' / n, headers={'Content-Type': 'text/javascript'}))
     app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Rubik-OFL.txt', lambda _: web.FileResponse(
