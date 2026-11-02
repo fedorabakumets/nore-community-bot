@@ -9,7 +9,7 @@ description = "Telegram community bot: applications, tickets, moderation, profil
 requires-python = ">=3.11"
 dependencies = [
   "aiohttp>=3.10,<4",
-  "aiogram>=3.30,<4",
+  "aiogram>=3.31,<4",
   "aiosqlite>=0.21,<1",
   "python-dotenv>=1.1,<2",
   "Pillow>=11,<12",

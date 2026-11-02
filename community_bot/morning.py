@@ -903,26 +903,60 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
     # A sent but unpinned post is retried in place, rather than sent a second time.
     if pending_day == today and pending_id:
         return await _pin_morning(bot, db, settings.community_chat_id, int(pending_id), today)
+    if await db.get_bot_state("morning_send_unknown_day") == today:
+        logger.warning("Результат прошлой отправки сводки неизвестен; повтор заблокирован до проверки")
+        return False
 
     brief = await collect_brief(now)
-    text = render_brief(brief)
-    from aiogram.types import FSInputFile
+    from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
+    from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 
     from community_bot.ephemeral import keep_in_chat
+    from community_bot.morning_rich import render_rich_brief
 
     chat_id = settings.community_chat_id
-    photo = brief.photo
+    username = None
+    if callable(getattr(bot, "me", None)):
+        # Resolve the bot's existing private entry point before sending anything.
+        username = (await bot.me()).username
+    reply_markup = None
+    if username:
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="НОРА", url=f"https://t.me/{username}?start=private"),
+        ]])
+    rich_send = getattr(bot, "send_rich_message", None)
+    rich_message = render_rich_brief(brief, username) if callable(rich_send) else None
+    # A lost response may mean Telegram accepted the message. Stop retries if the
+    # process dies or the network fails before we can store its message ID.
+    await db.set_bot_state("morning_send_unknown_day", today)
     with keep_in_chat():
-        if photo:
-            sent = await bot.send_photo(chat_id, FSInputFile(photo), caption=text, parse_mode="HTML")
-        else:
-            from aiogram.types import LinkPreviewOptions
-
-            sent = await bot.send_message(
-                chat_id, text, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
+        sent = None
+        if callable(rich_send):
+            try:
+                sent = await rich_send(chat_id, rich_message=rich_message)
+            except (TelegramBadRequest, TelegramNotFound) as exc:
+                reason = str(exc).casefold()
+                unsupported = ("method not found" in reason or "unknown method" in reason
+                               or "method is not supported" in reason
+                               or isinstance(exc, TelegramNotFound) and "not found" in reason)
+                if not unsupported:
+                    await db.set_bot_state("morning_send_unknown_day", "")
+                    raise
+                logger.warning("Rich Messages не поддерживаются сервером Bot API; используем прежний формат")
+        if sent is None:
+            text = render_brief(brief)
+            if brief.photo:
+                sent = await bot.send_photo(
+                    chat_id, FSInputFile(brief.photo), caption=text, parse_mode="HTML", reply_markup=reply_markup,
+                )
+            else:
+                sent = await bot.send_message(
+                    chat_id, text, parse_mode="HTML", reply_markup=reply_markup,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
     await db.set_bot_state("morning_pending_message_id", str(sent.message_id))
     await db.set_bot_state("morning_pending_day", today)
+    await db.set_bot_state("morning_send_unknown_day", "")
     if brief.history:
         await db.set_bot_state("morning_history_day", today)
     return await _pin_morning(bot, db, chat_id, sent.message_id, today)
