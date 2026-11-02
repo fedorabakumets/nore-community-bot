@@ -7,14 +7,18 @@
   const logo = '<span class="nora-game-logo">N<span>O</span>RA</span>';
   function createMusic() {
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
-    let button = null, nextStart = 0, overlap = 0;
+    let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
     function update() {
       if (!button) return;
-      const silent = muted || blocked;
-      button.setAttribute('aria-label', silent ? 'Включить музыку' : 'Выключить музыку');
-      button.setAttribute('aria-pressed', String(silent));
+      const silent = muted || blocked || level === 0;
+      button.setAttribute('aria-label', 'Настройки громкости');
+      button.setAttribute('aria-expanded', String(expanded));
       button.innerHTML = silent ? '<span aria-hidden="true">🔇</span>' : '<span aria-hidden="true">🔊</span>';
+      panel.hidden = !expanded;
+      slider.value = Math.round(level*100);
+      muteButton.textContent = muted || level === 0 ? 'Включить звук' : 'Выключить звук';
+      muteButton.setAttribute('aria-pressed', String(muted || level === 0));
     }
     function volume(value, seconds) {
       if (!context || !master) return;
@@ -50,24 +54,28 @@
         overlap = Math.min(3, buffer.duration / 3);
         nextStart = context.currentTime + .03; schedule(); schedule();
         blocked = context.state !== 'running'; update();
-        if (!muted) volume(.4, .6);
+        if (!muted) volume(level, .6);
       } catch (_) { if (!closed) { blocked = true; update(); } }
+    }
+    async function ensureAudio() {
+      if (!context) { blocked = false; start(); return; }
+      if (blocked || context.state !== 'running') {
+        try { await context.resume(); blocked = context.state !== 'running'; } catch (_) { blocked = true; }
+        if (!blocked && !buffer) { context.close(); context = null; start(); }
+      }
     }
     function attach(parent) {
       button = document.createElement('button'); button.type = 'button'; button.className = 'nora-game-music';
-      button.onclick = async () => {
-        if (!context) { blocked = false; start(); return; }
-        if (blocked || context.state !== 'running') {
-          try { await context.resume(); blocked = context.state !== 'running'; } catch (_) { blocked = true; }
-          if (!blocked && !buffer) { context.close(); context = null; start(); }
-          if (!blocked) { muted = false; volume(.4, .25); }
-        } else { muted = !muted; volume(muted ? 0 : .4, .25); }
-        update();
-      };
-      parent.appendChild(button); update();
+      panel = document.createElement('div'); panel.className = 'nora-game-mixer';
+      panel.innerHTML = '<label>Громкость <input type="range" min="0" max="100" step="1" aria-label="Громкость музыки"></label><button type="button" class="nora-game-mute"></button>';
+      slider = panel.querySelector('input'); muteButton = panel.querySelector('button');
+      button.onclick = async () => { expanded = !expanded; update(); if(expanded) await ensureAudio(); update(); };
+      slider.oninput = async () => { level = Number(slider.value)/100; muted = level===0; await ensureAudio(); volume(muted?0:level,.12); update(); };
+      muteButton.onclick = async () => { if(level===0)level=.4; muted=!muted; if(level>0 && muteButton.textContent==='Включить звук')muted=false; await ensureAudio(); volume(muted?0:level,.2); update(); };
+      parent.appendChild(button);parent.appendChild(panel);update();
     }
     function close() {
-      closed = true; button = null;
+      closed = true; button = null; panel = null;
       if (!context) return;
       const old = context; volume(0, .15);
       setTimeout(() => { for (const source of sources) { try { source.stop(); } catch (_) {} } sources.clear(); old.close().catch(() => {}); }, 750);
@@ -92,7 +100,7 @@
     music?.attach(overlay);
   }
   async function world(nickname) {
-    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
+    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
     try {
