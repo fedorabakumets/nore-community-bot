@@ -24,15 +24,15 @@ def content(response):
 async def test_registration_is_private_persistent_and_case_insensitive(tmp_path):
     db = Database(tmp_path / 'game.db')
     await db.initialize()
-    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': None}
+    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': None, 'outfit': None}
     first = await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
     assert content(first) == {'nickname': 'Alice'}
     duplicate = await nora_game_api.register(request(db, 2, {'nickname': 'aLiCe'}))
     assert duplicate.status == 409
-    assert content(await nora_game_api.status(request(db, 2))) == {'nickname': None}
+    assert content(await nora_game_api.status(request(db, 2))) == {'nickname': None, 'outfit': None}
     assert content(await nora_game_api.register(request(db, 1, {'nickname': 'Other'}))) == {'nickname': 'Alice'}
     await db.initialize()
-    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': 'Alice'}
+    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': 'Alice', 'outfit': None}
 
 
 @pytest.mark.asyncio
@@ -53,3 +53,20 @@ async def test_concurrent_registration_only_one_wins(tmp_path):
         nora_game_api.register(request(db, 2, {'nickname': 'player'})),
     )
     assert sorted(response.status for response in responses) == [200, 409]
+
+
+@pytest.mark.asyncio
+async def test_outfit_requires_registration_and_is_private_and_persistent(tmp_path):
+    db = Database(tmp_path / 'game.db')
+    await db.initialize()
+    clothes = {'shirt': 'gray', 'pants': 'burgundy_wide', 'shoes': 'red_air'}
+    with pytest.raises(ValueError):
+        await nora_game_api.save_outfit(request(db, 1, clothes))
+    await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
+    assert content(await nora_game_api.save_outfit(request(db, 1, clothes))) == {'outfit': clothes}
+    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': 'Alice', 'outfit': clothes}
+    assert content(await nora_game_api.status(request(db, 2))) == {'nickname': None, 'outfit': None}
+    await db.initialize()
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == clothes
+    with pytest.raises(ValueError):
+        await nora_game_api.save_outfit(request(db, 1, {**clothes, 'shoes': 'invalid'}))

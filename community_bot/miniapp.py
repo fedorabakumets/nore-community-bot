@@ -373,6 +373,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_post('/api/nora-game', nora_game_api.register)
+    app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
     app.router.add_get('/api/mafia', mafia_api.status)
     app.router.add_post('/api/mafia/action', mafia_api.action)
     app.router.add_get('/api/rocket', rocket_api.status)
@@ -408,9 +409,11 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'nora-game.js', 'people.js', 'community.js', 'avatars.js',
+                 'interactive.js', 'nora-voxel.js', 'nora-game.js', 'people.js', 'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
+    app.router.add_get('/vendor/three.module.js', lambda _: web.FileResponse(
+        ROOT / 'vendor' / 'three.module.js', headers={'Content-Type': 'text/javascript'}))
     app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Rubik-OFL.txt', lambda _: web.FileResponse(
