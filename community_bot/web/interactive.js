@@ -97,8 +97,48 @@ window.NoraInteractive = (() => {
   function interactiveScreen() {
     return `${mafiaInvites()}<p class="eyebrow">У каждого свой способ</p><h1>Побудем<br><em>вместе</em></h1><p class="sub play-intro">Заботься, играй, собирай своих.</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">Твой маленький спутник</span><strong><em>Питомец</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + " ждёт тебя. Забота, походы и маленькие находки." : "Заведи питомца. Заботься о нём и отправляй за приключениями."}</span><span class="play-hero-cta">${data.pet ? "К питомцу" : "Знакомиться"} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">Один или всей компанией</span><strong><em>Игры</em></strong><span class="play-hero-description">У города есть тайны.<br>У ракеты — свой предел.</span><span class="play-hero-cta">Выбрать игру ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>Свои всегда рядом<small>Добавляй друзей и зови играть</small></span>${icon("arrow")}</button>`;
   }
+  function noraGameCard() {
+    return `<button type="button" class="nora-game-card" id="nora-game-open" aria-label="НОРА — войти в воксельный мир">
+      <svg class="nora-game-card-art" viewBox="0 0 320 280" fill="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+        <path fill="#152b2a" d="M0 174h24v-18h32v18h24v-40h24v-20h32v20h24v-16h32v16h24v-34h24v-16h24v16h24v36h32v144H0z"/>
+        <path fill="#213d36" d="M0 214h36v-16h48v12h32v-22h56v12h40v-24h48v20h60v84H0z"/>
+        <path fill="#40523d" d="m76 222 152-30 92 36-140 44z"/>
+        <path fill="#23332c" d="m76 222 104 34v24L76 246z"/>
+        <path fill="#334137" d="m180 256 140-28v24l-140 28z"/>
+        <path fill="#6a6a50" d="m154 228 62-14 22 8-62 16z"/>
+        <path fill="#8c8060" d="m176 238 62-16 14 6-62 16z"/>
+        <path fill="#48554b" d="M154 210V110h12V86h16V74h64v12h16v24h12v100h-24v-96h-12V98h-48v16h-12v96z"/>
+        <path fill="#819080" d="M154 110h12v-8h16V86h64v12h-56v16h-24v96h-12z"/>
+        <path fill="#303f39" d="M246 86h12v24h16v100h-12v-92h-12V98h-4z"/>
+        <path fill="#a89970" d="M166 132h12v8h-12zm0 38h12v8h-12zm84-36h12v8h-12zm0 38h12v8h-12zm-44-86h16v8h-16z"/>
+        <g class="nora-card-portal">
+          <path fill="#681e39" d="M178 210V114h12V98h48v16h12v96z"/>
+          <path fill="#b72e50" d="M184 210v-90h12v-16h36v16h12v90z"/>
+          <path fill="#eb4e65" d="M190 210v-84h12v-16h24v16h12v84z"/>
+          <path fill="#ff9b8e" d="M196 206v-68h6v-12h12v-10h6v20h-12v70z"/>
+          <path fill="#ffcdad" d="M202 148h6v32h-6zm0 42h6v10h-6z"/>
+        </g>
+        <path fill="#977b4b" d="M126 196h8v24h-8zm160-8h8v24h-8z"/>
+        <path fill="#e69c56" d="M122 192h16v12h-16zm160-8h16v12h-16z"/>
+        <path fill="#ffd69a" d="M126 184h8v16h-8zm160-8h8v16h-8z"/>
+        <path fill="#39493b" d="M90 110h8v114h-8zm208-24h8v130h-8z"/>
+        <path fill="#24473a" d="M62 144h16v-24h12V96h12v24h12v24h16v24h-16v18H78v-18H62zm212-22h12V98h12V74h12v24h10v68h-34v-20h-12z"/>
+        <path fill="#346048" d="M78 144h12v-24h12v24h12v12H78zm208-22h12V98h12v36h-24z"/>
+        <path fill="#5a7d55" d="M106 216h12v-8h16v8h8v12h-36zm158-2h12v-8h16v8h12v12h-40z"/>
+        <path fill="#69858a" d="m272 48 8-16 8 16-8 20z"/>
+        <path fill="#a5d4ca" d="m272 48 8-16v36z"/>
+        <g class="nora-card-sparks" fill="#f4cd8d">
+          <path d="M142 72h4v4h-4zm116-20h4v4h-4zm-22 8h4v4h-4zm-98 102h4v4h-4zm142-12h4v4h-4zm-46 84h4v4h-4z"/>
+          <path d="M116 96h4v-4h4v4h4v4h-4v4h-4v-4h-4zm168-12h4v-4h4v4h4v4h-4v4h-4v-4h-4z"/>
+        </g>
+      </svg>
+      <span class="nora-game-card-top">ПОРТАЛ В ТВОЮ ИСТОРИЮ</span>
+      <span class="nora-game-card-copy"><span class="nora-game-logo">N<span>O</span>RA</span><span class="nora-game-card-description">За гранью привычного.<br>В мире из пикселей.</span></span>
+      <span class="nora-game-card-bottom"><span>Войти в Нору</span><b aria-hidden="true">→</b></span>
+    </button>`;
+  }
   function gamesScreen() {
-    return `${back("interactive", "Интерактив")}${mafiaInvites()}<p class="eyebrow">Есть время на ещё одну?</p><h1>Давай<br><em>сыграем</em></h1><button type="button" class="nora-game-card" id="nora-game-open"><span class="nora-game-card-top">НОВЫЙ МИР · ЭТАП 01</span><span class="nora-game-logo">N<span>O</span>RA</span><span class="nora-game-card-bottom">Твоя история начинается здесь <b>↗</b></span></button><button class="play-hero sea-hero" data-tab="sea"><span class="play-hero-copy"><span class="play-tags">${badge("С ботом или с другом")}${badge("Бесплатно · 🍪", true)}</span><strong><em>Морской бой</em></strong><span class="play-hero-description">Классика на 100 клетках.<br>Попадание — стреляй ещё.</span><span class="play-hero-cta">К бою ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}</span></button><button class="play-hero mafia-hero" data-tab="mafia"><span class="play-hero-copy"><span class="play-tags">${badge("5–12 человек")}${badge("Бесплатно", true)}</span><strong><em>Мафия</em></strong><span class="play-hero-description">Ночь скрывает роли.<br>Днём решают люди.</span><span class="play-hero-cta">Собрать своих ${icon("arrow")}</span></span><span class="play-hero-art">${icon("mafia")}</span></button><button class="play-hero rocket-hero" data-tab="rocket"><span class="play-hero-copy"><span class="play-tags">${badge("Соло")}${badge("18+ · 🍪")}</span><strong><em>Ракетка</em></strong><span class="play-hero-description">Поймай свой момент.<br>Забери до срыва.</span><span class="play-hero-cta">На старт ${icon("arrow")}</span></span><span class="play-hero-art">${icon("rocket")}</span></button><p class="footer-note">Морской бой — с ботом или с другом, бесплатно или на печеньки.<br>Мафия — командная игра без ставок. В Ракетке печеньки можно потерять.</p>`;
+    return `${back("interactive", "Интерактив")}${mafiaInvites()}<p class="eyebrow">Есть время на ещё одну?</p><h1>Давай<br><em>сыграем</em></h1>${noraGameCard()}<button class="play-hero sea-hero" data-tab="sea"><span class="play-hero-copy"><span class="play-tags">${badge("С ботом или с другом")}${badge("Бесплатно · 🍪", true)}</span><strong><em>Морской бой</em></strong><span class="play-hero-description">Классика на 100 клетках.<br>Попадание — стреляй ещё.</span><span class="play-hero-cta">К бою ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}</span></button><button class="play-hero mafia-hero" data-tab="mafia"><span class="play-hero-copy"><span class="play-tags">${badge("5–12 человек")}${badge("Бесплатно", true)}</span><strong><em>Мафия</em></strong><span class="play-hero-description">Ночь скрывает роли.<br>Днём решают люди.</span><span class="play-hero-cta">Собрать своих ${icon("arrow")}</span></span><span class="play-hero-art">${icon("mafia")}</span></button><button class="play-hero rocket-hero" data-tab="rocket"><span class="play-hero-copy"><span class="play-tags">${badge("Соло")}${badge("18+ · 🍪")}</span><strong><em>Ракетка</em></strong><span class="play-hero-description">Поймай свой момент.<br>Забери до срыва.</span><span class="play-hero-cta">На старт ${icon("arrow")}</span></span><span class="play-hero-art">${icon("rocket")}</span></button><p class="footer-note">Морской бой — с ботом или с другом, бесплатно или на печеньки.<br>Мафия — командная игра без ставок. В Ракетке печеньки можно потерять.</p>`;
   }
   function friendRow(person, section) {
     const actions = {
