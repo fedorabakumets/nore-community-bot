@@ -74,7 +74,7 @@ nav button{font-size:10px;letter-spacing:0;min-width:0;line-height:1.5}.header-a
 /* Compact own profile; public friend profiles retain their independent layout. */
 .welcome-open{border:1px solid var(--red);box-shadow:inset 0 0 0 1px #f3284320}
 .lk-screen{--lk-surface:linear-gradient(135deg,#202023,#19191c)}
-.lk-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px}.lk-title h1{font-size:28px;margin:0}.lk-title>button{width:40px;height:40px;background:none;color:#b8b8c5;display:grid;place-items:center}.lk-title svg{width:25px;height:25px}
+.lk-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px}.lk-title h1{font-size:28px;margin:0}.lk-identity-heading{display:flex;align-items:flex-start;gap:6px}.lk-identity-heading h2{flex:1;min-width:0}.lk-identity-heading button{width:40px;height:40px;flex-shrink:0;margin:-6px -6px 0 0;background:none;color:#b8b8c5;display:grid;place-items:center}.lk-identity-heading svg{width:25px;height:25px}
 .lk-identity{display:grid;grid-template-columns:96px minmax(0,1fr);gap:15px;padding:14px;background:var(--lk-surface);border:1px solid var(--line);border-radius:18px}
 .lk-photo-wrap{position:relative;align-self:start}.lk-photo-wrap .profile-photo{width:96px;height:112px;border-radius:17px;border:1px solid #44444c;background:#111113;color:var(--red)}
 .lk-photo-wrap #change-avatar{position:absolute;bottom:-7px;right:-5px;width:34px;height:34px;display:grid;place-items:center;background:#29292f;border:1px solid #4a4a54;border-radius:50%;font-size:8px;overflow:hidden}.lk-photo-wrap svg{width:18px;height:18px;flex-shrink:0}
@@ -167,7 +167,7 @@ nav button[data-tab="community"] svg{width:29px;height:29px}
 .community-tiles{width:100%;max-width:none;margin-inline:0;gap:8px}.community-tile{padding:14px;border-radius:16px}.community-tile strong{font-size:clamp(18px,4.5vw,23px)}.community-tile small{font-size:10px}.community-tile-icon{width:38%;height:38%}
 
 /* Respect Telegram's full-screen content inset after removing the top header. */
-main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px)) + max(56px,var(--tg-content-safe-area-inset-top,0px)) + 12px)}
+main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px)) + max(56px,var(--tg-content-safe-area-inset-top,0px)))}
 .nav-profile-wrap{position:relative;display:block;width:28px;height:28px;margin:0 auto 3px}.nav-profile-wrap .nav-profile-photo{margin:0}.nav-unread-dot{position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:var(--red);border:2px solid #121214;display:none}.nav-profile-wrap.has-unread .nav-unread-dot{display:block}.nav-profile-wrap.has-unread .nav-profile-photo{animation:nav-profile-glow 1.3s ease-in-out infinite}
 @keyframes nav-profile-glow{0%,100%{border-color:#a73a50;box-shadow:0 0 0 1px #f3284330,0 0 3px #f3284320}50%{border-color:#ff6179;box-shadow:0 0 0 2px #f3284366,0 0 12px 3px #f3284380}}
 @media(prefers-reduced-motion:reduce){.nav-profile-wrap.has-unread .nav-profile-photo{animation:none;border-color:var(--red);box-shadow:0 0 0 1px #f3284350}}
