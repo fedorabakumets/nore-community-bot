@@ -97,12 +97,18 @@ async def status(request):
     for row in sorted(rows, key=lambda r: (-r['rank'], str(r['profile_name'] or r['telegram_name']).casefold())):
         if row['rank'] > 0:
             staff.append({**await card(db, settings, viewer, row), 'role': row['role_name'] or row['role']})
+    from community_bot.helpers import has_permission
+    from community_bot.permissions import PERM_GAMES
+    from community_bot.sea_api import public_lobbies
     from community_bot.sea_api import read_status as read_sea_status
     sea_invites = (await read_sea_status(db, viewer))["invites"]
+    sea_admin = await has_permission(db, settings, viewer, PERM_GAMES)
+    sea_lobbies = await public_lobbies(db, viewer, admin=sea_admin)
     return web.json_response({'day': today.isoformat(), 'winner_day': day.isoformat(),
                               'revision_day': today.isoformat(),
                               'timezone': 'Europe/Moscow', 'leaders': leaders, 'staff': staff,
                               'winner': winner_card, 'awarded': bool(winner), 'sea_invites': sea_invites,
+                              'sea_lobbies': sea_lobbies, 'sea_admin': sea_admin,
                               'updated_at': now.isoformat(timespec='seconds')})
 
 

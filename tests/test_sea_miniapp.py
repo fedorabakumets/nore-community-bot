@@ -1,5 +1,6 @@
 """Real SQLite Sea Battle lifecycle: boards, stakes, persistence and notifications."""
 
+import asyncio
 import json
 import random
 import secrets
@@ -469,3 +470,110 @@ async def test_friend_timeout_passes_turn_at_deadline(env):
     result = (await view(env, 7, room))["room"]
     assert result["turn"] == ({7, 8} - {first}).pop()
     assert result["deadline"] == (env.now + sea.MOVE_SECONDS) * 1000
+
+
+async def test_public_password_lobby_join_kick_and_refund(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10, title="Порт", password="test-pass")
+    row = await env.db.fetchone("SELECT state_json FROM mini_sea_rooms WHERE id=?", (room,))
+    assert "test-pass" not in row["state_json"]
+    listings = await sea.public_lobbies(env.db, 8, now=env.now)
+    assert len(listings) == 1 and listings[0]["locked"] and listings[0]["stake"] == 10
+    assert "hash" not in json.dumps(listings)
+    with pytest.raises(ValueError, match="пароль"):
+        await send(env, 8, "join", room, password="wrong")
+    assert await env.db.fetchone("SELECT * FROM mini_sea_members WHERE user_id=8 AND active=1") is None
+    await send(env, 8, "join", room, password="test-pass")
+    assert await sea.public_lobbies(env.db, 9, now=env.now) == []
+    with pytest.raises(sea.Conflict, match="два игрока"):
+        await send(env, 9, "join", room, password="test-pass")
+    with pytest.raises(ValueError, match="создатель"):
+        await send(env, 8, "kick", room, user_id=7)
+    await send(env, 7, "kick", room, user_id=8)
+    assert await sea.public_lobbies(env.db, 8, now=env.now) == []
+    with pytest.raises(sea.Conflict, match="исключил"):
+        await send(env, 8, "join", room, password="test-pass")
+    await send(env, 9, "join", room, password="test-pass")
+    await send(env, 7, "cancel", room)
+    assert (await env.db.get_user(7))["cookies"] == 100
+    assert (await env.db.get_user(8))["cookies"] == 100
+    assert (await env.db.get_user(9))["cookies"] == 100
+
+
+async def test_join_invitation_cannot_overfill_and_admin_close(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10, password="test-pass")
+    await send(env, 7, "invite", room, user_id=8)
+    await send(env, 9, "join", room, password="test-pass")
+    with pytest.raises(sea.Conflict, match="два игрока"):
+        await send(env, 8, "respond", room, accept=True)
+    with pytest.raises(ValueError, match="прав администратора"):
+        await send(env, 8, "admin_close", room)
+    rooms = await sea.public_lobbies(env.db, 7, admin=True, now=env.now)
+    assert rooms[0]["players"] == 2
+    await send(env, 7, "admin_close", room)
+    assert (await env.db.get_user(7))["cookies"] == 100
+    assert (await env.db.get_user(9))["cookies"] == 100
+    assert not await env.db.fetchall("SELECT * FROM mini_sea_members WHERE room_id=? AND active=1", (room,))
+
+
+async def test_invited_friend_can_enter_password_room_and_rejoin_after_leaving(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0, password="test-pass")
+    await send(env, 7, "invite", room, user_id=8)
+    await send(env, 8, "respond", room, accept=True)
+    await send(env, 8, "leave", room)
+    await send(env, 9, "join", room, password="test-pass")
+    result = (await view(env, 7, room))["room"]
+    assert {p["id"] for p in result["players"]} == {7, 9}
+
+
+async def test_blocked_users_cannot_find_or_join_lobby(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0)
+    await friend_mutate(env.db, env.settings, 8, {"action": "block", "target_id": 7})
+    assert await sea.public_lobbies(env.db, 8, now=env.now) == []
+    with pytest.raises(sea.Conflict, match="нельзя"):
+        await send(env, 8, "join", room)
+
+
+async def test_password_attempt_limit_and_active_room_cannot_be_cancelled(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0, password="test-pass")
+    for _ in range(5):
+        with pytest.raises(ValueError, match="пароль"):
+            await send(env, 8, "join", room, password="wrong")
+    with pytest.raises(ValueError, match="много попыток"):
+        await send(env, 8, "join", room, password="test-pass")
+    await advance(env, 61)
+    await send(env, 8, "join", room, password="test-pass")
+    for uid in (7, 8):
+        await send(env, uid, "ready", room, ready=True)
+    await send(env, 7, "start", room)
+    with pytest.raises(ValueError, match="лобби"):
+        await send(env, 7, "cancel", room)
+
+
+async def test_older_private_lobbies_remain_private(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0)
+    saved = await state(env, room)
+    saved.pop("public")
+    await env.db.execute("UPDATE mini_sea_rooms SET state_json=? WHERE id=?", (json.dumps(saved), room))
+    assert await sea.public_lobbies(env.db, 8, now=env.now) == []
+    with pytest.raises(sea.Conflict, match="приглашению"):
+        await send(env, 8, "join", room)
+    await send(env, 7, "invite", room, user_id=8)
+    await send(env, 8, "respond", room, accept=True)
+
+
+async def test_simultaneous_joins_only_one_player_enters(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0)
+    results = await asyncio.gather(send(env, 8, "join", room), send(env, 9, "join", room),
+                                   return_exceptions=True)
+    assert sum(isinstance(result, tuple) for result in results) == 1
+    assert sum(isinstance(result, sea.Conflict) for result in results) == 1
+    assert len((await view(env, 7, room))["room"]["players"]) == 2
+
+
+async def test_game_admin_can_close_other_users_lobby(env):
+    await env.db.set_role(10, "admin")
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10)
+    await send(env, 8, "join", room)
+    await send(env, 10, "admin_close", room)
+    assert (await env.db.get_user(7))["cookies"] == 100
+    assert (await env.db.get_user(8))["cookies"] == 100
