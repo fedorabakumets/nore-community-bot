@@ -45,6 +45,8 @@ async def test_today_sends_one_greeting_and_owner_preview(tmp_path):
     await db.initialize()
     await db.ensure_user(71, "Caramel_kka", "Карамелька")
     await db.ensure_user(7, "owner", "Владелец")
+    await offer_gift(db, 7, "2026-11-02-owner")
+    await db.set_bot_state("birthday_owner_post:7:2026-11-02", "sent")
 
     class Bot:
         def __init__(self):
@@ -70,8 +72,11 @@ async def test_today_sends_one_greeting_and_owner_preview(tmp_path):
     assert "<b>НОРЫ</b>" in bot.photos[1][1]["caption"]
     assert len(bot.messages) == 2
     assert {args[0] for args, _ in bot.messages} == {7, 71}
-    assert await pending_gift(db, 7) == "2026-11-02-owner"
+    assert await pending_gift(db, 7) == "2026-11-02-owner2"
     assert await pending_gift(db, 71) == "2026-11-02"
+    assert await claim_gift(db, 7, "2026-11-02-owner2")
+    assert not await claim_gift(db, 7, "2026-11-02-owner2")
+    assert await claim_gift(db, 7, "2026-11-02-owner")
 
 
 def test_greeting_escapes_profile_name():
@@ -157,5 +162,9 @@ async def test_group_button_is_bound_to_recipient_even_when_other_has_gift(tmp_p
 
 def test_rich_greeting_embeds_bound_button_and_image():
     rich = rich_greeting({"user_id": 7, "profile_name": "Рома"}, "2026-11-02-owner")
-    assert rich.blocks[0].type == "photo"
+    assert rich.blocks[0].type == "paragraph"
+    assert rich.blocks[1].type == "photo"
+    assert rich.blocks[2].type == "paragraph"
+    assert rich.blocks[3].blocks[0].text == "Забери свой подарок по кнопке ниже или в мини-приложении"
+    assert rich.blocks[-1].buttons[0].style == "primary"
     assert rich.blocks[-1].buttons[0].callback_data == "birthday:claim:2026-11-02-owner:7"

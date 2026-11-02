@@ -36,7 +36,7 @@ GIFT_AMOUNT = 500
 GIFT_ART = Path(__file__).parent.parent / "assets" / "birthday" / "gift.png"
 SPECIAL_DAY = "2026-11-02"
 SPECIAL_USERNAME = "Caramel_kka"
-OWNER_GIFT = "2026-11-02-owner"
+OWNER_GIFT = "2026-11-02-owner2"
 
 
 def gift_key(user_id: int, day: str) -> str:
@@ -78,7 +78,7 @@ async def offer_gift(db: Database, user_id: int, day: str, *, preview: bool = Fa
 
 
 async def claim_gift(db: Database, user_id: int, day: str) -> bool:
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:-owner)?", day):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:-owner2?)?", day):
         return False
     now = utcnow()
     async with db.connect() as conn:
@@ -117,15 +117,16 @@ def rich_greeting(user: dict, day: str) -> InputRichMessage:
                                   user=User(id=uid, is_bot=False, first_name=name))
                if uid else RichTextBold(text="@" + str(user["username"])))
     return InputRichMessage(blocks=[
-        InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(GIFT_ART))),
         InputRichBlockParagraph(text=["🎂 ", mention, ", с днём рождения! 🎉"]),
+        InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(GIFT_ART))),
         InputRichBlockParagraph(text=["Поздравляем тебя от всей команды ", RichTextBold(text="НОРЫ"),
                                       " с этим днём! Желаем тебе ", RichTextBold(text="счастья"), ", ",
                                       RichTextBold(text="здоровья"), " и чтобы каждый день радовал тебя! ✨🍪"]),
         InputRichBlockBlockQuotation(blocks=[InputRichBlockParagraph(
-            text="Загляни в бота или мини-приложение за подарком — он уже ждёт тебя в уведомлениях! 🎁")]),
+            text="Забери свой подарок по кнопке ниже или в мини-приложении")]),
         InputRichBlockButtons(buttons=[RichMessageButton(
-            text="🎁 Получить подарок · 500 🍪", callback_data=f"birthday:claim:{day}:{recipient}")], align="center"),
+            text="🎁 Получить подарок · 500 🍪", style="primary",
+            callback_data=f"birthday:claim:{day}:{recipient}")], align="center"),
     ])
 
 
@@ -159,8 +160,7 @@ def greeting(user: dict) -> str:
         f"🎂 {mention}, с днём рождения! 🎉\n\n"
         "Поздравляем тебя от всей команды <b>НОРЫ</b> с этим днём! "
         "Желаем тебе <b>счастья</b>, <b>здоровья</b> и чтобы каждый день радовал тебя! ✨🍪\n\n"
-        "<blockquote>Загляни в бота или мини-приложение за подарком — "
-        "он уже ждёт тебя в уведомлениях! 🎁</blockquote>"
+        "<blockquote>Забери свой подарок по кнопке ниже или в мини-приложении</blockquote>"
     )
 
 
@@ -207,7 +207,7 @@ async def deliver_today(bot, db: Database, settings, now: datetime | None = None
         if owner:
             if await offer_gift(db, settings.owner_id, OWNER_GIFT):
                 await _private_offer(bot, settings.owner_id, OWNER_GIFT)
-            marker = f"birthday_owner_post:{settings.owner_id}:{day}"
+            marker = f"birthday_owner_post:{settings.owner_id}:{OWNER_GIFT}"
             async with db.connect() as conn:
                 await conn.execute("BEGIN IMMEDIATE")
                 cursor = await conn.execute(
