@@ -5,6 +5,8 @@ server's view; every shot is validated and resolved in a write transaction.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import secrets
 import time
@@ -347,7 +349,7 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
                 "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES (?,?, 'sea_win',?,?)",
                 (uid, stake * 2, "room:" + room["id"], _stamp(now)),
             )
-        elif stake and (cancelled or winner is None):
+        elif stake and (cancelled or winner is None) and (room["state"].get("started_at") or uid == room["host_id"]):
             await conn.execute("UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?", (stake, _stamp(now), uid))
             await conn.execute(
                 "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES (?,?, 'sea_refund',?,?)",
@@ -536,6 +538,17 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
     if not isinstance(title, str) or not 2 <= len(title.strip()) <= 60:
         raise ValueError("Название партии — от 2 до 60 символов")
     title = title.strip()
+    password = body.get("password", "")
+    if not isinstance(password, str) or len(password) > 64 or (password and len(password) < 4):
+        raise ValueError("Пароль должен содержать от 4 до 64 символов")
+    if vs_bot and password:
+        raise ValueError("Пароль доступен только для игры с человеком")
+    password_record = None
+    if password:
+        salt = secrets.token_hex(16)
+        password_record = {"salt": salt, "hash": hashlib.scrypt(
+            password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1
+        ).hex()}
     room_id = secrets.token_urlsafe(16)
     room = {
         "id": room_id,
@@ -553,6 +566,9 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
             "players": {str(uid): _new_player(user)},
             "timeline": [],
             "winner": None,
+            "password": password_record,
+            "public": not vs_bot,
+            "kicked": [],
         },
     }
     if vs_bot:
@@ -578,6 +594,86 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
     return room
 
 
+async def _join_room(conn, room, uid: int, now: float) -> None:
+    if room["status"] != "lobby" or room["bot"]:
+        raise Conflict("Комната уже закрыта")
+    if uid in room["state"].get("kicked", []):
+        raise Conflict("Создатель исключил тебя из этой комнаты")
+    if len(_active(room)) >= 2:
+        raise Conflict("В комнате уже два игрока")
+    if await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,)):
+        raise Conflict("Сначала заверши текущую партию Морского боя")
+    host = room["host_id"]
+    if await _one(conn, "SELECT 1 FROM mini_friend_blocks WHERE (blocker_id=? AND blocked_id=?) "
+                  "OR (blocker_id=? AND blocked_id=?)", (uid, host, host, uid)):
+        raise Conflict("Подключиться к этой комнате нельзя")
+    user = await _one(conn, "SELECT * FROM users WHERE user_id=?", (uid,))
+    # A player who left the lobby must not remain in the room or receive a refund.
+    for key, player in list(_players(room).items()):
+        if player["left"]:
+            del _players(room)[key]
+    _players(room)[str(uid)] = _new_player(user)
+    await conn.execute(
+        "INSERT INTO mini_sea_members(room_id,user_id,joined_at) VALUES(?,?,?) "
+        "ON CONFLICT(room_id,user_id) DO UPDATE SET active=1,joined_at=excluded.joined_at",
+        (room["id"], uid, now),
+    )
+    _log(room, f"{_players(room)[str(uid)]['name']} вошёл в комнату.", now)
+
+
+# Bounded per-process limit supplements the expensive password hash.
+_password_attempts: dict[tuple[str, int], list[float]] = {}
+
+
+def _check_password(room, uid: int, value, now: float) -> None:
+    record = room["state"].get("password")
+    if not record:
+        return
+    key = (room["id"], uid)
+    if len(_password_attempts) >= 4096 and key not in _password_attempts:
+        for expired in [k for k, times in _password_attempts.items() if not any(t > now - 60 for t in times)]:
+            del _password_attempts[expired]
+        if len(_password_attempts) >= 4096:
+            raise ValueError("Слишком много попыток. Попробуй через минуту")
+    attempts = [t for t in _password_attempts.get(key, []) if t > now - 60]
+    if len(attempts) >= 5:
+        raise ValueError("Слишком много попыток. Попробуй через минуту")
+    attempts.append(now)
+    _password_attempts[key] = attempts
+    if not isinstance(value, str) or len(value) > 64:
+        raise ValueError("Неверный пароль")
+    digest = hashlib.scrypt(value.encode(), salt=bytes.fromhex(record["salt"]), n=16384, r=8, p=1).hex()
+    if not hmac.compare_digest(digest, record["hash"]):
+        raise ValueError("Неверный пароль")
+    _password_attempts.pop(key, None)
+
+
+async def public_lobbies(db, uid: int, *, admin: bool = False, now: float | None = None) -> list[dict]:
+    now = _now(now)
+    await tick(db, now)
+    rows = await db.fetchall("SELECT * FROM mini_sea_rooms WHERE status='lobby' AND deadline>? "
+                             "ORDER BY created_at DESC LIMIT 200", (now,))
+    result = []
+    async with db.connect() as conn:
+        for row in rows:
+            room = dict(row)
+            room["state"] = _normalize_state(json.loads(room.pop("state_json")))
+            players = _active(room)
+            host = _player(room, room["host_id"])
+            if not admin and (not room["state"].get("public") or room["bot"] or len(players) >= 2
+                              or uid in room["state"].get("kicked", [])):
+                continue
+            if not admin and await _one(conn, "SELECT 1 FROM mini_friend_blocks WHERE "
+                                       "(blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+                                       (uid, room["host_id"], room["host_id"], uid)):
+                continue
+            result.append({"id": room["id"], "title": room["title"], "host_id": room["host_id"],
+                           "host_name": host["name"] if host else "Игрок", "stake": room["stake"],
+                           "locked": bool(room["state"].get("password")), "players": len(players),
+                           "bot": bool(room["bot"]), "public": bool(room["state"].get("public"))})
+    return result
+
+
 async def _respond(conn, db, settings, room, uid: int, body: dict, now: float) -> str:
     from community_bot.access import miniapp_allowed
     from community_bot.friends_api import accepted_in_connection
@@ -595,16 +691,7 @@ async def _respond(conn, db, settings, room, uid: int, body: dict, now: float) -
         raise Conflict("Приглашение больше не действует. Приглашать могут только друзья из этой партии")
     if not await miniapp_allowed(db, settings, uid):
         raise ValueError("Миниапка пока доступна от роли модератора")
-    member = await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,))
-    if member:
-        raise Conflict("Сначала заверши текущую партию Морского боя")
-    user = await _one(conn, "SELECT * FROM users WHERE user_id=?", (uid,))
-    _players(room)[str(uid)] = _new_player(user)
-    await conn.execute(
-        "INSERT INTO mini_sea_members(room_id,user_id,joined_at) VALUES(?,?,?) "
-        "ON CONFLICT(room_id,user_id) DO UPDATE SET active=1,joined_at=excluded.joined_at",
-        (room["id"], uid, now),
-    )
+    await _join_room(conn, room, uid, now)
     await conn.execute("UPDATE mini_sea_invites SET status='accepted' WHERE room_id=? AND user_id=?", (room["id"], uid))
     _log(room, f"{_players(room)[str(uid)]['name']} принял приглашение. Создатель может начинать.", now)
     return "Ты в комнате. Создатель партии начнёт бой"
@@ -623,6 +710,10 @@ async def _invite(conn, db, settings, room, uid: int, body: dict, now: float) ->
         raise ValueError("Сначала добавь этого участника в друзья")
     if not await miniapp_allowed(db, settings, target):
         raise ValueError("У друга пока нет доступа к миниапке")
+    if target in room["state"].get("kicked", []):
+        raise Conflict("Этот участник исключён из комнаты")
+    if len(_active(room)) >= 2:
+        raise Conflict("В комнате уже два игрока")
     if str(target) in _players(room) and not _players(room)[str(target)]["left"]:
         raise Conflict("Друг уже в комнате")
     previous = await _one(conn, "SELECT status FROM mini_sea_invites WHERE room_id=? AND user_id=?", (room["id"], target))
@@ -793,6 +884,7 @@ def _view(room, uid: int) -> dict:
         "timeline": room["state"]["timeline"],
         "ships_left": ships_left,
         "inviteable": room["status"] == "lobby" and not room["bot"],
+        "locked": bool(room["state"].get("password")),
     }
 
 
@@ -860,7 +952,9 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
     if not isinstance(body, dict):
         raise ValueError("Некорректное действие")
     action_name = body.get("action")
-    if action_name not in {"create", "invite", "respond", "ready", "start", "leave", "cancel", "shoot"}:
+    if action_name not in {
+        "create", "invite", "respond", "join", "kick", "admin_close", "ready", "start", "leave", "cancel", "shoot",
+    }:
         raise ValueError("Обнови экран и повтори действие")
     notice = None
     async with db.connect() as conn:
@@ -892,6 +986,23 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                 message = await _respond(conn, db, settings, room, uid, body, now)
                 if not body.get("accept"):
                     focus = None
+            elif action_name == "join":
+                if not room["state"].get("public"):
+                    raise Conflict("Комната доступна только по приглашению")
+                _check_password(room, uid, body.get("password", ""), now)
+                await _join_room(conn, room, uid, now)
+                message = "Ты в комнате. Подтверди готовность"
+            elif action_name == "admin_close":
+                from community_bot.helpers import has_permission
+                from community_bot.permissions import PERM_GAMES
+
+                if not await has_permission(db, settings, uid, PERM_GAMES):
+                    raise ValueError("Нет прав администратора")
+                if room["status"] != "lobby":
+                    raise Conflict("Можно закрыть только лобби")
+                await _finish(conn, room, None, now, cancelled=True)
+                focus = None
+                message = "Комната закрыта"
             else:
                 own = _player(room, uid)
                 if not own or own["left"]:
@@ -899,6 +1010,26 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                 if action_name == "invite":
                     notice = await _invite(conn, db, settings, room, uid, body, now)
                     message = "Приглашение отправлено"
+                elif action_name == "kick":
+                    target = body.get("user_id")
+                    if room["host_id"] != uid or room["status"] != "lobby" or room["bot"]:
+                        raise ValueError("Исключать игроков может создатель лобби")
+                    if type(target) is not int or target == uid or target <= 0:
+                        raise ValueError("Выбери участника")
+                    kicked = _player(room, target)
+                    if not kicked or kicked["left"]:
+                        raise Conflict("Участник уже покинул комнату")
+                    del _players(room)[str(target)]
+                    room["state"].setdefault("kicked", []).append(target)
+                    await conn.execute(
+                        "UPDATE mini_sea_members SET active=0 WHERE room_id=? AND user_id=?", (room["id"], target)
+                    )
+                    await conn.execute(
+                        "UPDATE mini_sea_invites SET status='expired' WHERE room_id=? AND user_id=?",
+                        (room["id"], target),
+                    )
+                    _log(room, f"{kicked['name']} исключён из комнаты.", now)
+                    message = "Участник исключён"
                 elif action_name == "ready":
                     if room["status"] != "lobby":
                         raise ValueError("Готовность меняется до начала партии")
@@ -907,8 +1038,8 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                 elif action_name == "start":
                     message = await _start(conn, db, settings, room, uid, now)
                 elif action_name == "cancel":
-                    if room["host_id"] != uid:
-                        raise ValueError("Удалить комнату может только её создатель")
+                    if room["host_id"] != uid or room["status"] != "lobby":
+                        raise ValueError("Закрыть лобби может только его создатель")
                     await _finish(conn, room, None, now, cancelled=True)
                     focus = None
                     message = "Ты вышел, комната закрыта" + (", ставка возвращена" if room["stake"] else "")
@@ -923,6 +1054,7 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                             focus = None
                             message = "Ты вышел, комната закрыта" + (", ставка возвращена" if room["stake"] else "")
                         else:
+                            del _players(room)[str(uid)]
                             message = "Ты вышел из комнаты"
                     else:
                         winner = _opponent_id(room, uid)
