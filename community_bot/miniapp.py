@@ -92,7 +92,9 @@ async def protection(request, handler):
         )
     except (KeyError, TypeError, json.JSONDecodeError):
         response = web.json_response({'error': 'Проверьте данные запроса'}, status=400)
-    response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
+    response.headers['Cache-Control'] = ('public, max-age=86400, immutable'
+                                         if request.path.startswith('/seasonal/media/')
+                                         else 'no-store' if request.path.startswith('/api/') else 'no-cache')
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['Content-Security-Policy'] = (
@@ -344,6 +346,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/seasonal', seasonal.status)
     app.router.add_get('/api/seasonal/items', seasonal.items_endpoint)
     app.router.add_post('/api/seasonal/save', seasonal.save_endpoint)
+    app.router.add_post('/api/seasonal/upload', seasonal.upload_image)
+    app.router.add_get('/seasonal/media/{token}', seasonal.image)
     app.router.add_post('/api/seasonal/buy/prepare', seasonal.buy_prepare_endpoint)
     app.router.add_post('/api/seasonal/buy/confirm', seasonal.buy_confirm_endpoint)
     app.router.add_post('/api/seasonal/join', seasonal.participate)

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import re
 import secrets
 import time
 from datetime import UTC, datetime
+from io import BytesIO
 from urllib.parse import urlsplit
 
+from aiogram.types import BufferedInputFile
 from aiohttp import web
 
 from community_bot.helpers import has_permission
@@ -109,7 +113,8 @@ def validate_metadata(body):
         result[key] = value.strip()
 
     def safe_url(value, *, allow_existing=False):
-        if allow_existing and value == "/seasonal/pink-guardian-season1.jpg":
+        if allow_existing and isinstance(value, str) and (value == "/seasonal/pink-guardian-season1.jpg"
+                or re.fullmatch(r"/seasonal/media/[0-9a-f]{48}", value)):
             return value
         if not isinstance(value, str) or len(value) > 2048:
             raise ValueError("Укажите корректную HTTPS-ссылку")
@@ -149,6 +154,10 @@ async def save_item(db, settings, uid, item_id, body):
         raise ValueError("Укажите цену платного предмета")
     fields = ("title", "description", "image", "author", "author_url", "links")
     metadata = validate_metadata({k: body.get(k) for k in fields})
+    if metadata["image"].startswith("/seasonal/media/"):
+        token = metadata["image"].rsplit("/", 1)[-1]
+        if not await db.get_bot_state("seasonal_media:" + token):
+            raise ValueError("Изображение не найдено. Загрузите его заново")
     metadata.update(mode=mode, price=price, enabled=enabled)
     is_new = item_id is None
     if is_new:
@@ -355,6 +364,38 @@ async def items_endpoint(request):
 
     user = await actor(request)
     return web.json_response({"items": await all_items(request.app["db"], request.app["settings"], user["user_id"])})
+
+
+async def upload_image(request):
+    from community_bot.miniapp import actor, normalized_photo
+
+    user = await actor(request)
+    db, settings = request.app["db"], request.app["settings"]
+    if not await can_manage(db, settings, user["user_id"]):
+        raise web.HTTPForbidden()
+    raw = await request.read()
+    if request.content_type not in {"image/jpeg", "image/png", "image/webp"} or len(raw) > 5 * 1024 * 1024:
+        raise ValueError("Выберите фото JPG, PNG или WebP до 5 МБ")
+    photo = await asyncio.to_thread(normalized_photo, raw)
+    sent = await request.app["bot"].send_photo(
+        user["user_id"], BufferedInputFile(photo, filename="seasonal.jpg"),
+        caption="Изображение сезонного предмета", disable_notification=True,
+    )
+    token = secrets.token_hex(24)
+    await db.set_bot_state("seasonal_media:" + token, sent.photo[-1].file_id)
+    return web.json_response({"image": "/seasonal/media/" + token})
+
+
+async def image(request):
+    token = request.match_info["token"]
+    if not re.fullmatch(r"[0-9a-f]{48}", token):
+        raise web.HTTPNotFound()
+    file_id = await request.app["db"].get_bot_state("seasonal_media:" + token)
+    if not file_id:
+        raise web.HTTPNotFound()
+    output = BytesIO()
+    await request.app["bot"].download(file_id, destination=output)
+    return web.Response(body=output.getvalue(), content_type="image/jpeg")
 
 
 async def save_endpoint(request):

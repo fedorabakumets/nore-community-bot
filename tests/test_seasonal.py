@@ -275,3 +275,51 @@ async def test_seasonal_http_handlers_create_and_complete_purchase(env, monkeypa
     response = await seasonal.buy_confirm_endpoint(Request(8, {"token": token}))
     assert "администрация свяжется" in json.loads(response.text)["message"].lower()
     assert (await env.db.get_user(8))["cookies"] == 70
+
+async def test_seasonal_image_upload_save_and_read(env):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from community_bot import seasonal
+
+    buf = BytesIO()
+    Image.new("RGB", (2, 2), "red").save(buf, "PNG")
+
+    class FakeBot:
+        async def send_photo(self, uid, photo, **kwargs):
+            assert uid == 7
+            return SimpleNamespace(photo=[SimpleNamespace(file_id="test-photo")])
+
+        async def download(self, file_id, destination):
+            assert file_id == "test-photo"
+            destination.write(b"jpeg-data")
+
+    class Request(dict):
+        def __init__(self, uid, raw, content_type="image/png"):
+            super().__init__(actor={"id": uid})
+            self.app = {"db": env.db, "settings": env.settings, "bot": FakeBot()}
+            self.raw = raw
+            self.content_type = content_type
+
+        async def read(self):
+            return self.raw
+
+    with pytest.raises(web.HTTPForbidden):
+        await seasonal.upload_image(Request(8, buf.getvalue()))
+    with pytest.raises(ValueError):
+        await seasonal.upload_image(Request(7, b"not an image"))
+    with pytest.raises(ValueError):
+        await seasonal.upload_image(Request(7, buf.getvalue(), "image/gif"))
+    response = await seasonal.upload_image(Request(7, buf.getvalue()))
+    image_path = json.loads(response.text)["image"]
+    item = {"title": "Приз", "description": "Описание", "author": "Автор", "mode": "raffle", "price": 0,
+            "author_url": "https://example.com", "image": image_path, "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    assert (await snapshot(env.db, env.settings, 8, item_id))["image"] == image_path
+    request = Request(8, b"")
+    request.match_info = {"token": image_path.rsplit("/", 1)[-1]}
+    assert (await seasonal.image(request)).body == b"jpeg-data"
+    item["image"] = "/seasonal/media/" + "0" * 48
+    with pytest.raises(ValueError, match="не найдено"):
+        await save_item(env.db, env.settings, 7, item_id, item)
