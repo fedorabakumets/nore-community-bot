@@ -26,7 +26,12 @@ def test_rich_blocks_keep_complete_headlines_and_embedded_photo():
     rich = render_rich_brief(brief, "test_bot")
     assert rich.blocks and any(isinstance(block, InputRichBlockPhoto) for block in rich.blocks)
     details = [block for block in rich.blocks if isinstance(block, InputRichBlockDetails)]
-    assert details[0].summary == title and len(details) == 2
+    assert details[1].summary == title and len(details) == 3
+    assert "Петербург" in details[0].summary
+    assert rich.blocks[1].text == "📆 Понедельник • 26 октября"
+    assert [str(getattr(block, "text", "")) for block in rich.blocks].index("🚦 Пробки") > next(
+        i for i, block in enumerate(rich.blocks) if getattr(block, "text", "") == "Этот день в Петербурге"
+    )
     bot = Bot(token="123456:TEST_TOKEN_FOR_LOCAL_SERIALIZATION")
     files = {}
     data = bot.session.prepare_value(rich, bot=bot, files=files)
