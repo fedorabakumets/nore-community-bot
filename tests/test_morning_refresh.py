@@ -373,3 +373,28 @@ async def test_failed_caption_refresh_keeps_old_pin_and_retry_state(tmp_path: Pa
     assert not await publish_morning_digest(Bot(), db, settings)
     assert await db.get_bot_state("morning_pin_message_id") == "42"
     assert await db.get_bot_state("morning_layout_version") is None
+
+
+def test_daily_layout_has_two_sources_and_only_confirmed_transport():
+    news = [
+        article("В Петербурге открылся новый музей", link="https://example.org/one", source="Источник 1"),
+        article("В Петербурге заработал новый парк", link="https://example.org/two", source="Источник 2"),
+    ]
+    brief = MorningBrief(NOW, weather=WeatherNow(8, 5, 3, 14, 0, "", ""),
+                         traffic_level=4, metro_available=False,
+                         closed_stations=["Неподтверждённая станция"], day_news=news)
+    text = render_brief(brief)
+    assert text.startswith("<b>NORA DAILY</b>\n")
+    assert "Петербург" in text and "ощущается +5°" in text
+    assert "В пути" in text and "пробки 4/10" in text
+    assert "Неподтверждённая станция" not in text
+    assert 'href="https://example.org/one"' in text and "Источник 1" in text
+    assert 'href="https://example.org/two"' in text and "Источник 2" in text
+    assert "В пути" not in render_brief(MorningBrief(NOW, metro_available=False))
+
+
+def test_daily_news_can_fill_second_place_from_another_region():
+    city = article("В Петербурге открылся музей")
+    region = article("В Гатчине открылся парк", link="https://example.org/region")
+    assert select_day_news([region, city], NOW, allow_other_regions=True) == [city, region]
+    assert select_day_news([region, city], NOW) == [city]
