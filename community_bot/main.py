@@ -461,12 +461,15 @@ async def main() -> None:
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
+    from community_bot.birthday import birthday_job
+    from community_bot.birthday import router as birthday_router
     from community_bot.event_access import router as event_router
     from community_bot.mafia_notifications import router as mafia_notifications_router
     from community_bot.sea_notifications import router as sea_notifications_router
 
     dispatcher.include_router(mafia_notifications_router)
     dispatcher.include_router(sea_notifications_router)
+    dispatcher.include_router(birthday_router)
     dispatcher.include_router(event_router)
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)
@@ -521,6 +524,7 @@ async def main() -> None:
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
+    birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
     from community_bot.rsvp import event_counters_job
 
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
@@ -545,6 +549,7 @@ async def main() -> None:
             board_task,
             morning_task,
             daily_chat_task,
+            birthday_task,
             event_counters_task,
             sticker_delivery_task,
             emergency_task,
@@ -561,6 +566,7 @@ async def main() -> None:
                 board_task,
                 morning_task,
                 daily_chat_task,
+                birthday_task,
                 event_counters_task,
                 sticker_delivery_task,
                 emergency_task,

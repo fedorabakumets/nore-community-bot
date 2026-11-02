@@ -10,6 +10,7 @@ LOAN_PRINCIPAL = 100
 LOAN_DAYS = 7
 
 TRANSACTION_LABELS = {
+    "birthday_gift": "Подарок НОРЫ ко дню рождения",
     "transfer": "Перевод",
     "admin_set": "Админ: баланс",
     "shop": "Магазин",

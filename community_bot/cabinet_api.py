@@ -291,6 +291,7 @@ async def wallet_history(request):
 
 
 async def notices(request):
+    from community_bot.birthday import pending_gift
     from community_bot.notify import CHANNELS
 
     user, db = await actor(request), request.app["db"]
@@ -317,6 +318,7 @@ async def notices(request):
             "sea_invites": [item for key, item in sea_invitations.items()
                             if not any(row.get("sea_invite") == item for row in rows)],
             "unread": await db.notify_unread_count(user["user_id"]),
+            "birthday_gift_day": await pending_gift(db, user["user_id"]),
             "channels": [
                 {
                     "id": key,
@@ -332,12 +334,20 @@ async def notices(request):
 
 
 async def notices_update(request):
+    from community_bot.birthday import claim_gift
     from community_bot.notify import CHANNELS
 
     user, db = await actor(request), request.app["db"]
     body = await request.json()
     if not isinstance(body, dict):
         raise ValueError("Проверь настройки уведомлений")
+    if body.get("action") == "claim_birthday":
+        day = body.get("day")
+        if not isinstance(day, str):
+            raise ValueError("Открой подарок заново")
+        if not await claim_gift(db, user["user_id"], day):
+            return result(False, "Подарок уже получен или недоступен")
+        return result(True, "Подарок получен: +500 🍪!")
     if body.get("action") == "read":
         through = body.get("through_id")
         if type(through) is not int or through < 0:

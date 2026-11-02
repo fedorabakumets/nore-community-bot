@@ -86,6 +86,7 @@ class PrivateAccessMiddleware(BaseMiddleware):
             allowed = action in {
                 'start:apply', 'menu:apply', 'menu:question', 'flow:cancel', 'flow:restart', 'ui:close',
             }
+            allowed |= action.startswith('birthday:claim:')
             allowed |= current == 'ApplicationForm:interview' and action.startswith('application:interview:')
             if allowed:
                 return await handler(event, data)
