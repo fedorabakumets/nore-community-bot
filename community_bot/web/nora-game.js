@@ -29,9 +29,9 @@
     frame(`<div class="nora-editor"><header><span class="nora-game-kicker">ИГРОК / ${esc(nickname)}</span><h1>Твой персонаж</h1></header><div class="nora-editor-stage"><canvas aria-label="Трёхмерный персонаж, вращайте пальцем"></canvas><span class="nora-editor-hint">↔ ПОВЕРНИ ПЕРСОНАЖА</span></div><div class="nora-editor-controls"><div class="nora-editor-tabs"><button data-category="shirt" class="active">Футболка</button><button data-category="pants">Штаны</button><button data-category="shoes">Обувь</button></div><div class="nora-editor-options"></div><p class="nora-game-error" role="alert"></p><button class="nora-editor-save">ВОЙТИ В МИР <span>↗</span></button></div></div>`);
     const root = overlay.querySelector('.nora-editor');
     const choices = {
-      shirt: [['white', 'Белая'], ['gray', 'Серая'], ['burgundy', 'Бордовая']],
-      pants: [['blue_slim', 'Узкие синие'], ['gray_slim', 'Узкие серые'], ['burgundy_wide', 'Широкие бордовые']],
-      shoes: [['white_stripes', 'Белые Adidas'], ['black_stripes', 'Чёрные Adidas'], ['red_air', 'Бордовые Air Max 97']],
+      shirt: [['white', 'Белая футболка'], ['gray', 'Серая футболка'], ['burgundy', 'Бордовая футболка']],
+      pants: [['blue_slim', 'Узкие синие джинсы'], ['gray_slim', 'Узкие серые джинсы'], ['burgundy_wide', 'Широкие бордовые джинсы']],
+      shoes: [['white_stripes', 'Белые кроссовки с чёрными полосками'], ['black_stripes', 'Чёрные кроссовки с белыми полосками'], ['red_air', 'Бордово-красные кроссовки с воздушной подошвой']],
     };
     let category = 'shirt';
     function options() {
