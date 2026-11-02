@@ -91,6 +91,9 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
         blocks.append(InputRichBlockParagraph(text="Подтверждённого события на эту дату пока нет."))
     if bot_username:
         blocks.extend([InputRichBlockDivider(), InputRichBlockButtons(
-            buttons=[RichMessageButton(text="НОРА", url=f"https://t.me/{bot_username}?start=private")], align="center",
+            buttons=[
+                RichMessageButton(text="BOT", url=f"https://t.me/{bot_username}?start=private"),
+                RichMessageButton(text="APP", url=f"https://t.me/{bot_username}?startapp"),
+            ], align="center",
         )])
     return InputRichMessage(blocks=blocks)
