@@ -38,8 +38,7 @@ def test_rich_blocks_keep_complete_headlines_and_embedded_photo():
     assert len(files) == 1 and "attach://" in data
     assert "https://example.org/news" in data and "https://example.org/history" in data
     assert "https://t.me/test_bot?start=private" in data
-    assert "https://t.me/test_bot?startapp" in data
-    assert '"text": "BOT"' in data and '"text": "APP"' in data
+    assert '"text": "BOT"' in data
     assert "Неизвестная станция" not in data
 
 
@@ -56,7 +55,9 @@ async def test_rich_send_pin_retry_without_duplicate(tmp_path, monkeypatch):
         fail = True
         async def me(self):
             return SimpleNamespace(username="test_bot")
-        async def send_rich_message(self, chat, *, rich_message):
+        async def send_rich_message(self, chat, *, rich_message, reply_markup):
+            assert reply_markup.inline_keyboard[0][0].text == "APP"
+            assert reply_markup.inline_keyboard[0][0].url == "https://t.me/test_bot?startapp"
             self.calls.append(rich_message)
             return SimpleNamespace(message_id=8)
         async def pin_chat_message(self, *args, **kwargs):
@@ -84,7 +85,7 @@ async def test_only_definitive_unsupported_errors_fallback(tmp_path, monkeypatch
     monkeypatch.setattr("community_bot.morning.collect_brief", collect)
     class Bot:
         legacy_calls = 0
-        async def send_rich_message(self, chat, *, rich_message):
+        async def send_rich_message(self, chat, *, rich_message, reply_markup):
             raise TelegramBadRequest(method=SendRichMessage(chat_id=chat, rich_message=rich_message), message=error)
         async def send_photo(self, *args, **kwargs):
             self.legacy_calls += 1
