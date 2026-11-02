@@ -7,7 +7,7 @@ window.NoraVoxel = (() => {
     const cube = new T.BoxGeometry(unit, unit, unit);
     const voxels = new Map();
     const material = new T.MeshLambertMaterial({ color: 0xffffff });
-    let section='body', phase=0, gait=0;
+    let section='body', phase=0, gait=0, run=0;
     const meshes=[], joints={}, origins={body:[0,13.5,0]};
     const motion=new T.Group(), hips=new T.Group(), torso=new T.Group();
     motion.name='gaitRoot';hips.name='hips';torso.name='torso';
@@ -18,10 +18,10 @@ window.NoraVoxel = (() => {
       torso.add(arm);arm.position.set(side*10*unit,11*unit,0);arm.add(forearm);forearm.position.y=-5*unit;
       for(const [name,node,origin] of [['thigh',thigh,[side*4,13.5,0]],['shin',shin,[side*4,7.5,0]],['foot',foot,[side*4,2.5,0]],['arm',arm,[side*10,24.5,0]],['forearm',forearm,[side*10,19.5,0]]]){node.name=name+key;joints[name+key]=node;origins[name+key]=origin;}
     }
-    function dot(x, y, z, color, override) { const side=x<0?'Left':'Right'; const part=override || (section==='shoes'?'foot'+side:section==='legs'?(y>=8?'thigh':'shin')+side:section==='arms'?(y>=20?'arm':'forearm')+side:'body');voxels.set(`${x},${y},${z}`, [x,y,z,color,part]); }
+    function dot(x, y, z, color, override) { const side=x<0?'Left':'Right'; const part=override || (section==='shoes'?'foot'+side:section==='legs'?(y>=8?'thigh':'shin')+side:section==='arms'?(y>=20?'arm':'forearm')+side:'body');voxels.set(`${part}:${x},${y},${z}`, [x,y,z,color,part]); }
     function box(x0, x1, y0, y1, z0, z1, color, surface = true) {
       for (let x=x0;x<=x1;x++) for (let y=y0;y<=y1;y++) for (let z=z0;z<=z1;z++)
-        if (!surface || x===x0 || x===x1 || y===y0 || y===y1 || z===z0 || z===z1) dot(x,y,z,color);
+        if (!surface || x===x0 || x===x1 || y===y0 || y===y1 || y===7 || y===8 || y===19 || y===20 || z===z0 || z===z1) dot(x,y,z,color);
     }
     function build() {
       for(const mesh of meshes){mesh.parent.remove(mesh);mesh.dispose();}meshes.length=0;
@@ -31,7 +31,7 @@ window.NoraVoxel = (() => {
       const shoe = outfit.shoes === 'white_stripes' ? 'white' : outfit.shoes === 'black_stripes' ? 'black' : 'red';
       for (const side of [-1,1]) {
         const x = side*4;
-        box(x-3,x+3,0,1,1,9,shoe); box(x-3,x+3,0,0,1,9, outfit.shoes==='red_air'?'black':'sole');
+        box(x-3,x+3,0,2,-3,9,shoe); box(x-3,x+3,0,0,-3,9, outfit.shoes==='red_air'?'black':'sole');
         if (outfit.shoes==='red_air') { for (let z=3;z<=8;z++) dot(x-3,1,z,'stripeWhite'); box(x-2,x+2,2,2,4,8,'red'); }
         else for (let i=0;i<3;i++) { dot(x-3,2,3+i*2,outfit.shoes==='white_stripes'?'stripe':'stripeWhite'); dot(x+3,2,3+i*2,outfit.shoes==='white_stripes'?'stripe':'stripeWhite'); }
       }
@@ -72,7 +72,7 @@ window.NoraVoxel = (() => {
       // Sculpted uppers, tongues, laces and layered sneaker sidewalls.
       for (const side of [-1,1]) {
         const x=side*4, trim=outfit.shoes==='white_stripes'?'gray':'sole';
-        box(x-2,x+2,2,3,1,5,shoe);
+        box(x-2,x+2,2,3,-3,5,shoe);
         box(x-2,x+2,2,2,6,8,shoe);
         box(x-1,x+1,3,3,3,5,trim);
         for (let z=4;z<=7;z++) box(x-1,x+1,3,3,z,z,'stripeWhite');
@@ -121,24 +121,26 @@ window.NoraVoxel = (() => {
         mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;joints[part].add(mesh);meshes.push(mesh);
       }
     }
-    function walk(distance,dt){
+    function walk(distance,dt,sprinting=false){
+      run+=((sprinting&&distance>0?1:0)-run)*(1-Math.exp(-8*dt));
       gait+=(Math.min(1,distance/Math.max(dt,.001)/1.7)-gait)*(1-Math.exp(-12*dt));
-      phase=(phase+distance/1.15*Math.PI*2)%(Math.PI*2);
+      phase=(phase+distance/(1.15+run*.55)*Math.PI*2)%(Math.PI*2);
       motion.position.y=(-.1+.015*Math.cos(phase*2))*gait;
-      torso.rotation.x=.025*gait;torso.rotation.z=Math.sin(phase)*.018*gait;
+      torso.rotation.x=(.025+run*.27)*gait;torso.rotation.z=Math.sin(phase)*.018*gait;
       for(const [key,offset] of [['Left',0],['Right',Math.PI]]){
         const t=((phase+offset)%(Math.PI*2))/(Math.PI*2),stance=.6;
         const swing=t<stance?0:(t-stance)/(1-stance);
-        const z=(t<stance?.42*(1-2*t/stance):-.42+.84*(swing*swing*(3-2*swing)))*gait;
-        const lift=Math.sin(swing*Math.PI)*.24*gait,L1=6*unit,L2=5*unit;
+        const stride=.42+run*.2;
+        const z=(t<stance?stride*(1-2*t/stance):-stride+2*stride*(swing*swing*(3-2*swing)))*gait;
+        const lift=Math.sin(swing*Math.PI)*(.24+run*.3)*gait,L1=6*unit,L2=5*unit;
         const down=L1+L2+motion.position.y-lift,r=Math.min(L1+L2-.00001,Math.hypot(down,z));
         const hip=Math.atan2(-z,down)-Math.acos(Math.max(-1,Math.min(1,(L1*L1+r*r-L2*L2)/(2*L1*r))));
         const knee=Math.PI-Math.acos(Math.max(-1,Math.min(1,(L1*L1+L2*L2-r*r)/(2*L1*L2))));
         joints['thigh'+key].rotation.x=gait<.001?0:hip;
         joints['shin'+key].rotation.x=gait<.001?0:knee;
         joints['foot'+key].rotation.x=gait<.001?0:-hip-knee;
-        joints['arm'+key].rotation.x=Math.cos(phase+offset)*.34*gait;
-        joints['forearm'+key].rotation.x=-.12*gait-Math.max(0,-z)*.18;
+        joints['arm'+key].rotation.x=(Math.cos(phase+offset)*.34*(1-run)+run*(.85+Math.sin(phase+offset)*.06))*gait;
+        joints['forearm'+key].rotation.x=(-.12*gait-Math.max(0,-z)*.18)*(1-run);
       }
     }
     build();

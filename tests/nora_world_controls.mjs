@@ -136,6 +136,16 @@ try {
   let disposed=0;
   stars.material.addEventListener('dispose',()=>disposed++);leaves.material.addEventListener('dispose',()=>disposed++);
   env.stop();assert.equal(disposed,2,'effect materials released');assert.equal(scene.getObjectByName('nora-stars'),undefined);
+  const runner=await setup();runner.key('KeyD');runner.frames(30);
+  const walking=runner.delta(30).length();runner.key('ShiftLeft');runner.frames(30);
+  assert.ok(runner.delta(30).length()>walking*1.65,'Shift accelerates');
+  assert.ok(runner.player.getObjectByName('torso').rotation.x>.2,'running leans forward');
+  assert.ok(runner.player.getObjectByName('armLeft').rotation.x>.6,'arms trail behind');
+  assert.ok(Math.abs(runner.player.getObjectByName('forearmLeft').rotation.x)<.03,'running elbows straighten');
+  runner.key('ShiftLeft',false);runner.frames(60);
+  assert.ok(runner.player.getObjectByName('torso').rotation.x<.04,'walk pose returns smoothly');
+  runner.root.querySelector('.nora-world-sprint').emit('click');runner.frames(30);
+  assert.ok(runner.delta(30).length()>walking*1.65,'touch sprint accelerates');runner.stop();
   const distances=[];
   for(const fps of [30,60,120]) {
     const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();
