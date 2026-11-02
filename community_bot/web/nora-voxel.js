@@ -98,7 +98,7 @@ window.NoraVoxel = (() => {
       mesh.instanceMatrix.needsUpdate=true; mesh.frustumCulled=false; pivot.add(mesh);
     }
     build();
-    return { group: pivot, rebuild: build, dispose() { mesh?.dispose(); material.dispose(); cube.dispose(); } };
+    return { group: pivot, rebuild: build, setOpacity(value) { const fading=value<.995; if(material.transparent!==fading){material.transparent=fading;material.needsUpdate=true;} material.opacity=value;material.depthWrite=!fading; }, dispose() { mesh?.dispose(); material.dispose(); cube.dispose(); } };
   }
   return { createCharacter, async mount(canvas, outfit, root) {
     const T = await import('/vendor/three.module.js');
