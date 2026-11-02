@@ -86,7 +86,7 @@ window.NoraWorld = (() => {
     trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
     const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
-    let actualDistance=5.7,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,moveHeading=null,lastInputX=0,lastInputZ=0;
+    let actualDistance=5.7,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,inputYaw=null,velocityX=0,velocityZ=0;
     const viewButton=root.querySelector('.nora-world-view');
     const views=['За спиной','От первого лица','Селфи'];
     function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
@@ -100,7 +100,7 @@ window.NoraWorld = (() => {
     on(joystick,'pointermove',e=>{if(e.pointerId===joyId)joystickMove(e);});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
     on(canvas,'pointerdown',e=>{if(orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
-    on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;moveHeading=null;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
+    on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;const turn=-(e.clientX-lastX)*.006;targetYaw+=turn;if(inputYaw!==null)inputYaw+=turn;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     function jump(){if(jumpHeight===0&&jumpVelocity===0)jumpVelocity=4.4;}
     on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;actualDistance=4.6;syncView();});
@@ -114,7 +114,7 @@ window.NoraWorld = (() => {
       if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
     });
     on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
-    function reset(){resetStick();keys.clear();orbitId=null;previous=0;moveHeading=null;lastInputX=lastInputZ=0;}
+    function reset(){resetStick();keys.clear();orbitId=null;previous=0;inputYaw=null;velocityX=velocityZ=0;}
     on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     function nearDoor(){return Math.abs(player.position.x)<1.5&&(inside?player.position.z>3.3:player.position.z>2.55&&player.position.z<4.8);}
@@ -137,18 +137,21 @@ window.NoraWorld = (() => {
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
         let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
-        const inputLength=Math.hypot(inputX,inputZ);if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
-        if(inputLength>.08){
-          if(moveHeading===null||Math.hypot(inputX-lastInputX,inputZ-lastInputZ)>.06){
-            moveHeading=Math.atan2(inputX*Math.cos(yaw)+inputZ*Math.sin(yaw),-inputX*Math.sin(yaw)+inputZ*Math.cos(yaw));
-            lastInputX=inputX;lastInputZ=inputZ;
-          }
-          const behind=moveHeading+Math.PI;
+        const inputLength=Math.hypot(inputX,inputZ);if(inputLength<=.025){inputX=inputZ=0;}if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
+        // The input frame stays stable while controls are held; automatic camera
+        // following must never feed back into steering. The vector itself is live.
+        if(inputLength>.025){if(inputYaw===null)inputYaw=yaw;}else inputYaw=null;
+        const basis=inputYaw===null?yaw:inputYaw;
+        const wantedX=(inputX*Math.cos(basis)+inputZ*Math.sin(basis))*1.7;
+        const wantedZ=(-inputX*Math.sin(basis)+inputZ*Math.cos(basis))*1.7;
+        const response=1-Math.exp(-(inputLength>.025?14:20)*dt);
+        velocityX+=(wantedX-velocityX)*response;velocityZ+=(wantedZ-velocityZ)*response;
+        if(Math.hypot(velocityX,velocityZ)<.002){velocityX=velocityZ=0;}
+        const dx=velocityX*dt,dz=velocityZ*dt;
+        if(Math.hypot(velocityX,velocityZ)>.03){
+          const behind=Math.atan2(velocityX,velocityZ)+Math.PI;
           targetYaw=yaw+Math.atan2(Math.sin(behind-yaw),Math.cos(behind-yaw));
-        }else{moveHeading=null;lastInputX=lastInputZ=0;}
-        const speed=Math.min(1,inputLength)*1.7*dt;
-        const dx=moveHeading===null?0:Math.sin(moveHeading)*speed;
-        const dz=moveHeading===null?0:Math.cos(moveHeading)*speed;
+        }
         const oldX=player.position.x,oldZ=player.position.z;
         move(player.position,dx,dz,zone);
         if(jumpVelocity!==0||jumpHeight>0){
@@ -157,7 +160,7 @@ window.NoraWorld = (() => {
         }
         player.position.y=.017+jumpHeight;
         character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt);
-        const heading=moveHeading===null?yaw+Math.PI:moveHeading;
+        const heading=Math.hypot(velocityX,velocityZ)>.03?Math.atan2(velocityX,velocityZ):player.rotation.y;
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
         player.rotation.y+=turn*(1-Math.exp(-16*dt));
         playerShadow.position.set(player.position.x,.008,player.position.z);
