@@ -181,15 +181,16 @@ window.NoraWorld = (() => {
     on(joystick,'pointerdown',e=>{if(joyId!==null)return;e.preventDefault();joyId=e.pointerId;joystick.setPointerCapture(joyId);joystickMove(e);});
     on(joystick,'pointermove',e=>{if(e.pointerId===joyId)joystickMove(e);});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
-    on(canvas,'pointerdown',e=>{if(orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
+    on(canvas,'pointerdown',e=>{if(companion.panelOpen()||orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
-    function jump(){if(jumpHeight===0&&jumpVelocity===0)jumpVelocity=4.4;}
+    function jump(){if(companion.panelOpen())return;if(jumpHeight===0&&jumpVelocity===0)jumpVelocity=4.4;}
     on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;actualDistance=4.6;syncView();});
     on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
     on(jumpButton,'click',jump);
     on(window,'keydown',e=>{
+      if(companion.panelOpen())return;
       if(!['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
       if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
       if(e.code==='Space'&&e.target?.closest?.('button'))return;
@@ -208,7 +209,7 @@ window.NoraWorld = (() => {
       lightingAt=-Infinity;updateLighting(Date.now());
       jumpHeight=0;jumpVelocity=0;player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
       root.querySelector('.nora-world-bar small').textContent=inside?'ТАВЕРНА':'ЛЕСНАЯ ПОЛЯНА';
-      for(const g of gusts)g.age=1;reset();
+      for(const g of gusts)g.age=1;companion.reset();reset();
     });
     function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
     const observer=new ResizeObserver(resize);observer.observe(canvas);resize();
@@ -224,12 +225,14 @@ window.NoraWorld = (() => {
       wind.instanceMatrix.needsUpdate=true;
     }
     const target=new T.Vector3(), offset=new T.Vector3(), direction=new T.Vector3();
+    const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     function tick(time){
       if(disposed)return;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
         let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
+        if(companion.panelOpen()){inputX=inputZ=0;}
         const inputLength=Math.hypot(inputX,inputZ);if(inputLength<=.025){inputX=inputZ=0;}if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
         // Movement is always relative to the visible camera, including selfie.
         // Turning the model must not rotate the camera or the input frame.
@@ -276,11 +279,12 @@ window.NoraWorld = (() => {
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         atmosphere.update(dt,updateLighting(Date.now()),inside);
+        companion.update(dt,camera);
         renderer.render(scene,camera);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }

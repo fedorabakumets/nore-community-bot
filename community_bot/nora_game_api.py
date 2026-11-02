@@ -36,6 +36,13 @@ async def status(request):
     return web.json_response({'nickname': row['nickname'] if row else None, 'outfit': outfit})
 
 
+async def companion(request):
+    """Owner-only view of the existing pet, including settled expedition state."""
+    from community_bot.cabinet_api import pet_data
+
+    return web.json_response({'pet': await pet_data(request.app['db'], {'user_id': request['actor']['id']})})
+
+
 async def register(request):
     body = await request.json()
     nickname = body.get('nickname') if isinstance(body, dict) else None

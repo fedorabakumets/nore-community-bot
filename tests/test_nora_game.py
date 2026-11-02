@@ -1,10 +1,12 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from community_bot import nora_game_api
+from community_bot import cabinet_api, nora_game_api
 from community_bot.database import Database
 
 
@@ -18,6 +20,39 @@ def request(db, uid, body=None):
 
 def content(response):
     return json.loads(response.text)
+
+
+@pytest.mark.asyncio
+async def test_companion_uses_own_existing_pet_and_expedition(tmp_path):
+    db = Database(tmp_path / 'companion.db')
+    await db.initialize()
+    for uid in (1, 2):
+        await db.ensure_user(uid)
+        await db.add_cookies(uid, 10, 'test')
+    assert content(await nora_game_api.companion(request(db, 1))) == {'pet': None}
+    assert (await db.purchase_pet(1, 'fox', 'Рыжик', 1))[0]
+    assert (await db.purchase_pet(2, 'cat', 'Чужой', 1))[0]
+    await db.execute('UPDATE pets SET hunger = 72 WHERE user_id = 1')
+    pet = content(await nora_game_api.companion(request(db, 1)))['pet']
+    assert (pet['name'], pet['species'], pet['hunger']) == ('Рыжик', 'fox', 72)
+    assert not {'user_id', 'telegram_id', 'username'} & pet.keys()
+    assert content(await nora_game_api.companion(request(db, 2)))['pet']['name'] == 'Чужой'
+    prepared = content(await cabinet_api.pet_prepare(request(db, 1, {'action': 'expedition'})))
+    send = request(db, 1, {'token': prepared['token']})
+    send.app['settings'] = SimpleNamespace(timezone='Europe/Moscow')
+    assert content(await cabinet_api.pet_action(send))['ok']
+    assert content(await nora_game_api.companion(request(db, 1)))['pet']['expedition_until']
+    assert content(await nora_game_api.companion(request(db, 2)))['pet']['expedition_until'] is None
+    assert not content(await cabinet_api.pet_action(send))['ok']
+    before = (await db.get_user(1))['cookies']
+    await db.execute('UPDATE pets SET expedition_until = ? WHERE user_id = 1',
+                     ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(),))
+    returned = content(await nora_game_api.companion(request(db, 1)))['pet']
+    assert returned['expedition_until'] is None
+    after = (await db.get_user(1))['cookies']
+    assert 1 <= after - before <= 10
+    await nora_game_api.companion(request(db, 1))
+    assert (await db.get_user(1))['cookies'] == after
 
 
 @pytest.mark.asyncio

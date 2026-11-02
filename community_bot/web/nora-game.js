@@ -100,7 +100,7 @@
     music?.attach(overlay);
   }
   async function world(nickname) {
-    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
+    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
     try {
@@ -158,5 +158,5 @@
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { close(); open(); }; } }
   }
   document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay) close(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay && !overlay.querySelector('.nora-pet-panel')?.open) close(); });
 })();

@@ -17,16 +17,18 @@ try {
   const Three = await import(pathToFileURL(join(temp, 'three.module.mjs')).href);
   const world = (await readFile(new URL('nora-world.js', web), 'utf8')).replace("await import('/vendor/three.module.js')", 'THREE');
   const voxel = await readFile(new URL('nora-voxel.js', web), 'utf8');
+  const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
   class Element extends EventTarget {
-    style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
+    open=false; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
     children = new Map();
     querySelector(selector) { if (!this.children.has(selector)) this.children.set(selector, new Element()); return this.children.get(selector); }
     setAttribute() {} setPointerCapture() {} blur() {}
+    showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}}; }
     emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); this.dispatchEvent(e); }
   }
-  async function setup(view = 0, fps = 60) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null})) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
@@ -34,11 +36,12 @@ try {
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     const context = vm.createContext({window, document, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      Date:{now:()=>now}, AbortController, ResizeObserver:class {observe(){} disconnect(){}},
+      Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, ResizeObserver:class {observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
     window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player=result.group;return result;};
+    vm.runInContext(companion, context);
     vm.runInContext(world, context);
     const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes'});
     for(let i=0;i<view;i++)root.querySelector('.nora-world-view').emit('click');
@@ -146,6 +149,45 @@ try {
   assert.ok(runner.player.getObjectByName('torso').rotation.x<.04,'walk pose returns smoothly');
   runner.root.querySelector('.nora-world-sprint').emit('click');runner.frames(30);
   assert.ok(runner.delta(30).length()>walking*1.65,'touch sprint accelerates');runner.stop();
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  for(const species of ['cat','dog','fox','raccoon','dragon']) {
+    let current={name:'<Друг>',species,species_label:species,hunger:72,thirst:83,enabled:true,expedition_until:null};
+    const calls=[];
+    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='pet/prepare')return {token:'owner-token'};
+      if(path==='pet/action'){current={...current,expedition_until:'2026-11-03T12:00:00Z'};return {ok:true,message:'В походе'};}
+      return {pet:current};};
+    const h=await setup(0,60,petApi);await flush();h.frames(1);
+    const pet=h.scene().getObjectByName('nora-companion');assert.ok(pet,'existing '+species+' appears');
+    assert.ok(pet.children[0].count<1500,'bounded voxel model');
+    const actions=h.root.querySelector('.nora-pet-actions');assert.equal(actions.hidden,false,'nearby actions');
+    h.root.querySelector('.nora-pet-stroke').emit('click');h.frames(1);
+    const hearts=h.scene().getObjectByName('nora-pet-hearts');assert.equal(hearts.visible,true,'petting hearts');
+    const alpha=hearts.material.opacity;h.frames(40);assert.ok(hearts.material.opacity<alpha,'hearts fade');
+    h.frames(80);assert.equal(hearts.visible,false,'hearts expire');
+    h.zone.boxes.push([1,2,3,4]);
+    for(const [key,count] of [['KeyD',120],['KeyW',130],['KeyA',100]]){
+      h.key(key);
+      for(let i=0;i<count;i++){h.frames(1);assert.ok(!(pet.position.x>.66&&pet.position.x<2.34&&pet.position.z>2.66&&pet.position.z<4.34),'follower avoids furniture');}
+      h.key(key,false);
+    }
+    h.frames(100);assert.ok(pet.position.distanceTo(h.player.position)<1.8,'follows around corners');
+    h.root.querySelector('.nora-pet-open').emit('click');await flush();
+    const panel=h.root.querySelector('.nora-pet-panel'),body=panel.querySelector('.nora-pet-content');
+    assert.ok(panel.open);assert.ok(body.innerHTML.includes('72 / 100'));assert.ok(body.innerHTML.includes('&lt;Друг>'),'name escaped');
+    h.key('KeyW');assert.ok(h.delta(40).length()<.001,'panel blocks movement');
+    body.closest=()=>true;body.emit('click');body.emit('click');await flush();
+    assert.equal(calls.filter(([path])=>path==='pet/action').length,1,'one expedition request');
+    assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'away pet disappears');
+    panel.close();current={...current,expedition_until:null};h.frames(1900);await flush();h.frames(1);
+    assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns after server sync');
+    h.player.position.set(0,.017,3.6);h.root.querySelector('.nora-world-action').emit('click');h.frames(1);
+    assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');
+    h.stop();assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'pet disposed');
+  }
+  let resolvePet;
+  const late=await setup(0,60,()=>new Promise(resolve=>{resolvePet=resolve;}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
+  assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
+  console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
   const distances=[];
   for(const fps of [30,60,120]) {
     const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();

@@ -374,6 +374,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import nora_game_api
 
     app.router.add_get('/api/nora-game', nora_game_api.status)
+    app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)
     app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
     app.router.add_get('/api/mafia', mafia_api.status)
@@ -411,7 +412,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'nora-voxel.js', 'nora-scenery.js', 'nora-world.js', 'nora-game.js', 'people.js',
+                 'interactive.js', 'nora-voxel.js', 'nora-scenery.js', 'nora-companion.js',
+                 'nora-world.js', 'nora-game.js', 'people.js',
                  'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
