@@ -98,10 +98,79 @@ async def test_outfit_requires_registration_and_is_private_and_persistent(tmp_pa
     with pytest.raises(ValueError):
         await nora_game_api.save_outfit(request(db, 1, clothes))
     await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
-    assert content(await nora_game_api.save_outfit(request(db, 1, clothes))) == {'outfit': clothes}
-    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': 'Alice', 'outfit': clothes}
+    expected = {**clothes, **nora_game_api.APPEARANCE_DEFAULTS}
+    assert content(await nora_game_api.save_outfit(request(db, 1, clothes))) == {'outfit': expected}
+    assert content(await nora_game_api.status(request(db, 1))) == {'nickname': 'Alice', 'outfit': expected}
     assert content(await nora_game_api.status(request(db, 2))) == {'nickname': None, 'outfit': None}
     await db.initialize()
-    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == clothes
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == expected
     with pytest.raises(ValueError):
         await nora_game_api.save_outfit(request(db, 1, {**clothes, 'shoes': 'invalid'}))
+
+
+@pytest.mark.asyncio
+async def test_appearance_survives_reload_and_legacy_clothing_updates(tmp_path):
+    db = Database(tmp_path / 'game.db')
+    await db.initialize()
+    clothes = {'shirt': 'white', 'pants': 'blue_slim', 'shoes': 'white_stripes'}
+    for uid, name in ((1, 'Alice'), (2, 'Other')):
+        await nora_game_api.register(request(db, uid, {'nickname': name}))
+    # A saved outfit from before the editor update must still open normally.
+    await db.execute('INSERT INTO nora_game_outfits VALUES (?, ?, ?, ?)', (1, *clothes.values()))
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == {
+        **clothes, **nora_game_api.APPEARANCE_DEFAULTS,
+    }
+    appearance = {'gender': 'female', 'hairstyle': 'ponytail', 'hair_color': 'rose', 'eye_color': 'green'}
+    await nora_game_api.save_outfit(request(db, 1, {**clothes, **appearance, 'telegram_id': 2}))
+    await nora_game_api.save_outfit(request(db, 2, clothes))
+    await db.initialize()
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == {**clothes, **appearance}
+    assert content(await nora_game_api.status(request(db, 2)))['outfit'] == {
+        **clothes, **nora_game_api.APPEARANCE_DEFAULTS,
+    }
+    updated = {**clothes, 'shirt': 'gray'}
+    assert content(await nora_game_api.save_outfit(request(db, 1, updated)))['outfit'] == {
+        **updated, **appearance,
+    }
+
+
+@pytest.mark.asyncio
+async def test_all_appearance_options_can_be_saved(tmp_path):
+    db = Database(tmp_path / 'game.db')
+    await db.initialize()
+    await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
+    outfit = {'shirt': 'gray', 'pants': 'gray_slim', 'shoes': 'black_stripes',
+              **nora_game_api.APPEARANCE_DEFAULTS}
+    for key, allowed in nora_game_api.APPEARANCE_CHOICES.items():
+        for value in sorted(allowed):
+            outfit[key] = value
+            assert content(await nora_game_api.save_outfit(request(db, 1, outfit)))['outfit'] == outfit
+            assert content(await nora_game_api.status(request(db, 1)))['outfit'] == outfit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('field', [*nora_game_api.APPEARANCE_CHOICES, 'shirt', 'pants', 'shoes'])
+@pytest.mark.parametrize('value', ['invalid', None, [], {}, 42])
+async def test_invalid_appearance_does_not_change_saved_outfit(tmp_path, field, value):
+    db = Database(tmp_path / 'game.db')
+    await db.initialize()
+    await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
+    clothes = {'shirt': 'white', 'pants': 'blue_slim', 'shoes': 'white_stripes'}
+    before = content(await nora_game_api.save_outfit(request(db, 1, clothes)))['outfit']
+    with pytest.raises(ValueError):
+        await nora_game_api.save_outfit(request(db, 1, {**before, 'shirt': 'gray', field: value}))
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved', ['broken json', '[]', '{"gender": [], "hair_color": "invalid"}'])
+async def test_invalid_stored_appearance_falls_back_to_defaults(tmp_path, saved):
+    db = Database(tmp_path / 'game.db')
+    await db.initialize()
+    await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
+    clothes = {'shirt': 'white', 'pants': 'blue_slim', 'shoes': 'white_stripes'}
+    await nora_game_api.save_outfit(request(db, 1, clothes))
+    await db.set_bot_state('nora_game_appearance:1', saved)
+    assert content(await nora_game_api.status(request(db, 1)))['outfit'] == {
+        **clothes, **nora_game_api.APPEARANCE_DEFAULTS,
+    }

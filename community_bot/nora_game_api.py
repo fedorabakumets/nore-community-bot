@@ -1,4 +1,5 @@
 """Private registration for the standalone NORA game."""
+import json
 import re
 import sqlite3
 
@@ -18,6 +19,33 @@ CREATE TABLE IF NOT EXISTS nora_game_outfits (
 );
 """
 
+APPEARANCE_CHOICES = {
+    'gender': {'male', 'female'},
+    'hairstyle': {'crop', 'bob', 'ponytail'},
+    'hair_color': {'black', 'chestnut', 'brown', 'blonde', 'ginger', 'ash', 'rose', 'blue'},
+    'eye_color': {'brown', 'hazel', 'green', 'blue', 'gray', 'violet'},
+}
+APPEARANCE_DEFAULTS = {
+    'gender': 'male', 'hairstyle': 'crop', 'hair_color': 'black', 'eye_color': 'brown',
+}
+
+
+async def _appearance(db, telegram_id):
+    row = await (await db.execute(
+        'SELECT value FROM bot_state WHERE key = ?', (f'nora_game_appearance:{telegram_id}',),
+    )).fetchone()
+    try:
+        saved = json.loads(row['value']) if row else {}
+    except (ValueError, TypeError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    return {
+        key: saved[key] if isinstance(saved.get(key), str) and saved[key] in allowed
+        else APPEARANCE_DEFAULTS[key]
+        for key, allowed in APPEARANCE_CHOICES.items()
+    }
+
 
 async def status(request):
     async with request.app['db'].connect() as db:
@@ -32,7 +60,7 @@ async def status(request):
                 'SELECT shirt, pants, shoes FROM nora_game_outfits WHERE telegram_id = ?',
                 (request['actor']['id'],),
             )).fetchone()
-            outfit = dict(saved) if saved else None
+            outfit = {**dict(saved), **await _appearance(db, request['actor']['id'])} if saved else None
     return web.json_response({'nickname': row['nickname'] if row else None, 'outfit': outfit})
 
 
@@ -72,8 +100,14 @@ async def save_outfit(request):
         'pants': {'blue_slim', 'gray_slim', 'burgundy_wide'},
         'shoes': {'white_stripes', 'black_stripes', 'red_air'},
     }
-    if not isinstance(body, dict) or any(body.get(key) not in allowed for key, allowed in choices.items()):
+    if not isinstance(body, dict) or any(
+        not isinstance(body.get(key), str) or body[key] not in allowed
+        for key, allowed in choices.items()
+    ):
         raise ValueError('Выбери одежду из доступных вариантов')
+    if any(key in body and (not isinstance(body[key], str) or body[key] not in allowed)
+           for key, allowed in APPEARANCE_CHOICES.items()):
+        raise ValueError('Выбери внешность из доступных вариантов')
     async with request.app['db'].connect() as db:
         await db.execute('BEGIN IMMEDIATE')
         row = await (await db.execute(
@@ -81,11 +115,18 @@ async def save_outfit(request):
         )).fetchone()
         if not row:
             raise ValueError('Сначала зарегистрируй игровой ник')
+        appearance = await _appearance(db, request['actor']['id'])
+        appearance.update({key: body[key] for key in APPEARANCE_CHOICES if key in body})
         await db.execute(
             'INSERT INTO nora_game_outfits (telegram_id, shirt, pants, shoes) VALUES (?, ?, ?, ?) '
             'ON CONFLICT(telegram_id) DO UPDATE SET shirt=excluded.shirt, '
             'pants=excluded.pants, shoes=excluded.shoes',
             (request['actor']['id'], body['shirt'], body['pants'], body['shoes']),
         )
+        await db.execute(
+            'INSERT INTO bot_state(key, value) VALUES (?, ?) '
+            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+            (f"nora_game_appearance:{request['actor']['id']}", json.dumps(appearance)),
+        )
         await db.commit()
-    return web.json_response({'outfit': {key: body[key] for key in choices}})
+    return web.json_response({'outfit': {**{key: body[key] for key in choices}, **appearance}})
