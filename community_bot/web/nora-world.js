@@ -26,6 +26,58 @@ window.NoraWorld = (() => {
     }
     return safe;
   }
+  function timeOfDay(now=Date.now()) {
+    // Moscow is UTC+3 year-round; independent of the device's selected timezone.
+    const hour=((now/3600000+3)%24+24)%24;
+    const elevation=Math.sin((hour-6)/24*Math.PI*2);
+    const t=Math.max(0,Math.min(1,(elevation+.12)/.48));
+    const daylight=t*t*(3-2*t);
+    return {hour,daylight,twilight:1-Math.abs(daylight*2-1)};
+  }
+  function createAtmosphere(T,scene,geometry) {
+    const starsMaterial=new T.MeshBasicMaterial({color:'#dce4e0',transparent:true,depthWrite:false,fog:false});
+    const leafMaterial=new T.MeshLambertMaterial({color:'#b6a06a'});
+    const stars=new T.InstancedMesh(geometry,starsMaterial,112);
+    const leaves=new T.InstancedMesh(geometry,leafMaterial,128);
+    stars.name='nora-stars';leaves.name='nora-leaves';
+    stars.frustumCulled=leaves.frustumCulled=false;
+    stars.instanceMatrix.setUsage(T.DynamicDrawUsage);leaves.instanceMatrix.setUsage(T.DynamicDrawUsage);
+    scene.add(stars,leaves);
+    const o=new T.Object3D(),color=new T.Color();
+    const anchors=[...trees,[-7.2,-10.5],[0,-10.5],[7.2,-10.5],[-7.2,10.5],[0,10.5],[7.2,10.5],[-10.5,0],[10.5,0]];
+    const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    let elapsed=0;
+    for(let i=0;i<128;i++){color.set(['#ae965c','#7b9867','#b17858','#647f68'][i%4]);leaves.setColorAt(i,color);}
+    function update(dt,daylight,inside){
+      elapsed+=dt;
+      stars.visible=!inside&&daylight<.99;leaves.visible=!inside;
+      starsMaterial.opacity=(1-daylight)*.85;
+      if(inside)return;
+      if(stars.visible){
+        for(let i=0;i<112;i++){
+          const a=i*2.399963, y=.12+(i+.5)/112*.86, radius=65*Math.sqrt(1-y*y);
+          const pulse=reduced ? .7 : .45+.55*Math.pow(.5+.5*Math.sin(elapsed*(.32+(i%7)*.07)+i*1.7),3);
+          o.position.set(Math.cos(a)*radius,65*y,Math.sin(a)*radius);
+          o.rotation.set(0,a,0);o.scale.setScalar((.07+(i%4)*.025)*pulse);o.updateMatrix();stars.setMatrixAt(i,o.matrix);
+        }
+        stars.instanceMatrix.needsUpdate=true;
+      }
+      for(let i=0;i<128;i++){
+        const leaf=Math.floor(i/4),fragment=i%4,anchor=anchors[leaf%anchors.length];
+        const cycle=(elapsed*(reduced ? .035 : .12)+(leaf*.6180339)%1)%1;
+        const drift=cycle*1.2,spread=Math.max(0,(cycle-.58)/.42);
+        // Each leaf breaks into four separate voxel fragments before vanishing aloft.
+        const visible=cycle<.75+fragment*.055;
+        o.position.set(anchor[0]+Math.sin(leaf*7)*.9+Math.sin(cycle*7+leaf)*.28+drift+(fragment%2-.5)*(.07+spread*.35),
+          3.7-cycle*3.3+(fragment<2?1:-1)*spread*.12,
+          anchor[1]+Math.cos(leaf*3)*.9+Math.cos(cycle*6+leaf)*.35+(fragment<2?-.5:.5)*(.07+spread*.35));
+        o.rotation.set(cycle*5+leaf,cycle*4,Math.sin(cycle*7+leaf)*.6);
+        o.scale.set(visible?.065:0,visible?.025:0,visible?.065:0);o.updateMatrix();leaves.setMatrixAt(i,o.matrix);
+      }
+      leaves.instanceMatrix.needsUpdate=true;
+    }
+    return {update,dispose(){scene.remove(stars,leaves);stars.dispose();leaves.dispose();starsMaterial.dispose();leafMaterial.dispose();}};
+  }
   async function mount(canvas, root, outfit) {
     const T = await import('/vendor/three.module.js');
     if (!root.isConnected) return () => {};
@@ -37,7 +89,7 @@ window.NoraWorld = (() => {
     const camera = new T.PerspectiveCamera(58, 1, .1, 110);
     const ambient=new T.HemisphereLight('#fff6df', '#71865f', 2.2);scene.add(ambient);
     const sunlight = new T.DirectionalLight('#fff1cd', 2.4); sunlight.position.set(-12,22,10);scene.add(sunlight);
-    const geometry = new T.BoxGeometry(1,1,1), material = new T.MeshLambertMaterial({color:0xffffff});
+    const geometry = new T.BoxGeometry(1,1,1), material = new T.MeshLambertMaterial({color:'#b9bca4'});
     const blocks = [], matrix = new T.Object3D(), tint = new T.Color();
     function block(x,y,z,sx,sy,sz,color) { blocks.push([x,y,z,sx,sy,sz,color]); }
     // Grass top and layered soil; only exterior earth faces need cubes.
@@ -71,10 +123,39 @@ window.NoraWorld = (() => {
     const landscape = new T.InstancedMesh(geometry,material,blocks.length);
     blocks.forEach(([x,y,z,sx,sy,sz,color],i)=>{matrix.position.set(x,y,z);matrix.scale.set(sx,sy,sz);matrix.updateMatrix();landscape.setMatrixAt(i,matrix.matrix);tint.set(color);landscape.setColorAt(i,tint);});
     landscape.instanceMatrix.needsUpdate=true;landscape.computeBoundingSphere();scene.add(landscape);
-    const sunMaterial=new T.MeshBasicMaterial({color:'#fff3b0',fog:false}), sun=new T.Mesh(geometry,sunMaterial);
+    const sunMaterial=new T.MeshBasicMaterial({color:'#efd0a0',fog:false,transparent:true,depthWrite:false}), sun=new T.Mesh(geometry,sunMaterial);
     sun.position.set(-8,12,-45);sun.scale.set(4,4,1);scene.add(sun);
+    const moonMaterial=new T.MeshBasicMaterial({color:'#c6d4dc',fog:false,transparent:true,depthWrite:false});
+    const moon=new T.Mesh(geometry,moonMaterial);moon.scale.set(2.6,2.6,.8);scene.add(moon);
     const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);
     let inside=false,zone=scenery.outdoorZone;
+    const atmosphere=createAtmosphere(T,scene,geometry);
+    const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
+    const lightNight=new T.Color('#9aadd0'),lightDay=new T.Color('#f3d8ad');
+    let lightingAt=-Infinity;
+    function updateLighting(now){
+      const phase=timeOfDay(now);
+      if(now-lightingAt>1000||now<lightingAt){
+        lightingAt=now;
+        if(inside){
+          scene.background.set('#241c20');scene.fog.color.set('#382a2b');scene.fog.near=10;scene.fog.far=26;
+          ambient.color.set('#e8c594');ambient.groundColor.set('#534037');ambient.intensity=1.65;
+          sunlight.color.set('#ffc083');sunlight.intensity=1.25;
+        }else{
+          scene.background.copy(skyNight).lerp(skyDay,phase.daylight).lerp(skyDusk,phase.twilight*.45);
+          scene.fog.color.copy(scene.background);scene.fog.near=10;scene.fog.far=phase.daylight*10+32;
+          ambient.color.copy(lightNight).lerp(lightDay,phase.daylight);ambient.groundColor.set('#3e5149');ambient.intensity=1.15+phase.daylight*.7;
+          sunlight.color.copy(lightNight).lerp(lightDay,phase.daylight);sunlight.intensity=.75+phase.daylight*1.35;
+          sunMaterial.opacity=phase.daylight;moonMaterial.opacity=1-phase.daylight;
+          const angle=(phase.hour-6)/24*Math.PI*2;
+          sun.position.set(Math.cos(angle)*38,Math.sin(angle)*38,-45);
+          moon.position.set(-Math.cos(angle)*38,-Math.sin(angle)*38,-45);
+          sunlight.position.lerpVectors(moon.position,sun.position,phase.daylight);sunlight.position.y=Math.max(8,sunlight.position.y);
+        }
+      }
+      return phase.daylight;
+    }
+    updateLighting(Date.now());
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
     player.scale.setScalar(.32);player.position.set(0,.017,5.5);player.rotation.y=Math.PI;scene.add(player);
     // Soft contact patches without costly real-time shadow maps.
@@ -121,9 +202,8 @@ window.NoraWorld = (() => {
     on(action,'click',()=>{
       if(!nearDoor())return;
       inside=!inside;zone=inside?scenery.indoorZone:scenery.outdoorZone;
-      scenery.indoor.visible=inside;scenery.outdoor.visible=!inside;landscape.visible=!inside;sun.visible=!inside;groundShadows.visible=!inside;
-      scene.background.set(inside?'#3e3029':'#b2d5d2');scene.fog=new T.Fog(inside?'#66503c':'#b2d5d2',inside?14:12,inside?30:42);
-      ambient.color.set(inside?'#ffe0b4':'#fff6df');ambient.groundColor.set(inside?'#795a43':'#71865f');sunlight.color.set(inside?'#ffd3a0':'#fff1cd');sunlight.intensity=inside?1.1:2.4;
+      scenery.indoor.visible=inside;scenery.outdoor.visible=!inside;landscape.visible=!inside;sun.visible=moon.visible=!inside;groundShadows.visible=!inside;
+      lightingAt=-Infinity;updateLighting(Date.now());
       jumpHeight=0;jumpVelocity=0;player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
       root.querySelector('.nora-world-bar small').textContent=inside?'ТАВЕРНА':'ЛЕСНАЯ ПОЛЯНА';
       reset();
@@ -180,13 +260,14 @@ window.NoraWorld = (() => {
           camera.position.copy(target).add(offset);camera.lookAt(target);
         }
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
+        atmosphere.update(dt,updateLighting(Date.now()),inside);
         renderer.render(scene,camera);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();character.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();character.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }
-  return {mount,move,cameraDistance};
+  return {mount,move,cameraDistance,timeOfDay,createAtmosphere};
 })();

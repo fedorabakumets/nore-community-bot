@@ -29,12 +29,12 @@ try {
   async function setup(view = 0, fps = 60) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
-    let frame, player, camera, time = 0;
-    const renderer = {setPixelRatio(){}, setSize(){}, dispose(){}, render(s,c){camera=c;}};
+    let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
+    const renderer = {setPixelRatio(){}, setSize(){}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     const context = vm.createContext({window, document, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      AbortController, ResizeObserver:class {observe(){} disconnect(){}},
+      Date:{now:()=>now}, AbortController, ResizeObserver:class {observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
@@ -48,7 +48,7 @@ try {
     const joystick = root.querySelector('.nora-world-joystick');
     const stick = (x,z,down=false) => joystick.emit(down?'pointerdown':'pointermove',{pointerId:1,clientX:60+x*36,clientY:60+z*36});
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
-    return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera};
+    return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
   function screenDelta(h, delta) {
     const forward = h.camera().getWorldDirection(new Three.Vector3()); forward.y=0; forward.normalize();
@@ -105,11 +105,43 @@ try {
   h.key('KeyW');h.frames(20);h.window.emit('blur');assert.ok(h.delta(30).length()<.001,'blur stops');
   h.key('Space');h.frames(10);assert.ok(h.player.position.y>.1,'jump');h.frames(60);assert.equal(h.player.position.y,.017,'lands');
   h.stop();
+  const env=await setup();
+  const api=env.world;
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,0)).hour,3,'Moscow UTC+3');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,22)).hour,1,'Moscow date rollover');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,9)).daylight,1,'Moscow noon');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,21)).daylight,0,'Moscow midnight');
+  let previousDay=api.timeOfDay(Date.UTC(2026,10,2,0)).daylight;
+  for(let minute=1;minute<=1440;minute++){
+    const phase=api.timeOfDay(Date.UTC(2026,10,2,0,minute));
+    assert.ok(Math.abs(phase.daylight-previousDay)<.015,'smooth day/night transition');previousDay=phase.daylight;
+  }
+  const scene=env.scene(),stars=scene.getObjectByName('nora-stars'),leaves=scene.getObjectByName('nora-leaves');
+  assert.equal(stars.count,112);assert.equal(leaves.count,128);
+  const nightLight=scene.children.find(o=>o.isHemisphereLight).intensity;
+  assert.ok(stars.visible&&stars.material.opacity>.5,'stars at night');
+  const beforeStars=stars.instanceMatrix.array.slice(),beforeLeaves=leaves.instanceMatrix.array.slice();
+  env.frames(90);
+  assert.notDeepEqual(stars.instanceMatrix.array,beforeStars,'stars twinkle individually');
+  assert.notDeepEqual(leaves.instanceMatrix.array,beforeLeaves,'leaves drift and fragment');
+  assert.ok([...leaves.instanceMatrix.array].every(Number.isFinite),'finite particle transforms');
+  let vanished=0;
+  for(let i=0;i<leaves.count;i++)if(leaves.instanceMatrix.array[i*16]===0)vanished++;
+  assert.ok(vanished>0&&vanished<128,'some voxel fragments dissolve in flight');
+  env.setNow(Date.UTC(2026,10,2,9));env.frames(1);
+  assert.equal(stars.visible,false,'no daytime stars');
+  assert.ok(scene.children.find(o=>o.isHemisphereLight).intensity>nightLight,'day brighter, night remains playable');
+  env.player.position.set(0,.017,3.6);env.root.querySelector('.nora-world-action').emit('click');env.frames(1);
+  assert.equal(leaves.visible,false,'no outdoor leaves in tavern');assert.equal(stars.visible,false);
+  let disposed=0;
+  stars.material.addEventListener('dispose',()=>disposed++);leaves.material.addEventListener('dispose',()=>disposed++);
+  env.stop();assert.equal(disposed,2,'effect materials released');assert.equal(scene.getObjectByName('nora-stars'),undefined);
   const distances=[];
   for(const fps of [30,60,120]) {
     const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();
   }
   assert.ok(Math.max(...distances)-Math.min(...distances)<.01,'frame-rate independent speed');
+  console.log('NORA atmosphere: Moscow time, smooth cycle, night stars, twinkle, leaf fragments, indoor visibility and disposal passed.');
   console.log('NORA controls: 8 directions, 3 views, keyboard/touch, chords, repeat, camera turn, stop, jump and 30/60/120 FPS passed.');
 } finally {
   await rm(temp, {recursive:true, force:true});
