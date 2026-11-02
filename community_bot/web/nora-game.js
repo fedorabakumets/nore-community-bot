@@ -9,11 +9,12 @@
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
     let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
+    let recordPlaying=true;
     let musicGain=null, musicFilter=null, musicPan=null, spatial={gain:1,cutoff:18000,pan:0};
     function positionMusic(value) {
       spatial=value;
       if(!context||!musicGain)return;
-      musicGain.gain.setTargetAtTime(value.gain,context.currentTime,.22);
+      musicGain.gain.setTargetAtTime(recordPlaying?value.gain:0,context.currentTime,.22);
       musicFilter.frequency.setTargetAtTime(value.cutoff,context.currentTime,.22);
       musicPan?.pan.setTargetAtTime(value.pan,context.currentTime,.18);
     }
@@ -94,7 +95,7 @@
     }
     function worldAudio() {
       let stopped = false, ambience = [], daylight = 1, indoors = false, distance = 0;
-      positionMusic({gain:.12,cutoff:1000,pan:0});
+      recordPlaying=true; positionMusic({gain:.12,cutoff:1000,pan:0});
       const buffers = new Map();
       const names = ['birds_dawn', 'crickets', 'doorOpen_1', 'doorClose_1',
         'footstep_grass_000', 'footstep_grass_001', 'footstep_wood_000', 'footstep_wood_001'];
@@ -148,11 +149,12 @@
           distance += travelled;
           if (distance >= .65) { distance %= .65; step(inside); }
         },
+        playing(value) { if(!stopped){recordPlaying=value;positionMusic(spatial);if(value)ensureAudio();} },
         spatial(value) { if(!stopped)positionMusic(value); },
         jump(inside) { distance = 0; step(inside, .8); },
         land(inside) { distance = 0; step(inside, 1.15); },
         door(inside) { play(inside ? 'doorOpen_1' : 'doorClose_1', .7); },
-        stop() { stopped = true; positionMusic({gain:1,cutoff:18000,pan:0}); for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
+        stop() { stopped = true; recordPlaying=true; positionMusic({gain:1,cutoff:18000,pan:0}); for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
       };
     }
     return {start,attach,close,worldAudio};
@@ -175,7 +177,7 @@
     music?.attach(overlay);
   }
   async function world(nickname) {
-    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
+    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-action nora-record-toggle" type="button" aria-pressed="true" hidden>Выключить проигрыватель</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
     const sounds = music?.worldAudio();

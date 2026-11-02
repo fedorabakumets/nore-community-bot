@@ -44,6 +44,10 @@ try {
   tavern.update(.5,true,0,camera);assert.ok(record.rotation.y<0,'record rotates');
   const noteMatrix=new Three.Matrix4();notes.getMatrixAt(0,noteMatrix);const beforeNote=noteMatrix.clone();
   tavern.update(.5,true,0,camera);notes.getMatrixAt(0,noteMatrix);assert.notDeepEqual(noteMatrix.elements,beforeNote.elements,'notes rise and change scale');
+  const stoppedAngle=record.rotation.y;
+  tavern.update(.5,true,0,camera,false);assert.equal(record.rotation.y,stoppedAngle,'switched-off record stops rotating');
+  assert.equal(notes.visible,false,'off switch hides notes');
+  tavern.update(.5,true,0,camera,true);assert.ok(record.rotation.y<stoppedAngle&&notes.visible,'switch resumes animation');
   tavern.update(.5,false,0,camera);
   const acoustics=acousticContext.window.NoraWorld.tavernAcoustics;
   const doorway=acoustics(false,0,3.6),rear=acoustics(false,0,-3.6),far=acoustics(false,0,7);
@@ -82,7 +86,7 @@ try {
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
   const soundEvents=[];
-  const sounds={spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
+  const sounds={playing:value=>soundEvents.push(['playing',value]),spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
     land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};
   const audioWorld=await setup(0,60,undefined,sounds);
   audioWorld.key('Space'); audioWorld.frames(60);
@@ -94,6 +98,19 @@ try {
   assert.ok(soundEvents.some(e=>e[0]==='update'&&e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='jump'&&e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='land'&&e[1]));
+  const recordButton=audioWorld.root.querySelector('.nora-record-toggle');
+  assert.equal(recordButton.hidden,true,'record control hidden far away');
+  audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
+  assert.equal(recordButton.hidden,false,'record control shown beside console');
+  recordButton.emit('click');assert.equal(recordButton.textContent,'Включить проигрыватель');
+  assert.ok(soundEvents.some(e=>e[0]==='playing'&&e[1]===false));
+  audioWorld.player.position.set(0,.017,3.7);audioWorld.root.querySelector('.nora-world-action').emit('click');audioWorld.frames(2);
+  assert.equal(recordButton.hidden,true,'record control hidden outside');
+  const countPlaying=soundEvents.filter(e=>e[0]==='playing').length;
+  recordButton.emit('click');assert.equal(soundEvents.filter(e=>e[0]==='playing').length,countPlaying,'cannot toggle from outside');
+  audioWorld.root.querySelector('.nora-world-action').emit('click');audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
+  assert.equal(recordButton.textContent,'Включить проигрыватель','door transition preserves off state');
+  recordButton.emit('click');assert.equal(recordButton.textContent,'Выключить проигрыватель');
   audioWorld.stop();assert.equal(soundEvents.at(-1)[0],'stop');
   function screenDelta(h, delta) {
     const forward = h.camera().getWorldDirection(new Three.Vector3()); forward.y=0; forward.normalize();

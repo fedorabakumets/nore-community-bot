@@ -209,6 +209,18 @@ window.NoraWorld = (() => {
     function reset(){resetStick();keys.clear();orbitId=null;previous=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
     on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
+    const recordButton=root.querySelector('.nora-record-toggle');
+    let recordPlaying=true;
+    function nearRecord(){return inside&&!companion.panelOpen()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
+    function syncRecordButton(){
+      recordButton.hidden=!nearRecord();
+      recordButton.textContent=recordPlaying?'Выключить проигрыватель':'Включить проигрыватель';
+      recordButton.setAttribute('aria-pressed',String(recordPlaying));
+    }
+    on(recordButton,'click',()=>{
+      if(!nearRecord())return;
+      recordPlaying=!recordPlaying;sounds?.playing(recordPlaying);syncRecordButton();recordButton.blur();
+    });
     function nearDoor(){return Math.abs(player.position.x)<1.5&&(inside?player.position.z>3.3:player.position.z>2.55&&player.position.z<4.8);}
     on(action,'click',()=>{
       if(!nearDoor())return;
@@ -284,11 +296,12 @@ window.NoraWorld = (() => {
           offset.copy(direction).multiplyScalar(actualDistance);
           camera.position.copy(target).add(offset);camera.lookAt(target);
         }
+        syncRecordButton();
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
         sounds?.spatial(tavernAcoustics(inside,player.position.x,player.position.z,yaw+(view===2?Math.PI:0)));
-        scenery.update?.(dt,inside,daylight,camera);
+        scenery.update?.(dt,inside,daylight,camera,recordPlaying);
         sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
         atmosphere.update(dt,daylight,inside);
         companion.update(dt,camera);

@@ -149,13 +149,14 @@ window.NoraScenery = (() => {
     notes.instanceMatrix.setUsage(T.DynamicDrawUsage);let elapsed=0;
     const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     const colors=['#e6ad69','#b989bd','#77b8ad','#d77d84','#a7ba71','#8ba7cd'];
-    function update(dt,inside,daylight,camera){
+    function update(dt,inside,daylight,camera,playing=true){
       elapsed+=dt;
       if(!inside){
         windows.forEach((w,i)=>{const pulse=reduced?1:.94+.045*Math.sin(elapsed*1.3+i*2.1)+.015*Math.sin(elapsed*2.7+i);warm.set('#edb86d').multiplyScalar(pulse*(1-daylight*.22));glow.setColorAt(i,warm);});
         glow.instanceColor.needsUpdate=true;
       }
-      if(!inside)return;
+      notes.visible=playing;
+      if(!inside||!playing)return;
       if(!reduced)record.rotation.y-=dt*1.45;
       for(let i=0;i<12;i++){
         const phase=(elapsed*.28+i/12)%1,fade=Math.sin(phase*Math.PI),a=i*2.399;
