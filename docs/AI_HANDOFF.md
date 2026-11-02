@@ -2,6 +2,11 @@
 
 > Состояние на 02.11.2026. При расхождении доверять Git. Секреты и данные production-БД сюда не записывать.
 
+## Игра НОРА: отступ от кнопок Telegram (02.11.2026)
+
+- Worktree `C:/Users/User/Projects/nora-telegram-safe-area`, ветка `chatgpt/nora-telegram-safe-area` от origin production `3b6143c`, без upstream. CSS использует общий верхний отступ с системной safe area, Telegram content safe area и резервом 48px; кнопки назад и звука, микшер, экран регистрации/редактор и шапка мира опущены согласованно.
+- Проверены расчёт отступов для разных safe area, CSS-структура, diff --check и pip check. check_local остановлен на 13 прежних Ruff E501. Реальное расположение в Telegram iOS/Android не проверено; после выпуска проверяет владелец. Изменены только style.css и handoff.
+
 ## Игра НОРА: дарк-фэнтези и время суток (02.11.2026)
 
 - Worktree `C:/Users/User/Projects/nora-dark-fantasy`, ветка `chatgpt/nora-dark-fantasy` от origin production `3516d64`, без upstream. Исходная копия оставлена нетронутой.
