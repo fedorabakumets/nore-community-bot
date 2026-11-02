@@ -235,12 +235,21 @@ async def emergency_stop_confirm(
 async def start(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
-    if message.chat.type == "private" and (message.text or "").partition(" ")[2].strip() == "birthday":
-        from community_bot.birthday import SPECIAL_DAY, gift_keyboard, offer_special_on_contact, pending_gift
+    if message.chat.type == "private":
+        from community_bot.birthday import (
+            SPECIAL_DAY,
+            SPECIAL_USERNAME,
+            gift_keyboard,
+            offer_special_on_contact,
+            pending_gift,
+        )
 
-        await offer_special_on_contact(db, message.from_user, SPECIAL_DAY)
+        if datetime.now(ZoneInfo(settings.timezone)).date().isoformat() == SPECIAL_DAY:
+            await offer_special_on_contact(db, message.from_user, SPECIAL_DAY)
         day = await pending_gift(db, message.from_user.id)
-        if day:
+        is_recipient = (message.from_user.username or "").casefold() == SPECIAL_USERNAME.casefold()
+        birthday_link = (message.text or "").partition(" ")[2].strip() == "birthday"
+        if day and (is_recipient or birthday_link):
             await message.answer("🎁 <b>Подарок НОРЫ</b> · 500 🍪", parse_mode="HTML", reply_markup=gift_keyboard(day))
             return
     await register_telegram_user(db, message.from_user)

@@ -182,9 +182,12 @@ async def birthday_job(bot, db: Database, settings) -> None:
         except Exception:
             logger.exception("Birthday job failed")
         now = datetime.now(timezone)
-        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
+        if now.hour < 9:
+            target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        elif now.hour < 23:
+            target = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            target = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
         await asyncio.sleep(max(1, (target - now).total_seconds()))
 
 
