@@ -2,17 +2,20 @@ import asyncio
 import json
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from community_bot.birthday import (
+    claim_callback,
     claim_gift,
     deliver_today,
     greeting,
     offer_gift,
     offer_special_on_contact,
     pending_gift,
+    rich_greeting,
 )
 from community_bot.cabinet_api import notices, notices_update
 from community_bot.database import Database
@@ -60,14 +63,14 @@ async def test_today_sends_one_greeting_and_owner_preview(tmp_path):
     await deliver_today(bot, db, settings, now)
     await deliver_today(bot, db, settings, now)
 
-    assert len(bot.photos) == 1
+    assert len(bot.photos) == 2
     assert bot.photos[0][0][0] == -100123
-    assert 'tg://user?id=71' in bot.photos[0][1]["caption"]
-    assert "<blockquote>" in bot.photos[0][1]["caption"]
-    assert "<b>НОРЫ</b>" in bot.photos[0][1]["caption"]
+    assert 'tg://user?id=71' in bot.photos[1][1]["caption"]
+    assert "<blockquote>" in bot.photos[1][1]["caption"]
+    assert "<b>НОРЫ</b>" in bot.photos[1][1]["caption"]
     assert len(bot.messages) == 2
     assert {args[0] for args, _ in bot.messages} == {7, 71}
-    assert await pending_gift(db, 7) == "2026-11-02"
+    assert await pending_gift(db, 7) == "2026-11-02-owner"
     assert await pending_gift(db, 71) == "2026-11-02"
 
 
@@ -97,8 +100,8 @@ async def test_named_guest_can_claim_from_public_greeting(tmp_path):
     settings = SimpleNamespace(owner_id=7, community_chat_id=-100123, timezone="Europe/Moscow")
     now = datetime(2026, 11, 2, 12, tzinfo=ZoneInfo("Europe/Moscow"))
     await deliver_today(bot, db, settings, now)
-    assert len(bot.photos) == 1
-    assert "<b>@Caramel_kka</b>" in bot.photos[0]["caption"]
+    assert len(bot.photos) == 2
+    assert "<b>@Caramel_kka</b>" in bot.photos[1]["caption"]
 
     stranger = SimpleNamespace(id=72, username="somebody", first_name="Other")
     recipient = SimpleNamespace(id=71, username="Caramel_kka", first_name="Карамелька")
@@ -107,7 +110,7 @@ async def test_named_guest_can_claim_from_public_greeting(tmp_path):
     assert await claim_gift(db, 71, "2026-11-02")
     assert (await db.get_user(71))["cookies"] == 500
     await deliver_today(bot, db, settings, now)
-    assert len(bot.photos) == 1
+    assert len(bot.photos) == 2
 
 
 @pytest.mark.asyncio
@@ -132,3 +135,27 @@ async def test_miniapp_notice_claim_uses_same_wallet(tmp_path):
     second = json.loads((await notices_update(Request({"action": "claim_birthday", "day": "2026-11-02"}))).body)
     assert first["ok"] and not second["ok"]
     assert (await db.get_user(7))["cookies"] == 500
+
+
+@pytest.mark.asyncio
+async def test_group_button_is_bound_to_recipient_even_when_other_has_gift(tmp_path):
+    db = Database(tmp_path / "access.sqlite3")
+    await db.initialize()
+    await db.ensure_user(7, "owner", "Owner")
+    await db.ensure_user(8, "other", "Other")
+    await offer_gift(db, 7, "2026-11-02-owner")
+    await offer_gift(db, 8, "2026-11-02-owner")
+    callback = SimpleNamespace(data="birthday:claim:2026-11-02-owner:7",
+                               from_user=SimpleNamespace(id=8, username="other"),
+                               message=SimpleNamespace(chat=SimpleNamespace(type="supergroup")),
+                               answer=AsyncMock())
+    await claim_callback(callback, db)
+    assert "подарок-то не твой" in callback.answer.await_args.args[0]
+    assert (await db.get_user(8))["cookies"] == 0
+    assert await pending_gift(db, 8) == "2026-11-02-owner"
+
+
+def test_rich_greeting_embeds_bound_button_and_image():
+    rich = rich_greeting({"user_id": 7, "profile_name": "Рома"}, "2026-11-02-owner")
+    assert rich.blocks[0].type == "photo"
+    assert rich.blocks[-1].buttons[0].callback_data == "birthday:claim:2026-11-02-owner:7"
