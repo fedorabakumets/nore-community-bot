@@ -70,6 +70,8 @@ try {
       if(device==='keyboard')codes.forEach(c=>h.key(c));else h.stick(x,z,true);
       h.frames(20);
       const d=h.delta(60);aligned(screenDelta(h,d),x,z,`${device}/${view}/${x},${z}`);speeds.push(d.length());
+      const facing=new Three.Vector3(Math.sin(h.player.rotation.y),0,Math.cos(h.player.rotation.y));
+      assert.ok(facing.dot(d.clone().normalize())>.999,'character faces travel in every view/direction');
       if(device==='keyboard')codes.forEach(c=>h.key(c,false));else h.joystick.emit('pointerup',{pointerId:1});
       h.frames(20);
     }
@@ -77,6 +79,13 @@ try {
     h.stop();
   }
   const h=await setup();
+  const startHeading=h.player.rotation.y;
+  h.key('KeyA');h.frames(1);
+  const firstTurn=Math.abs(Math.atan2(Math.sin(h.player.rotation.y-startHeading),Math.cos(h.player.rotation.y-startHeading)));
+  assert.ok(firstTurn>.01&&firstTurn<.5,'turn starts smoothly instead of snapping');
+  h.frames(60);h.key('KeyA',false);h.frames(30);
+  const idleHeading=h.player.rotation.y;
+  h.frames(60);assert.equal(h.player.rotation.y,idleHeading,'idle preserves facing');
   h.key('KeyA');h.frames(60);h.key('KeyA',false);h.frames(20);
   h.key('KeyA');aligned(screenDelta(h,h.delta(60)),-1,0,'repeated left');h.key('KeyA',false);
   h.key('KeyW');h.frames(20);h.key('KeyD');h.frames(20);

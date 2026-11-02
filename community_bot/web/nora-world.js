@@ -139,7 +139,7 @@ window.NoraWorld = (() => {
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
         const inputLength=Math.hypot(inputX,inputZ);if(inputLength<=.025){inputX=inputZ=0;}if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
         // Movement is always relative to the visible camera, including selfie.
-        // Strafe/backpedal without rotating the camera or caching an old input frame.
+        // Turning the model must not rotate the camera or the input frame.
         const basis=yaw+(view===2?Math.PI:0);
         const wantedX=(inputX*Math.cos(basis)+inputZ*Math.sin(basis))*1.7;
         const wantedZ=(-inputX*Math.sin(basis)+inputZ*Math.cos(basis))*1.7;
@@ -155,10 +155,11 @@ window.NoraWorld = (() => {
         }
         player.position.y=.017+jumpHeight;
         character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt);
-        // Facing follows the view, not the movement vector: A/D are side steps.
-        const heading=yaw+Math.PI;
+        // Face actual travel, preserving the last heading when stopped/blocked.
+        const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
+        const heading=Math.hypot(travelledX,travelledZ)>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
-        player.rotation.y+=turn*(1-Math.exp(-16*dt));
+        player.rotation.y+=turn*(1-Math.exp(-12*dt));
         playerShadow.position.set(player.position.x,.008,player.position.z);
         target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
         const wanted=inside?4.6:(camera.aspect<.7?5.7:5.1);
