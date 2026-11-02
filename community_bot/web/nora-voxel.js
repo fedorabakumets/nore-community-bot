@@ -2,26 +2,20 @@
 window.NoraVoxel = (() => {
   const unit = .105;
   const colors = { skin: '#f2a07d', shadow: '#d67c64', hair: '#29252c', hairLight: '#39333b', glass: '#171a20', lens: '#e6c3ae', eye: '#24313b', mouth: '#9e5351', white: '#e9e7e1', gray: '#777982', burgundy: '#702a3d', blue: '#344e72', denimGray: '#555965', sole: '#c5c1ba', black: '#24262b', red: '#9c3348', stripe: '#202124', stripeWhite: '#eee8df' };
-  return { async mount(canvas, outfit, root) {
-    const T = await import('/vendor/three.module.js');
-    const renderer = new T.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'low-power' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
-    renderer.outputColorSpace = T.SRGBColorSpace;
-    const scene = new T.Scene(), camera = new T.OrthographicCamera(-2, 2, 2.9, -2.9, .1, 100);
-    camera.position.set(0, 3.5, 12); camera.lookAt(0, 2.65, 0);
-    scene.add(new T.HemisphereLight(0xffffff, 0x655562, 2.3));
-    const light = new T.DirectionalLight(0xffffff, 2.2); light.position.set(-3, 6, 5); scene.add(light);
-    const pivot = new T.Group(); scene.add(pivot);
+  function createCharacter(T, outfit) {
+    const pivot = new T.Group();
     const cube = new T.BoxGeometry(unit, unit, unit);
-    const materials = new Map(), groups = new Map(), voxels = new Map();
-    let meshes = [], raf = 0, lastTouch = 0, dragging = false, startX = 0, disposed = false;
+    const voxels = new Map();
+    const material = new T.MeshLambertMaterial({ color: 0xffffff });
+    let mesh = null;
     function dot(x, y, z, color) { voxels.set(`${x},${y},${z}`, [x, y, z, color]); }
     function box(x0, x1, y0, y1, z0, z1, color, surface = true) {
       for (let x=x0;x<=x1;x++) for (let y=y0;y<=y1;y++) for (let z=z0;z<=z1;z++)
         if (!surface || x===x0 || x===x1 || y===y0 || y===y1 || z===z0 || z===z1) dot(x,y,z,color);
     }
     function build() {
-      for (const m of meshes) { pivot.remove(m); m.dispose(); } meshes=[]; groups.clear(); voxels.clear();
+      if (mesh) { pivot.remove(mesh); mesh.dispose(); }
+      voxels.clear();
       // Feet and layered soles.
       const shoe = outfit.shoes === 'white_stripes' ? 'white' : outfit.shoes === 'black_stripes' ? 'black' : 'red';
       for (const side of [-1,1]) {
@@ -92,26 +86,39 @@ window.NoraVoxel = (() => {
         box(center,center+1,35,37,10,10,'eye',false);
       }
       box(-1,1,36,37,9,10,'glass'); box(-1,1,32,34,8,10,'shadow'); box(-2,2,30,30,8,8,'mouth');
+      mesh = new T.InstancedMesh(cube, material, voxels.size);
+      const temp = new T.Object3D(), tint = new T.Color();
+      let i = 0;
       for (const [x,y,z,color] of voxels.values()) {
-        if (!groups.has(color)) groups.set(color, []);
-        groups.get(color).push([x,y,z]);
+        temp.position.set(x*unit,y*unit,z*unit); temp.updateMatrix(); mesh.setMatrixAt(i,temp.matrix);
+        const shade=color.endsWith('Trim')?.78:color.endsWith('Light')?1.12:1;
+        tint.set(colors[color] || colors[color.replace(/Trim|Light/g, '')]);
+        tint.multiplyScalar(shade*(.94+((x*13+y*7+z*3)&3)*.02)); mesh.setColorAt(i++,tint);
       }
-      for (const [color, positions] of groups) {
-        if (!materials.has(color)) materials.set(color,new T.MeshLambertMaterial({color:colors[color] || colors[color.replace(/Trim|Light/g, '')]}));
-        const mesh=new T.InstancedMesh(cube,materials.get(color),positions.length), temp=new T.Object3D();
-        positions.forEach(([x,y,z],i)=>{temp.position.set(x*unit,y*unit,z*unit);temp.updateMatrix();mesh.setMatrixAt(i,temp.matrix);const shade=color.endsWith('Trim')?.78:color.endsWith('Light')?1.12:1;const tint=new T.Color().setScalar(shade*(.94+((x*13+y*7+z*3)&3)*.02));mesh.setColorAt(i,tint);});
-        mesh.instanceMatrix.needsUpdate=true; mesh.frustumCulled=false; pivot.add(mesh); meshes.push(mesh);
-      }
+      mesh.instanceMatrix.needsUpdate=true; mesh.frustumCulled=false; pivot.add(mesh);
     }
     build();
+    return { group: pivot, rebuild: build, dispose() { mesh?.dispose(); material.dispose(); cube.dispose(); } };
+  }
+  return { createCharacter, async mount(canvas, outfit, root) {
+    const T = await import('/vendor/three.module.js');
+    const renderer = new T.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'low-power' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+    renderer.outputColorSpace = T.SRGBColorSpace;
+    const scene = new T.Scene(), camera = new T.OrthographicCamera(-2, 2, 2.9, -2.9, .1, 100);
+    camera.position.set(0, 3.5, 12); camera.lookAt(0, 2.65, 0);
+    scene.add(new T.HemisphereLight(0xffffff, 0x655562, 2.3));
+    const light = new T.DirectionalLight(0xffffff, 2.2); light.position.set(-3, 6, 5); scene.add(light);
+    const character = createCharacter(T, outfit), pivot = character.group; scene.add(pivot);
+    let raf = 0, lastTouch = 0, dragging = false, startX = 0, disposed = false;
     function resize() { const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);const aspect=w/h, halfHeight=Math.max(2.95,1.65/aspect);camera.top=halfHeight;camera.bottom=-halfHeight;camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.updateProjectionMatrix(); }
     const observer=new ResizeObserver(resize); observer.observe(canvas);resize();
-    const changed=()=>build();root.addEventListener('outfit-change',changed);
+    const changed=()=>character.rebuild();root.addEventListener('outfit-change',changed);
     canvas.style.touchAction='none';
     canvas.onpointerdown=e=>{dragging=true;startX=e.clientX;canvas.setPointerCapture(e.pointerId);};
     canvas.onpointermove=e=>{if(dragging){pivot.rotation.y+=(e.clientX-startX)*.009;startX=e.clientX;lastTouch=performance.now();}};
     canvas.onpointerup=canvas.onpointercancel=()=>{dragging=false;};
     function tick(t){if(disposed)return;if(!document.hidden){if(!dragging&&t-lastTouch>1300)pivot.rotation.y+=.0025;renderer.render(scene,camera);}raf=requestAnimationFrame(tick);} tick(0);
-    return ()=>{disposed=true;cancelAnimationFrame(raf);observer.disconnect();root.removeEventListener('outfit-change',changed);for(const m of meshes)m.dispose();for(const m of materials.values())m.dispose();cube.dispose();renderer.dispose();};
+    return ()=>{disposed=true;cancelAnimationFrame(raf);observer.disconnect();root.removeEventListener('outfit-change',changed);character.dispose();renderer.dispose();};
   }};
 })();

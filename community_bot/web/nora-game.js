@@ -14,11 +14,21 @@
   }
   function frame(content) {
     if (!overlay) return;
+    sceneStop?.(); sceneStop = null;
+    overlay.classList.toggle('nora-world-active', content.includes('class="nora-world"'));
     overlay.innerHTML = `<div class="nora-game-inner"><button type="button" class="nora-game-back" aria-label="Вернуться к играм">← Игры</button><div class="nora-game-body">${content}</div><div class="nora-game-foot">NORA / НОВЫЙ МИР</div></div>`;
     overlay.querySelector('.nora-game-back').onclick = close;
   }
-  function welcome(nickname) {
-    frame(`${logo}<div class="nora-game-mark" aria-hidden="true">✦</div><p class="nora-game-kicker">ИГРОК / ${esc(nickname)}</p><h1>Добро пожаловать<br>в Нору</h1><p>Твой персонаж готов.</p>`);
+  async function world(nickname) {
+    frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>СТАРТОВЫЙ ОСТРОВ</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help">Джойстик — идти · Проведи по экрану — обзор</p><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
+    const root = overlay.querySelector('.nora-world');
+    root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
+    try {
+      const stop = await window.NoraWorld.mount(root.querySelector('canvas'), root, outfit);
+      if (root.isConnected) sceneStop = stop; else stop();
+    } catch (_) {
+      if (root.isConnected) root.querySelector('.nora-world-help').textContent = 'Не удалось открыть 3D-мир. Закрой и открой игру снова.';
+    }
   }
   function portal(nickname) {
     frame(`<div class="nora-game-portal-scene" aria-label="Вход в Нору"><div class="nora-game-portal"></div><span class="nora-game-portal-caption">ВХОД В НОРУ</span></div>`);
@@ -39,7 +49,7 @@
     }
     root.querySelector('.nora-editor-tabs').onclick = e => { const b = e.target.closest('[data-category]'); if (!b) return; category = b.dataset.category; root.querySelectorAll('[data-category]').forEach(el => el.classList.toggle('active', el === b)); options(); };
     root.querySelector('.nora-editor-options').onclick = e => { const b = e.target.closest('[data-choice]'); if (!b) return; outfit[category] = b.dataset.choice; options(); root.dispatchEvent(new Event('outfit-change')); };
-    root.querySelector('.nora-editor-save').onclick = async e => { const b = e.currentTarget; b.disabled = true; const version = active; try { await api('nora-game/outfit', outfit); if (version === active) { sceneStop?.(); sceneStop = null; welcome(nickname); } } catch (error) { if (version === active) { root.querySelector('.nora-game-error').textContent = error.message; b.disabled = false; } } };
+    root.querySelector('.nora-editor-save').onclick = async e => { const b = e.currentTarget; b.disabled = true; const version = active; try { await api('nora-game/outfit', outfit); if (version === active) { sceneStop?.(); sceneStop = null; world(nickname); } } catch (error) { if (version === active) { root.querySelector('.nora-game-error').textContent = error.message; b.disabled = false; } } };
     options();
     try { const stop = await window.NoraVoxel.mount(root.querySelector('canvas'), outfit, root); if (root.isConnected) sceneStop = stop; else stop(); }
     catch (_) { root.querySelector('.nora-editor-stage').textContent = '3D сейчас недоступно на этом устройстве'; root.querySelector('.nora-editor-save').disabled = true; }
@@ -63,7 +73,7 @@
     document.body.appendChild(overlay);
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
-    try { const result = await api('nora-game'); if (version === active) { outfit = result.outfit || { ...defaults }; result.nickname ? (result.outfit ? editor(result.nickname) : portal(result.nickname)) : registration(); } }
+    try { const result = await api('nora-game'); if (version === active) { outfit = result.outfit || { ...defaults }; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { close(); open(); }; } }
   }
   document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); });

@@ -409,7 +409,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'nora-voxel.js', 'nora-game.js', 'people.js', 'community.js', 'avatars.js',
+                 'interactive.js', 'nora-voxel.js', 'nora-world.js', 'nora-game.js', 'people.js',
+                 'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):
