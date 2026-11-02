@@ -934,7 +934,10 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
         sent = None
         if callable(rich_send):
             try:
-                sent = await rich_send(chat_id, rich_message=rich_message)
+                app_markup = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="APP", url=f"https://t.me/{username}?startapp"),
+                ]]) if username else None
+                sent = await rich_send(chat_id, rich_message=rich_message, reply_markup=app_markup)
             except (TelegramBadRequest, TelegramNotFound) as exc:
                 reason = str(exc).casefold()
                 unsupported = ("method not found" in reason or "unknown method" in reason

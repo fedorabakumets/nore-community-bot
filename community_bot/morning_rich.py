@@ -95,7 +95,6 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
         blocks.extend([InputRichBlockDivider(), InputRichBlockButtons(
             buttons=[
                 RichMessageButton(text="BOT", url=f"https://t.me/{bot_username}?start=private"),
-                RichMessageButton(text="APP", url=f"https://t.me/{bot_username}?startapp"),
             ], align="center",
         )])
     return InputRichMessage(blocks=blocks)
