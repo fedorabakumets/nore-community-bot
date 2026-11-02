@@ -83,7 +83,8 @@ async def protection(request, handler):
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
-                                    '/api/friends', '/api/mafia', '/api/rocket', '/api/sea', '/api/seasonal',
+                                    '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
+                                    '/api/sea', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -368,6 +369,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
+    from community_bot import nora_game_api
+
+    app.router.add_get('/api/nora-game', nora_game_api.status)
+    app.router.add_post('/api/nora-game', nora_game_api.register)
     app.router.add_get('/api/mafia', mafia_api.status)
     app.router.add_post('/api/mafia/action', mafia_api.action)
     app.router.add_get('/api/rocket', rocket_api.status)
@@ -403,7 +408,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'people.js', 'community.js', 'avatars.js', 'events.js', 'sea.js', 'style.css'):
+                 'interactive.js', 'nora-game.js', 'people.js', 'community.js', 'avatars.js',
+                 'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))
