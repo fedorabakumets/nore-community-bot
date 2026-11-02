@@ -19,10 +19,10 @@ from aiogram.types import (
 
 from community_bot.morning import (
     MONTHS,
+    WEEKDAYS,
     MorningBrief,
     clean_link,
     clothing_advice,
-    format_day,
     format_temp,
     weather_label,
 )
@@ -33,29 +33,23 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
     day = local.date()
     blocks = [
         InputRichBlockSectionHeading(text="NORA DAILY", size=1),
-        InputRichBlockParagraph(text=f"{format_day(day)} · Петербург"),
+        InputRichBlockParagraph(text=f"📆 {WEEKDAYS[day.weekday()]} • {day.day} {MONTHS[day.month - 1]}"),
     ]
-    if brief.photo:
-        blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(brief.photo))))
-    blocks.extend([InputRichBlockDivider(), InputRichBlockSectionHeading(text="🌤 Погода", size=2)])
     if brief.weather:
         weather = brief.weather
-        advice = clothing_advice(weather)
-        blocks.append(InputRichBlockParagraph(text=(
-            f"{ {'clear': '☀️', 'cloudy': '☁️', 'rain': '🌧', 'snow': '❄️', 'fog': '🌫', 'storm': '⛈'}[weather.kind]} "
-            f"{format_temp(weather.temperature)} · {weather_label(weather.code).lower()} · "
-            f"ощущается {format_temp(weather.feels_like)}\nНа улицу: {advice}"
-        )))
+        emoji = {"clear": "☀️", "cloudy": "☁️", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}
+        summary = (f"{emoji[weather.kind]} Петербург · {format_temp(weather.temperature)} · "
+                   f"{weather_label(weather.code)}")
+        details = [
+            InputRichBlockParagraph(text=f"Ощущается как {format_temp(weather.feels_like)}"),
+            InputRichBlockParagraph(text=f"💨 Ветер {round(weather.wind_kmh / 3.6)} м/с"),
+            InputRichBlockParagraph(text=f"👕 {clothing_advice(weather)}"),
+        ]
+        blocks.append(InputRichBlockDetails(summary=summary, blocks=details))
     else:
-        blocks.append(InputRichBlockParagraph(text="Погоду сейчас получить не удалось."))
-    transport = []
-    if brief.traffic_level is not None:
-        transport.append(f"{brief.traffic_level} из 10 баллов")
-    if brief.metro_available and brief.closed_stations:
-        transport.append("закрыты: " + ", ".join(brief.closed_stations))
-    if transport:
-        blocks.extend([InputRichBlockSectionHeading(text="🚦 Пробки", size=3),
-                       InputRichBlockParagraph(text=" · ".join(transport))])
+        blocks.append(InputRichBlockParagraph(text="🌤 Погоду сейчас получить не удалось."))
+    if brief.photo:
+        blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(brief.photo))))
     blocks.extend([InputRichBlockDivider(), InputRichBlockSectionHeading(text="📰 Свежие новости", size=2)])
     if brief.day_news:
         for item in brief.day_news[:2]:
@@ -89,6 +83,14 @@ def render_rich_brief(brief: MorningBrief, bot_username: str | None = None) -> I
         blocks.append(InputRichBlockDetails(summary=summary, blocks=details))
     else:
         blocks.append(InputRichBlockParagraph(text="Подтверждённого события на эту дату пока нет."))
+    transport = []
+    if brief.traffic_level is not None:
+        transport.append(f"{brief.traffic_level} из 10 баллов")
+    if brief.metro_available and brief.closed_stations:
+        transport.append("закрыты: " + ", ".join(brief.closed_stations))
+    if transport:
+        blocks.extend([InputRichBlockDivider(), InputRichBlockSectionHeading(text="🚦 Пробки", size=3),
+                       InputRichBlockParagraph(text=" · ".join(transport))])
     if bot_username:
         blocks.extend([InputRichBlockDivider(), InputRichBlockButtons(
             buttons=[
