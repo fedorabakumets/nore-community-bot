@@ -65,8 +65,8 @@ window.NoraCompanion = (() => {
     const controls=new AbortController(),on=(el,type,fn)=>el.addEventListener(type,fn,{signal:controls.signal});
     const actions=root.querySelector('.nora-pet-actions'),open=root.querySelector('.nora-pet-open'),stroke=root.querySelector('.nora-pet-stroke');
     const panel=root.querySelector('.nora-pet-panel'),content=panel.querySelector('.nora-pet-content'),message=panel.querySelector('.nora-pet-message');
-    let pet=null,model=null,disposed=false,pending=false,flight=null,valid=false,near=false,route=[],timer=0;
-    function reset(){if(!model)return;model.clear();model.body.position.copy(player.position);model.body.position.y=.017;move(model.body.position,.65,0,getZone());route=[new T.Vector3(player.position.x,.017,player.position.z)];}
+    let pet=null,model=null,disposed=false,pending=false,flight=null,valid=false,near=false,route=[],timer=0,following=false,wanderTarget=null,wanderWait=3,blockedFor=0,pettingHold=0;
+    function reset(){if(!model)return;following=false;wanderTarget=null;wanderWait=3;blockedFor=0;pettingHold=0;model.clear();model.body.position.copy(player.position);model.body.position.y=.017;move(model.body.position,.65,0,getZone());route=[new T.Vector3(player.position.x,.017,player.position.z)];}
     function apply(value){
       const species=pet?.species;pet=value;
       if(!pet||pet.expedition_until){model?.dispose();model=null;actions.hidden=true;near=false;return;}
@@ -87,7 +87,7 @@ window.NoraCompanion = (() => {
     on(panel.querySelector('.nora-pet-close'),'click',()=>panel.close());
     on(panel,'close',resetInput);
     on(panel,'cancel',e=>e.stopPropagation());
-    on(stroke,'click',()=>{if(near&&model){model.stroke();stroke.blur();}});
+    on(stroke,'click',()=>{if(near&&model){pettingHold=1.6;wanderTarget=null;model.stroke();stroke.blur();}});
     on(content,'click',async event=>{
       if(!event.target.closest('.nora-pet-expedition')||pending||!valid||!pet?.enabled||pet.expedition_until)return;
       pending=true;message.textContent='';render();
@@ -108,15 +108,45 @@ window.NoraCompanion = (() => {
       if(!model)return;
       const position=model.body.position,last=route[route.length-1];
       if(!last||Math.hypot(player.position.x-last.x,player.position.z-last.z)>.12)route.push(new T.Vector3(player.position.x,.017,player.position.z));
-      if(route.length>160||position.distanceTo(player.position)>10)reset();
-      const old=position.clone();
-      // Follow the owner's recorded route, so corners and tavern furniture are respected.
-      let remaining=position.distanceTo(route[0]);
-      for(let i=1;i<route.length;i++)remaining+=route[i].distanceTo(route[i-1]);
-      if(remaining>1.05){
-        const target=route[0],dx=target.x-position.x,dz=target.z-position.z,distance=Math.hypot(dx,dz);
-        if(distance<.06){if(route.length>1)route.shift();}
-        else {const step=Math.min(distance,remaining-1.05,3.7*dt);move(position,dx/distance*step,dz/distance*step,getZone());}
+      if(route.length>160)route.shift();
+      if(position.distanceTo(player.position)>12)reset();
+      const old=position.clone(),ownerDistance=Math.hypot(position.x-player.position.x,position.z-player.position.z);
+      pettingHold=Math.max(0,pettingHold-dt);
+      if(ownerDistance>3.5){following=true;wanderTarget=null;}
+      else if(following&&ownerDistance<2.2){following=false;route=[new T.Vector3(player.position.x,.017,player.position.z)];wanderWait=2+Math.random()*3;}
+      if(!panel.open&&pettingHold===0){
+        if(following){
+          // Retrace the owner's path around walls, instead of cutting across them.
+          const target=route[0],dx=target.x-position.x,dz=target.z-position.z,distance=Math.hypot(dx,dz);
+          if(distance<.08){if(route.length>1)route.shift();}
+          else {const step=Math.min(distance,2.6*dt);move(position,dx/distance*step,dz/distance*step,getZone());
+            blockedFor=position.distanceTo(old)<.0001?blockedFor+dt:0;
+            if(blockedFor>.7){
+              // Skip stale trail points only when the next one is reachable.
+              for(let i=1;i<route.length;i++){
+                const probe=position.clone();move(probe,route[i].x-probe.x,route[i].z-probe.z,getZone());
+                if(Math.hypot(probe.x-route[i].x,probe.z-route[i].z)<.05){route.splice(0,i);break;}
+              }blockedFor=0;
+            }}
+        }else{
+          // A short amble, then a longer rest; never wander far from the owner.
+          wanderWait-=dt;
+          if(!wanderTarget&&wanderWait<=0){
+            const angle=Math.random()*Math.PI*2,dist=.4+Math.random()*.65;
+            const candidate=new T.Vector3(position.x+Math.cos(angle)*dist,.017,position.z+Math.sin(angle)*dist);
+            if(Math.hypot(candidate.x-player.position.x,candidate.z-player.position.z)<2.8)wanderTarget=candidate;
+            else wanderWait=1+Math.random()*2;
+          }
+          if(wanderTarget){
+            const dx=wanderTarget.x-position.x,dz=wanderTarget.z-position.z,dist=Math.hypot(dx,dz);
+            if(dist<.04){wanderTarget=null;wanderWait=2.5+Math.random()*3;blockedFor=0;}
+            else {const step=Math.min(dist,.4*dt);move(position,dx/dist*step,dz/dist*step,getZone());
+              blockedFor=position.distanceTo(old)<.0001?blockedFor+dt:0;
+              if(blockedFor>.7){wanderTarget=null;wanderWait=2+Math.random()*2;blockedFor=0;}}
+          }
+          // Retain a short trail for a later chase without growing indefinitely.
+          while(route.length>40)route.shift();
+        }
       }
       const distance=position.distanceTo(old);
       if(distance>.0001){const heading=Math.atan2(position.x-old.x,position.z-old.z);model.body.rotation.y+=Math.atan2(Math.sin(heading-model.body.rotation.y),Math.cos(heading-model.body.rotation.y))*(1-Math.exp(-10*dt));}

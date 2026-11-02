@@ -35,7 +35,8 @@ try {
     const renderer = {setPixelRatio(){}, setSize(){}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
-    const context = vm.createContext({window, document, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
+    let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
+    const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
       Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, ResizeObserver:class {observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     vm.runInContext(voxel, context);
@@ -170,7 +171,8 @@ try {
       for(let i=0;i<count;i++){h.frames(1);assert.ok(!(pet.position.x>.66&&pet.position.x<2.34&&pet.position.z>2.66&&pet.position.z<4.34),'follower avoids furniture');}
       h.key(key,false);
     }
-    h.frames(100);assert.ok(pet.position.distanceTo(h.player.position)<1.8,'follows around corners');
+    h.frames(300);assert.ok(pet.position.distanceTo(h.player.position)<3.5,`follows around corners: ${pet.position.toArray()} / ${h.player.position.toArray()}`);
+    h.player.position.copy(pet.position);h.player.position.x-=.5;h.frames(1);
     h.root.querySelector('.nora-pet-open').emit('click');await flush();
     const panel=h.root.querySelector('.nora-pet-panel'),body=panel.querySelector('.nora-pet-content');
     assert.ok(panel.open);assert.ok(body.innerHTML.includes('72 / 100'));assert.ok(body.innerHTML.includes('&lt;Друг>'),'name escaped');
@@ -184,6 +186,17 @@ try {
     assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');
     h.stop();assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'pet disposed');
   }
+  const wander=await setup(0,60,async()=>({pet:{name:'Лис',species:'fox',species_label:'лиса',hunger:80,thirst:80,enabled:true,expedition_until:null}}));
+  await flush();wander.frames(1);const wanderingPet=wander.scene().getObjectByName('nora-companion'),start=wanderingPet.position.clone();
+  wander.key('KeyW');wander.frames(30);wander.key('KeyW',false);wander.frames(20);
+  assert.ok(wanderingPet.position.distanceTo(start)<.01,'pet does not follow small owner movement');
+  const idleStart=wanderingPet.position.clone();wander.frames(600);
+  assert.ok(wanderingPet.position.distanceTo(idleStart)>.1,'pet ambles while owner waits');
+  assert.ok(wanderingPet.position.distanceTo(wander.player.position)<3.5,'ambling stays nearby');
+  wander.key('KeyW');wander.frames(160);wander.key('KeyW',false);wander.frames(260);
+  const separation=wanderingPet.position.distanceTo(wander.player.position);
+  assert.ok(separation<3.5&&separation>1.3,'pet catches up from far away but keeps a comfortable distance');
+  wander.stop();console.log('NORA companion: relaxed wandering, delayed following and distance passed.');
   let resolvePet;
   const late=await setup(0,60,()=>new Promise(resolve=>{resolvePet=resolve;}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
