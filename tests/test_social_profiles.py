@@ -89,12 +89,13 @@ async def test_presence_privacy_and_private_profile_hide_all_activity(env):
         await update(Request(env, body={"hidden": True, "user_id": 9}))
 
 
-async def test_public_profile_omits_money_secrets_and_does_not_expose_nonfriend_online(env):
+async def test_public_profile_shows_balance_omits_secrets_and_nonfriend_online(env):
     await heartbeat(env.db, 9, "b" * 20, 1, True)
     result = json.loads((await profile(Request(env))).body)
     assert result["id"] == 9 and result["bio"] == "Био участника" and not result["hidden"]
     assert not result["presence"]["visible"]
-    assert not {"cookies", "cookie_debt", "moderator_note", "avatar_file_id", "warnings"} & result.keys()
+    assert result["cookies"] == 100
+    assert not {"cookie_debt", "moderator_note", "avatar_file_id", "warnings", "fill_percent"} & result.keys()
     assert "secret note" not in json.dumps(result)
     await befriend(env, 8, 9)
     assert json.loads((await profile(Request(env))).body)["presence"]["online"]
@@ -107,11 +108,18 @@ async def test_hidden_and_blocked_profiles_and_avatars_are_enforced_on_server(en
     await befriend(env, 8, 9)
     await env.db.update_profile(9, "profile_private", 1)
     p = json.loads((await profile(Request(env))).body)
-    assert p["hidden"] and set(p) == {"id", "name", "username", "friend", "hidden"}
+    assert p["hidden"] and set(p) == {"id", "name", "username", "friend", "hidden", "private"}
     with pytest.raises(web.HTTPForbidden):
         await avatar(Request(env))
     # Existing see-private permission still works for the configured owner.
-    assert not json.loads((await profile(Request(env, uid=7))).body)["hidden"]
+    privileged = json.loads((await profile(Request(env, uid=7))).body)
+    assert not privileged["hidden"] and privileged["private"]
+    assert not {"bio", "hobbies", "cookies", "reputation", "tier", "fill_percent"} & privileged.keys()
+    own = json.loads((await profile(Request(env, uid=9))).body)
+    assert own["cookies"] == 100 and own["bio"] == "Био участника"
+    lookup = Request(env, uid=7, target=None)
+    lookup.query = {"recipient": "@person9"}
+    assert not {"bio", "hobbies", "cookies", "reputation", "tier"} & json.loads((await profile(lookup)).body).keys()
     await env.db.update_profile(9, "profile_private", 0)
     await mutate(env.db, env.settings, 8, {"action": "block", "target_id": 9})
     with pytest.raises(web.HTTPNotFound):

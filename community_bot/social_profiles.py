@@ -142,7 +142,6 @@ async def target_for(request):
 
 async def profile(request):
     from community_bot.domain import reputation_tier
-    from community_bot.profile_fill import profile_fill_percent
 
     db, uid, settings = request.app["db"], request["actor"]["id"], request.app["settings"]
     target = await target_for(request)
@@ -153,10 +152,10 @@ async def profile(request):
         "username": target["username"],
         "friend": friend,
         "hidden": True,
+        "private": bool(target["profile_private"]),
     }
     if not await can_view_profile(db, settings, uid, target):
         return web.json_response(result)
-    tier = reputation_tier(target["reputation"], settings.restricted_reputation_threshold)
     presence = (
         (await presence_map(db, [target["user_id"]]))[target["user_id"]]
         if friend or uid == target["user_id"]
@@ -166,15 +165,14 @@ async def profile(request):
         hidden=False,
         private=bool(target["profile_private"]),
         age=target["age"],
-        bio=target["profile_bio"],
-        hobbies=target["hobbies"],
-        reputation=target["reputation"],
-        tier=tier.label,
-        fill_percent=profile_fill_percent(target),
         role=await role_title(db, await effective_role(db, settings, target["user_id"])),
         has_avatar=bool(target["avatar_file_id"] and target["avatar_media_type"] == "photo"),
         presence=presence,
     )
+    if not target["profile_private"] or uid == target["user_id"]:
+        tier = reputation_tier(target["reputation"], settings.restricted_reputation_threshold)
+        result.update(bio=target["profile_bio"], hobbies=target["hobbies"],
+                      reputation=target["reputation"], tier=tier.label, cookies=target["cookies"])
     return web.json_response(result)
 
 
