@@ -10,6 +10,13 @@ window.NoraScenery = (() => {
     function bush(x,z,size=1){for(let a=-2;a<=2;a++)for(let b=0;b<3;b++)for(let c=-2;c<=2;c++){if(Math.abs(a)+Math.abs(c)+b>4)continue;box(x+a*.22*size,.13+b*.22*size,z+c*.22*size,.23*size,.23*size,.23*size,['#3b7841','#519847','#70af51'][Math.abs(a+b+c)%3]);}}
     function flower(x,z,color){box(x,.2,z,.07,.4,.07,'#3c803f');box(x,.42,z,.12,.12,.12,'#f8cd70');for(const [a,b] of [[1,0],[-1,0],[0,1],[0,-1]])box(x+a*.11,.41,z+b*.11,.13,.1,.13,color);box(x+.1,.17,z,.22,.06,.1,'#65a749');}
     function tree(x,z,i){for(let y=0;y<9;y++)box(x,.15+y*.3,z,.38,.3,.38,y%3?'#805438':'#aa7950');for(let a=-3;a<=3;a++)for(let b=-2;b<=3;b++)for(let c=-3;c<=3;c++){if(Math.abs(a)+Math.abs(c)+Math.max(0,b)>7||(Math.abs(a)<3&&Math.abs(c)<3&&b>-2&&b<3))continue;box(x+a*.42,3.1+b*.42,z+c*.42,.43,.43,.43,['#3e7741','#508e48','#65a653','#80b15c'][Math.abs(a*7+b*3+c+i)%4]);}cameraOnly(x,2.5,z,2.8,4.8,2.8);}
+    function distantTree(x,z,i){
+      const h=3.8+(Math.abs(i*13)%7)*.3;
+      box(x,.7,z,.5,2.4,.5,'#63795a');
+      box(x,h*.65,z,2.5,h*.55,2.5,['#5b815c','#638764','#6c9168'][Math.abs(i)%3]);
+      box(x-.65,h*.84,z+.25,1.5,h*.37,1.8,'#739671');
+      box(x+.6,h*.72,z-.45,1.7,h*.45,1.6,'#648861');
+    }
     // Dense natural perimeter, with forest terraces continuing into the fog.
     for(let edge=0;edge<4;edge++)for(let i=-7;i<=7;i++){
       const x=edge<2?i:(edge===2?-8:8),z=edge<2?(edge===0?-8:8):i;
@@ -20,10 +27,16 @@ window.NoraScenery = (() => {
       const x=edge<2?i*3.6+(edge*.9):(edge===2?-10.5:10.5),z=edge<2?(edge===0?-10.5:10.5):i*3.6;
       tree(x,z,edge+i);bush(x+.8,z-1,1.4);
     }
-    for(let x=-20;x<=20;x+=4)for(let z=-20;z<=20;z+=4){
+    for(let x=-32;x<=32;x+=4)for(let z=-32;z<=32;z+=4){
       if(Math.abs(x)<10&&Math.abs(z)<10)continue;
       box(x,-1.4,z,4,1.8,4,['#629249','#6e9b50','#578d47'][Math.abs(x+z)%3]);
-      if((x+z)%8===0)tree(x+.6,z+.4,x+z);
+      if((x+z)%8===0){if(Math.max(Math.abs(x),Math.abs(z))<16)tree(x+.6,z+.4,x+z);else distantTree(x+.6,z+.4,x+z);}
+    }
+    // Staggered low-detail silhouettes close gaps without multiplying detailed foliage.
+    for(const radius of [13,18,24,30])for(let edge=0;edge<4;edge++)for(let i=-radius;i<=radius;i+=2.7){
+      const shift=Math.sin(i*7+edge)*.6;
+      const x=edge<2?i+shift:(edge===2?-radius:radius),z=edge<2?(edge===0?-radius:radius):i+shift;
+      distantTree(x,z,Math.round(i*3)+edge);
     }
     for(const [x,z] of [[-6,1],[5,-1],[4,4],[-4,4],[1,-5],[-4,-4]]){bush(x,z,.8);for(let i=0;i<3;i++)flower(x+.7+i*.23,z+.3-i*.3,['#eb939f','#e9c55f','#c7b2e6'][i]);}
     // Center tavern: pale irregular masonry, oak framing and a tiled stepped roof.
