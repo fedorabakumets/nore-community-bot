@@ -252,3 +252,5 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .home-intro h1,.shop-root-heading h1,.community-heading h1,.events-heading,.lk-title h1{font-size:clamp(24px,6.8vw,34px);line-height:40px;margin:0 0 12px}
 .events-heading{font-size:clamp(18px,5.6vw,34px)}
 .lk-title{min-height:40px}.lk-title h1{margin:0}
+
+.home-event-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}.home-event-strip::-webkit-scrollbar,.home-updates::-webkit-scrollbar{display:none}.home-event-strip>.home-meetup{flex:0 0 100%;scroll-snap-align:start}.home-updates{scrollbar-width:none}.home-updates::after{content:"";flex:0 0 max(0px,calc(100% - min(85%,340px) - 14px))}.home-carousel-dots{display:flex;justify-content:center;gap:8px;margin:10px 0}.home-carousel-dots button{width:9px;height:9px;min-width:0;padding:0;border:1px solid var(--red);border-radius:50%;background:transparent}.home-carousel-dots button[aria-current="true"]{background:var(--red)}.home-news-article b em,.home-article h2 em{color:var(--red);font-style:normal}
