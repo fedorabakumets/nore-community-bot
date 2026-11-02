@@ -28,6 +28,33 @@ try {
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}}; }
     emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); this.dispatchEvent(e); }
   }
+  const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
+  const sceneryWindow={matchMedia:()=>({matches:false})};
+  vm.runInNewContext(sceneryCode,{window:sceneryWindow});
+  const sharedGeometry=new Three.BoxGeometry(),sharedMaterial=new Three.MeshLambertMaterial();
+  const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial);
+  const record=tavern.indoor.getObjectByName('nora-record'),notes=tavern.indoor.getObjectByName('nora-music-notes');
+  assert.ok(record&&notes,'record player and notes are present');
+  assert.equal(tavern.outdoor.getObjectByName('nora-tavern-windows').count,8,'windows on all four facades');
+  const blocked={x:0,y:0,z:1.5};
+  const acousticContext={window:{}};vm.runInNewContext(world,acousticContext);
+  acousticContext.window.NoraWorld.move(blocked,0,-2,tavern.indoorZone);
+  assert.ok(blocked.z>.7,'console blocks walking through its cabinet');
+  const camera=new Three.PerspectiveCamera();camera.position.set(2,2,3);camera.lookAt(0,1,0);
+  tavern.update(.5,true,0,camera);assert.ok(record.rotation.y<0,'record rotates');
+  const noteMatrix=new Three.Matrix4();notes.getMatrixAt(0,noteMatrix);const beforeNote=noteMatrix.clone();
+  tavern.update(.5,true,0,camera);notes.getMatrixAt(0,noteMatrix);assert.notDeepEqual(noteMatrix.elements,beforeNote.elements,'notes rise and change scale');
+  tavern.update(.5,false,0,camera);
+  const acoustics=acousticContext.window.NoraWorld.tavernAcoustics;
+  const doorway=acoustics(false,0,3.6),rear=acoustics(false,0,-3.6),far=acoustics(false,0,7);
+  assert.ok(doorway.gain>far.gain&&far.gain>rear.gain,'doorway louder than distance and back wall');
+  assert.ok(doorway.cutoff>rear.cutoff,'walls remove high frequencies');
+  assert.ok(acoustics(true,0,2).gain>doorway.gain,'inside louder than outside');
+  assert.ok(acoustics(false,-4,4).pan>0&&acoustics(false,4,4).pan<0,'stereo follows building direction');
+  let geometryDisposed=false;sharedGeometry.addEventListener('dispose',()=>{geometryDisposed=true;});
+  tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
+  sharedGeometry.dispose();sharedMaterial.dispose();
+  console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
   async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
@@ -55,7 +82,7 @@ try {
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
   const soundEvents=[];
-  const sounds={update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
+  const sounds={spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
     land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};
   const audioWorld=await setup(0,60,undefined,sounds);
   audioWorld.key('Space'); audioWorld.frames(60);

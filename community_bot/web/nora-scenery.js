@@ -44,11 +44,14 @@ window.NoraScenery = (() => {
       const px=x*.25,py=.125+y*.25;
       for(const side of [-1,1]){
         if(side===1&&Math.abs(px)<.65&&py<2)continue;
-        const window=side===1&&Math.abs(Math.abs(px)-1.75)<.5&&py>.9&&py<1.95;
+        const window=Math.abs(Math.abs(px)-1.75)<.5&&py>.9&&py<1.95;
         if(!window)box(px,py,side*2.25,.25,.25,.25,['#d8c596','#c6b187','#e7d7ac','#b9a27d'][Math.abs(x*7+y*3)%4]);
       }
     }
-    for(const side of [-1,1])for(let z=-8;z<=8;z++)for(let y=0;y<11;y++)box(side*2.875,.125+y*.25,z*.25,.25,.25,.25,['#d8c596','#c6b187','#e3cfa2'][Math.abs(z+y)%3]);
+    for(const side of [-1,1])for(let z=-8;z<=8;z++)for(let y=0;y<11;y++){
+      const py=.125+y*.25;
+      if(!(Math.abs(Math.abs(z*.25)-1)<.5&&py>.9&&py<1.95))box(side*2.875,py,z*.25,.25,.25,.25,['#d8c596','#c6b187','#e3cfa2'][Math.abs(z+y)%3]);
+    }
     for(const x of [-2.75,2.75])for(const z of [-2.25,2.25])for(let y=0;y<11;y++)box(x,.125+y*.25,z,.4,.25,.4,y%3?'#8a8c80':'#a8a89a');
     for(const z of [-2.4,2.4])box(0,2.77,z,5.8,.18,.22,'#604333');
     for(let x=-12;x<=12;x++)for(let z=-10;z<=10;z++){
@@ -60,23 +63,48 @@ window.NoraScenery = (() => {
       for(const z of [-2.25,2.25])box(x*.26,y,z,.26,.25,.25,(x+Math.round(y*4))%3?'#d4be93':'#b9a17b');
     box(0,3.7,2.4,.55,.65,.12,'#614333');box(0,3.7,2.48,.3,.4,.06,'#34282e');
     box(1.05,1.8,2.6,.22,.3,.22,'#edc57c');box(1.05,2,2.6,.32,.1,.32,'#594331');
-    for(let y=0;y<6;y++)box(-1.7,4.2+y*.25,-1.2,.65,.25,.65,y%2?'#939081':'#b2ac96');box(-1.7,5.67,-1.2,.85,.2,.85,'#6d6c64');
-    for(const x of [-1.75,1.75]){
-      box(x,1.4,2.39,.95,.95,.08,'#382931');box(x,1.4,2.46,.75,.7,.05,'#af7547');
-      for(const dx of [-.5,.5])box(x+dx,1.4,2.48,.15,1.15,.17,'#70503b');
-      for(const y of [.88,1.92])box(x,y,2.48,1.15,.16,.2,'#76513a');
-      box(x,1.4,2.5,.09,.9,.08,'#48352d');box(x,1.4,2.5,.9,.09,.08,'#48352d');
+    box(1.05,2.05,2.42,.12,.12,.48,'#594331');
+    for(let y=0;y<9;y++)box(-1.7,3.45+y*.25,-1.2,.65,.25,.65,y%2?'#939081':'#b2ac96');box(-1.7,5.67,-1.2,.85,.2,.85,'#6d6c64');
+    const windows=[];
+    function facadeWindow(x,z,angle,index){
+      const c=Math.cos(angle),n=Math.sin(angle);
+      function detail(u,y,v,w,h,d,color){box(x+u*c+v*n,y,z-u*n+v*c,Math.abs(c)*w+Math.abs(n)*d,h,Math.abs(n)*w+Math.abs(c)*d,color);}
+      detail(0,1.4,.13,1.05,1.12,.12,'#382931');
+      windows.push({x:x+.22*n,z:z+.22*c,angle});
+      for(const u of [-.55,.55])detail(u,1.4,.25,.15,1.25,.18,'#62442f');
+      for(const y of [.82,1.98])detail(0,y,.25,1.25,.14,.18,'#76513a');
+      detail(0,1.4,.29,.075,1.05,.08,'#48352d');detail(0,1.4,.29,1.05,.075,.08,'#48352d');
+      detail(0,.78,.3,1.42,.16,.65,'#a48a60');
+      for(const u of [-.43,.43])detail(u,.61,.16,.14,.3,.23,'#70503b');
+      // Pots and a bottle sit directly on the sill rather than hovering.
+      detail(-.3,.97,.38,.28,.22,.28,index%2?'#927054':'#ad7656');
+      detail(-.3,1.16,.38,.18,.2,.18,'#6e8c50');detail(-.3,1.29,.38,.12,.1,.12,'#d9ae73');
+      detail(.3,.99,.38,.14,.26,.14,'#58796c');detail(.3,1.16,.38,.08,.08,.08,'#7b9171');
+    }
+    for(const side of [-1,1])for(const x of [-1.75,1.75])facadeWindow(x,side*2.25,side===1?0:Math.PI,windows.length);
+    for(const side of [-1,1])for(const z of [-1,1])facadeWindow(side*2.875,z,side*Math.PI/2,windows.length);
+    // Timber ties, stone footing and eaves join the masonry and roof.
+    for(const side of [-1,1]){
+      box(0,.12,side*2.3,5.9,.24,.28,'#8d8c7b');box(side*2.9,.12,0,.28,.24,4.6,'#8d8c7b');
+      box(side*2.9,2.77,0,.24,.2,4.9,'#604333');
     }
     for(let x=-2;x<=2;x++)box(x*.23,1,2.26,.23,2,.12,x%2?'#71503b':'#805c40');
     for(const x of [-.7,.7])box(x,1.05,2.4,.18,2.1,.2,'#503a30');box(0,2.1,2.4,1.6,.2,.2,'#503a30');box(.35,1,2.44,.12,.12,.12,'#cf9b4b');box(0,.04,2.7,1.7,.08,.5,'#b7b3a4');
     // Wooden hanging sign and paving leading to the door.
+    box(2.3,2.6,2.5,.16,.16,.7,'#50392d');
     box(2.3,2.35,2.8,.12,.7,.12,'#50392d');box(1.95,2.6,2.8,.8,.12,.12,'#50392d');box(1.8,2.25,2.8,.75,.4,.13,'#90643c');box(1.8,2.25,2.88,.35,.08,.04,'#dfc38a');
     for(let z=3;z<7;z++)for(let x=-1;x<=1;x++)box(x*.45,.012,z*.8,.43,.025,.7,['#a8a99a','#b5b29c','#999f8b'][(x+z+3)%3]);
     solid(0,1.6,0,6,3.2,4.7);cameraOnly(0,3.8,0,6.6,2,5.6);
     // Original trees are solid too, including their canopies for the camera.
     for(const [x,z] of [[-5.7,-5.6],[5.2,-4.7],[-5.6,5.3],[5.5,5.7]]){solid(x,1,z,.6,2,.6);cameraOnly(x,2.8,z,3,2.6,3);}
     outdoorZone.boxes=solids;outdoorZone.cameraBoxes=cameraBoxes;
-    const outdoor=mesh();blocks=[];solids=[];cameraBoxes=[];
+    const outdoor=mesh();
+    const windowMaterial=new T.MeshBasicMaterial({color:'#ffffff'});
+    const glow=new T.InstancedMesh(geometry,windowMaterial,windows.length),windowMatrix=new T.Object3D(),warm=new T.Color();
+    glow.name='nora-tavern-windows';glow.frustumCulled=false;
+    windows.forEach((w,i)=>{windowMatrix.position.set(w.x,1.4,w.z);windowMatrix.rotation.y=w.angle;windowMatrix.scale.set(.97,1.03,.04);windowMatrix.updateMatrix();glow.setMatrixAt(i,windowMatrix.matrix);glow.setColorAt(i,warm.set('#e8ad62'));});
+    outdoor.add(glow);
+    blocks=[];solids=[];cameraBoxes=[];
     // Separate furnished room: the roof stays overhead and never obscures its contents.
     for(let x=-9;x<=9;x++)for(let z=-10;z<=10;z++)box(x*.5,-.08,z*.5,.49,.16,.49,(x+z)%3?'#956b46':'#a97d51');
     for(const x of [-4.7,4.7]){box(x,1.7,0,.3,3.4,10.4,'#ad916b');solid(x,1.7,0,.3,3.4,10.4);}
@@ -103,9 +131,47 @@ window.NoraScenery = (() => {
     for(const [x,z] of [[-4,2.5],[3.7,2],[-2.2,-4.4]]){box(x,.22,z,.55,.44,.45,'#baa57c');box(x,.47,z,.24,.1,.24,'#8d7958');solid(x,.22,z,.55,.44,.45);}
     box(0,.012,1.2,1.2,.02,3.8,'#923f43');for(let z=-.5;z<=3;z+=.3)box(0,.027,z,1.1,.01,.05,'#c7a26c');
     box(0,1.1,5.02,1.5,2.2,.08,'#76503a');box(.45,1,4.95,.12,.12,.12,'#d9ad5f');
+    // Record console on four feet in the middle of the room.
+    furniture(0,.55,0,1.15,.7,.84,'#704832');box(0,.94,0,1.27,.12,.94,'#aa7c4c');
+    for(const x of [-.46,.46])for(const z of [-.3,.3])box(x,.12,z,.14,.24,.14,'#513a2d');
+    box(0,.55,.43,.87,.42,.035,'#392e2b');
+    for(let x=-3;x<=3;x++)box(x*.115,.55,.46,.035,.34,.025,'#bb945b');
+    box(.39,1.05,-.21,.08,.12,.08,'#d0ae6c');box(.28,1.11,-.06,.28,.045,.045,'#d0ae6c');box(.16,1.09,.02,.055,.07,.12,'#d0ae6c');
     indoorZone.boxes=solids;indoorZone.cameraBoxes=cameraBoxes;
     const indoor=mesh();indoor.visible=false;
-    return {outdoor,indoor,outdoorZone,indoorZone,dispose(){outdoor.dispose();indoor.dispose();}};
+    const discGeometry=new T.CylinderGeometry(.38,.38,.035,32),discMaterial=new T.MeshLambertMaterial({color:'#242329'});
+    const record=new T.Mesh(discGeometry,discMaterial);record.name='nora-record';record.position.set(-.08,1.025,0);indoor.add(record);
+    const labelGeometry=new T.CylinderGeometry(.12,.12,.01,24),labelMaterial=new T.MeshBasicMaterial({color:'#b56d69'});
+    const label=new T.Mesh(labelGeometry,labelMaterial);label.position.y=.023;record.add(label);
+    const mark=new T.Mesh(geometry,labelMaterial);mark.position.set(.24,.022,0);mark.scale.set(.11,.012,.035);record.add(mark);
+    const noteMaterial=new T.MeshBasicMaterial({color:'#ffffff',transparent:true,depthWrite:false});
+    const notes=new T.InstancedMesh(geometry,noteMaterial,12*4),o=new T.Object3D();notes.name='nora-music-notes';notes.frustumCulled=false;indoor.add(notes);
+    notes.instanceMatrix.setUsage(T.DynamicDrawUsage);let elapsed=0;
+    const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    const colors=['#e6ad69','#b989bd','#77b8ad','#d77d84','#a7ba71','#8ba7cd'];
+    function update(dt,inside,daylight,camera){
+      elapsed+=dt;
+      if(!inside){
+        windows.forEach((w,i)=>{const pulse=reduced?1:.94+.045*Math.sin(elapsed*1.3+i*2.1)+.015*Math.sin(elapsed*2.7+i);warm.set('#edb86d').multiplyScalar(pulse*(1-daylight*.22));glow.setColorAt(i,warm);});
+        glow.instanceColor.needsUpdate=true;
+      }
+      if(!inside)return;
+      if(!reduced)record.rotation.y-=dt*1.45;
+      for(let i=0;i<12;i++){
+        const phase=(elapsed*.28+i/12)%1,fade=Math.sin(phase*Math.PI),a=i*2.399;
+        const x=-.08+Math.sin(a+phase*2)*(.12+phase*.35),y=1.12+phase*1.85,z=Math.cos(a+phase*2)*(.1+phase*.25);
+        // Four cubes make a beamed eighth note, facing the active camera.
+        for(let part=0;part<4;part++){
+          o.position.set(x,y,z);if(camera)o.quaternion.copy(camera.quaternion);
+          const u=[-.035,.015,.06,.085][part],v=[-.045,.045,.115,.08][part];
+          o.translateX(u);o.translateY(v);o.scale.set((part===0?.085:part===1?.025:.07)*fade,(part===1?.18:.035)*fade,.025*fade);
+          if(reduced)o.scale.setScalar(0);
+          o.updateMatrix();notes.setMatrixAt(i*4+part,o.matrix);notes.setColorAt(i*4+part,warm.set(colors[i%colors.length]).multiplyScalar(.5+.5*fade));
+        }
+      }
+      notes.instanceMatrix.needsUpdate=true;notes.instanceColor.needsUpdate=true;
+    }
+    return {outdoor,indoor,outdoorZone,indoorZone,update,dispose(){outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
   return {create};
 })();

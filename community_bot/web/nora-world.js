@@ -34,6 +34,14 @@ window.NoraWorld = (() => {
     const daylight=t*t*(3-2*t);
     return {hour,daylight,twilight:1-Math.abs(daylight*2-1)};
   }
+  function tavernAcoustics(inside,x,z,yaw=0) {
+    const dx=-x,dz=(inside?0:2.55)-z,distance=Math.hypot(dx,dz);
+    if(inside)return {gain:.9,cutoff:18000,pan:Math.max(-.65,Math.min(.65,(dx*Math.cos(yaw)-dz*Math.sin(yaw))/Math.max(1,distance)))};
+    // Sound escapes through the front doorway; walls muffle side/rear listening.
+    const front=Math.max(0,Math.min(1,(z-1.5)/1.6));
+    const door=front/(1+distance*.65);
+    return {gain:.035+.6*door,cutoff:450+4200*door,pan:Math.max(-.8,Math.min(.8,(dx*Math.cos(yaw)-dz*Math.sin(yaw))/Math.max(1,distance)))};
+  }
   function createAtmosphere(T,scene,geometry) {
     const starsMaterial=new T.MeshBasicMaterial({color:'#dce4e0',transparent:true,depthWrite:false,fog:false});
     const leafMaterial=new T.MeshLambertMaterial({color:'#b6a06a'});
@@ -279,6 +287,8 @@ window.NoraWorld = (() => {
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
+        sounds?.spatial(tavernAcoustics(inside,player.position.x,player.position.z,yaw+(view===2?Math.PI:0)));
+        scenery.update?.(dt,inside,daylight,camera);
         sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
         atmosphere.update(dt,daylight,inside);
         companion.update(dt,camera);
@@ -290,5 +300,5 @@ window.NoraWorld = (() => {
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }
-  return {mount,move,cameraDistance,timeOfDay,createAtmosphere};
+  return {mount,move,cameraDistance,timeOfDay,createAtmosphere,tavernAcoustics};
 })();

@@ -9,6 +9,14 @@
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
     let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
+    let musicGain=null, musicFilter=null, musicPan=null, spatial={gain:1,cutoff:18000,pan:0};
+    function positionMusic(value) {
+      spatial=value;
+      if(!context||!musicGain)return;
+      musicGain.gain.setTargetAtTime(value.gain,context.currentTime,.22);
+      musicFilter.frequency.setTargetAtTime(value.cutoff,context.currentTime,.22);
+      musicPan?.pan.setTargetAtTime(value.pan,context.currentTime,.18);
+    }
     function update() {
       if (!button) return;
       const silent = muted || blocked || level === 0;
@@ -30,7 +38,7 @@
       if (closed || !buffer) return;
       const source = context.createBufferSource(), gain = context.createGain();
       const start = Math.max(context.currentTime + .02, nextStart), end = start + buffer.duration;
-      source.buffer = buffer; source.connect(gain); gain.connect(master);
+      source.buffer = buffer; source.connect(gain); gain.connect(musicGain);
       gain.gain.setValueAtTime(0, start);
       gain.gain.linearRampToValueAtTime(1, start + overlap);
       gain.gain.setValueAtTime(1, end - overlap);
@@ -43,6 +51,10 @@
       if (!AudioContext) { blocked = true; update(); return; }
       try {
         context = new AudioContext(); master = context.createGain(); master.gain.value = 0; master.connect(context.destination);
+        musicGain=context.createGain();musicFilter=context.createBiquadFilter();musicFilter.type='lowpass';musicFilter.Q.value=.35;
+        musicGain.connect(musicFilter);
+        if(context.createStereoPanner){musicPan=context.createStereoPanner();musicFilter.connect(musicPan);musicPan.connect(master);}else musicFilter.connect(master);
+        positionMusic(spatial);
         await context.resume();
         if (closed) return;
         const response = await fetch('/game/nora-theme.mp3');
@@ -82,6 +94,7 @@
     }
     function worldAudio() {
       let stopped = false, ambience = [], daylight = 1, indoors = false, distance = 0;
+      positionMusic({gain:.12,cutoff:1000,pan:0});
       const buffers = new Map();
       const names = ['birds_dawn', 'crickets', 'doorOpen_1', 'doorClose_1',
         'footstep_grass_000', 'footstep_grass_001', 'footstep_wood_000', 'footstep_wood_001'];
@@ -135,10 +148,11 @@
           distance += travelled;
           if (distance >= .65) { distance %= .65; step(inside); }
         },
+        spatial(value) { if(!stopped)positionMusic(value); },
         jump(inside) { distance = 0; step(inside, .8); },
         land(inside) { distance = 0; step(inside, 1.15); },
         door(inside) { play(inside ? 'doorOpen_1' : 'doorClose_1', .7); },
-        stop() { stopped = true; for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
+        stop() { stopped = true; positionMusic({gain:1,cutoff:18000,pan:0}); for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
       };
     }
     return {start,attach,close,worldAudio};
