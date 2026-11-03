@@ -16,11 +16,11 @@ try {
   const context = {window:{}};
   vm.runInNewContext(await readFile(new URL('nora-voxel.js', web), 'utf8'), context);
   const {defaults, choices, createCharacter, icon} = context.window.NoraVoxel;
-  function voxels(character) {
+  function voxels(character, part) {
     character.group.updateMatrixWorld(true);
     const result = new Map(), matrix = new T.Matrix4(), point = new T.Vector3(), color = new T.Color();
     character.group.traverse(mesh => {
-      if (!mesh.isInstancedMesh) return;
+      if (!mesh.isInstancedMesh || (part && mesh.parent.name!==part)) return;
       for(let i=0;i<mesh.count;i++) {
         mesh.getMatrixAt(i, matrix); matrix.premultiply(mesh.matrixWorld);
         point.setFromMatrixPosition(matrix); mesh.getColorAt(i, color);
@@ -70,9 +70,39 @@ try {
   const female=voxels(character);
   assert.ok(initial.has('8,18,4') && !female.has('8,18,4'), 'female has a different waist');
   assert.ok(initial.has('9,28,0') && !female.has('9,28,0'), 'female has a softer jaw');
-  assert.ok(female.has('0,22,6')&&!initial.has('0,22,6'), 'female chest has real depth');
-  assert.ok(female.has('0,21,5')&&female.has('6,22,5'), 'chest steps into the shirt at bottom and sides');
-  assert.ok(female.has('7,15,4')&&!female.has('7,18,4'), 'hips taper into the waist');
+  assert.ok(female.has('0,22,8')&&!initial.has('0,22,8'), 'female chest projects two voxels beyond V1');
+  assert.ok(female.has('0,20,5')&&female.has('7,22,5'), 'chest steps into the shirt at bottom and sides');
+  for(let x=-3;x<=3;x++)assert.ok(female.has(`${x},22,8`),'front volume is one connected band, not separate blocks');
+  assert.ok(female.has('8,15,4')&&!female.has('6,18,3'), 'hips are wider and waist is narrower than V1');
+  function fittedSilhouette(character) {
+    const body=voxels(character,'torso');
+    const profile=new Map();
+    for(const key of body.keys()) {
+      const [x,y,z]=key.split(',').map(Number);
+      if(y<14||y>25)continue;
+      if(!profile.has(y))profile.set(y,{width:0,back:Infinity,front:-Infinity});
+      const row=profile.get(y);row.width=Math.max(row.width,Math.abs(x));row.back=Math.min(row.back,z);row.front=Math.max(row.front,z);
+    }
+    assert.equal(profile.get(18).width,5,'waist is eleven voxels across');
+    assert.equal(profile.get(18).back,-3,'waist also tapers in profile');
+    assert.equal(profile.get(18).front,3,'no detached fold protrudes at the waist');
+    assert.equal(profile.get(14).width,8,'hip hem is seventeen voxels across');
+    for(let y=15;y<=18;y++)assert.ok(Math.abs(profile.get(y).width-profile.get(y-1).width)<=1,'waist to hips uses single-voxel steps');
+    assert.equal(profile.get(22).front,8,'chest silhouette remains visible with every shirt');
+    for(let y=14;y<=25;y++) {
+      const row=profile.get(y),depth=y===18||y===19?3:4;
+      for(let x=-row.width;x<=row.width;x++) {
+        assert.ok(body.has(`${x},${y},${-depth}`),'back shell has no missing columns');
+        assert.ok(Array.from({length:9-depth},(_,i)=>i+depth).some(z=>body.has(`${x},${y},${z}`)),'front shell has no missing columns');
+      }
+    }
+    for(const side of [-1,1]) {
+      const thigh=voxels(character,'thigh'+(side<0?'Left':'Right'));
+      assert.ok(thigh.has(`${side*4},11,-5`),'rear seat is actual geometry on the moving thigh');
+      assert.ok(thigh.has(`${side*8},13,-4`),'upper pants meet the widened hip hem');
+    }
+  }
+  fittedSilhouette(character);
   const expectedChoices = {
     gender:['male','female'], hairstyle:['crop','bob','ponytail'],
     hair_color:['black','chestnut','brown','blonde','ginger','ash','rose','blue'],
@@ -99,9 +129,9 @@ try {
       assert.equal(meshCount,11,'joint batches stay constant');
       assert.equal(materials.size,1,'all joints share one material');assert.equal(geometries.size,1,'all joints share one cube');
       maxVoxels=Math.max(maxVoxels,count);
-      assert.ok(count<6500,'geometry stays below the previous smallest 6829-voxel model');
+      assert.ok(count<6000,'V2 keeps the V1 scale and stays under six thousand voxels');
       const pixels=voxels(character);
-      if(gender==='female')assert.ok(pixels.has('0,22,6'),'every shirt preserves fitted volume');
+      if(gender==='female')fittedSilhouette(character);
       assert.ok(pixels.has('0,24,5'),'every shirt keeps its collar');
     }
   for(const [gender] of choices.gender)for(const [hairstyle] of choices.hairstyle) {
@@ -122,6 +152,25 @@ try {
     }
     return result;
   }
+  // Conservative cube bounds in torso space catch visible arm/figure penetration.
+  // Exclude shoulder and elbow caps, whose small overlaps are intentional.
+  function cells(node,torso,select=()=>true) {
+    const result=[],matrix=new T.Matrix4(),relative=new T.Matrix4();
+    const inverse=new T.Matrix4().copy(torso.matrixWorld).invert();
+    const cube=new T.Box3(new T.Vector3(-.0525,-.0525,-.0525),new T.Vector3(.0525,.0525,.0525));
+    for(const mesh of node.children)if(mesh.isInstancedMesh) {
+      relative.copy(inverse).multiply(mesh.matrixWorld);
+      for(let i=0;i<mesh.count;i++) {
+        mesh.getMatrixAt(i,matrix);
+        if(select(matrix.elements[12]/.105,matrix.elements[13]/.105,matrix.elements[14]/.105))
+          result.push(cube.clone().applyMatrix4(matrix.premultiply(relative)));
+      }
+    }
+    return result;
+  }
+  function penetrates(a,b) {
+    return ['x','y','z'].every(axis=>Math.min(a.max[axis],b.max[axis])-Math.max(a.min[axis],b.min[axis])>1e-5);
+  }
   for(const [gender] of choices.gender)for(const [pants] of choices.pants) {
     Object.assign(outfit,{gender,pants});character.rebuild();
     const resources=[];character.group.traverse(mesh=>{if(mesh.isInstancedMesh)resources.push([mesh,mesh.count,mesh.instanceMatrix.array,mesh.geometry,mesh.material]);});
@@ -135,6 +184,16 @@ try {
           const a=character.group.getObjectByName(parent==='torso'?parent:parent+side),b=character.group.getObjectByName(child+side);
           const origin=b.getWorldPosition(new T.Vector3()),left=points(a,origin),right=points(b,origin);
           assert.ok(left.some(p=>right.some(q=>p.distanceTo(q)<.16)),`${gender} ${pants} ${child} seam stays connected`);
+        }
+        if(gender==='female') {
+          const torso=character.group.getObjectByName('torso');
+          const figure=cells(torso,torso,(_x,y,z)=>(y+13.5>=14&&y+13.5<=16)||(y+13.5>=20&&y+13.5<=24&&z>4));
+          figure.push(...cells(character.group.getObjectByName('thigh'+side),torso,(_x,y)=>y>=-3.5));
+          for(const limb of ['arm','forearm']) {
+            const arm=cells(character.group.getObjectByName(limb+side),torso);
+            const touching=arm.find(a=>figure.some(b=>penetrates(a,b)));
+            assert.ok(!touching,`${pants} ${sprint?'run':'walk'} frame ${frame}: ${limb}${side} clears chest and hips; ${JSON.stringify(touching)}`);
+          }
         }
       }
     }
@@ -151,7 +210,7 @@ try {
   character.rebuild();
   assert.equal(released,11,'rebuild releases every previous instanced body mesh');
   character.dispose(); other.dispose();
-  console.log(`NORA appearance: 162 shape combinations, fitted chest, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
+  console.log(`NORA appearance: 162 shape combinations, V2 chest/waist/hips/rear shell, arm clearance, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
 } finally {
   await rm(temp,{recursive:true,force:true});
 }

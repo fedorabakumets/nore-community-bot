@@ -20,7 +20,7 @@ window.NoraVoxel = (() => {
     const style = category === 'hairstyle' ? value : outfit.hairstyle;
     let art = '';
     if (category === 'gender') {
-      art = `<path fill="${colors.skin}" d="M11 4h10v11H11z"/><path fill="${hair}" d="M10 3h12v5H10z"/><path fill="#c7b99b" d="${value==='female'?'M9 17h14v5h-3v4h-8v-4H9z':'M7 17h18v6h-4v3H11v-3H7z'}"/>`;
+      art = `<path fill="${colors.skin}" d="M11 4h10v11H11z"/><path fill="${hair}" d="M10 3h12v5H10z"/><path fill="#c7b99b" d="${value==='female'?'M9 17h14v4h-3v2h2v3H10v-3h2v-2H9z':'M7 17h18v6h-4v3H11v-3H7z'}"/>`;
       art += `<path fill="#e3bc82" d="${value==='female'?'M25 20h2v3h3v2h-3v4h-2v-4h-3v-2h3z':'M24 2h6v6h-2V6l-5 5-2-2 5-5h-2z'}"/>`;
     } else if (category === 'hairstyle' || category === 'hair_color') {
       art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M8 6h16v2h2v16h-2v2h-3V13h-3v-2h-5v2h-2v13H8v-2H6V8h2z':style==='ponytail'?'M8 7h16v3h4v3h2v11h-2v3h-3V14h-3v10h-2V12h-5v2h-4v10H9V14H7V9h1z':'M9 7V5h13v2h3v4h-2v3h-4v-2h-5v2h-4v3H7V7z'}"/><path fill="#fff" opacity=".18" d="M10 7h10v2H10z"/>`;
@@ -29,7 +29,8 @@ window.NoraVoxel = (() => {
     } else if (category === 'eye_color') {
       art = `<path fill="#e9e7e1" d="M5 11h4V8h14v3h4v10h-4v3H9v-3H5z"/><path fill="${eyeColors[value]||eyeColors.brown}" d="M11 9h10v14H11z"/><path fill="#202124" d="M14 12h4v9h-4z"/><path fill="#fff" d="M12 10h3v3h-3z"/>`;
     } else if (category === 'shirt') {
-      art = `<path fill="${colors[value]||colors.white}" d="M11 5H8L2 11l4 6 4-2v12h12V15l4 2 4-6-6-6h-3l-2 3h-6z"/><path fill="#000" opacity=".22" d="M10 24h12v3H10zM13 5h6v3h-6z"/><path fill="#fff" opacity=".25" d="M18 12h3v4h-3z"/>`;
+      const shape=outfit.gender==='female'?'M11 5H8L2 11l4 6 4-2v3h2v4h-2v5h12v-5h-2v-4h2v-3l4 2 4-6-6-6h-3l-2 3h-6z':'M11 5H8L2 11l4 6 4-2v12h12V15l4 2 4-6-6-6h-3l-2 3h-6z';
+      art = `<path fill="${colors[value]||colors.white}" d="${shape}"/><path fill="#000" opacity=".22" d="M10 24h12v3H10zM13 5h6v3h-6z"/><path fill="#fff" opacity=".25" d="M18 12h3v4h-3z"/>`;
       art += `<path fill="${colors.cream}" d="M11 5h2v3h6V5h2v3h-2v2h-6V8h-2zM4 14l2 3 4-2v-2l-4 2zM22 13v2l4 2 2-3-2 1zM10 25h12v2H10z"/>`;
     } else if (category === 'pants') {
       const wide = value === 'burgundy_wide';
@@ -64,6 +65,8 @@ window.NoraVoxel = (() => {
     function build() {
       const palette = {...colors, hair: hairColors[outfit.hair_color] || hairColors.black, eye: eyeColors[outfit.eye_color] || eyeColors.brown};
       const female = outfit.gender === 'female';
+      // A relaxed two-degree arm opening keeps the fitted hips clear during sway.
+      joints.armLeft.rotation.z=female?-.04:0;joints.armRight.rotation.z=female?.04:0;
       for(const mesh of meshes){mesh.parent.remove(mesh);mesh.dispose();}meshes.length=0;
       voxels.clear();
       section='shoes';
@@ -82,37 +85,52 @@ window.NoraVoxel = (() => {
       for (const side of [-1,1]) {
         const x=side*4;
         for(let y=4;y<=13;y++) {
-          const edge=wide&&y>=5&&y<=11?4:3;
-          box(x-(side<0?edge:3),x+(side>0?edge:3),y,y,-3,3,pant);
+          const edge=(wide&&y>=5&&y<=11)||(female&&y>=11)?4:3;
+          const back=female&&y>=10?-4:-3;
+          box(x-(side<0?edge:3),x+(side>0?edge:3),y,y,back,3,pant);
+          // Seat volume belongs to each thigh, so it follows the existing gait.
+          if(female&&y>=11&&y<=12)box(x-2,x+2,y,y,-5,-4,pant);
         }
       }
       section='body';
       // Continuous shirt shell: one-voxel steps at the waist, hips and shoulders.
       // The fitted front grows out of the torso, rather than two attached blocks.
-      const shirtWidths=female?[7,7,6,6,6,6,7,7,8,8,8,7]:[7,7,7,8,8,8,8,8,8,8,8,7];
+      const shirtWidths=female?[8,8,7,6,5,5,6,7,8,8,8,7]:[7,7,7,8,8,8,8,8,8,8,8,7];
       for(let y=14;y<=25;y++) {
-        const width=shirtWidths[y-14];
-        box(-width,width,y,y,-4,4,outfit.shirt);
+        const width=shirtWidths[y-14],depth=female&&(y===18||y===19)?3:4;
+        box(-width,width,y,y,-depth,depth,outfit.shirt);
       }
       if(female) {
-        box(-5,5,21,21,5,5,outfit.shirt);
-        box(-6,6,22,23,5,5,outfit.shirt);
-        box(-4,4,22,22,6,6,outfit.shirt);box(-3,3,23,23,6,6,outfit.shirt);
+        // One continuous dressed volume with tapered sides and upper/lower edges.
+        box(-4,4,20,20,5,5,outfit.shirt);
+        box(-6,6,21,21,5,5,outfit.shirt);box(-5,5,21,21,6,6,outfit.shirt);
+        box(-3,3,21,21,7,7,outfit.shirt);
+        box(-7,7,22,22,5,5,outfit.shirt);box(-6,6,22,22,6,6,outfit.shirt);
+        box(-5,5,22,22,7,7,outfit.shirt);
+        box(-3,3,22,22,8,8,outfit.shirt);
+        box(-6,6,23,23,5,5,outfit.shirt);box(-5,5,23,23,6,6,outfit.shirt);
+        box(-3,3,23,23,7,7,outfit.shirt);
         box(-5,5,24,24,5,5,outfit.shirt);
-        box(-4,4,21,21,5,5,outfit.shirt+'Trim');
+        box(-3,3,20,20,5,5,outfit.shirt+'Trim');
       }
       section='arms';
       for (const side of [-1,1]) {
         const x=side*10;
         box(x-2,x+2,20,24,-3,3,outfit.shirt);
         box(x-1,x+1,25,25,-2,2,outfit.shirt);
-        box(x-2,x+2,12,19,-2,2,'skin');
-        box(x-2,x+2,12,12,3,3,'shadow');
+        // A one-voxel inner taper leaves clearance beside the wider female hips.
+        const inner=female?1:2;
+        if(female) {
+          box(x-2,x+2,17,19,-2,2,'skin');
+          box(x-(side<0?2:inner),x+(side>0?2:inner),12,16,-2,2,'skin');
+        } else box(x-2,x+2,12,19,-2,2,'skin');
+        box(x-(side<0?2:inner),x+(side>0?2:inner),12,12,3,3,'shadow');
       }
       // Cream knit edging and restrained, flush fabric shading.
       const shirtTrim = outfit.shirt + 'Trim', shirtLight = outfit.shirt + 'Light';
       section='body';
-      box(-7,7,14,14,-4,4,'cream');
+      const hem=shirtWidths[0];
+      box(-hem,hem,14,14,-4,4,'cream');
       box(-2,2,25,25,4,4,'skin');
       box(-3,-3,25,25,4,4,'cream');box(3,3,25,25,4,4,'cream');
       box(-2,2,24,24,5,5,'cream');
@@ -120,21 +138,26 @@ window.NoraVoxel = (() => {
       for (const side of [-1,1]) {
         const x=side*10;
         section='arms';box(x-2,x+2,20,20,-3,3,'cream');section='body';
-        for (let y=16;y<=21;y++) dot(side*shirtWidths[y-14],y,4,shirtTrim);
+        for (let y=16;y<=21;y++) dot(side*shirtWidths[y-14],y,female&&(y===18||y===19)?3:4,shirtTrim);
         for (let y=15;y<=17;y++) dot(side*5,y,4,shirtLight);
-        const fold=side*(female?5:6),front=female?5:4;
-        box(fold,fold,23,24,front,front,shirtLight);
+        const fold=side*(female?5:6);
+        for(let y=23;y<=24;y++)dot(fold,y,female?(y===23?6:5):4,shirtLight);
       }
       section='body';
       // Denim seams, waistband, rear pockets and stepped knee creases.
       const pantTrim=pant+'Trim', pantLight=pant+'Light';
-      box(-7,7,13,13,-3,3,pantTrim);
+      box(female?-8:-7,female?8:7,13,13,female?-4:-3,3,pantTrim);
       section='legs';
       for (const side of [-1,1]) {
         const x=side*4;
-        for (let y=4;y<=12;y++) dot(x+side*(wide&&y>=5&&y<=11?4:3),y,3,pantTrim);
-        box(x-2,x+2,9,11,-3,-3,pantLight);
-        box(x-2,x+2,8,8,-3,-3,pantTrim);
+        for (let y=4;y<=12;y++) dot(x+side*((wide&&y>=5&&y<=11)||(female&&y>=11)?4:3),y,3,pantTrim);
+        if(female) {
+          box(x-1,x+1,11,12,-5,-5,pantLight);
+          box(x-1,x+1,10,10,-4,-4,pantTrim);
+        } else {
+          box(x-2,x+2,9,11,-3,-3,pantLight);
+          box(x-2,x+2,8,8,-3,-3,pantTrim);
+        }
         box(x-1,x+1,6,6,3,3,pantLight);
         box(x-3,x+3,4,4,-3,3,pantTrim);
         box(x-2,x+2,3,4,-2,2,pant);
