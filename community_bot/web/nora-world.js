@@ -117,11 +117,12 @@ window.NoraWorld = (() => {
       const peer={avatar,label,target:null};peers.set(nickname,peer);return peer;
     }
     function leave(){
-      if(!session)return;
+      if(!session)return Promise.resolve();
       const departed=session;session=null;
       for(const nickname of peers.keys())remove(nickname);
       const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000)).catch(()=>{});
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
+      return pending;
     }
     function update(time,dt){
       if(!session){
@@ -352,7 +353,7 @@ window.NoraWorld = (() => {
       const throughPortal=label==='ЛОББИ'||label==='НА ОСТРОВ';
       if(throughPortal){
         inLobby=!inLobby;
-        if(!inLobby)lobby.leave();
+        if(!inLobby)lobby.leave().then(()=>records?.refresh());
         player.position.set(0,.017,portalZ[inLobby?'lobby':'home']-2.2);
         player.rotation.y=Math.PI;yaw=targetYaw=0;
       }else{

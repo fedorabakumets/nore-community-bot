@@ -1,5 +1,7 @@
 """Private registration for the standalone NORA game."""
+import asyncio
 import json
+import logging
 import math
 import re
 import sqlite3
@@ -7,7 +9,10 @@ import time
 
 from aiohttp import web
 
+from community_bot import music_api
 from community_bot.database import utcnow
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nora_game_players (
@@ -214,6 +219,38 @@ LOBBY_WING_HEIGHT = 2.56
 LOBBY_PLATFORM_HEIGHT = 1.0
 
 
+async def settle_lobby_record(app):
+    """Settle disconnected owners and finished records even without active clients."""
+    async with app['db'].connect() as db:
+        deck = await music_api.read_lobby_deck(db)
+        if not deck.get('record'):
+            return
+        await db.execute('BEGIN IMMEDIATE')
+        deck = await music_api.read_lobby_deck(db)
+        await music_api.settle_lobby_deck(db, deck, app)
+        await db.commit()
+
+
+async def lobby_record_lifecycle(app):
+    async def run():
+        while True:
+            try:
+                await settle_lobby_record(app)
+            except Exception:
+                logger.exception('Lobby record settlement failed')
+            await asyncio.sleep(1)
+
+    task = asyncio.create_task(run(), name='nora-lobby-record')
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 async def lobby(request):
     body = await request.json()
     if not isinstance(body, dict):
@@ -224,13 +261,15 @@ async def lobby(request):
     presence = request.app['nora_lobby']
     user_id = request['actor']['id']
     now = time.monotonic()
-    for key, (seen, _, _) in tuple(presence.items()):
+    for key, (seen, expired_session, _) in tuple(presence.items()):
         if now - seen >= LOBBY_TTL:
             del presence[key]
+            await music_api.return_departed_record(request.app['db'], key, expired_session)
     current = presence.get(user_id)
     if body.get('leave') is True:
         if current and current[1] == session:
             del presence[user_id]
+            await music_api.return_departed_record(request.app['db'], user_id, session)
         return web.json_response({'players': []})
     pose = {}
     for key, (minimum, maximum) in LOBBY_BOUNDS.items():

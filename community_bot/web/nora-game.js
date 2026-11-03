@@ -13,7 +13,7 @@
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
     let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
-    let recordPlaying=true, selectedRecord='/game/nora-theme.mp3', trackVersion=0;
+    let recordPlaying=true, selectedRecord='/game/nora-theme.mp3', trackVersion=0, recordOnce=false;
     const tracks=new Map();
     let musicGain=null, musicFilter=null, musicPan=null, musicLevel=null, effectsLevel=null, spatial={gain:1,cutoff:18000,pan:0};
     function positionMusic(value) {
@@ -49,12 +49,12 @@
       gain.gain.linearRampToValueAtTime(1, start + overlap);
       gain.gain.setValueAtTime(1, end - overlap);
       gain.gain.linearRampToValueAtTime(0, end);
-      sources.add(source); source.onended = () => { sources.delete(source); source.disconnect(); gain.disconnect(); if (!closed) schedule(); };
+      sources.add(source); source.onended = () => { sources.delete(source); source.disconnect(); gain.disconnect(); if (!closed && !recordOnce) schedule(); };
       source.start(start); nextStart = start + buffer.duration - overlap;
     }
-    async function selectRecord(url,force=false) {
-      if(!force&&url===selectedRecord)return;
-      selectedRecord=url;const version=++trackVersion;
+    async function selectRecord(url,force=false,once=recordOnce) {
+      if(!force&&url===selectedRecord&&once===recordOnce)return;
+      selectedRecord=url;recordOnce=once;const version=++trackVersion;
       for(const source of sources){source.onended=null;try{source.stop();}catch(_){}source.disconnect();source.recordGain?.disconnect();}
       sources.clear();buffer=null;
       if(!url||!context||closed)return;
@@ -67,8 +67,8 @@
         const decoded=await tracks.get(url);
         if(closed||version!==trackVersion||current!==context)return;
         if(!Number.isFinite(decoded.duration)||decoded.duration<.2)throw Error('invalid audio');
-        buffer=decoded;overlap=Math.min(3,buffer.duration/3);nextStart=context.currentTime+.03;
-        schedule();schedule();blocked=context.state!=='running';update();
+        buffer=decoded;overlap=recordOnce?0:Math.min(3,buffer.duration/3);nextStart=context.currentTime+.03;
+        schedule();if(!recordOnce)schedule();blocked=context.state!=='running';update();
       }catch(_){tracks.delete(url);if(!closed&&version===trackVersion){blocked=true;update();}}
     }
     async function start() {
@@ -166,7 +166,7 @@
           distance += travelled;
           if (distance >= .65) { distance %= .65; step(inside); }
         },
-        record(url) { if(!stopped)return selectRecord(url); },
+        record(url, once=false) { if(!stopped)return selectRecord(url,false,once); },
         playing(value) { if(!stopped){recordPlaying=value;positionMusic(spatial);if(value)ensureAudio();} },
         spatial(value) { if(!stopped)positionMusic(value); },
         jump(inside) { distance = 0; step(inside, .8); },

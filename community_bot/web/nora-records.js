@@ -29,7 +29,7 @@ window.NoraRecords = (() => {
   }
   function mount(root, scenery, sounds, reset) {
     let state=null, busy=false, disposed=false, nearShelf=false, nearPlayer=false, inLobby=false;
-    let deck=null, nextSync=0, syncing=false, activeTrack;
+    let deck=null, nextSync=0, syncing=false, activeTrack, activeLobby;
     const controls=new AbortController();
     const actions=document.createElement('div');actions.className='nora-record-actions';actions.hidden=true;
     const inventory=document.createElement('button');
@@ -41,12 +41,14 @@ window.NoraRecords = (() => {
     (root.querySelector('.nora-world-context')||root).append(actions,held);root.append(panel);
     function track(){
       const id=inLobby?deck?.record:state?.player;
-      if(id===activeTrack)return;
-      activeTrack=id;sounds?.record?.(id?catalog[id].url:null);
+      if(id===activeTrack&&inLobby===activeLobby)return;
+      activeTrack=id;activeLobby=inLobby;sounds?.record?.(id?catalog[id].url:null,inLobby);
     }
     function applyDeck(next){
       if(deck&&deck.revision>=next.revision)return;
+      const returned=deck?.mine&&deck.record&&!next.record;
       deck=next;scenery.setLobbyRecord(next.record);track();renderActions();
+      if(returned)load();
     }
     async function syncDeck(){
       if(syncing)return;
@@ -122,7 +124,7 @@ window.NoraRecords = (() => {
       if(!state)return;
       const id=inLobby?deck?.record:state.player;
       const canInsert=state.hand&&(!inLobby||(deck&&!id));
-      const canEject=id&&!state.hand&&(!inLobby||deck.mine);
+      const canEject=id&&(inLobby?deck.mine&&(!state.hand||state.inventory.includes(null)):!state.hand);
       actions.innerHTML=`${nearPlayer&&(id||inLobby)?`<small class="nora-record-now">${id?catalog[id].name:deck?'Проигрыватель свободен':'Загружаем проигрыватель…'}</small>`:''}${nearShelf?'<button data-record-shelf>Стеллаж · пластинки</button>':''}${nearPlayer&&canInsert?'<button data-record-insert>Вставить пластинку</button>':''}${nearPlayer&&canEject?'<button data-record-eject>Достать пластинку</button>':''}`;
       actions.querySelectorAll('button').forEach(b=>b.disabled=busy);
     }
@@ -152,6 +154,7 @@ window.NoraRecords = (() => {
     panel.addEventListener('close',()=>{reset();renderActions();},{signal:controls.signal});
     load();
     return {
+      refresh:load,
       panelOpen:()=>panel.open,
       hasRecord:()=>!!state?.player,
       lobbyPlaying:()=>!!deck?.playing,

@@ -135,7 +135,8 @@ async def test_lobby_record_transfer_is_persistent_and_owner_only(tmp_path):
     assert not content(await act(owner, 'lobby_toggle', deck_revision=1))['lobby_deck']['playing']
     await db.initialize()
     result = content(await act(owner, 'lobby_eject', deck_revision=2))
-    assert result['hand'] == 'standard' and result['lobby_deck']['record'] is None
+    assert result['hand'] == 'standard' and result['shelf'] == []
+    assert result['lobby_deck']['record'] is None
 
 
 @pytest.mark.asyncio
@@ -269,3 +270,63 @@ def test_bundled_playlist_has_all_five_tracks():
     tracks = load_tracks(assets / 'dedzytwo-playlist.json', original)
     assert len(tracks) == 5
     assert all(track.media.path.stat().st_size > 0 for track in tracks[1:])
+
+@pytest.mark.asyncio
+async def test_lobby_finished_record_inventory_fallback_and_personal_cooldown(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'lobby-finish.db')
+    await db.initialize()
+    now = [1000.0]
+    monkeypatch.setattr(music_api.time, 'time', lambda: now[0])
+    for uid, name in ((1, 'Alice'), (2, 'Bob')):
+        await nora_game_api.register(request(db, uid, {'nickname': name}))
+
+    async def act(uid, action, **extra):
+        state = content(await music_api.collection(request(db, uid)))
+        return await music_api.record_action(request(db, uid, {
+            'action': action, 'revision': state['revision'], **extra,
+        }))
+
+    await act(1, 'eject')
+    await act(1, 'lobby_insert', deck_revision=0)
+    now[0] += music_api.RECORD_DURATION['standard'] + 1
+    state = content(await music_api.collection(request(db, 1)))
+    assert state['inventory'][0] == 'standard' and not state['shelf']
+    await act(1, 'unpack', slot=0)
+    with pytest.raises(ValueError, match='доступен через'):
+        await act(1, 'lobby_insert', deck_revision=2)
+    await act(2, 'eject')
+    await act(2, 'lobby_insert', deck_revision=2)
+    async with db.connect() as conn:
+        state = await music_api.read_collection(conn, 2)
+        state['inventory'] = ['standard'] * 8
+        await music_api.save(conn, 'nora_records:2', state)
+        await conn.commit()
+    now[0] += music_api.RECORD_DURATION['standard'] + 1
+    state = content(await music_api.collection(request(db, 2)))
+    assert state['shelf'] == ['standard'] and len(state['inventory']) == 8
+
+
+@pytest.mark.asyncio
+async def test_disconnected_owner_returns_record_to_shelf_and_manual_eject_uses_hand(tmp_path):
+    db = Database(tmp_path / 'lobby-disconnect.db')
+    await db.initialize()
+    await nora_game_api.register(request(db, 1, {'nickname': 'Alice'}))
+
+    async def act(action, **extra):
+        state = content(await music_api.collection(request(db)))
+        return content(await music_api.record_action(request(db, body={
+            'action': action, 'revision': state['revision'], **extra,
+        })))
+
+    await act('eject')
+    await act('lobby_insert', deck_revision=0)
+    await nora_game_api.settle_lobby_record({'db': db, 'nora_lobby': {}})
+    state = content(await music_api.collection(request(db)))
+    assert state['shelf'] == ['standard'] and not any(state['inventory'])
+    async with db.connect() as conn:
+        await music_api.save(conn, 'nora_lobby_cooldown:1', 0)
+        await conn.commit()
+    await act('take', record='standard')
+    await act('lobby_insert', deck_revision=2)
+    state = await act('lobby_eject', deck_revision=3)
+    assert state['hand'] == 'standard' and state['shelf'] == []
