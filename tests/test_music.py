@@ -81,6 +81,52 @@ async def test_collection_rejects_unregistered_invalid_and_stale_actions(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_lobby_record_transfer_is_persistent_and_owner_only(tmp_path):
+    db = Database(tmp_path / 'lobby-records.db')
+    await db.initialize()
+    for uid, nickname in ((1, 'Player'), (2, 'Other')):
+        await nora_game_api.register(request(db, uid, {'nickname': nickname}))
+    async with db.connect() as conn:
+        legacy = music_api.initial_collection()
+        del legacy['inventory']
+        await music_api.save(conn, 'nora_records:1', legacy)
+        await conn.commit()
+
+    async def act(uid, action, **extra):
+        state = content(await music_api.collection(request(db, uid)))
+        return await music_api.record_action(request(db, uid, {
+            'action': action, 'revision': state['revision'], **extra,
+        }))
+
+    async def lobby_deck(uid):
+        req = request(db, uid)
+        req.query = {'room': 'lobby'}
+        return content(await music_api.collection(req))
+
+    assert content(await music_api.collection(request(db)))['inventory'] == [None] * 8
+    await act(1, 'eject')
+    for invalid in (-1, 8, True):
+        with pytest.raises(ValueError, match='клетку'):
+            await act(1, 'pack', slot=invalid)
+    assert content(await act(1, 'pack', slot=7))['inventory'][7] == 'standard'
+    await db.initialize()
+    assert content(await act(1, 'unpack', slot=7))['hand'] == 'standard'
+    await act(2, 'eject')
+    results = await asyncio.gather(*(act(uid, 'lobby_insert', deck_revision=0) for uid in (1, 2)))
+    assert sorted(response.status for response in results) == [200, 409]
+    owner = 1 if results[0].status == 200 else 2
+    visitor = 3 - owner
+    assert await lobby_deck(visitor) == {'record': 'standard', 'mine': False, 'playing': True, 'revision': 1}
+    assert content(await music_api.collection(request(db, visitor)))['hand'] == 'standard'
+    with pytest.raises(ValueError, match='владелец'):
+        await act(visitor, 'lobby_eject', deck_revision=1)
+    assert not content(await act(owner, 'lobby_toggle', deck_revision=1))['lobby_deck']['playing']
+    await db.initialize()
+    result = content(await act(owner, 'lobby_eject', deck_revision=2))
+    assert result['hand'] == 'standard' and result['lobby_deck']['record'] is None
+
+
+@pytest.mark.asyncio
 async def test_delivery_cooldown_is_atomic_persistent_and_limits_shared_chat(tmp_path, monkeypatch):
     db = Database(tmp_path / 'delivery.db')
     await db.initialize()

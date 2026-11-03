@@ -28,15 +28,38 @@ window.NoraRecords = (() => {
     return `<div class="nora-vinyl-art ${id==='standard'?'nora-vinyl-standard':''}" aria-hidden="true"><div class="nora-vinyl-sleeve">${id==='dedzytwo'?`<img data-record-cover src="${coverUrl}" alt="">`:'<span>STANDARD<br>MUSIC</span>'}</div><div class="nora-vinyl-disc"><i></i></div></div>`;
   }
   function mount(root, scenery, sounds, reset) {
-    let state=null, busy=false, disposed=false, nearShelf=false, nearPlayer=false;
+    let state=null, busy=false, disposed=false, nearShelf=false, nearPlayer=false, inLobby=false;
+    let deck=null, nextSync=0, syncing=false, activeTrack;
     const controls=new AbortController();
     const actions=document.createElement('div');actions.className='nora-record-actions';actions.hidden=true;
+    const inventory=document.createElement('button');
+    inventory.type='button';inventory.className='nora-world-outfit nora-world-inventory';
+    inventory.textContent='Инвентарь';inventory.dataset.recordInventory='';
+    root.querySelector('.nora-world-bar').append(inventory);
     const held=document.createElement('p');held.className='nora-record-held';held.hidden=true;
-    const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Коллекция пластинок');
+    const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Пластинки и инвентарь');
     (root.querySelector('.nora-world-context')||root).append(actions,held);root.append(panel);
+    function track(){
+      const id=inLobby?deck?.record:state?.player;
+      if(id===activeTrack)return;
+      activeTrack=id;sounds?.record?.(id?catalog[id].url:null);
+    }
+    function applyDeck(next){
+      if(deck&&deck.revision>=next.revision)return;
+      deck=next;scenery.setLobbyRecord(next.record);track();renderActions();
+    }
+    async function syncDeck(){
+      if(syncing)return;
+      syncing=true;nextSync=Date.now()+1500;
+      try{
+        const next=await api('nora-game/records?room=lobby',undefined,AbortSignal.timeout(3000));
+        if(!disposed)applyDeck(next);
+      }catch{}finally{syncing=false;}
+    }
     function apply(next) {
       state=next;scenery.setRecords?.(state);
-      sounds?.record?.(state.player?catalog[state.player].url:null);
+      if(next.lobby_deck)applyDeck(next.lobby_deck);
+      track();
       held.textContent=state.hand?'В руках: '+catalog[state.hand].name:'';held.hidden=!state.hand;
       renderActions();
     }
@@ -50,38 +73,67 @@ window.NoraRecords = (() => {
         }
       }catch(error){if(!disposed){held.hidden=false;held.textContent=error.message;actions.hidden=false;actions.innerHTML='<button data-record-reload>Загрузить пластинки</button>';}}
     }
-    async function change(action,record) {
+    async function change(action,record,slot) {
       if(busy||!state)return false;
       busy=true;panel.querySelectorAll('button').forEach(b=>b.disabled=true);renderActions();
       try {
-        const next=await api('nora-game/records',{action,record,revision:state.revision});
+        const next=await api('nora-game/records',{action,record,slot,revision:state.revision,deck_revision:deck?.revision});
         if(disposed)return false;apply(next);return true;
       }catch(error){
         try{const next=await api('nora-game/records');if(!disposed)apply(next);}catch{}
         if(!disposed){
-          if(panel.open&&action!=='claim')showShelf();
+          if(action.startsWith('lobby_'))syncDeck();
+          if(panel.open&&panel.dataset.view==='inventory')showInventory();
+          else if(panel.open&&action!=='claim')showShelf();
           const message=panel.open?panel.querySelector('[role="status"]'):null;
           if(message)message.textContent=error.message;else {held.hidden=false;held.textContent=error.message;}
         }
         return false;
-      }finally{busy=false;if(!disposed){panel.querySelectorAll('button').forEach(b=>b.disabled=b.hasAttribute('data-record-take')&&!!state?.hand);renderActions();}}
+      }finally{busy=false;if(!disposed){panel.querySelectorAll('button').forEach(b=>{
+        if(b.hasAttribute('data-record-slot'))b.disabled=Boolean(state.inventory[Number(b.dataset.recordSlot)])===Boolean(state.hand);
+        else b.disabled=b.hasAttribute('data-record-take')&&!!state?.hand;
+      });renderActions();}}
     }
-    function openPanel(html) {reset();panel.innerHTML=html;panel.showModal();renderActions();panel.querySelector('button')?.focus();}
+    function openPanel(html) {reset();panel.innerHTML=html;if(!panel.open)panel.showModal();renderActions();panel.querySelector('button')?.focus();}
     function showGift() {
+      panel.dataset.view='gift';
       const claimed=state?.claimed;
       openPanel(`${art()}<p class="nora-record-season">SEASON 1 • BLOODY NORA</p><h2>${catalog.dedzytwo.name}</h2><p>${claimed?'Твоя пластинка уже в коллекции. Найди стеллаж у дальней стены таверны.':'Забери подарок и поставь пластинку на полку таверны.'}</p><p role="status"></p>${claimed?'':'<button data-record-claim>Забрать пластинку</button>'}<button data-record-close>Войти в мир</button>`);
     }
     function showShelf() {
+      panel.dataset.view='shelf';
       openPanel(`<p class="nora-record-season">ТАВЕРНА / КОЛЛЕКЦИЯ</p><h2>Пластинки</h2><div class="nora-record-shelf-list">${state.shelf.map(id=>`<button data-record-take="${id}" ${state.hand?'disabled':''}>${art(id)}<span>${catalog[id].name}</span><small>${state.hand?'Сначала освободи руки':'Взять с полки'}</small></button>`).join('')||'<p>Полка пока пуста.</p>'}</div>${state.hand?'<button data-record-store>Поставить пластинку из рук</button>':''}<p class="nora-record-future">ТРОФЕИ · СКОРО<br>ДРУГИЕ НАХОДКИ · СКОРО</p><p role="status"></p><button data-record-close>Вернуться в таверну</button>`);
     }
+    function showInventory(){
+      panel.dataset.view='inventory';
+      const slots=state.inventory.map((id,slot)=>{
+        const name=id?catalog[id].name:'пусто';
+        return `<button type="button" data-record-slot="${slot}" aria-label="Клетка ${slot+1}: ${name}"
+          title="${name}" ${Boolean(id)===Boolean(state.hand)?'disabled':''}>${id?art(id):`<span>${slot+1}</span>`}</button>`;
+      }).join('');
+      const hint=state.hand?`В руках: ${catalog[state.hand].name}. Выбери свободную клетку.`:'Нажми на пластинку, чтобы взять её в руки.';
+      openPanel(`<p class="nora-record-season">СУМКА / ${state.inventory.filter(Boolean).length} ИЗ ${state.inventory.length}</p>
+        <h2>Инвентарь</h2><p>${hint}</p><div class="nora-inventory-grid">${slots}</div>
+        <p role="status"></p><button data-record-close>Закрыть</button>`);
+    }
     function renderActions() {
+      inventory.disabled=!state||busy;
       actions.hidden=!state||panel.open||(!nearShelf&&!nearPlayer);
       if(!state)return;
-      actions.innerHTML=`${nearPlayer&&state.player?`<small class="nora-record-now">${catalog[state.player].name}</small>`:''}${nearShelf?'<button data-record-shelf>Стеллаж · пластинки</button>':''}${nearPlayer&&state.hand?'<button data-record-insert>Вставить пластинку</button>':''}${nearPlayer&&state.player&&!state.hand?'<button data-record-eject>Достать пластинку</button>':''}`;
+      const id=inLobby?deck?.record:state.player;
+      const canInsert=state.hand&&(!inLobby||(deck&&!id));
+      const canEject=id&&!state.hand&&(!inLobby||deck.mine);
+      actions.innerHTML=`${nearPlayer&&(id||inLobby)?`<small class="nora-record-now">${id?catalog[id].name:deck?'Проигрыватель свободен':'Загружаем проигрыватель…'}</small>`:''}${nearShelf?'<button data-record-shelf>Стеллаж · пластинки</button>':''}${nearPlayer&&canInsert?'<button data-record-insert>Вставить пластинку</button>':''}${nearPlayer&&canEject?'<button data-record-eject>Достать пластинку</button>':''}`;
       actions.querySelectorAll('button').forEach(b=>b.disabled=busy);
     }
     async function click(e) {
       const button=e.target.closest('button');if(!button||busy)return;
+      if(button.hasAttribute('data-record-inventory')&&state){showInventory();return;}
+      if(button.hasAttribute('data-record-slot')&&panel.open){
+        const slot=Number(button.dataset.recordSlot);
+        if(await change(state.hand?'pack':'unpack',undefined,slot)&&panel.open)showInventory();
+        return;
+      }
       if(button.hasAttribute('data-record-close')){panel.close();reset();renderActions();return;}
       if(button.hasAttribute('data-record-reload')){load();return;}
       if(button.hasAttribute('data-record-shelf')&&nearShelf){showShelf();return;}
@@ -89,8 +141,8 @@ window.NoraRecords = (() => {
       if(button.hasAttribute('data-record-claim'))action='claim';
       if(button.hasAttribute('data-record-take')&&nearShelf){action='take';record=button.dataset.recordTake;}
       if(button.hasAttribute('data-record-store')&&nearShelf)action='store';
-      if(button.hasAttribute('data-record-insert')&&nearPlayer)action='insert';
-      if(button.hasAttribute('data-record-eject')&&nearPlayer)action='eject';
+      if(button.hasAttribute('data-record-insert')&&nearPlayer)action=inLobby?'lobby_insert':'insert';
+      if(button.hasAttribute('data-record-eject')&&nearPlayer)action=inLobby?'lobby_eject':'eject';
       if(action&&await change(action,record)){
         if(action==='take'||action==='store'){panel.close();reset();}
         if(action==='claim')showGift();
@@ -102,13 +154,20 @@ window.NoraRecords = (() => {
     return {
       panelOpen:()=>panel.open,
       hasRecord:()=>!!state?.player,
-      update(inside,x,z,grounded,blocked) {
+      lobbyPlaying:()=>!!deck?.playing,
+      canToggleLobby:()=>!!deck?.mine,
+      toggleLobby:()=>change('lobby_toggle'),
+      update(inside,x,z,grounded,blocked,lobby,nearLobbyDeck) {
+        if(inLobby!==lobby){
+          inLobby=lobby;nextSync=0;track();renderActions();
+        }
+        if(inLobby&&Date.now()>=nextSync)syncDeck();
         const available=inside&&grounded&&!blocked;
         const shelf=available&&Math.hypot(x-.1,z+4.4)<1.9;
-        const player=available&&Math.hypot(x,z)<1.8;
+        const player=(available&&Math.hypot(x,z)<1.8)||(inLobby&&nearLobbyDeck&&!blocked);
         if(shelf!==nearShelf||player!==nearPlayer){nearShelf=shelf;nearPlayer=player;renderActions();}
       },
-      dispose(){disposed=true;controls.abort();panel.remove();actions.remove();held.remove();},
+      dispose(){disposed=true;controls.abort();panel.remove();actions.remove();held.remove();inventory.remove();},
     };
   }
   return {mount,art,drawCover,giftIcon,catalog};

@@ -12,16 +12,31 @@ ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'game'
 RECORDS = {'standard', 'dedzytwo'}
 COOLDOWN = 300
 CHAT_COOLDOWN = 60
+INVENTORY_SIZE = 8
+LOBBY_DECK_KEY = 'nora_lobby_deck'
 
 
 def initial_collection():
-    return {'claimed': False, 'player': 'standard', 'hand': None, 'shelf': [], 'revision': 0}
+    return {'claimed': False, 'player': 'standard', 'hand': None, 'shelf': [], 'revision': 0,
+            'inventory': [None] * INVENTORY_SIZE}
 
 
 async def read_collection(db, uid):
     row = await (await db.execute('SELECT value FROM bot_state WHERE key = ?',
                                  (f'nora_records:{uid}',))).fetchone()
-    return json.loads(row['value']) if row else initial_collection()
+    state = json.loads(row['value']) if row else initial_collection()
+    state.setdefault('inventory', [None] * INVENTORY_SIZE)
+    return state
+
+
+async def read_lobby_deck(db):
+    row = await (await db.execute('SELECT value FROM bot_state WHERE key = ?', (LOBBY_DECK_KEY,))).fetchone()
+    return json.loads(row['value']) if row else {'record': None, 'owner': None, 'playing': False, 'revision': 0}
+
+
+def public_deck(deck, uid):
+    return {'record': deck['record'], 'mine': deck['owner'] == uid,
+            'playing': deck['playing'], 'revision': deck['revision']}
 
 
 async def save(db, key, value):
@@ -31,8 +46,11 @@ async def save(db, key, value):
 
 
 async def collection(request):
+    uid = request['actor']['id']
     async with request.app['db'].connect() as db:
-        state = await read_collection(db, request['actor']['id'])
+        if getattr(request, 'query', {}).get('room') == 'lobby':
+            return web.json_response(public_deck(await read_lobby_deck(db), uid))
+        state = await read_collection(db, uid)
     return web.json_response(state)
 
 
@@ -42,6 +60,7 @@ async def record_action(request):
         raise ValueError('Выбери действие с пластинкой')
     uid = request['actor']['id']
     action = body.get('action')
+    lobby = action in ('lobby_insert', 'lobby_eject', 'lobby_toggle')
     async with request.app['db'].connect() as db:
         await db.execute('BEGIN IMMEDIATE')
         registered = await (await db.execute(
@@ -70,6 +89,37 @@ async def record_action(request):
                 raise ValueError('В руках нет пластинки')
             state['shelf'].append(state['hand'])
             state['hand'] = None
+        elif action in ('pack', 'unpack'):
+            slot = body.get('slot')
+            inventory = state['inventory']
+            if type(slot) is not int or not 0 <= slot < INVENTORY_SIZE:
+                raise ValueError('Выбери клетку инвентаря')
+            if action == 'pack' and state['hand'] and inventory[slot] is None:
+                inventory[slot], state['hand'] = state['hand'], None
+            elif action == 'unpack' and not state['hand'] and inventory[slot]:
+                state['hand'], inventory[slot] = inventory[slot], None
+            else:
+                raise ValueError('Проверь, свободны ли руки и клетка инвентаря')
+        elif lobby:
+            deck = await read_lobby_deck(db)
+            if type(body.get('deck_revision')) is not int or body['deck_revision'] != deck['revision']:
+                return web.json_response({'error': 'Проигрыватель изменился. Попробуй снова'}, status=409)
+            if action == 'lobby_insert':
+                if deck['record'] or not state['hand']:
+                    raise ValueError('Для установки нужна пластинка в руках и свободный проигрыватель')
+                deck.update(record=state['hand'], owner=uid, playing=True)
+                state['hand'] = None
+            elif deck['owner'] != uid:
+                raise ValueError('Этой пластинкой управляет её владелец')
+            elif action == 'lobby_eject':
+                if state['hand']:
+                    raise ValueError('Освободи руки, чтобы достать пластинку')
+                state['hand'] = deck['record']
+                deck.update(record=None, owner=None, playing=False)
+            else:
+                deck['playing'] = not deck['playing']
+            deck['revision'] += 1
+            await save(db, LOBBY_DECK_KEY, deck)
         elif action == 'insert':
             if not state['hand']:
                 raise ValueError('Возьми пластинку со стеллажа')
@@ -83,7 +133,7 @@ async def record_action(request):
         state['revision'] += 1
         await save(db, f'nora_records:{uid}', state)
         await db.commit()
-    return web.json_response(state)
+    return web.json_response({**state, 'lobby_deck': public_deck(deck, uid)} if lobby else state)
 
 
 async def delivery_status(request):

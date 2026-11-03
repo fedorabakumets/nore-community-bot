@@ -210,7 +210,7 @@ window.NoraWorld = (() => {
     const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
     if(scenery.lobby)scene.add(scenery.lobby);
     const tavernOffset=window.NoraScenery.tavernOffset??0;
-    const portalZ=window.NoraScenery.portalZ;
+    const {portalZ,lobbyDeck}=window.NoraScenery;
     let inside=false,inLobby=false,zone=scenery.outdoorZone;
     const atmosphere=createAtmosphere(T,scene,geometry);
     const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
@@ -294,18 +294,28 @@ window.NoraWorld = (() => {
     on(root,'nora-settings-open',reset);on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');
-    let recordPlaying=true;
+    let recordPlaying=true, audioPlaying=true;
     function inputPaused(){return !!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen();}
-    function nearRecord(){return inside&&!inputPaused()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
+    function nearLobbyDeck(){
+      return inLobby&&Math.hypot(player.position.x-lobbyDeck.x,player.position.z-lobbyDeck.z)<1.8&&jumpHeight===0&&jumpVelocity===0;
+    }
+    function nearRecord(){
+      return !inputPaused()&&(inLobby?nearLobbyDeck():
+        inside&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0);
+    }
     function syncRecordButton(){
-      const hidden=!nearRecord()||(!!records&&!records.hasRecord());
+      const available=inLobby?records?.canToggleLobby():!records||records.hasRecord();
+      const playing=inLobby?!!records?.lobbyPlaying():recordPlaying;
+      const hidden=!nearRecord()||!available;
       if(recordButton.hidden!==hidden)recordButton.hidden=hidden;
-      const text=recordPlaying?'Выключить проигрыватель':'Включить проигрыватель';
-      if(recordButton.textContent!==text){recordButton.textContent=text;recordButton.setAttribute('aria-pressed',String(recordPlaying));}
+      const text=playing?'Выключить проигрыватель':'Включить проигрыватель';
+      if(recordButton.textContent!==text){recordButton.textContent=text;recordButton.setAttribute('aria-pressed',String(playing));}
     }
     on(recordButton,'click',()=>{
       if(!nearRecord())return;
-      recordPlaying=!recordPlaying;sounds?.playing(recordPlaying);syncRecordButton();recordButton.blur();
+      if(inLobby)records?.toggleLobby();
+      else{recordPlaying=!recordPlaying;audioPlaying=recordPlaying;sounds?.playing(recordPlaying);}
+      syncRecordButton();recordButton.blur();
     });
     function nearbyAction(){
       if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return '';
@@ -441,7 +451,7 @@ window.NoraWorld = (() => {
           offset.copy(direction).multiplyScalar(actualDistance);
           camera.position.copy(target).add(offset);camera.lookAt(target);
         }
-        records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen());
+        records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen(),inLobby,nearLobbyDeck());
         syncRecordButton();
         const actionText=nearbyAction();
         if(action.hidden!==!actionText)action.hidden=!actionText;
@@ -452,13 +462,21 @@ window.NoraWorld = (() => {
         if(inLobby)lobby.update(time,dt);
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
-        sounds?.spatial(inLobby?{gain:0,cutoff:450,pan:0}:
-          tavernAcoustics(inside,player.position.x,player.position.z-(inside?0:tavernOffset),yaw+(view===2?Math.PI:0)));
-        if(inLobby)scenery.updatePortal(dt);
-        else{
-          scenery.update?.(dt,inside,daylight,camera,recordPlaying&&(!records||records.hasRecord()));
+        const audioYaw=yaw+(view===2?Math.PI:0);
+        const playing=inLobby?!!records?.lobbyPlaying():recordPlaying;
+        if(playing!==audioPlaying){audioPlaying=playing;sounds?.playing(playing);}
+        if(inLobby){
+          const dx=lobbyDeck.x-player.position.x,dz=lobbyDeck.z-player.position.z;
+          const distance=Math.hypot(dx,dz);
+          sounds?.spatial({gain:.85*Math.max(0,1-distance/14),cutoff:16000,
+            pan:.8*(dx*Math.cos(audioYaw)-dz*Math.sin(audioYaw))/Math.max(1,distance)});
+          scenery.updatePortal(dt);
+        }else{
+          sounds?.spatial(tavernAcoustics(inside,player.position.x,
+            player.position.z-(inside?0:tavernOffset),audioYaw));
           if(!inside)scenery.updatePortal?.(dt);
         }
+        scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
         sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
         atmosphere.update(dt,daylight,inside||inLobby);
         companion.update(dt,camera);

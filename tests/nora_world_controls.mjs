@@ -56,6 +56,22 @@ try {
   assert.equal(notes.visible,false,'off switch hides notes');
   tavern.update(.5,true,0,camera,true);assert.ok(record.rotation.y<stoppedAngle&&notes.visible,'switch resumes animation');
   tavern.update(.5,false,0,camera);
+  const lobbyRecord=tavern.lobby.getObjectByName('nora-record');
+  const lobbyNotes=tavern.lobby.getObjectByName('nora-music-notes');
+  assert.equal(lobbyRecord.visible,false,'lobby deck starts empty');
+  tavern.setLobbyRecord('dedzytwo');
+  tavern.update(.5,false,0,camera,true,true);
+  assert.ok(lobbyRecord.visible&&lobbyRecord.rotation.y<0&&lobbyNotes.visible,'lobby deck shows and spins its own disc');
+  const lobbyAngle=lobbyRecord.rotation.y;
+  tavern.update(.5,false,0,camera,false,true);
+  assert.equal(lobbyRecord.rotation.y,lobbyAngle);
+  assert.equal(lobbyNotes.visible,false);
+  tavern.setLobbyRecord(null);
+  assert.equal(lobbyRecord.visible,false,'ejecting clears the lobby deck');
+  const lobbyDeckPosition=sceneryWindow.NoraScenery.lobbyDeck;
+  const lobbyDeckApproach={x:lobbyDeckPosition.x,z:lobbyDeckPosition.z+1.5};
+  acousticContext.window.NoraWorld.move(lobbyDeckApproach,0,-2,tavern.lobbyZone);
+  assert.ok(lobbyDeckApproach.z>lobbyDeckPosition.z+.5,'the duplicated cabinet blocks walking through it');
   const acoustics=acousticContext.window.NoraWorld.tavernAcoustics;
   const doorway=acoustics(false,0,3.6),rear=acoustics(false,0,-3.6),far=acoustics(false,0,7);
   assert.ok(doorway.gain>far.gain&&far.gain>rear.gain,'doorway louder than distance and back wall');
@@ -329,6 +345,60 @@ try {
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.stop();
   console.log('NORA lobby: proximity, return portal, shared avatar and cleanup passed.');
+  const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
+  function widget(){
+    const children=[],listeners={};
+    return {children,listeners,dataset:{},append(...nodes){children.push(...nodes);},setAttribute(){},
+      addEventListener(type,fn){listeners[type]=fn;},querySelectorAll(){return [];},
+      querySelector(){return null;},showModal(){this.open=true;},close(){this.open=false;},remove(){}};
+  }
+  const recordsRoot=widget(),recordsBar=widget(),recordsContext=widget();
+  recordsRoot.querySelector=selector=>selector==='.nora-world-bar'?recordsBar:recordsContext;
+  const collection={hand:'dedzytwo',player:'standard',shelf:[],inventory:Array(8).fill(null),revision:0};
+  let shared={record:null,mine:false,playing:false,revision:0};
+  const moves=[],tracks=[];
+  const recordsWindow={};
+  vm.runInNewContext(recordsCode,{window:recordsWindow,Image:class {},document:{createElement:widget},
+    AbortController,AbortSignal,api:async(path,body)=>{
+      if(path.includes('?'))return {...shared};
+      if(body){
+        moves.push(body.action);
+        if(body.action==='pack'){collection.inventory[body.slot]=collection.hand;collection.hand=null;}
+        if(body.action==='unpack'){collection.hand=collection.inventory[body.slot];collection.inventory[body.slot]=null;}
+        if(body.action==='lobby_insert'){
+          shared={record:collection.hand,mine:true,playing:true,revision:1};collection.hand=null;
+          return {...collection,revision:++collection.revision,lobby_deck:shared};
+        }
+        collection.revision++;
+      }
+      return {...collection};
+    }});
+  const recordsController=recordsWindow.NoraRecords.mount(recordsRoot,{setLobbyRecord(){}},
+    {record:url=>tracks.push(url)},()=>{});
+  await flush();
+  const inventoryPanel=recordsRoot.children[0],contextActions=recordsContext.children[0];
+  const recordClick=(attr,dataset={})=>recordsRoot.listeners.click({
+    target:{closest:()=>({hasAttribute:key=>key===attr,dataset})},
+  });
+  await recordClick('data-record-inventory');
+  assert.equal([...inventoryPanel.innerHTML.matchAll(/data-record-slot=/g)].length,8);
+  await recordClick('data-record-slot',{recordSlot:'2'});
+  assert.equal(collection.inventory[2],'dedzytwo');
+  await recordClick('data-record-close');
+  recordsController.update(false,0,-3,true,false,true,true);
+  await flush();
+  await recordClick('data-record-inventory');
+  await recordClick('data-record-slot',{recordSlot:'2'});
+  await recordClick('data-record-close');
+  assert.match(contextActions.innerHTML,/data-record-insert/);
+  await recordClick('data-record-insert');
+  assert.deepEqual(moves,['pack','unpack','lobby_insert']);
+  assert.equal(tracks.at(-1),'/game/dedzytwo-s1.mp3');
+  assert.ok(recordsController.lobbyPlaying());
+  recordsController.update(false,0,0,true,false,false,false);
+  assert.equal(tracks.at(-1),'/game/nora-theme.mp3');
+  recordsController.dispose();
+  console.log('NORA inventory: eight cells, pack, unpack, lobby insert and room audio passed.');
   const distances=[];
   for(const fps of [30,60,120]) {
     const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();

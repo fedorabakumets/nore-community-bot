@@ -1,6 +1,7 @@
 'use strict';
 window.NoraScenery = (() => {
   const tavernOffset=-4.95, portalZ={home:6.75,lobby:9.75};
+  const lobbyDeck={x:0,z:-3};
   function create(T, geometry, material) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
@@ -142,11 +143,19 @@ window.NoraScenery = (() => {
     box(0,.012,1.2,1.2,.02,3.8,'#923f43');for(let z=-.5;z<=3;z+=.3)box(0,.027,z,1.1,.01,.05,'#c7a26c');
     box(0,1.1,5.02,1.5,2.2,.08,'#76503a');box(.45,1,4.95,.12,.12,.12,'#d9ad5f');
     // Record console on four feet in the middle of the room.
-    furniture(0,.55,0,1.15,.7,.84,'#704832');box(0,.94,0,1.27,.12,.94,'#aa7c4c');
-    for(const x of [-.46,.46])for(const z of [-.3,.3])box(x,.12,z,.14,.24,.14,'#513a2d');
-    box(0,.55,.43,.87,.42,.035,'#392e2b');
-    for(let x=-3;x<=3;x++)box(x*.115,.55,.46,.035,.34,.025,'#bb945b');
-    box(.39,1.05,-.21,.08,.12,.08,'#d0ae6c');box(.28,1.11,-.06,.28,.045,.045,'#d0ae6c');box(.16,1.09,.02,.055,.07,.12,'#d0ae6c');
+    function consoleAt(x,z){
+      const first=blocks.length;
+      furniture(0,.55,0,1.15,.7,.84,'#704832');box(0,.94,0,1.27,.12,.94,'#aa7c4c');
+      for(const x of [-.46,.46])for(const z of [-.3,.3])box(x,.12,z,.14,.24,.14,'#513a2d');
+      box(0,.55,.43,.87,.42,.035,'#392e2b');
+      for(let x=-3;x<=3;x++)box(x*.115,.55,.46,.035,.34,.025,'#bb945b');
+      box(.39,1.05,-.21,.08,.12,.08,'#d0ae6c');box(.28,1.11,-.06,.28,.045,.045,'#d0ae6c');box(.16,1.09,.02,.055,.07,.12,'#d0ae6c');
+      for(const part of blocks.slice(first)){part[0]+=x;part[2]+=z;}
+      const collision=solids.at(-1),camera=cameraBoxes.at(-1);
+      collision[0]+=x;collision[1]+=x;collision[2]+=z;collision[3]+=z;
+      camera[0]+=x;camera[1]+=x;camera[4]+=z;camera[5]+=z;
+    }
+    consoleAt(0,0);
     indoorZone.boxes=solids;indoorZone.cameraBoxes=cameraBoxes;
     const indoor=mesh();indoor.visible=false;
     const discGeometry=new T.CylinderGeometry(.38,.38,.035,32),discMaterial=new T.MeshLambertMaterial({color:'#242329'});
@@ -158,6 +167,13 @@ window.NoraScenery = (() => {
     const coverMaterial=new T.MeshLambertMaterial({color:'#b94b67'});
     const recordFaceGeometry=new T.CircleGeometry(.378,32);
     const recordFace=new T.Mesh(recordFaceGeometry,coverMaterial);recordFace.rotation.x=-Math.PI/2;recordFace.position.y=.019;recordFace.visible=false;record.add(recordFace);
+    const lobbyRecord=record.clone();
+    lobbyRecord.position.x+=lobbyDeck.x;lobbyRecord.position.z+=lobbyDeck.z;lobbyRecord.visible=false;
+    const [lobbyLabel,lobbyMark,lobbyFace]=lobbyRecord.children;
+    function setLobbyRecord(id){
+      lobbyRecord.visible=!!id;lobbyFace.visible=id==='dedzytwo';
+      lobbyLabel.visible=lobbyMark.visible=id!=='dedzytwo';
+    }
     if(window.NoraRecords&&typeof Image!=='undefined'){
       const image=new Image();image.onload=()=>{
         if(recordsDisposed)return;
@@ -192,15 +208,19 @@ window.NoraScenery = (() => {
     notes.instanceMatrix.setUsage(T.DynamicDrawUsage);let elapsed=0;
     const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
     const colors=['#e6ad69','#b989bd','#77b8ad','#d77d84','#a7ba71','#8ba7cd'];
-    function update(dt,inside,daylight,camera,playing=true){
+    const lobbyNotes=notes.clone();lobbyNotes.position.set(lobbyDeck.x,0,lobbyDeck.z);
+    lobbyNotes.visible=false;
+    function update(dt,inside,daylight,camera,playing=true,inLobby=false){
+      const activeNotes=inLobby?lobbyNotes:notes;
+      const activeRecord=inLobby?lobbyRecord:record;
       elapsed+=dt;
-      if(!inside){
+      if(!inside&&!inLobby){
         windows.forEach((w,i)=>{const pulse=reduced?1:.94+.045*Math.sin(elapsed*1.3+i*2.1)+.015*Math.sin(elapsed*2.7+i);warm.set('#edb86d').multiplyScalar(pulse*(1-daylight*.22));glow.setColorAt(i,warm);});
         glow.instanceColor.needsUpdate=true;
       }
-      notes.visible=playing;
-      if(!inside||!playing)return;
-      if(!reduced)record.rotation.y-=dt*1.45;
+      activeNotes.visible=playing;
+      if((!inside&&!inLobby)||!playing)return;
+      if(!reduced)activeRecord.rotation.y-=dt*1.45;
       for(let i=0;i<12;i++){
         const phase=(elapsed*.28+i/12)%1,fade=Math.sin(phase*Math.PI),a=i*2.399;
         const x=-.08+Math.sin(a+phase*2)*(.12+phase*.35),y=1.12+phase*1.85,z=Math.cos(a+phase*2)*(.1+phase*.25);
@@ -210,10 +230,10 @@ window.NoraScenery = (() => {
           const u=[-.035,.015,.06,.085][part],v=[-.045,.045,.115,.08][part];
           o.translateX(u);o.translateY(v);o.scale.set((part===0?.085:part===1?.025:.07)*fade,(part===1?.18:.035)*fade,.025*fade);
           if(reduced)o.scale.setScalar(0);
-          o.updateMatrix();notes.setMatrixAt(i*4+part,o.matrix);notes.setColorAt(i*4+part,warm.set(colors[i%colors.length]).multiplyScalar(.5+.5*fade));
+          o.updateMatrix();activeNotes.setMatrixAt(i*4+part,o.matrix);activeNotes.setColorAt(i*4+part,warm.set(colors[i%colors.length]).multiplyScalar(.5+.5*fade));
         }
       }
-      notes.instanceMatrix.needsUpdate=true;notes.instanceColor.needsUpdate=true;
+      activeNotes.instanceMatrix.needsUpdate=true;activeNotes.instanceColor.needsUpdate=true;
     }
     blocks=[];solids=[];cameraBoxes=[];
     const lobbyZone={limitX:16.35,limitZ:11.35,boxes:solids,cameraBoxes};
@@ -266,7 +286,8 @@ window.NoraScenery = (() => {
       flame.position.set(lx,2.1,z);flame.scale.set(.29,.42,.29);lanterns.add(flame);
       const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
     }
-    const lobby=mesh();lobby.add(lanterns);lobby.visible=false;
+    consoleAt(lobbyDeck.x,lobbyDeck.z);
+    const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes);lobby.visible=false;
     const portal=new T.Group();
     portal.name='nora-world-portal';
     // Stepped stone surround and brass inlays from the NORA cover.
@@ -323,7 +344,7 @@ window.NoraScenery = (() => {
       portalTime+=dt;
       highlightMaterial.opacity=.61+.13*Math.sin(portalTime*2);
     }
-    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();lobbyNotes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
-  return {create,tavernOffset,portalZ};
+  return {create,tavernOffset,portalZ,lobbyDeck};
 })();
