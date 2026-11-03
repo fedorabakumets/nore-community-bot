@@ -8,10 +8,12 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import FSInputFile
 from aiohttp import web
 
+from .dedzytwo_playlist import PlaylistDelivery, Track, load_tracks
+
 ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'game'
 RECORDS = {'standard', 'dedzytwo'}
 COOLDOWN = 300
-CHAT_COOLDOWN = 60
+CHAT_COOLDOWN = 300
 INVENTORY_SIZE = 8
 LOBBY_DECK_KEY = 'nora_lobby_deck'
 
@@ -163,14 +165,17 @@ async def send_track(request):
         await save(db, f'nora_music_send:{uid}', now)
         await save(db, 'nora_music_chat', now)
         await db.commit()
+    tracks = load_tracks(
+        request.app['db'].path.with_name('dedzytwo-playlist.json'),
+        Track(FSInputFile(ASSETS / 'dedzytwo-s1.mp3'), 'Музыкальная пластинка «?» (S1)', 'dedzytwo'),
+    )
+    delivery = PlaylistDelivery(
+        request.app['bot'], FSInputFile(ASSETS / 'dedzytwo-playlist.jpg'), tracks,
+    )
     sent = []
     for recipient in (chat, uid):
         try:
-            await request.app['bot'].send_audio(
-                recipient, FSInputFile(ASSETS / 'dedzytwo-s1.mp3'),
-                title='Музыкальная пластинка «?» (S1)', performer='dedzytwo',
-                caption='Старое ≠ бесполезное\nSEASON 1 • BLOODY NORA\nhttps://t.me/thededzzyDJ',
-            )
+            await delivery.send(recipient)
             sent.append(recipient)
         except TelegramAPIError:
             pass

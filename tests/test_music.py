@@ -4,17 +4,29 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.exceptions import TelegramForbiddenError
-from aiogram.methods import SendAudio
+from aiogram import Bot
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramForbiddenError, TelegramNotFound
+from aiogram.methods import SendAudio, SendRichMessage
 
 from community_bot import music_api, nora_game_api
 from community_bot.database import Database
 
 
+def delivery_bot(send_audio=None):
+    return SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username='nora_test_bot')),
+        send_rich_message=AsyncMock(side_effect=TelegramNotFound(
+            method=SendRichMessage(chat_id=1, rich_message={'blocks': []}), message='Not Found',
+        )),
+        send_audio=send_audio or AsyncMock(),
+    )
+
+
 def request(db, uid=1, body=None, bot=None):
     class Request(dict):
         app = {'db': db, 'settings': SimpleNamespace(community_chat_id=-100),
-               'bot': bot or SimpleNamespace(send_audio=AsyncMock())}
+               'bot': bot or delivery_bot()}
         json = AsyncMock(return_value=body)
 
     return Request(actor={'id': uid})
@@ -130,7 +142,7 @@ async def test_lobby_record_transfer_is_persistent_and_owner_only(tmp_path):
 async def test_delivery_cooldown_is_atomic_persistent_and_limits_shared_chat(tmp_path, monkeypatch):
     db = Database(tmp_path / 'delivery.db')
     await db.initialize()
-    bot = SimpleNamespace(send_audio=AsyncMock())
+    bot = delivery_bot()
     now = [10000]
     monkeypatch.setattr(music_api.time, 'time', lambda: now[0])
     results = await asyncio.gather(*(music_api.send_track(request(db, bot=bot)) for _ in range(2)))
@@ -139,8 +151,8 @@ async def test_delivery_cooldown_is_atomic_persistent_and_limits_shared_chat(tmp
     assert [call.args[0] for call in bot.send_audio.await_args_list] == [-100, 1]
     assert all(call.args[1].path == music_api.ASSETS / 'dedzytwo-s1.mp3'
                for call in bot.send_audio.await_args_list)
-    assert content(await music_api.send_track(request(db, 2, bot=bot)))['retry_after'] == 60
-    assert content(await music_api.delivery_status(request(db, 2)))['retry_after'] == 60
+    assert content(await music_api.send_track(request(db, 2, bot=bot)))['retry_after'] == 300
+    assert content(await music_api.delivery_status(request(db, 2)))['retry_after'] == 300
     assert bot.send_audio.await_count == 2
     await db.initialize()
     assert content(await music_api.delivery_status(request(db)))['retry_after'] == 300
@@ -159,7 +171,7 @@ async def test_delivery_does_not_report_full_success_on_partial_failure(tmp_path
         if uid in failed:
             raise TelegramForbiddenError(method=SendAudio(chat_id=uid, audio='test'), message='Forbidden')
 
-    result = content(await music_api.send_track(request(db, bot=SimpleNamespace(send_audio=send))))
+    result = content(await music_api.send_track(request(db, bot=delivery_bot(send))))
     assert not result['sent']
     assert result['message'] != 'Отправили песню в чат и в личку 🎧'
     assert result['retry_after'] == 300
@@ -188,3 +200,61 @@ async def test_music_and_records_require_signed_staff_identity(tmp_path, path):
          patch.object(access, 'miniapp_allowed', AsyncMock(return_value=False)):
         assert (await miniapp.protection(req, handler)).status == 403
         handler.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delivers_native_playlist_to_both_recipients(tmp_path):
+    db = Database(tmp_path / 'delivery.db')
+    await db.initialize()
+    (tmp_path / 'extra.mp3').touch()
+    db.path.with_name('dedzytwo-playlist.json').write_text(json.dumps([
+        {'media': 'test-file-id', 'title': 'L.O.T.R', 'performer': 'kizaru', 'duration': 123},
+        {'media': './extra.mp3', 'title': 'Holla Holla'},
+    ]), encoding='utf-8')
+    bot = delivery_bot()
+    bot.send_rich_message.side_effect = None
+    bot.send_rich_message.return_value = SimpleNamespace(rich_message=None)
+
+    assert content(await music_api.send_track(request(db, bot=bot)))['sent']
+    assert [call.args[0] for call in bot.send_rich_message.await_args_list] == [-100, 1]
+    for call in bot.send_rich_message.await_args_list:
+        message = call.kwargs['rich_message']
+        assert [block.type for block in message.blocks] == [
+            'photo', 'paragraph', 'heading', 'details', 'divider',
+            'audio', 'audio', 'audio', 'divider', 'buttons',
+        ]
+        assert message.blocks[0].photo.media.path.name == 'dedzytwo-playlist.jpg'
+        assert message.blocks[3].is_open
+        track = message.blocks[6].audio
+        assert (track.media, track.title, track.performer, track.duration) == (
+            'test-file-id', 'L.O.T.R', 'kizaru', 123,
+        )
+        button = message.blocks[-1].buttons[0]
+        assert button.text == 'НОРА' and button.url == 'https://t.me/nora_test_bot?startapp'
+    bot.send_audio.assert_not_awaited()
+
+    session = AiohttpSession()
+    transport_bot = Bot('123456:test-token', session=session)
+    files = {}
+    payload = json.loads(session.prepare_value(message, bot=transport_bot, files=files))
+    assert len(files) == 3
+    assert payload['blocks'][0]['photo']['media'].startswith('attach://')
+    assert payload['blocks'][5]['audio']['media'].startswith('attach://')
+    assert payload['blocks'][6]['audio']['media'] == 'test-file-id'
+    assert files[payload['blocks'][7]['audio']['media'].removeprefix('attach://')].path == tmp_path / 'extra.mp3'
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_rich_delivery_failure_does_not_duplicate_message(tmp_path):
+    from aiogram.exceptions import TelegramNetworkError
+
+    db = Database(tmp_path / 'delivery.db')
+    await db.initialize()
+    bot = delivery_bot()
+    bot.send_rich_message.side_effect = TelegramNetworkError(
+        method=SendRichMessage(chat_id=1, rich_message={'blocks': []}), message='timeout',
+    )
+
+    assert not content(await music_api.send_track(request(db, bot=bot)))['sent']
+    assert bot.send_rich_message.await_count == 2
+    bot.send_audio.assert_not_awaited()
