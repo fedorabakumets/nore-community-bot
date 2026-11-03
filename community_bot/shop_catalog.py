@@ -6,6 +6,9 @@ import re
 from community_bot.domain import cookie_word, discounted_price, reputation_tier
 
 ITEM_LABELS = {
+    "nora_wings_raven": "Крылья «Ворон»",
+    "nora_wings_flame": "Крылья «Пламя»",
+    "nora_wings_frost": "Крылья «Иней»",
     "restore_rep": "Поднять репутацию +10",
     "reset_limits": "Сброс лимитов репутации",
     "forgive": "Прости меня…",

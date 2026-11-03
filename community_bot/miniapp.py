@@ -384,6 +384,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)
+    app.router.add_post('/api/nora-game/wings', nora_game_api.change_wings)
     app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
     app.router.add_get('/api/mafia', mafia_api.status)
     app.router.add_post('/api/mafia/action', mafia_api.action)
@@ -420,7 +421,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
-                 'interactive.js', 'nora-voxel.js', 'nora-scenery.js', 'nora-companion.js',
+                 'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
                  'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
@@ -436,6 +437,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
         ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
     app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
         ASSETS / 'fonts' / 'Monocraft-LICENSE.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
+    app.router.add_get('/game/wings-license.txt', lambda _: web.FileResponse(ROOT / 'nora-wings-license.txt'))
     app.router.add_static('/game/sounds/', ASSETS / 'game' / 'sounds', show_index=False)
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)

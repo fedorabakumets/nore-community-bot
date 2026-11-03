@@ -216,3 +216,66 @@ async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path,
     await exchange(2)
     now += nora_game_api.LOBBY_TTL
     assert await exchange(1) == []
+
+
+@pytest.mark.asyncio
+async def test_wing_purchase_and_lobby_bonus_use_persisted_equipment(tmp_path):
+    db = Database(tmp_path / 'wings.db')
+    await db.initialize()
+    for uid, nickname in ((1, 'Alice'), (2, 'Robin')):
+        await db.ensure_user(uid)
+        await nora_game_api.register(request(db, uid, {'nickname': nickname}))
+        await nora_game_api.save_outfit(request(db, uid, {
+            'shirt': 'gray', 'pants': 'gray_slim', 'shoes': 'black_stripes',
+        }))
+    await db.set_cookies(1, 100, 1)
+    await db.set_cookies(2, 49, 1)
+
+    async def change(uid, action, item):
+        return await nora_game_api.change_wings(request(db, uid, {
+            'action': action, 'item': item, 'price': 0, 'telegram_id': 1,
+        }))
+
+    async def exchange(uid, height):
+        req = request(db, uid, {
+            'session': f'00000000-0000-4000-8000-{uid:012d}',
+            'x': 1, 'y': height, 'z': 2, 'heading': 0, 'wings': 'flame',
+        })
+        req.app['nora_lobby'] = presence
+        return content(await nora_game_api.lobby(req))['players']
+
+    presence = {}
+    assert (await change(2, 'buy', 'flame')).status == 409
+    assert (await db.get_user(2))['cookies'] == 49
+    with pytest.raises(ValueError, match='купи'):
+        await change(2, 'equip', 'flame')
+    responses = await asyncio.gather(change(1, 'buy', 'raven'), change(1, 'buy', 'raven'))
+    assert [content(r) for r in responses] == [{'owned': ['raven'], 'equipped': None}] * 2
+    assert (await db.get_user(1))['cookies'] == 50
+    assert (await change(1, 'buy', 'frost')).status == 200
+    assert (await db.get_user(1))['cookies'] == 0
+    rows = await db.list_transactions(1)
+    assert sorted((row['details'], row['amount']) for row in rows if row['kind'] == 'shop') == [
+        ('nora_wings_frost', -50), ('nora_wings_raven', -50),
+    ]
+
+    await exchange(1, .017)
+    with pytest.raises(ValueError, match='высоту'):
+        await exchange(1, 1.02)
+    await change(1, 'equip', 'raven')
+    await change(1, 'equip', 'frost')
+    reopened = Database(tmp_path / 'wings.db')
+    profile = content(await nora_game_api.status(request(reopened, 1)))
+    assert profile['wings'] == {'owned': ['raven', 'frost'], 'equipped': 'frost'}
+    assert profile['outfit']['wings'] == 'frost'
+    await exchange(1, 1.02)
+    peer, = await exchange(2, .017)
+    assert peer['outfit']['wings'] == 'frost'
+    assert not {'wings', 'owned', 'telegram_id'} & peer.keys()
+    await change(1, 'equip', None)
+    with pytest.raises(ValueError, match='высоту'):
+        await exchange(1, 1.02)
+    await exchange(1, .017)
+    peer, = await exchange(2, .017)
+    assert 'wings' not in peer['outfit']
+    assert (await db.get_user(1))['cookies'] == 0

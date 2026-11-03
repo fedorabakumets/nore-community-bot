@@ -1,5 +1,8 @@
 'use strict';
 window.NoraWorld = (() => {
+  const GRAVITY=13, JUMP_SPEED=4.4;
+  // At fixed gravity, apex height is proportional to launch speed squared.
+  const jumpSpeed=equipped=>JUMP_SPEED*Math.sqrt(equipped?1.4:1);
   const trees = [[-5.7,-5.6], [5.2,-4.7], [-5.6,5.3], [5.5,5.7]];
   function move(position, dx, dz, zone = {limit:8.35,boxes:[]}) {
     // Substeps prevent tunneling through furniture after a frame stall.
@@ -133,6 +136,7 @@ window.NoraWorld = (() => {
           for(const pose of players){
             online.add(pose.nickname);
             const peer=peers.get(pose.nickname)||add(pose);
+            peer.avatar.setWings(pose.outfit.wings);
             peer.target=pose;
           }
           for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
@@ -153,6 +157,7 @@ window.NoraWorld = (() => {
         rotation.y+=Math.atan2(Math.sin(angle),Math.cos(angle))*ease;
         const distance=Math.hypot(dx,dz);
         avatar.walk(position.y>.04?0:distance,dt,distance>2.2*dt);
+        avatar.animateWings(dt,target.y>.04);
       }
     }
     return {update,leave};
@@ -275,7 +280,7 @@ window.NoraWorld = (() => {
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
-    function jump(){if(inputPaused())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
+    function jump(){if(inputPaused())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=jumpSpeed(outfit.wings);sounds?.jump(inside);}}
     on(root,'nora-pov',e=>{pov=e.detail;view=pov===0?1:0;actualDistance=0;cameraRelease=0;cameraSpeed=0;syncView();});
     if(pov===0){view=1;syncView();}
     on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;if(view!==1&&pov===0){pov=100;root.dispatchEvent(new CustomEvent('nora-view-pov',{detail:pov}));}cameraRelease=0;cameraSpeed=0;syncView();});
@@ -407,10 +412,11 @@ window.NoraWorld = (() => {
         const oldX=player.position.x,oldZ=player.position.z;
         move(player.position,dx,dz,zone);
         if(jumpVelocity!==0||jumpHeight>0){
-          jumpVelocity-=13*dt;jumpHeight+=jumpVelocity*dt;
+          jumpVelocity-=GRAVITY*dt;jumpHeight+=jumpVelocity*dt;
           if(jumpHeight<=0){jumpHeight=0;jumpVelocity=0;sounds?.land(inside);}
         }
         player.position.y=.017+jumpHeight;
+        character.animateWings(dt,jumpHeight>0);
         character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt,sprinting);
         // Face actual travel, preserving the last heading when stopped/blocked.
         const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;

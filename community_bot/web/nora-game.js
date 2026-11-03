@@ -3,6 +3,8 @@
   let overlay = null, active = 0, requestedFullscreen = false, sceneStop = null;
   const defaults = window.NoraVoxel.defaults;
   let outfit = { ...defaults };
+  let wingState;
+  const wingShop = window.NoraWings;
   let helpDismissed = false;
   let music = null, pendingGift = false;
   const settings = {pov: 100, music: 100, effects: 100};
@@ -235,11 +237,11 @@
     setTimeout(() => { if (version === active) editor(nickname); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 150 : 2100);
   }
   async function editor(nickname) {
-    const categories = {gender:'Пол',hairstyle:'Причёска',hair_color:'Цвет волос',eye_color:'Цвет глаз',shirt:'Футболка',pants:'Штаны',shoes:'Обувь'};
+    const categories = {gender:'Пол',hairstyle:'Причёска',hair_color:'Цвет волос',eye_color:'Цвет глаз',shirt:'Футболка',pants:'Штаны',shoes:'Обувь',wings:'Крылья'};
     const {choices, icon} = window.NoraVoxel;
-    frame(`<div class="nora-editor"><header><span class="nora-game-kicker">ИГРОК / ${esc(nickname)}</span><h1>Твой персонаж</h1></header><div class="nora-editor-stage"><canvas aria-label="Трёхмерный персонаж, вращайте пальцем"></canvas><span class="nora-editor-hint">↔ ПОВЕРНИ ПЕРСОНАЖА</span></div><div class="nora-editor-controls"><div class="nora-editor-tabs" role="group" aria-label="Разделы внешности">${Object.entries(categories).map(([key,label])=>`<button type="button" data-category="${key}" aria-label="${label}" title="${label}" aria-pressed="${key==='gender'}" class="${key==='gender'?'active':''}">${icon(key,outfit[key],outfit)}</button>`).join('')}</div><div class="nora-editor-caption"><span class="nora-editor-category">Пол</span><span class="nora-editor-selection" role="status"></span></div><div class="nora-editor-options" role="group" aria-label="Пол"></div><p class="nora-game-error" role="alert"></p><button class="nora-editor-save">СОХРАНИТЬ И ВОЙТИ <span>↗</span></button></div></div>`);
+    frame(`<div class="nora-editor"><header><span class="nora-game-kicker">ИГРОК / ${esc(nickname)}</span><h1>Твой персонаж</h1></header><div class="nora-editor-stage"><canvas aria-label="Трёхмерный персонаж, вращайте пальцем"></canvas><span class="nora-editor-hint">↔ ПОВЕРНИ ПЕРСОНАЖА</span></div><div class="nora-editor-controls"><div class="nora-editor-tabs" role="group" aria-label="Разделы внешности">${Object.entries(categories).map(([key,label])=>`<button type="button" data-category="${key}" aria-label="${label}" title="${label}" aria-pressed="${key==='gender'}" class="${key==='gender'?'active':''}">${key==='wings'?wingShop.icon():icon(key,outfit[key],outfit)}</button>`).join('')}</div><div class="nora-editor-caption"><span class="nora-editor-category">Пол</span><span class="nora-editor-selection" role="status"></span></div><div class="nora-editor-options" role="group" aria-label="Пол"></div><p class="nora-game-error" role="alert"></p><button class="nora-editor-save">СОХРАНИТЬ И ВОЙТИ <span>↗</span></button></div></div>`);
     const root = overlay.querySelector('.nora-editor');
-    let category = 'gender', saving = false;
+    let category = 'gender', saving = false, preview = wingState.equipped;
     const optionList = root.querySelector('.nora-editor-options');
     function selection() {
       optionList.querySelectorAll('[data-choice]').forEach(el => {
@@ -249,24 +251,87 @@
       });
       root.querySelector('.nora-editor-selection').textContent = choices[category].find(([value]) => value === outfit[category])?.[1] || '';
     }
+    function previewWings(id,inspect=false) {
+      preview=id;
+      root.dispatchEvent(new CustomEvent('wings-preview',{detail:{id,inspect}}));
+    }
+    function wingCards() {
+      optionList.innerHTML = Object.entries(wingShop.catalog).map(([id,item])=>{
+        const equipped = wingState.equipped===id;
+        const owned = wingState.owned.includes(id);
+        const action = equipped?'Снять':owned?'Надеть':'Купить';
+        return `<article class="nora-wing-card">
+          <button type="button" data-wing-preview="${id}" aria-label="Примерить: ${item.name}"
+            aria-pressed="${preview===id}" class="${preview===id?'selected':''}">
+            ${wingShop.icon(id)}<strong>${item.name}</strong>
+          </button>
+          <span>50 🍪</span><small>Усиленный прыжок +40%</small>
+          <button type="button" data-wing-action="${id}">${action}</button>
+        </article>`;
+      }).join('');
+      root.querySelector('.nora-editor-selection').textContent = wingShop.catalog[preview]?.name || 'Выбери пару для примерки';
+    }
     function options() {
       optionList.classList.toggle('nora-editor-swatches', category.endsWith('_color'));
       optionList.setAttribute('aria-label', categories[category]);
       root.querySelector('.nora-editor-category').textContent = categories[category];
+      if(category==='wings') { wingCards();return; }
       optionList.innerHTML = choices[category].map(([value, label]) => `<button type="button" data-choice="${value}" aria-label="${label}" title="${label}">${icon(category,value,outfit)}</button>`).join('');
       selection();
     }
     root.querySelector('.nora-editor-tabs').onclick = e => {
       const b = e.target.closest('[data-category]'); if (!b || saving) return;
-      category = b.dataset.category;
+      const next = b.dataset.category;
+      if(next!==category) {
+        if(next==='wings') previewWings(wingState.equipped,true);
+        else if(category==='wings') previewWings(wingState.equipped);
+      }
+      category = next;
       root.querySelectorAll('[data-category]').forEach(el => { el.classList.toggle('active', el === b); el.setAttribute('aria-pressed', String(el === b)); });
       options();
     };
-    optionList.onclick = e => {
-      const b = e.target.closest('[data-choice]'); if (!b || saving) return;
+    optionList.onclick = async e => {
+      if(saving) return;
+      const tryOn = e.target.closest('[data-wing-preview]');
+      if(tryOn) {
+        previewWings(tryOn.dataset.wingPreview,true);
+        wingCards();
+        optionList.querySelector(`[data-wing-preview="${preview}"]`).focus({preventScroll:true});
+        return;
+      }
+      const wingButton = e.target.closest('[data-wing-action]');
+      if(wingButton) {
+        const id = wingButton.dataset.wingAction;
+        const owned = wingState.owned.includes(id);
+        const removing = wingState.equipped===id;
+        saving=true;
+        root.querySelectorAll('.nora-editor-controls button').forEach(button=>{button.disabled=true;});
+        root.querySelector('.nora-game-error').textContent='';
+        try {
+          const state = await api('nora-game/wings',{action:owned?'equip':'buy',item:removing?null:id});
+          if(!root.isConnected) return;
+          wingState=state;
+          outfit.wings=state.equipped;
+          previewWings(removing?null:id,!removing);
+          wingCards();
+        } catch(error) {
+          if(root.isConnected) {
+            root.querySelector('.nora-game-error').textContent=error.message;
+            toast(error.message);
+          }
+        } finally {
+          saving=false;
+          if(root.isConnected) {
+            root.querySelectorAll('.nora-editor-controls button').forEach(button=>{button.disabled=false;});
+            optionList.querySelector(`[data-wing-action="${id}"]`).focus({preventScroll:true});
+          }
+        }
+        return;
+      }
+      const b = e.target.closest('[data-choice]'); if (!b) return;
       outfit[category] = b.dataset.choice;
       selection();
-      root.querySelectorAll('[data-category]').forEach(el => { const key=el.dataset.category; el.innerHTML=icon(key,outfit[key],outfit); });
+      root.querySelectorAll('[data-category]').forEach(el => { const key=el.dataset.category; if(key!=='wings')el.innerHTML=icon(key,outfit[key],outfit); });
       root.dispatchEvent(new Event('outfit-change'));
     };
     root.querySelector('.nora-editor-save').onclick = async () => {
@@ -277,7 +342,7 @@
       const version = active;
       try {
         const result = await api('nora-game/outfit', {...outfit});
-        if (version === active && root.isConnected) { outfit={...defaults,...result.outfit}; world(nickname); }
+        if (version === active && root.isConnected) { outfit={...defaults,...result.outfit,wings:wingState.equipped}; world(nickname); }
       } catch (error) {
         if (version === active && root.isConnected) {
           root.querySelector('.nora-game-error').textContent = error.message;
@@ -287,7 +352,13 @@
       }
     };
     options();
-    try { const stop = await window.NoraVoxel.mount(root.querySelector('canvas'), outfit, root); if (root.isConnected) sceneStop = stop; else stop(); }
+    try {
+      const stop = await window.NoraVoxel.mount(root.querySelector('canvas'), outfit, root);
+      if (root.isConnected) {
+        sceneStop = stop;
+        if (category==='wings') previewWings(preview,true);
+      } else stop();
+    }
     catch (_) { root.querySelector('.nora-editor-stage').textContent = '3D сейчас недоступно на этом устройстве'; root.querySelector('.nora-editor-save').disabled = true; }
   }
   function registration(message = '') {
@@ -311,7 +382,7 @@
     music = createMusic(); music.start();
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
-    try { const result = await api('nora-game'); if (version === active) { outfit = {...defaults,...result.outfit}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
+    try { const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const gift=pendingGift;close();open(gift); }; } }
   }
   document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); if(event.target.closest('[data-record-gift]'))open(true); });

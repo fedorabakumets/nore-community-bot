@@ -281,6 +281,15 @@ window.NoraVoxel = (() => {
         mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;joints[part].add(mesh);meshes.push(mesh);
       }
     }
+    let wingId, wings;
+    function setWings(id) {
+      if (id===wingId) return;
+      wings?.dispose();
+      wingId=id;
+      wings=window.NoraWings?.attach(T,torso,id,unit,material);
+      wings?.tick(0);
+    }
+    function animateWings(dt,airborne) { wings?.tick(dt,airborne); }
     function walk(distance,dt,sprinting=false){
       run+=((sprinting&&distance>0?1:0)-run)*(1-Math.exp(-8*dt));
       gait+=(Math.min(1,distance/Math.max(dt,.001)/1.7)-gait)*(1-Math.exp(-12*dt));
@@ -304,10 +313,24 @@ window.NoraVoxel = (() => {
       }
     }
     build();
-    return { group: pivot, rebuild: build, walk, setOpacity(value) { material.opacity=Math.max(0,Math.min(1,value));for(const mesh of meshes)mesh.visible=material.opacity>.001; }, dispose() { for(const mesh of meshes)mesh.dispose(); material.dispose(); cube.dispose(); } };
+    setWings(outfit.wings);
+    return {
+      group:pivot, rebuild:build, walk, setWings, animateWings,
+      setOpacity(value) {
+        material.opacity=Math.max(0,Math.min(1,value));
+        for(const mesh of meshes)mesh.visible=material.opacity>.001;
+        wings?.setOpacity(material.opacity);
+      },
+      dispose() {
+        wings?.dispose();
+        for(const mesh of meshes)mesh.dispose();
+        material.dispose();cube.dispose();
+      },
+    };
   }
   return { defaults, choices, icon, createCharacter, async mount(canvas, outfit, root) {
     const T = await import('/vendor/three.module.js');
+    if (!root.isConnected) return () => {};
     const renderer = new T.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'low-power' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = T.SRGBColorSpace;
@@ -316,15 +339,23 @@ window.NoraVoxel = (() => {
     scene.add(new T.HemisphereLight(0xffffff, 0x655562, 2.3));
     const light = new T.DirectionalLight(0xffffff, 2.2); light.position.set(-3, 6, 5); scene.add(light);
     const character = createCharacter(T, outfit), pivot = character.group; scene.add(pivot);
+    let preview = outfit.wings, previous = 0;
     let raf = 0, lastTouch = 0, dragging = false, startX = 0, disposed = false;
-    function resize() { const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);const aspect=w/h, halfHeight=Math.max(2.95,1.65/aspect);camera.top=halfHeight;camera.bottom=-halfHeight;camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.updateProjectionMatrix(); }
+    function resize() { const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);const aspect=w/h, halfHeight=Math.max(2.95,(preview?3.1:1.65)/aspect);camera.top=halfHeight;camera.bottom=-halfHeight;camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.updateProjectionMatrix(); }
     const observer=new ResizeObserver(resize); observer.observe(canvas);resize();
     const changed=()=>character.rebuild();root.addEventListener('outfit-change',changed);
+    function previewWings(event) {
+      preview=event.detail.id;
+      character.setWings(preview);
+      if(event.detail.inspect) { pivot.rotation.y=Math.PI+.28;lastTouch=performance.now()+1800; }
+      resize();
+    }
+    root.addEventListener('wings-preview',previewWings);
     canvas.style.touchAction='none';
     canvas.onpointerdown=e=>{dragging=true;startX=e.clientX;canvas.setPointerCapture(e.pointerId);};
     canvas.onpointermove=e=>{if(dragging){pivot.rotation.y+=(e.clientX-startX)*.009;startX=e.clientX;lastTouch=performance.now();}};
     canvas.onpointerup=canvas.onpointercancel=()=>{dragging=false;};
-    function tick(t){if(disposed)return;if(!document.hidden){if(!dragging&&t-lastTouch>1300)pivot.rotation.y+=.0025;renderer.render(scene,camera);}raf=requestAnimationFrame(tick);} tick(0);
-    return ()=>{disposed=true;cancelAnimationFrame(raf);observer.disconnect();root.removeEventListener('outfit-change',changed);character.dispose();renderer.dispose();};
+    function tick(t){if(disposed)return;const dt=previous?Math.min((t-previous)/1000,.05):0;previous=t;if(!document.hidden){character.animateWings(dt);if(!dragging&&t-lastTouch>1300)pivot.rotation.y+=.0025;renderer.render(scene,camera);}raf=requestAnimationFrame(tick);} tick(0);
+    return ()=>{disposed=true;cancelAnimationFrame(raf);observer.disconnect();root.removeEventListener('outfit-change',changed);root.removeEventListener('wings-preview',previewWings);character.dispose();renderer.dispose();};
   }};
 })();

@@ -17,6 +17,7 @@ try {
   await writeFile(join(temp, 'three.module.mjs'), module);
   const Three = await import(pathToFileURL(join(temp, 'three.module.mjs')).href);
   const world = (await readFile(new URL('nora-world.js', web), 'utf8')).replace("await import('/vendor/three.module.js')", 'THREE');
+  const wings = await readFile(new URL('nora-wings.js', web), 'utf8');
   const voxel = await readFile(new URL('nora-voxel.js', web), 'utf8');
   const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
   class Element extends EventTarget {
@@ -82,7 +83,7 @@ try {
   tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false, equipped=null) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
@@ -96,12 +97,13 @@ try {
       crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     if(realScenery)vm.runInContext(sceneryCode, context);
+    vm.runInContext(wings, context);
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
     window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player??=result.group;return result;};
     vm.runInContext(companion, context);
     vm.runInContext(world, context);
-    const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes'}, sounds);
+    const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes',wings:equipped}, sounds);
     for(let i=0;i<view;i++)root.querySelector('.nora-world-view').emit('click');
     const frames = count => {for(let i=0;i<count;i++)frame(time+=1000/fps);};
     frames(30);
@@ -233,6 +235,39 @@ try {
   h.key('KeyW');h.frames(20);h.window.emit('blur');assert.ok(h.delta(30).length()<.001,'blur stops');
   h.key('Space');h.frames(10);assert.ok(h.player.position.y>.1,'jump');h.frames(60);assert.equal(h.player.position.y,.017,'lands');
   h.stop();
+  for (const fps of [30,60,120]) {
+    const peaks=[];
+    for (const id of [null,'raven','flame','frost']) {
+      const w=await setup(0,fps,undefined,undefined,fps===30,false,id);
+      const model=w.player.getObjectByName('wings');
+      assert.equal(Boolean(model),Boolean(id));
+      if (model) {
+        assert.equal(model.parent.name,'torso');
+        const meshes=[];
+        model.traverse(mesh=>{if(mesh.isMesh)meshes.push(mesh);});
+        assert.equal(meshes.length,4);
+        assert.equal(meshes[0].material.map.magFilter,Three.NearestFilter);
+        assert.equal(meshes[0].geometry,meshes[2].geometry);
+        const idle=model.children[0].rotation.y;
+        w.frames(3);
+        assert.notEqual(model.children[0].rotation.y,idle);
+      }
+      if(fps===30)w.root.querySelector('.nora-world-jump').emit('pointerdown');
+      else w.key('Space');
+      let peak=0;
+      for(let i=0;i<fps;i++){
+        w.frames(1);
+        const height=w.player.position.y-.017;
+        peak=Math.max(peak,height);
+        if(i===Math.floor(fps*.2))w.key('Space'); // Airborne input cannot add another jump.
+      }
+      assert.equal(w.player.position.y,.017);
+      peaks.push(peak);
+      w.stop();
+    }
+    assert.ok(peaks[1]/peaks[0]>1.39&&peaks[1]/peaks[0]<1.44);
+    assert.equal(peaks[1],peaks[2]);assert.equal(peaks[2],peaks[3]);
+  }
   const env=await setup();
   const api=env.world;
   assert.equal(api.timeOfDay(Date.UTC(2026,10,2,0)).hour,3,'Moscow UTC+3');

@@ -7,6 +7,8 @@ import time
 
 from aiohttp import web
 
+from community_bot.database import utcnow
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nora_game_players (
     telegram_id INTEGER PRIMARY KEY,
@@ -49,7 +51,20 @@ async def _appearance(db, telegram_id):
     }
 
 
-async def _player_profile(database, telegram_id):
+WING_IDS = frozenset({'raven', 'flame', 'frost'})
+WING_PRICE = 50
+
+
+async def _wings(db, telegram_id):
+    row = await (await db.execute(
+        'SELECT value FROM bot_state WHERE key = ?', (f'nora_game_wings:{telegram_id}',),
+    )).fetchone()
+    if row:
+        return json.loads(row['value'])
+    return {'owned': [], 'equipped': None}
+
+
+async def _player_profile(database, telegram_id, *, private=False):
     async with database.connect() as db:
         row = await (await db.execute(
             'SELECT p.nickname, o.shirt, o.pants, o.shoes FROM nora_game_players AS p '
@@ -60,11 +75,17 @@ async def _player_profile(database, telegram_id):
         if row and row['shirt'] is not None:
             outfit = {key: row[key] for key in ('shirt', 'pants', 'shoes')}
             outfit.update(await _appearance(db, telegram_id))
-    return {'nickname': row['nickname'] if row else None, 'outfit': outfit}
+        wings = await _wings(db, telegram_id) if private and row else None
+        if outfit and wings and wings['equipped']:
+            outfit['wings'] = wings['equipped']
+    profile = {'nickname': row['nickname'] if row else None, 'outfit': outfit}
+    if wings and wings['owned']:
+        profile['wings'] = wings
+    return profile
 
 
 async def status(request):
-    return web.json_response(await _player_profile(request.app['db'], request['actor']['id']))
+    return web.json_response(await _player_profile(request.app['db'], request['actor']['id'], private=True))
 
 
 async def companion(request):
@@ -135,9 +156,61 @@ async def save_outfit(request):
     return web.json_response({'outfit': {**{key: body[key] for key in choices}, **appearance}})
 
 
+async def change_wings(request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise ValueError('Выбери крылья')
+    action, item = body.get('action'), body.get('item')
+    if action not in ('buy', 'equip') or (
+        not (action == 'equip' and 'item' in body and item is None)
+        and (not isinstance(item, str) or item not in WING_IDS)
+    ):
+        raise ValueError('Выбери крылья')
+
+    user_id = request['actor']['id']
+    async with request.app['db'].connect() as db:
+        await db.execute('BEGIN IMMEDIATE')
+        player = await (await db.execute(
+            'SELECT 1 FROM nora_game_players WHERE telegram_id = ?', (user_id,),
+        )).fetchone()
+        if not player:
+            raise ValueError('Сначала зарегистрируй игровой ник')
+        wings = await _wings(db, user_id)
+        if action == 'buy':
+            if item in wings['owned']:
+                return web.json_response(wings)
+            now = utcnow()
+            debit = await db.execute(
+                'UPDATE users SET cookies = cookies - ?, updated_at = ? WHERE user_id = ? AND cookies >= ?',
+                (WING_PRICE, now, user_id, WING_PRICE),
+            )
+            if debit.rowcount != 1:
+                return web.json_response({'error': 'Недостаточно печенек.'}, status=409)
+            await db.execute(
+                'INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)',
+                (user_id, -WING_PRICE, 'shop', f'nora_wings_{item}', now),
+            )
+            wings['owned'].append(item)
+        else:
+            if item is not None and item not in wings['owned']:
+                raise ValueError('Сначала купи эти крылья')
+            wings['equipped'] = item
+
+        await db.execute(
+            'INSERT INTO bot_state(key, value) VALUES (?, ?) '
+            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+            (f'nora_game_wings:{user_id}', json.dumps(wings)),
+        )
+        await db.commit()
+    return web.json_response(wings)
+
+
 # Lobby presence expires automatically when a client closes or loses its connection.
 LOBBY_TTL = 8
-LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'y': (0, .8), 'heading': (-math.pi, math.pi)}
+LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi, math.pi)}
+# 0.017 ground offset plus 4.4² / (2 × 13), with 1.4× height for equipped wings.
+LOBBY_HEIGHT = .8
+LOBBY_WING_HEIGHT = 1.07
 
 
 async def lobby(request):
@@ -171,6 +244,20 @@ async def lobby(request):
         profile = await _player_profile(request.app['db'], user_id)
         if not profile['nickname'] or not profile['outfit']:
             raise ValueError('Сначала создай персонажа')
+    # Only the persisted equipment can authorize the higher replicated jump.
+    async with request.app['db'].connect() as db:
+        equipped = (await _wings(db, user_id))['equipped']
+    height = body.get('y')
+    maximum = LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT
+    if type(height) not in (int, float) or not 0 <= height <= maximum:
+        raise ValueError('Проверь высоту прыжка')
+    pose['y'] = height
+    outfit = dict(profile['outfit'])
+    if equipped:
+        outfit['wings'] = equipped
+    else:
+        outfit.pop('wings', None)
+    profile = {'nickname': profile['nickname'], 'outfit': outfit}
     presence[user_id] = (time.monotonic(), session, {**profile, **pose})
     others = [player for key, (_, _, player) in presence.items() if key != user_id]
     others.sort(key=lambda player: (player['x'] - pose['x']) ** 2 + (player['z'] - pose['z']) ** 2)
