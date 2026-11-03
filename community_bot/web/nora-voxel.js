@@ -23,18 +23,18 @@ window.NoraVoxel = (() => {
       art = `<path fill="${colors.skin}" d="M11 4h10v11H11z"/><path fill="${hair}" d="M10 3h12v5H10z"/><path fill="#c7b99b" d="${value==='female'?'M9 17h14v4h-3v2h2v3H10v-3h2v-2H9z':'M7 17h18v6h-4v3H11v-3H7z'}"/>`;
       art += `<path fill="#e3bc82" d="${value==='female'?'M25 20h2v3h3v2h-3v4h-2v-4h-3v-2h3z':'M24 2h6v6h-2V6l-5 5-2-2 5-5h-2z'}"/>`;
     } else if (category === 'hairstyle' || category === 'hair_color') {
-      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M11 4h10v1h3v2h2v3h1v12h-1v3h-3v1h-3V13h-3v-2h-4v2h-2v13H8v-2H6V10h1V7h2V5h2z':style==='ponytail'?'M11 4h10v1h3v3h2v3h3v3h2v8h-1v3h-2v3h-3V15h-3v9h-2V13h-4v-2h-3v3h-2v10H9V14H7V8h2V5h2z':'M10 3h8v1h4v2h2v2h2v5h-3v2h-3v-3h-5v2h-4v3H8v-4H6V8h2V5h2z'}"/><path fill="#fff" opacity=".12" d="M11 5h9v2h-9z"/>`;
+      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M10 4h12v2h3v4h2v14h-3v2h-3V12h-5v-2h-4v3h-1v13H8v-2H6V10h1V6h3z':style==='ponytail'?'M11 4h10v1h3v3h2v3h3v3h2v8h-1v3h-2v3h-3V15h-3v9h-2V13h-4v-2h-3v3h-2v10H9V14H7V8h2V5h2z':'M10 3h9v2h5v3h2v5h-6v-2h-7v3H8v-1H6V8h2V5h2z'}"/><path fill="#fff" opacity=".06" d="M11 5h9v2h-9z"/>`;
       if(style==='ponytail') art += `<path fill="${colors.burgundy}" d="M26 12h5v2h-5z"/>`;
       if(category==='hair_color') art += '<path fill="#e3bc82" d="M25 18h3v3h-3zM22 21h3v3h-3zM19 24h3v3h-3z"/>';
     } else if (category === 'eye_color') {
       art = `<path fill="#e9e7e1" d="M5 11h4V8h14v3h4v10h-4v3H9v-3H5z"/><path fill="${eyeColors[value]||eyeColors.brown}" d="M11 9h10v14H11z"/><path fill="#202124" d="M14 12h4v9h-4z"/><path fill="#fff" d="M12 10h3v3h-3z"/>`;
     } else if (category === 'shirt') {
       const shape=outfit.gender==='female'?'M11 5H8L2 11l4 6 4-2v3h2v4h-2v5h12v-5h-2v-4h2v-3l4 2 4-6-6-6h-3l-2 3h-6z':'M11 5H8L2 11l4 6 4-2v12h12V15l4 2 4-6-6-6h-3l-2 3h-6z';
-      art = `<path fill="${colors[value]||colors.white}" d="${shape}"/><path fill="#000" opacity=".22" d="M10 24h12v3H10zM13 5h6v3h-6z"/><path fill="#fff" opacity=".25" d="M18 12h3v4h-3z"/>`;
+      art = `<path fill="${colors[value]||colors.white}" d="${shape}"/><path fill="#000" opacity=".10" d="M10 24h12v3H10zM13 5h6v3h-6z"/>`;
       art += `<path fill="${colors.cream}" d="M11 5h2v3h6V5h2v3h-2v2h-6V8h-2zM4 14l2 3 4-2v-2l-4 2zM22 13v2l4 2 2-3-2 1zM10 25h12v2H10z"/>`;
     } else if (category === 'pants') {
       const wide = value === 'burgundy_wide';
-      art = `<path fill="${value==='blue_slim'?colors.blue:value==='gray_slim'?colors.denimGray:colors.burgundy}" d="M7 4h18v9l${wide?'2':'-2'} 15h-${wide?'10':'6'}l-1-14-1 14H${wide?'5':'9'}l${wide?'2':'-2'}-15z"/><path fill="#000" opacity=".25" d="M7 4h18v3H7z"/><path fill="#c5c1ba" d="M15 5h2v2h-2z"/>`;
+      art = `<path fill="${value==='blue_slim'?colors.blue:value==='gray_slim'?colors.denimGray:colors.burgundy}" d="M7 4h18v9l${wide?'2':'-2'} 15h-${wide?'10':'6'}l-1-14-1 14H${wide?'5':'9'}l${wide?'2':'-2'}-15z"/><path fill="#000" opacity=".10" d="M7 4h18v3H7z"/><path fill="#c5c1ba" d="M15 5h2v2h-2z"/>`;
     } else if (category === 'shoes') {
       const fill = value==='white_stripes'?colors.white:value==='black_stripes'?colors.black:colors.red;
       art = `<path fill="${fill}" d="M5 8h9v6l5 3h6l4 4v5H3V13h2z"/><path fill="${value==='white_stripes'?colors.stripe:colors.stripeWhite}" d="M9 15h2v6H9zM13 16h2v5h-2zM17 18h2v3h-2z"/><path fill="${colors.sole}" d="M3 24h26v3H3z"/>`;
@@ -101,17 +101,14 @@ window.NoraVoxel = (() => {
         box(-width,width,y,y,-depth,depth,outfit.shirt);
       }
       if(female) {
-        // One continuous dressed volume with tapered sides and upper/lower edges.
+        // Broad front plane with a single bevel, not concentric narrow terraces.
         box(-4,4,20,20,5,5,outfit.shirt);
-        box(-6,6,21,21,5,5,outfit.shirt);box(-5,5,21,21,6,6,outfit.shirt);
-        box(-3,3,21,21,7,7,outfit.shirt);
-        box(-7,7,22,22,5,5,outfit.shirt);box(-6,6,22,22,6,6,outfit.shirt);
-        box(-5,5,22,22,7,7,outfit.shirt);
-        box(-3,3,22,22,8,8,outfit.shirt);
-        box(-6,6,23,23,5,5,outfit.shirt);box(-5,5,23,23,6,6,outfit.shirt);
-        box(-3,3,23,23,7,7,outfit.shirt);
+        box(-6,6,21,23,5,6,outfit.shirt);
+        box(-4,4,21,23,7,7,outfit.shirt);
+        box(-7,7,22,22,5,5,outfit.shirt);
+        box(-4,4,22,23,8,8,outfit.shirt);
         box(-5,5,24,24,5,5,outfit.shirt);
-        box(-3,3,20,20,5,5,outfit.shirt+'Trim');
+        box(-4,4,24,24,6,6,outfit.shirt);
       }
       section='arms';
       for (const side of [-1,1]) {
@@ -126,8 +123,7 @@ window.NoraVoxel = (() => {
         } else box(x-2,x+2,12,19,-2,2,'skin');
         box(x-(side<0?2:inner),x+(side>0?2:inner),12,12,3,3,'shadow');
       }
-      // Cream knit edging and restrained, flush fabric shading.
-      const shirtTrim = outfit.shirt + 'Trim', shirtLight = outfit.shirt + 'Light';
+      // Let scene lighting describe the cloth; keep only intentional knit edging.
       section='body';
       const hem=shirtWidths[0];
       box(-hem,hem,14,14,-4,4,'cream');
@@ -138,13 +134,9 @@ window.NoraVoxel = (() => {
       for (const side of [-1,1]) {
         const x=side*10;
         section='arms';box(x-2,x+2,20,20,-3,3,'cream');section='body';
-        for (let y=16;y<=21;y++) dot(side*shirtWidths[y-14],y,female&&(y===18||y===19)?3:4,shirtTrim);
-        for (let y=15;y<=17;y++) dot(side*5,y,4,shirtLight);
-        const fold=side*(female?5:6);
-        for(let y=23;y<=24;y++)dot(fold,y,female?(y===23?6:5):4,shirtLight);
       }
       section='body';
-      // Denim seams, waistband, rear pockets and stepped knee creases.
+      // Quiet denim panels: waistband and broad pockets, no isolated knee marks.
       const pantTrim=pant+'Trim', pantLight=pant+'Light';
       box(female?-8:-7,female?8:7,13,13,female?-4:-3,3,pantTrim);
       section='legs';
@@ -153,12 +145,9 @@ window.NoraVoxel = (() => {
         for (let y=4;y<=12;y++) dot(x+side*((wide&&y>=5&&y<=11)||(female&&y>=11)?4:3),y,3,pantTrim);
         if(female) {
           box(x-1,x+1,11,12,-5,-5,pantLight);
-          box(x-1,x+1,10,10,-4,-4,pantTrim);
         } else {
           box(x-2,x+2,9,11,-3,-3,pantLight);
-          box(x-2,x+2,8,8,-3,-3,pantTrim);
         }
-        box(x-1,x+1,6,6,3,3,pantLight);
         box(x-3,x+3,4,4,-3,3,pantTrim);
         box(x-2,x+2,3,4,-2,2,pant);
         dot(x,13,4,'sole');
@@ -166,11 +155,11 @@ window.NoraVoxel = (() => {
       section='shoes';
       // Sculpted uppers, tongues, laces and layered sneaker sidewalls.
       for (const side of [-1,1]) {
-        const x=side*4, trim=outfit.shoes==='white_stripes'?'gray':'sole';
+        const x=side*4;
         box(x-2,x+2,2,3,-3,5,shoe);
         box(x-2,x+2,2,2,6,8,shoe);
-        box(x-1,x+1,3,3,3,5,trim);
-        for (const z of [4,6]) box(x-1,x+1,3,3,z,z,'stripeWhite');
+        box(x-1,x+1,3,3,3,6,shoe);
+        box(x-1,x+1,3,3,4,5,'stripeWhite');
         if (outfit.shoes==='red_air') {
           for (const edge of [-3,3]) {
             for (let z=2;z<=8;z++) { dot(x+edge,1,z,'sole'); dot(x+edge,2,z,'burgundy'); }
@@ -194,21 +183,21 @@ window.NoraVoxel = (() => {
         box(side*11,side*11,34,35,1,1,'shadow');
         box(side<0?-9:8,side<0?-8:9,32,33,7,7,'cheek');
       }
-      // Broad bevelled masses share a solid shell, not stacked hollow plates.
+      // Three broad crown planes replace the staircase of shrinking rings.
       const hairstyle = outfit.hairstyle || defaults.hairstyle;
       box(-10,10,42,44,-7,7,'hair',false);
       for(let y=42;y<=49;y++) {
-        const width=[10,11,11,11,10,9,8,6][y-42],depth=[7,8,8,8,7,6,5,4][y-42];
+        const width=y<=45?11:y<=48?10:8,depth=y<=45?8:y<=48?7:5;
         for(let x=-width;x<=width;x++)for(let z=-depth;z<=depth;z++)
           if(Math.abs(x)+Math.abs(z)<=width+depth-3)
-            dot(x,y,z,y>=47&&x<2?'hairLight':'hair');
+            dot(x,y,z,y>=46&&x<2?'hairLight':'hair');
       }
       box(-10,10,39,42,-8,-6,'hair');
       if(hairstyle==='crop') {
         // A swept crown and connected fringe locks give a deliberate parting.
         box(-7,1,50,50,-2,3,'hairLight');
-        for(const [left,right,bottom,front] of [[-10,-8,39,8],[-7,-3,40,9],[-2,2,41,9],[3,6,40,8],[7,10,42,8]])
-          box(left,right,bottom,44,7,front,'hair');
+        for(const [left,right,bottom,front] of [[-10,-7,39,8],[-6,2,40,9],[3,10,42,8]])
+          box(left,right,bottom,44,7,front,'hair',false);
         for(const side of [-1,1]) {
           box(side<0?-11:10,side<0?-10:11,39,43,-5,4,'hair');
           box(side*10,side*10,38,38,-3,2,'hair');
@@ -216,29 +205,27 @@ window.NoraVoxel = (() => {
       } else if(hairstyle==='bob') {
         // Rounded sides flow into the back; the lower edge turns inward.
         for(let y=29;y<=43;y++) {
-          const width=y<=30?10:y<=33?11:12,back=y<=30?8:y<=33?9:10;
+          const width=y<=30?10:y===31?11:12,back=y<=30?8:y===31?9:10;
           for(let x=-width;x<=width;x++)for(let z=-back;z<=7;z++)
             if((Math.abs(x)>=9||z<=-6)&&Math.abs(x)+Math.abs(z)<=width+back-3)
-              dot(x,y,z,Math.abs(x)===width&&z>=0?'hairLight':'hair');
+              dot(x,y,z,x<=-9&&z>=0?'hairLight':'hair');
         }
-        for(const [left,right,bottom] of [[-10,-7,39],[-6,-2,40],[-1,3,41],[4,8,42],[9,10,40]])
-          box(left,right,bottom,44,7,9,'hair');
-        for(const side of [-1,1])box(side*10,side*10,30,38,8,8,'hairLight');
+        for(const [left,right,bottom] of [[-10,-7,39],[-6,2,40],[3,10,42]])
+          box(left,right,bottom,44,7,9,'hair',false);
+        for(const side of [-1,1])box(side<0?-10:9,side<0?-9:10,30,38,8,8,'hair');
       } else if(hairstyle==='ponytail') {
         box(-11,-9,37,43,-6,7,'hair');box(9,11,37,43,-6,7,'hair');
-        for(const [left,right,bottom] of [[-9,-6,40],[-5,-2,41],[-1,3,42],[4,7,40],[8,9,39]])
-          box(left,right,bottom,44,7,9,'hair');
+        for(const [left,right,bottom] of [[-9,-3,40],[-2,3,42],[4,9,40]])
+          box(left,right,bottom,44,7,9,'hair',false);
         for(const side of [-1,1]) {
-          box(side<0?-11:9,side<0?-9:11,34,40,7,8,'hair');
-          box(side<0?-10:9,side<0?-9:10,31,33,7,9,'hair');
-          box(side*9,side*9,29,30,8,9,'hair');
-          box(side*9,side*9,32,38,9,9,'hairLight');
+          box(side<0?-11:9,side<0?-9:11,35,40,7,8,'hair');
+          box(side<0?-10:9,side<0?-9:10,29,34,7,8,'hair');
         }
         box(-3,3,41,45,-12,-8,'hair');
         box(-3,3,40,41,-13,-10,'burgundy');
         for(let y=26;y<=39;y++) {
-          const width=y<=28?2:y<=31?3:y<=36?5:4;
-          const center=y<=28?-12:y<=31?-13:-14,depth=y<=28?1:2;
+          const width=y<=28?2:y<=30?3:4;
+          const center=y<=28?-12:-13,depth=2;
           for(let x=-width;x<=width;x++)for(let z=center-depth;z<=center+depth;z++)
             if(Math.abs(x)+Math.abs(z-center)<=width+depth-1)
               dot(x,y,z,x<=-2&&z===center-depth?'hairLight':'hair');
@@ -265,9 +252,12 @@ window.NoraVoxel = (() => {
       const temp=new T.Object3D(),tint=new T.Color(),batches=new Map();
       // Cull only cubes enclosed by their own joint; keep articulated seam caps.
       const neighbors=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+      // The head is solid. Account for its interior without allocating hidden cubes.
+      // These bounds match the main head box above; face/jaw and moving joints stay explicit.
+      const inHead=(x,y,z)=>x>=-10&&x<=10&&y>=31&&y<=44&&z>=-7&&z<=7;
       for(const voxel of voxels.values()){
         const [x,y,z,,part]=voxel;
-        if(neighbors.every(([dx,dy,dz])=>voxels.has(`${part}:${x+dx},${y+dy},${z+dz}`)))continue;
+        if(neighbors.every(([dx,dy,dz])=>(part==='body'&&inHead(x+dx,y+dy,z+dz))||voxels.has(`${part}:${x+dx},${y+dy},${z+dz}`)))continue;
         if(!batches.has(part))batches.set(part,[]);batches.get(part).push(voxel);
       }
       for(const [part,items] of batches){
@@ -275,7 +265,7 @@ window.NoraVoxel = (() => {
         items.forEach(([x,y,z,color],i)=>{
           temp.position.set((x-origin[0])*unit,(y-origin[1])*unit,(z-origin[2])*unit);temp.updateMatrix();mesh.setMatrixAt(i,temp.matrix);
           // Stable, broad tones replace the per-cube checker pattern.
-          const shade=color.endsWith('Trim')?.86:color.endsWith('Light')?1.07:1;
+          const shade=color.endsWith('Trim')?.93:color.endsWith('Light')?1.04:1;
           tint.set(palette[color]||palette[color.replace(/Trim|Light/g,'')]);tint.multiplyScalar(shade);mesh.setColorAt(i,tint);
         });
         mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;joints[part].add(mesh);meshes.push(mesh);

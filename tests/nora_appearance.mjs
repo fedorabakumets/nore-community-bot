@@ -133,10 +133,28 @@ try {
       assert.equal(meshCount,11,'joint batches stay constant');
       assert.equal(materials.size,1,'all joints share one material');assert.equal(geometries.size,1,'all joints share one cube');
       maxVoxels=Math.max(maxVoxels,count);
-      assert.ok(count<6000,'V3 keeps the V1 scale and stays under six thousand voxels');
+      assert.ok(count<5000,'V4 removes hidden scalp faces and stays below five thousand instances');
       const pixels=voxels(character);
       if(gender==='female')fittedSilhouette(character);
       assert.ok(pixels.has('0,24,5'),'every shirt keeps its collar');
+      const body=voxels(character,'torso');
+      assert.ok(![...body.keys()].some(key=>{
+        const [x,y,z]=key.split(',').map(Number);
+        return Math.abs(x)<10&&y>31&&y<44&&Math.abs(z)<7;
+      }),'solid head interior never consumes rendered instances');
+      // Surface continuity and macro planes, independently of the construction boxes.
+      const crownWidths=[];
+      for(let y=44;y<=49;y++) {
+        const row=[...body.keys()].map(key=>key.split(',').map(Number)).filter(p=>p[1]===y&&p[2]===0);
+        crownWidths.push(Math.max(...row.map(p=>Math.abs(p[0]))));
+      }
+      assert.ok(new Set(crownWidths).size<=3,'crown reads as at most three broad tiers');
+      assert.ok(crownWidths.at(-1)>=8,'simplified crown retains a broad top volume');
+      const cloth=body.get('0,17,4');
+      for(const side of [-1,1])for(let y=15;y<=17;y++)
+        assert.equal(body.get(`${side*5},${y},4`),cloth,'no isolated bright cloth stripes');
+      if(gender==='female')for(let x=-4;x<=4;x++)for(let y=22;y<=23;y++)
+        assert.equal(body.get(`${x},${y},8`),cloth,'chest has one broad continuous front plane');
     }
   for(const [gender] of choices.gender)for(const [hairstyle] of choices.hairstyle) {
     const samples=new Set();Object.assign(outfit,{gender,hairstyle});
@@ -217,7 +235,7 @@ try {
   character.rebuild();
   assert.equal(released,11,'rebuild releases every previous instanced body mesh');
   character.dispose(); other.dispose();
-  console.log(`NORA appearance: 162 shape combinations, V3 hair coverage/broad tones, V2 chest/waist/hips/rear shell, arm clearance, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
+  console.log(`NORA appearance: 162 shape combinations, V4 macro crown/chest planes and quiet cloth, hair coverage/broad tones, V2 chest/waist/hips/rear shell, arm clearance, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
 } finally {
   await rm(temp,{recursive:true,force:true});
 }
