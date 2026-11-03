@@ -23,8 +23,8 @@ window.NoraVoxel = (() => {
       art = `<path fill="${colors.skin}" d="M11 4h10v11H11z"/><path fill="${hair}" d="M10 3h12v5H10z"/><path fill="#c7b99b" d="${value==='female'?'M9 17h14v4h-3v2h2v3H10v-3h2v-2H9z':'M7 17h18v6h-4v3H11v-3H7z'}"/>`;
       art += `<path fill="#e3bc82" d="${value==='female'?'M25 20h2v3h3v2h-3v4h-2v-4h-3v-2h3z':'M24 2h6v6h-2V6l-5 5-2-2 5-5h-2z'}"/>`;
     } else if (category === 'hairstyle' || category === 'hair_color') {
-      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M8 6h16v2h2v16h-2v2h-3V13h-3v-2h-5v2h-2v13H8v-2H6V8h2z':style==='ponytail'?'M8 7h16v3h4v3h2v11h-2v3h-3V14h-3v10h-2V12h-5v2h-4v10H9V14H7V9h1z':'M9 7V5h13v2h3v4h-2v3h-4v-2h-5v2h-4v3H7V7z'}"/><path fill="#fff" opacity=".18" d="M10 7h10v2H10z"/>`;
-      if(style==='ponytail') art += `<path fill="${colors.burgundy}" d="M25 12h5v2h-5z"/>`;
+      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M11 4h10v1h3v2h2v3h1v12h-1v3h-3v1h-3V13h-3v-2h-4v2h-2v13H8v-2H6V10h1V7h2V5h2z':style==='ponytail'?'M11 4h10v1h3v3h2v3h3v3h2v8h-1v3h-2v3h-3V15h-3v9h-2V13h-4v-2h-3v3h-2v10H9V14H7V8h2V5h2z':'M10 3h8v1h4v2h2v2h2v5h-3v2h-3v-3h-5v2h-4v3H8v-4H6V8h2V5h2z'}"/><path fill="#fff" opacity=".12" d="M11 5h9v2h-9z"/>`;
+      if(style==='ponytail') art += `<path fill="${colors.burgundy}" d="M26 12h5v2h-5z"/>`;
       if(category==='hair_color') art += '<path fill="#e3bc82" d="M25 18h3v3h-3zM22 21h3v3h-3zM19 24h3v3h-3z"/>';
     } else if (category === 'eye_color') {
       art = `<path fill="#e9e7e1" d="M5 11h4V8h14v3h4v10h-4v3H9v-3H5z"/><path fill="${eyeColors[value]||eyeColors.brown}" d="M11 9h10v14H11z"/><path fill="#202124" d="M14 12h4v9h-4z"/><path fill="#fff" d="M12 10h3v3h-3z"/>`;
@@ -194,38 +194,55 @@ window.NoraVoxel = (() => {
         box(side*11,side*11,34,35,1,1,'shadow');
         box(side<0?-9:8,side<0?-8:9,32,33,7,7,'cheek');
       }
-      // Connected terraces replace random spikes; all colours use this shell.
-      box(-10,10,42,45,-7,7,'hair');box(-10,10,39,44,-8,-6,'hair');
-      box(-9,9,46,47,-6,6,'hair');
+      // Broad bevelled masses share a solid shell, not stacked hollow plates.
       const hairstyle = outfit.hairstyle || defaults.hairstyle;
+      box(-10,10,42,44,-7,7,'hair',false);
+      for(let y=42;y<=49;y++) {
+        const width=[10,11,11,11,10,9,8,6][y-42],depth=[7,8,8,8,7,6,5,4][y-42];
+        for(let x=-width;x<=width;x++)for(let z=-depth;z<=depth;z++)
+          if(Math.abs(x)+Math.abs(z)<=width+depth-3)
+            dot(x,y,z,y>=47&&x<2?'hairLight':'hair');
+      }
+      box(-10,10,39,42,-8,-6,'hair');
       if(hairstyle==='crop') {
-        box(-7,5,48,48,-4,4,'hair');box(-6,1,48,48,2,4,'hairLight');
-        for(const [left,right,bottom] of [[-10,-8,39],[-7,-4,40],[-3,1,41],[2,5,40],[6,9,42]])
-          box(left,right,bottom,43,7,8,'hair');
-        box(-10,-10,38,41,-5,4,'hair');box(10,10,38,41,-5,4,'hair');
-      } else if(hairstyle==='bob') {
-        box(-10,10,30,43,-9,-6,'hair');box(-9,9,29,29,-8,-6,'hair');
+        // A swept crown and connected fringe locks give a deliberate parting.
+        box(-7,1,50,50,-2,3,'hairLight');
+        for(const [left,right,bottom,front] of [[-10,-8,39,8],[-7,-3,40,9],[-2,2,41,9],[3,6,40,8],[7,10,42,8]])
+          box(left,right,bottom,44,7,front,'hair');
         for(const side of [-1,1]) {
-          box(side<0?-11:9,side<0?-9:11,31,43,-7,6,'hair');
-          box(side<0?-10:9,side<0?-9:10,29,30,-6,5,'hair');
-          box(side*10,side*10,31,40,7,7,'hairLight');
+          box(side<0?-11:10,side<0?-10:11,39,43,-5,4,'hair');
+          box(side*10,side*10,38,38,-3,2,'hair');
+        }
+      } else if(hairstyle==='bob') {
+        // Rounded sides flow into the back; the lower edge turns inward.
+        for(let y=29;y<=43;y++) {
+          const width=y<=30?10:y<=33?11:12,back=y<=30?8:y<=33?9:10;
+          for(let x=-width;x<=width;x++)for(let z=-back;z<=7;z++)
+            if((Math.abs(x)>=9||z<=-6)&&Math.abs(x)+Math.abs(z)<=width+back-3)
+              dot(x,y,z,Math.abs(x)===width&&z>=0?'hairLight':'hair');
         }
         for(const [left,right,bottom] of [[-10,-7,39],[-6,-2,40],[-1,3,41],[4,8,42],[9,10,40]])
-          box(left,right,bottom,43,7,8,'hair');
+          box(left,right,bottom,44,7,9,'hair');
+        for(const side of [-1,1])box(side*10,side*10,30,38,8,8,'hairLight');
       } else if(hairstyle==='ponytail') {
-        box(-10,-9,37,43,-6,6,'hair');box(9,10,37,43,-6,6,'hair');
+        box(-11,-9,37,43,-6,7,'hair');box(9,11,37,43,-6,7,'hair');
         for(const [left,right,bottom] of [[-9,-6,40],[-5,-2,41],[-1,3,42],[4,7,40],[8,9,39]])
-          box(left,right,bottom,43,7,8,'hair');
+          box(left,right,bottom,44,7,9,'hair');
         for(const side of [-1,1]) {
-          box(side<0?-10:9,side<0?-9:10,31,40,7,8,'hair');
-          box(side*9,side*9,29,30,7,8,'hair');
-          box(side*9,side*9,31,37,8,8,'hairLight');
+          box(side<0?-11:9,side<0?-9:11,34,40,7,8,'hair');
+          box(side<0?-10:9,side<0?-9:10,31,33,7,9,'hair');
+          box(side*9,side*9,29,30,8,9,'hair');
+          box(side*9,side*9,32,38,9,9,'hairLight');
         }
-        box(-3,3,40,44,-12,-8,'hair');
-        box(-3,3,39,40,-12,-10,'burgundy');
-        box(-4,4,32,38,-14,-10,'hair');
-        box(-3,3,28,31,-14,-11,'hair');box(-2,2,26,27,-13,-11,'hair');
-        box(-2,-2,30,37,-14,-14,'hairLight');
+        box(-3,3,41,45,-12,-8,'hair');
+        box(-3,3,40,41,-13,-10,'burgundy');
+        for(let y=26;y<=39;y++) {
+          const width=y<=28?2:y<=31?3:y<=36?5:4;
+          const center=y<=28?-12:y<=31?-13:-14,depth=y<=28?1:2;
+          for(let x=-width;x<=width;x++)for(let z=center-depth;z<=center+depth;z++)
+            if(Math.abs(x)+Math.abs(z-center)<=width+depth-1)
+              dot(x,y,z,x<=-2&&z===center-depth?'hairLight':'hair');
+        }
       }
       // All eye pixels share one shallow plane: no protruding pupil stack.
       for (const center of [-5,5]) {
@@ -257,8 +274,9 @@ window.NoraVoxel = (() => {
         const mesh=new T.InstancedMesh(cube,material,items.length),origin=origins[part];
         items.forEach(([x,y,z,color],i)=>{
           temp.position.set((x-origin[0])*unit,(y-origin[1])*unit,(z-origin[2])*unit);temp.updateMatrix();mesh.setMatrixAt(i,temp.matrix);
-          const shade=color.endsWith('Trim')?.78:color.endsWith('Light')?1.12:1;
-          tint.set(palette[color]||palette[color.replace(/Trim|Light/g,'')]);tint.multiplyScalar(shade*(.94+((x*13+y*7+z*3)&3)*.02));mesh.setColorAt(i,tint);
+          // Stable, broad tones replace the per-cube checker pattern.
+          const shade=color.endsWith('Trim')?.86:color.endsWith('Light')?1.07:1;
+          tint.set(palette[color]||palette[color.replace(/Trim|Light/g,'')]);tint.multiplyScalar(shade);mesh.setColorAt(i,tint);
         });
         mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;joints[part].add(mesh);meshes.push(mesh);
       }

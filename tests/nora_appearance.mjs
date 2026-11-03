@@ -31,6 +31,7 @@ try {
     return result;
   }
   const outfit = {...defaults}, character = createCharacter(T, outfit), initial = voxels(character);
+  const skinSample=initial.get('0,33,8');assert.ok(skinSample,'nose provides a visible skin sample');
   assert.ok(initial.has('-7,35,8'), 'eye whites are visible');
   assert.ok(initial.has('-5,35,8'), 'pupil is visible on the eye plane');
   assert.notEqual(initial.get('-5,35,8'), initial.get('-6,35,8'), 'pupil contrasts with iris');
@@ -47,10 +48,12 @@ try {
     if(style==='ponytail') {
       assert.ok(pixels.has('0,26,-12'), 'ponytail extends below head at back');
       assert.ok(pixels.has('-9,29,8')&&pixels.has('9,29,8'), 'front strands frame both sides');
+      for(const side of [-1,1])assert.equal(pixels.get(`${side*10},41,7`),pixels.get('3,49,0'),'ponytail sides join the fringe without scalp pinholes');
     }
-    for(const key of pixels.keys()) {
+    for(const [key,color] of pixels) {
       const [x,y,z]=key.split(',').map(Number);
       if(y<42)continue;
+      assert.notEqual(color,skinSample,'hair covers the upper scalp, including bevel corners');
       assert.ok([[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([dx,dy,dz])=>pixels.has(`${x+dx},${y+dy},${z+dz}`)), 'hair has no floating top pixels');
     }
   }
@@ -60,7 +63,8 @@ try {
     for(const [value] of choices[field]) {
       outfit[field]=value; character.rebuild();
       const pixels=voxels(character);
-      samples.add(pixels.get(field==='hair_color'?'0,44,-8':'-6,35,8'));
+      const sample=pixels.get(field==='hair_color'?'3,49,0':'-6,35,8');
+      assert.ok(sample,'colour sample is on the visible shell');samples.add(sample);
       assert.equal(pixels.get('0,20,4'), initial.get('0,20,4'), 'appearance colours leave clothing unchanged');
       assert.ok(icon(field,value,outfit).includes('<svg'), 'colour has a visual icon');
     }
@@ -129,7 +133,7 @@ try {
       assert.equal(meshCount,11,'joint batches stay constant');
       assert.equal(materials.size,1,'all joints share one material');assert.equal(geometries.size,1,'all joints share one cube');
       maxVoxels=Math.max(maxVoxels,count);
-      assert.ok(count<6000,'V2 keeps the V1 scale and stays under six thousand voxels');
+      assert.ok(count<6000,'V3 keeps the V1 scale and stays under six thousand voxels');
       const pixels=voxels(character);
       if(gender==='female')fittedSilhouette(character);
       assert.ok(pixels.has('0,24,5'),'every shirt keeps its collar');
@@ -137,7 +141,10 @@ try {
   for(const [gender] of choices.gender)for(const [hairstyle] of choices.hairstyle) {
     const samples=new Set();Object.assign(outfit,{gender,hairstyle});
     for(const [hair_color] of choices.hair_color) {
-      outfit.hair_color=hair_color;character.rebuild();samples.add(voxels(character).get('0,44,-8'));
+      outfit.hair_color=hair_color;character.rebuild();
+      const pixels=voxels(character),sample=pixels.get('3,49,0');
+      assert.ok(sample,'every hairstyle has an exposed crown');samples.add(sample);
+      for(const x of [4,5])assert.equal(pixels.get(`${x},49,0`),sample,'hair uses broad tones without a per-cube checker');
     }
     assert.equal(samples.size,8,'every hairstyle in either gender remains recolourable');
   }
@@ -204,13 +211,13 @@ try {
     }
   }
   const other=createCharacter(T,defaults);
-  assert.equal(voxels(other).get('0,44,-8'),initial.get('0,44,-8'),'characters do not share mutable colour state');
+  assert.equal(voxels(other).get('3,49,0'),initial.get('3,49,0'),'characters do not share mutable colour state');
   let released=0;
   character.group.traverse(node=>{if(node.isInstancedMesh)node.addEventListener('dispose',()=>released++);});
   character.rebuild();
   assert.equal(released,11,'rebuild releases every previous instanced body mesh');
   character.dispose(); other.dispose();
-  console.log(`NORA appearance: 162 shape combinations, V2 chest/waist/hips/rear shell, arm clearance, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
+  console.log(`NORA appearance: 162 shape combinations, V3 hair coverage/broad tones, V2 chest/waist/hips/rear shell, arm clearance, flat eyes, connected hair, all colours, saved IDs/legacy outfits, articulated seams, IK and cleanup passed; max ${maxVoxels} voxels, 11 shared-geometry batches.`);
 } finally {
   await rm(temp,{recursive:true,force:true});
 }
