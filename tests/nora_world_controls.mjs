@@ -403,14 +403,14 @@ try {
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
   console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
   const exchanges=[];
-  let remoteTime=0,dropReply=false;
+  let remoteTime=0,dropReply=false,remoteOffset=0;
   const lobbyWorld=await setup(0,60,async(path,body)=>{
     if(path!=='nora-game/lobby')return {pet:null};
     exchanges.push(body);
     if(dropReply&&!body.leave)throw Error('temporary loss');
     return {time:remoteTime,players:body.leave?[]:[{
       nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
-      x:2+remoteTime*.003,y:.017,z:4,heading:remoteTime<750?3.13:-3.13,grounded:true,time:remoteTime,
+      x:2+remoteTime*.003+remoteOffset,y:.017,z:4,heading:remoteTime<750?3.13:-3.13,grounded:true,time:remoteTime,
     }]};
   },undefined,false,true);
   const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
@@ -445,6 +445,11 @@ try {
     assert.ok(Math.abs(hasPeer().position.x-previousX)<=.081,'recovering after delayed data does not snap');
   }
   assert.ok(hasPeer().position.x>previousX,'movement resumes after the connection recovers');
+  remoteOffset=8;
+  for(let i=0;i<6;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  assert.ok(hasPeer().position.x>10,'remote teleport discards the old movement samples');
   lobbyWorld.player.position.set(0,.017,8.6);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'НА ОСТРОВ');
   lobbyAction.emit('click');await flush();
@@ -452,6 +457,37 @@ try {
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.stop();
   console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
+  const parkour=await setup(0,60,undefined,undefined,false,true);
+  const parkourAction=parkour.root.querySelector('.nora-world-action');
+  parkour.player.position.set(0,.017,5.6);parkour.frames(1);parkourAction.emit('click');
+  const jumpCourse=()=>{
+    parkour.player.position.set(8.6,.017,10.55);
+    parkour.frames(1);
+    for(const [z,top] of [[9.15,.34],[7.45,.68],[5.8,1.02],[4.15,1.36],[2.45,1.7]]){
+      parkour.key('ShiftLeft');parkour.key('KeyW');parkour.key('Space');parkour.key('Space',false);
+      for(let i=0;i<42&&parkour.player.position.z>z+.08;i++)parkour.frames(1);
+      parkour.key('KeyW',false);parkour.key('ShiftLeft',false);parkour.frames(24);
+      assert.equal(parkour.player.position.y,top+.017,'each platform is reachable without wings');
+    }
+    assert.equal(parkourAction.hidden,false,'the return button is available on the finish platform');
+    assert.equal(parkourAction.textContent,'К СТАРТУ ПАРКУРА');
+  };
+  parkour.player.position.set(8.2,.017,2.45);parkour.frames(1);
+  assert.equal(parkourAction.hidden,true,'the finish button cannot be activated from ground level');
+  jumpCourse();
+  parkourAction.emit('click');
+  assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'screen button teleports synchronously');
+  parkour.frames(1);
+  assert.equal(parkourAction.hidden,true);
+  jumpCourse();
+  const finishButton=parkour.scene().getObjectByName('nora-parkour-button');
+  parkour.scene().updateMatrixWorld(true);parkour.camera().updateMatrixWorld(true);
+  const point=finishButton.getWorldPosition(new Three.Vector3()).project(parkour.camera());
+  const pointer={button:0,pointerId:2,clientX:(point.x+1)*60,clientY:(1-point.y)*60};
+  parkour.canvas.emit('pointerdown',pointer);parkour.canvas.emit('pointerup',pointer);
+  assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'tapping the 3D button teleports synchronously');
+  parkour.stop();
+  console.log('NORA parkour: five jumps, finish access and both teleport controls passed.');
   const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
   function widget(){
     const children=[],listeners={};

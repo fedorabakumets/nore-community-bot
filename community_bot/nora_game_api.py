@@ -216,7 +216,7 @@ LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi
 # Ground offset plus the ordinary apex and, with wings, the 6.8-speed second launch.
 LOBBY_HEIGHT = .8
 LOBBY_WING_HEIGHT = 2.56
-LOBBY_PLATFORM_HEIGHT = 1.0
+LOBBY_PLATFORM_HEIGHT = 1.7  # Parkour finish in nora-scenery.js.
 
 
 async def settle_lobby_record(app):
