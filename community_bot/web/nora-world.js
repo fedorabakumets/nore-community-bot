@@ -176,7 +176,7 @@ window.NoraWorld = (() => {
     trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
     const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
-    let actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
+    let pov=Number(root.dataset.pov ?? 100), actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
     const viewButton=root.querySelector('.nora-world-view');
     const views=['За спиной','От первого лица','Селфи'];
     function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
@@ -195,7 +195,9 @@ window.NoraWorld = (() => {
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
     function jump(){if(inputPaused())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
-    on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;cameraRelease=0;cameraSpeed=0;syncView();});
+    on(root,'nora-pov',e=>{pov=e.detail;view=pov===0?1:0;actualDistance=0;cameraRelease=0;cameraSpeed=0;syncView();});
+    if(pov===0){view=1;syncView();}
+    on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;if(view!==1&&pov===0){pov=100;root.dispatchEvent(new CustomEvent('nora-view-pov',{detail:pov}));}cameraRelease=0;cameraSpeed=0;syncView();});
     on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
     on(jumpButton,'click',jump);
     on(window,'keydown',e=>{
@@ -208,11 +210,11 @@ window.NoraWorld = (() => {
     });
     on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
     function reset(){resetStick();keys.clear();orbitId=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
-    on(window,'blur',reset);on(document,'visibilitychange',reset);
+    on(root,'nora-settings-open',reset);on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');
     let recordPlaying=true;
-    function inputPaused(){return companion.panelOpen()||!!records?.panelOpen();}
+    function inputPaused(){return !!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen();}
     function nearRecord(){return inside&&!inputPaused()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
     function syncRecordButton(){
       const hidden=!nearRecord()||(!!records&&!records.hasRecord());
@@ -303,7 +305,7 @@ window.NoraWorld = (() => {
         if(scenery.carriedRecord){const angle=player.rotation.y;scenery.carriedRecord.position.set(player.position.x+Math.cos(angle)*.26+Math.sin(angle)*.2,player.position.y+.64,player.position.z-Math.sin(angle)*.26+Math.cos(angle)*.2);scenery.carriedRecord.rotation.y=angle;}
         playerShadow.position.set(player.position.x,.008,player.position.z);
         target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
-        const wanted=inside?4.6:(camera.aspect<.7?5.7:5.1);
+        const wanted=(inside?4.6:(camera.aspect<.7?5.7:5.1))*Math.max(.04,pov/100);
         if(view===1){
           player.visible=false;playerShadow.visible=false;
           camera.position.set(player.position.x-Math.sin(yaw)*.22,1.51+jumpHeight,player.position.z-Math.cos(yaw)*.22);
@@ -314,6 +316,7 @@ window.NoraWorld = (() => {
           const cameraYaw=yaw+(view===2?Math.PI:0);
           direction.set(Math.sin(cameraYaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(cameraYaw)*Math.cos(pitch));
           const safe=cameraDistance(target,direction,wanted,zone.cameraBoxes);
+          if(actualDistance>safe)actualDistance=safe;
           if(safe<=actualDistance+.001&&safe<wanted-.001){
             // Never interpolate through a wall. Briefly hold release at corners
             // so alternating collision hits cannot pump the camera in and out.

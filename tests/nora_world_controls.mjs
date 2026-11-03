@@ -19,9 +19,9 @@ try {
   const voxel = await readFile(new URL('nora-voxel.js', web), 'utf8');
   const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
   class Element extends EventTarget {
-    open=false; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
+    open=false; dataset = {}; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
     children = new Map();
-    querySelector(selector) { if (!this.children.has(selector)) this.children.set(selector, new Element()); return this.children.get(selector); }
+    querySelector(selector) { if(selector==='.nora-settings[open]')return null; if (!this.children.has(selector)) this.children.set(selector, new Element()); return this.children.get(selector); }
     setAttribute() {} setPointerCapture() {} blur() {}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
@@ -87,6 +87,14 @@ try {
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
+  const povWorld=await setup();
+  const fullDistance=povWorld.camera().position.distanceTo(povWorld.player.position);
+  povWorld.root.emit('nora-pov',{detail:40});povWorld.frames(180);
+  assert.ok(povWorld.camera().position.distanceTo(povWorld.player.position)<fullDistance*.7,'perspective slider changes camera distance');
+  povWorld.root.emit('nora-pov',{detail:0});povWorld.frames(1);
+  assert.equal(povWorld.player.visible,false,'zero perspective selects first person');
+  povWorld.root.emit('nora-pov',{detail:100});povWorld.frames(180);
+  assert.equal(povWorld.player.visible,true,'perspective restores third person');povWorld.stop();
   const mobileWorld=await setup(0,30,undefined,undefined,true);
   const r=mobileWorld.renderer;
   assert.ok(r.width*r.height*r.ratio**2<=420001,'Retina mobile buffer has a pixel budget');

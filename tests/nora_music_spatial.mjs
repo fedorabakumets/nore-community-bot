@@ -12,7 +12,7 @@ class AudioContext {
   createGain(){return node('gain');}createBiquadFilter(){return node('filter');}createStereoPanner(){return node('pan');}createBufferSource(){return node('source');}
   async resume(){} async close(){} async decodeAudioData(){return {duration:30};}
 }
-const context=vm.createContext({window:{AudioContext},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),setTimeout:fn=>fn()});
+const context=vm.createContext({settings:{music:100,effects:100},window:{AudioContext},fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}),setTimeout:fn=>fn()});
 const audio=vm.runInContext(code.slice(begin,end)+';createMusic()',context);
 await audio.start();
 const master=nodes.find(n=>n.type==='gain'),filter=nodes.find(n=>n.type==='lowpass'),panner=nodes.find(n=>n.type==='pan');
@@ -23,7 +23,12 @@ assert.equal(musicGain.gain.value,.15);assert.equal(filter.frequency.value,750);
 assert.equal(master.gain.value,.4,'world attenuation preserves common volume');
 assert.ok(nodes.filter(n=>n.type==='source').slice(0,2).every(n=>n.outputs[0].outputs[0]===musicGain),'theme sources use spatial bus');
 effects.jump(false);
-assert.equal(nodes.at(-1).outputs[0],master,'footstep effect bypasses music lowpass and panning');
+const effectBus=nodes.at(-1).outputs[0],musicBus=panner.outputs[0];
+assert.equal(effectBus.outputs[0],master,'effects connect to master');
+assert.equal(musicBus.outputs[0],master,'music connects to master');
+audio.setLevel('music',25);audio.setLevel('effects',70);
+assert.equal(musicBus.gain.value,.25,'music level is independent');
+assert.equal(effectBus.gain.value,.7,'effects level is independent');
 effects.playing(false);assert.equal(musicGain.gain.value,0,'switch stops only record music');
 effects.spatial({gain:.5,cutoff:3000,pan:.2});assert.equal(musicGain.gain.value,0,'walking outside does not restart record');
 assert.equal(master.gain.value,.4,'effects retain common volume while record is off');
