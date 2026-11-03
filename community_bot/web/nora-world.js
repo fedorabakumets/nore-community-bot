@@ -4,14 +4,18 @@ window.NoraWorld = (() => {
   const WING_LIFT_SPEED=6.8, GLIDE_GRAVITY=6.5, GLIDE_FALL_SPEED=3.4;
   const TAVERN_JUMP_LIMIT=1.5; // Keep the avatar below the ceiling beams.
   const trees = [[-5.7,-5.6], [5.2,-4.7], [-5.6,5.3], [5.5,5.7]];
-  function move(position, dx, dz, zone = {limit:8.35,boxes:[]}) {
+  const FURNITURE_RADIUS=.12;
+  function overlapsBox(x,z,[x0,x1,z0,z1],radius){
+    return x>x0-radius&&x<x1+radius&&z>z0-radius&&z<z1+radius;
+  }
+  function move(position, dx, dz, zone = {limit:8.35,boxes:[]}, feet) {
     // Substeps prevent tunneling through furniture after a frame stall.
     const steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/.12));
     for(let step=0;step<steps;step++)for(const [axis,delta] of [['x',dx/steps],['z',dz/steps]]) {
       const bound=axis==='x'?(zone.limitX||zone.limit):(zone.limitZ||zone.limit);
       const next=Math.max(-bound,Math.min(bound,position[axis]+delta));
       const x=axis==='x'?next:position.x,z=axis==='z'?next:position.z;
-      if(!zone.boxes.some(([x0,x1,z0,z1])=>x>x0-.34&&x<x1+.34&&z>z0-.34&&z<z1+.34))position[axis]=next;
+      if(!zone.boxes.some(box=>(feet??0)<(box[4]??Infinity)&&overlapsBox(x,z,box,Number.isFinite(box[4])&&feet!==undefined?FURNITURE_RADIUS:.34)))position[axis]=next;
     }
     position.y=.017;
   }
@@ -281,9 +285,10 @@ window.NoraWorld = (() => {
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
+    let grounded=true;
     function jump(){
       if(inputPaused())return;
-      if(jumpHeight===0&&jumpVelocity===0) jumpVelocity=JUMP_SPEED;
+      if(grounded){grounded=false;jumpVelocity=JUMP_SPEED;}
       else if(outfit.wings&&jumpHeight>0&&!wingBoostUsed){
         wingBoostUsed=true;
         jumpVelocity=WING_LIFT_SPEED;
@@ -361,7 +366,7 @@ window.NoraWorld = (() => {
       if(scenery.lobby)scenery.lobby.visible=inLobby;
       landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
       lightingAt=-Infinity;updateLighting(Date.now());
-      jumpHeight=0;jumpVelocity=0;wingBoostUsed=false;action.hidden=true;action.blur();
+      jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;action.hidden=true;action.blur();
       locationLabel.textContent=inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
       canvas.setAttribute('aria-label',inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
       for(const g of gusts)g.age=1;companion.reset();reset();
@@ -421,18 +426,24 @@ window.NoraWorld = (() => {
         if(Math.hypot(velocityX,velocityZ)<.002){velocityX=velocityZ=0;}
         const dx=velocityX*dt,dz=velocityZ*dt;
         const oldX=player.position.x,oldZ=player.position.z;
-        move(player.position,dx,dz,zone);
-        if(dt>0&&(jumpVelocity!==0||jumpHeight>0)){
+        move(player.position,dx,dz,zone,jumpHeight);
+        let floor=0;
+        for(const box of zone.boxes){
+          const top=box[4];
+          if(top>floor&&top<=jumpHeight&&overlapsBox(player.position.x,player.position.z,box,FURNITURE_RADIUS))floor=top;
+        }
+        grounded=grounded&&jumpHeight===floor;
+        if(dt>0&&!grounded){
           const gliding=wingBoostUsed&&jumpVelocity<=0;
           jumpVelocity-=(gliding?GLIDE_GRAVITY:GRAVITY)*dt;
           if(gliding)jumpVelocity=Math.max(-GLIDE_FALL_SPEED,jumpVelocity);
           jumpHeight+=jumpVelocity*dt;
           if(inside&&jumpHeight>TAVERN_JUMP_LIMIT){jumpHeight=TAVERN_JUMP_LIMIT;jumpVelocity=0;}
-          if(jumpHeight<=0){jumpHeight=0;jumpVelocity=0;wingBoostUsed=false;sounds?.land(inside);}
+          if(jumpHeight<=floor){jumpHeight=floor;jumpVelocity=0;grounded=true;wingBoostUsed=false;sounds?.land(inside);}
         }
         player.position.y=.017+jumpHeight;
-        character.animateWings(dt,jumpHeight>0,wingBoostUsed&&jumpVelocity>0);
-        character.walk(jumpHeight>0?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt,sprinting);
+        character.animateWings(dt,!grounded,wingBoostUsed&&jumpVelocity>0);
+        character.walk(!grounded?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt,sprinting);
         // Face actual travel, preserving the last heading when stopped/blocked.
         const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
         const heading=Math.hypot(travelledX,travelledZ)>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
@@ -498,7 +509,7 @@ window.NoraWorld = (() => {
           if(!inside)scenery.updatePortal?.(dt);
         }
         scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
-        sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
+        sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),grounded);
         atmosphere.update(dt,daylight,inside||inLobby);
         companion.update(dt,camera);
         renderer.render(scene,camera);

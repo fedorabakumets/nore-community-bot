@@ -211,6 +211,7 @@ LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi
 # Ground offset plus the ordinary apex and, with wings, the 6.8-speed second launch.
 LOBBY_HEIGHT = .8
 LOBBY_WING_HEIGHT = 2.56
+LOBBY_PLATFORM_HEIGHT = 1.0
 
 
 async def lobby(request):
@@ -248,7 +249,7 @@ async def lobby(request):
     async with request.app['db'].connect() as db:
         equipped = (await _wings(db, user_id))['equipped']
     height = body.get('y')
-    maximum = LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT
+    maximum = LOBBY_PLATFORM_HEIGHT + (LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT)
     if type(height) not in (int, float) or not 0 <= height <= maximum:
         raise ValueError('Проверь высоту прыжка')
     pose['y'] = height

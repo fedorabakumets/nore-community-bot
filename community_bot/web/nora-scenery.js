@@ -6,7 +6,7 @@ window.NoraScenery = (() => {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
     function box(x,y,z,w,h,d,color){blocks.push([x,y,z,w,h,d,color]);}
-    function solid(x,y,z,w,h,d){solids.push([x-w/2,x+w/2,z-d/2,z+d/2]);cameraBoxes.push([x-w/2,x+w/2,y-h/2,y+h/2,z-d/2,z+d/2]);}
+    function solid(x,y,z,w,h,d,top=Infinity){solids.push([x-w/2,x+w/2,z-d/2,z+d/2,top]);cameraBoxes.push([x-w/2,x+w/2,y-h/2,y+h/2,z-d/2,z+d/2]);}
     function cameraOnly(x,y,z,w,h,d){cameraBoxes.push([x-w/2,x+w/2,y-h/2,y+h/2,z-d/2,z+d/2]);}
     function mesh(){const result=new T.InstancedMesh(geometry,material,blocks.length),o=new T.Object3D(),c=new T.Color();blocks.forEach(([x,y,z,w,h,d,color],i)=>{o.position.set(x,y,z);o.scale.set(w,h,d);o.updateMatrix();result.setMatrixAt(i,o.matrix);c.set(color);result.setColorAt(i,c);});result.computeBoundingSphere();return result;}
     function bush(x,z,size=1){for(let a=-2;a<=2;a++)for(let b=0;b<3;b++)for(let c=-2;c<=2;c++){if(Math.abs(a)+Math.abs(c)+b>4)continue;box(x+a*.22*size,.13+b*.22*size,z+c*.22*size,.215*size,.215*size,.215*size,['#3b7841','#519847','#70af51'][Math.abs(a+b+c)%3]);}}
@@ -119,33 +119,33 @@ window.NoraScenery = (() => {
     box(0,3.6,0,9.7,.25,10.7,'#604532');cameraOnly(0,3.6,0,9.7,.25,10.7);
     for(let z=-4;z<=4;z+=2)box(0,3.38,z,9.4,.22,.25,'#513a2d');
     for(const x of [-4.45,4.45])for(let y=.25;y<=3.25;y+=.5)box(x,y,0,.12,.07,10,'#816548');
-    function furniture(x,y,z,w,h,d,color){box(x,y,z,w,h,d,color);solid(x,y,z,w,h,d);}
-    function barrel(x,z){for(let y=0;y<4;y++){box(x,.13+y*.26,z,y===0||y===3?.65:.78,.26,y===0||y===3?.65:.78,'#91613b');}for(const y of [.25,.78])box(x,y,z,.81,.08,.81,'#55504a');solid(x,.5,z,.85,1,.85);}
-    function chair(x,z){cameraOnly(x,.6,z,.65,1.2,.65);furniture(x,.38,z,.55,.14,.55,'#7c5035');box(x,.8,z-.23,.55,.8,.12,'#6c482f');for(const a of [-.2,.2])for(const b of [-.2,.2])box(x+a,.18,z+b,.1,.36,.1,'#62412d');}
+    function furniture(x,y,z,w,h,d,color){box(x,y,z,w,h,d,color);solid(x,y,z,w,h,d,y+h/2);}
+    function barrel(x,z){for(let y=0;y<4;y++){box(x,.13+y*.26,z,y===0||y===3?.65:.78,.26,y===0||y===3?.65:.78,'#91613b');}for(const y of [.25,.78])box(x,y,z,.81,.08,.81,'#55504a');solid(x,.52,z,.81,1.04,.81,1.04);}
+    function chair(x,z){cameraOnly(x,.6,z,.65,1.2,.65);furniture(x,.38,z,.55,.14,.55,'#7c5035');furniture(x,.8,z-.23,.55,.8,.12,'#6c482f');for(const a of [-.2,.2])for(const b of [-.2,.2])box(x+a,.18,z+b,.1,.36,.1,'#62412d');}
     for(const [x,z] of [[-2.2,1.5],[2.25,.5],[1.9,-2.7]]){
       furniture(x,.85,z,1.6,.18,1.25,'#855a37');for(const a of [-.6,.6])for(const b of [-.45,.45])box(x+a,.4,z+b,.16,.8,.16,'#69482f');
       chair(x-.25,z+1.1);chair(x+.25,z-1.1);
       box(x-.35,1,z+.15,.24,.16,.24,'#d8be8c');box(x+.35,1,z-.25,.16,.3,.16,'#5b7541');box(x+.25,.97,z+.22,.4,.06,.3,'#c89d67');
     }
-    furniture(-3.1,.65,-2.6,1.25,1.3,3.6,'#765033');box(-3.1,1.34,-2.6,1.55,.15,3.8,'#ab7a48');
+    box(-3.1,.65,-2.6,1.25,1.3,3.6,'#765033');furniture(-3.1,1.34,-2.6,1.55,.15,3.8,'#ab7a48');
     for(let z=-4;z<=-1;z+=.45)box(-3.1,1.57,z,.16,.32,.16,z%1?'#64805a':'#b8915b');
     for(const [x,z] of [[-3.6,4],[3.6,3.8],[-3.7,-4.4],[3.6,-4.4]])barrel(x,z);
     // Collection rack replaces the fireplace: records below, trophies and finds above.
-    furniture(.1,1.42,-4.78,2.7,2.84,.38,'#49372d');
+    box(.1,1.42,-4.78,2.7,2.84,.38,'#49372d');solid(.1,1.42,-4.78,2.7,2.84,.38);
     for(const x of [-1.25,1.45])box(x,1.42,-4.45,.14,2.84,.64,'#b08a56');
     for(const y of [.14,.98,1.82,2.76])box(.1,y,-4.4,2.7,.13,.8,'#977044');
     for(const x of [-.6,.8])box(x,1.45,-4.5,.08,.65,.45,'#765339');
     box(.1,2.88,-4.52,2.9,.16,.78,'#c09b65');
     for(const x of [-3.8,3.8]){box(x,2.3,-4.95,1.2,.12,.35,'#65452e');for(let i=0;i<4;i++)box(x-.4+i*.25,2.5,-4.88,.14,.32,.14,['#748352','#b16f4e','#d0ac72','#577373'][i]);}
     // Scattered sacks, books, crates and rugs retain a clear center aisle.
-    furniture(3.7,.3,-2.2,.7,.6,.7,'#9a7044');box(3.7,.64,-2.2,.75,.1,.75,'#6b4c34');
-    for(const [x,z] of [[-4,2.5],[3.7,2],[-2.2,-4.4]]){box(x,.22,z,.55,.44,.45,'#baa57c');box(x,.47,z,.24,.1,.24,'#8d7958');solid(x,.22,z,.55,.44,.45);}
+    box(3.7,.3,-2.2,.7,.6,.7,'#9a7044');furniture(3.7,.64,-2.2,.75,.1,.75,'#6b4c34');
+    for(const [x,z] of [[-4,2.5],[3.7,2],[-2.2,-4.4]]){box(x,.22,z,.55,.44,.45,'#baa57c');box(x,.47,z,.24,.1,.24,'#8d7958');solid(x,.26,z,.55,.52,.45,.52);}
     box(0,.012,1.2,1.2,.02,3.8,'#923f43');for(let z=-.5;z<=3;z+=.3)box(0,.027,z,1.1,.01,.05,'#c7a26c');
     box(0,1.1,5.02,1.5,2.2,.08,'#76503a');box(.45,1,4.95,.12,.12,.12,'#d9ad5f');
     // Record console on four feet in the middle of the room.
     function consoleAt(x,z){
       const first=blocks.length;
-      furniture(0,.55,0,1.15,.7,.84,'#704832');box(0,.94,0,1.27,.12,.94,'#aa7c4c');
+      box(0,.55,0,1.15,.7,.84,'#704832');furniture(0,.94,0,1.27,.12,.94,'#aa7c4c');
       for(const x of [-.46,.46])for(const z of [-.3,.3])box(x,.12,z,.14,.24,.14,'#513a2d');
       box(0,.55,.43,.87,.42,.035,'#392e2b');
       for(let x=-3;x<=3;x++)box(x*.115,.55,.46,.035,.34,.025,'#bb945b');
@@ -276,7 +276,8 @@ window.NoraScenery = (() => {
       box(x,.39,z,2.25,.15,.65,'#624943');
       box(x,.67,z-.28,2.25,.48,.12,'#59454a');
       for(const dx of [-.85,.85])box(x+dx,.16,z,.18,.32,.53,'#797282');
-      solid(x,.45,z,2.25,.9,.65);
+      solid(x,.2325,z,2.25,.465,.65,.465);
+      solid(x,.67,z-.28,2.25,.48,.12,.91);
       const lx=x+Math.sign(x)*1.8;
       box(lx,1.05,z,.17,2.1,.17,'#3f3b4b');
       for(const y of [1.83,2.37])box(lx,y,z,.48,.12,.48,'#4d4757');
