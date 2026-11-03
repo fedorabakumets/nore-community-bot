@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {setMaxListeners} from 'node:events';
 import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
 
 setMaxListeners(0);
 const web = new URL('../community_bot/web/', import.meta.url);
@@ -25,7 +26,7 @@ try {
     setAttribute() {} setPointerCapture() {} blur() {}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
-    getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}}; }
+    getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
     emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); this.dispatchEvent(e); }
   }
   const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
@@ -40,6 +41,12 @@ try {
   const acousticContext={window:{}};vm.runInNewContext(world,acousticContext);
   acousticContext.window.NoraWorld.move(blocked,0,-2,tavern.indoorZone);
   assert.ok(blocked.z>.7,'console blocks walking through its cabinet');
+  const lobbyWalk={x:0,z:0};
+  acousticContext.window.NoraWorld.move(lobbyWalk,20,0,tavern.lobbyZone);
+  assert.equal(lobbyWalk.x,16.35,'the lobby is traversable across its wide central path');
+  const movedHouse={x:0,z:0};
+  acousticContext.window.NoraWorld.move(movedHouse,0,-5,tavern.outdoorZone);
+  assert.ok(movedHouse.z < -2 && movedHouse.z > -2.6,'house collision follows its move to the back wall');
   const camera=new Three.PerspectiveCamera();camera.position.set(2,2,3);camera.lookAt(0,1,0);
   tavern.update(.5,true,0,camera);assert.ok(record.rotation.y<0,'record rotates');
   const noteMatrix=new Three.Matrix4();notes.getMatrixAt(0,noteMatrix);const beforeNote=noteMatrix.clone();
@@ -59,7 +66,7 @@ try {
   tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
@@ -70,11 +77,12 @@ try {
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
+      crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
+    if(realScenery)vm.runInContext(sceneryCode, context);
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
-    window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player=result.group;return result;};
+    window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player??=result.group;return result;};
     vm.runInContext(companion, context);
     vm.runInContext(world, context);
     const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes'}, sounds);
@@ -301,6 +309,26 @@ try {
   const late=await setup(0,60,()=>new Promise(resolve=>{resolvePet=resolve;}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
   console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
+  const exchanges=[];
+  const lobbyWorld=await setup(0,60,async(path,body)=>{
+    if(path!=='nora-game/lobby')return {pet:null};
+    exchanges.push(body);
+    return {players:body.leave?[]:[{nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},x:2,y:.017,z:4,heading:0}]};
+  },undefined,false,true);
+  const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
+  assert.equal(lobbyAction.hidden,true,'portal button only appears nearby');
+  lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
+  assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
+  lobbyAction.emit('click');lobbyWorld.frames(1);await flush();
+  const hasPeer=()=>lobbyWorld.scene().children.some(node=>node.children.some(child=>child.isSprite));
+  assert.ok(hasPeer(),'authenticated lobby snapshot creates a labeled avatar');
+  lobbyWorld.player.position.set(0,.017,8.6);lobbyWorld.frames(1);
+  assert.equal(lobbyAction.textContent,'НА ОСТРОВ');
+  lobbyAction.emit('click');await flush();
+  assert.ok(exchanges.at(-1).leave,'returning to the island leaves the shared lobby');
+  assert.ok(!hasPeer(),'remote avatars are removed from the island');
+  lobbyWorld.stop();
+  console.log('NORA lobby: proximity, return portal, shared avatar and cleanup passed.');
   const distances=[];
   for(const fps of [30,60,120]) {
     const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();

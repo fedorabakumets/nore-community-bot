@@ -86,6 +86,77 @@ window.NoraWorld = (() => {
     }
     return {update,dispose(){scene.remove(stars,leaves);stars.dispose();leaves.dispose();starsMaterial.dispose();leafMaterial.dispose();}};
   }
+  function lobbyPlayers(T,scene,player,status){
+    const peers=new Map();
+    let session=null,pending=null,next=0;
+    function remove(nickname){
+      const peer=peers.get(nickname);
+      scene.remove(peer.avatar.group);
+      peer.label.material.map.dispose();peer.label.material.dispose();peer.avatar.dispose();
+      peers.delete(nickname);
+    }
+    function add({nickname,outfit,x,y,z,heading}){
+      const avatar=window.NoraVoxel.createCharacter(T,outfit);
+      avatar.group.scale.setScalar(.32);
+      avatar.group.position.set(x,y,z);avatar.group.rotation.y=heading;
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=48;
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#181424';ctx.fillRect(0,0,256,48);
+      ctx.fillStyle='#f0ddff';ctx.font='bold 23px monospace';ctx.textAlign='center';
+      ctx.fillText(nickname,128,32,236);
+      const label=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthWrite:false}));
+      label.position.y=5.5;label.scale.set(4.5,.84,1);avatar.group.add(label);
+      scene.add(avatar.group);
+      const peer={avatar,label,target:null};peers.set(nickname,peer);return peer;
+    }
+    function leave(){
+      if(!session)return;
+      const departed=session;session=null;
+      for(const nickname of peers.keys())remove(nickname);
+      const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000)).catch(()=>{});
+      pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
+    }
+    function update(time,dt){
+      if(!session){
+        session=crypto.randomUUID();next=0;
+        status.textContent='ЛОББИ · ПОДКЛЮЧЕНИЕ';
+      }
+      if(!pending&&time>=next){
+        next=time+400;
+        const {x,y,z}=player.position,angle=player.rotation.y;
+        const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
+        const sentSession=session;
+        pending=api('nora-game/lobby',{session,x,y,z,heading},AbortSignal.timeout(3000)).then(({players})=>{
+          if(session!==sentSession)return;
+          if(status.textContent!=='ЛОББИ')status.textContent='ЛОББИ';
+          const online=new Set();
+          for(const pose of players){
+            online.add(pose.nickname);
+            const peer=peers.get(pose.nickname)||add(pose);
+            peer.target=pose;
+          }
+          for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
+        }).catch(()=>{
+          if(session!==sentSession)return;
+          if(status.textContent!=='ЛОББИ · СВЯЗЬ ПОТЕРЯНА')status.textContent='ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
+          for(const nickname of peers.keys())remove(nickname);
+        });
+        const sent=pending;
+        sent.finally(()=>{if(pending===sent)pending=null;});
+      }
+      const ease=1-Math.exp(-9*dt);
+      for(const {avatar,target} of peers.values()){
+        const {position,rotation}=avatar.group;
+        const dx=(target.x-position.x)*ease,dz=(target.z-position.z)*ease;
+        position.x+=dx;position.z+=dz;position.y+=(target.y-position.y)*ease;
+        const angle=target.heading-rotation.y;
+        rotation.y+=Math.atan2(Math.sin(angle),Math.cos(angle))*ease;
+        const distance=Math.hypot(dx,dz);
+        avatar.walk(position.y>.04?0:distance,dt,distance>2.2*dt);
+      }
+    }
+    return {update,leave};
+  }
   async function mount(canvas, root, outfit, sounds) {
     const T = await import('/vendor/three.module.js');
     if (!root.isConnected) { sounds?.stop(); return () => {}; }
@@ -137,7 +208,10 @@ window.NoraWorld = (() => {
     const moonMaterial=new T.MeshBasicMaterial({color:'#c6d4dc',fog:false,transparent:true,depthWrite:false});
     const moon=new T.Mesh(geometry,moonMaterial);moon.scale.set(2.6,2.6,.8);scene.add(moon);
     const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
-    let inside=false,zone=scenery.outdoorZone;
+    if(scenery.lobby)scene.add(scenery.lobby);
+    const tavernOffset=window.NoraScenery.tavernOffset??0;
+    const portalZ=window.NoraScenery.portalZ;
+    let inside=false,inLobby=false,zone=scenery.outdoorZone;
     const atmosphere=createAtmosphere(T,scene,geometry);
     const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
     const lightNight=new T.Color('#9aadd0'),lightDay=new T.Color('#f3d8ad');
@@ -150,6 +224,11 @@ window.NoraWorld = (() => {
           scene.background.set('#241c20');scene.fog.color.set('#382a2b');scene.fog.near=10;scene.fog.far=26;
           ambient.color.set('#e8c594');ambient.groundColor.set('#534037');ambient.intensity=1.65;
           sunlight.color.set('#ffc083');sunlight.intensity=1.25;
+        }else if(inLobby){
+          scene.background.set('#171725');scene.fog.color.copy(scene.background);
+          scene.fog.near=10;scene.fog.far=32;
+          ambient.color.set('#b8b6eb');ambient.groundColor.set('#504363');ambient.intensity=1.28;
+          sunlight.color.set('#a3aeef');sunlight.intensity=.85;sunlight.position.set(-12,22,10);
         }else{
           scene.background.copy(skyNight).lerp(skyDay,phase.daylight).lerp(skyDusk,phase.twilight*.45);
           scene.fog.color.copy(scene.background);scene.fog.near=10;scene.fog.far=phase.daylight*10+32;
@@ -162,11 +241,13 @@ window.NoraWorld = (() => {
           sunlight.position.lerpVectors(moon.position,sun.position,phase.daylight);sunlight.position.y=Math.max(8,sunlight.position.y);
         }
       }
-      return phase.daylight;
+      return inLobby?0:phase.daylight;
     }
     updateLighting(Date.now());
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
-    player.scale.setScalar(.32);player.position.set(0,.017,5.5);player.rotation.y=Math.PI;scene.add(player);
+    player.scale.setScalar(.32);player.position.set(0,.017,5.5+tavernOffset);player.rotation.y=Math.PI;scene.add(player);
+    const locationLabel=root.querySelector('.nora-world-bar small');
+    const lobby=lobbyPlayers(T,scene,player,locationLabel);
     // Soft contact patches without costly real-time shadow maps.
     const shadowCanvas=document.createElement('canvas');shadowCanvas.width=64;shadowCanvas.height=64;
     const context=shadowCanvas.getContext('2d'), gradient=context.createRadialGradient(32,32,3,32,32,32);
@@ -226,16 +307,40 @@ window.NoraWorld = (() => {
       if(!nearRecord())return;
       recordPlaying=!recordPlaying;sounds?.playing(recordPlaying);syncRecordButton();recordButton.blur();
     });
-    function nearDoor(){return Math.abs(player.position.x)<1.5&&(inside?player.position.z>3.3:player.position.z>2.55&&player.position.z<4.8);}
+    function nearbyAction(){
+      if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return '';
+      const {x,z}=player.position;
+      if(inside)return Math.abs(x)<1.5&&z>3.3?'Выйти из таверны':'';
+      if(portalZ&&Math.abs(x)<1.65&&Math.abs(z-portalZ[inLobby?'lobby':'home'])<1.85)
+        return inLobby?'НА ОСТРОВ':'ЛОББИ';
+      return !inLobby&&Math.abs(x)<1.5&&z-tavernOffset>2.55&&z-tavernOffset<4.8?'Войти в таверну':'';
+    }
     on(action,'click',()=>{
-      if(!nearDoor())return;
-      inside=!inside;sounds?.door(inside);zone=inside?scenery.indoorZone:scenery.outdoorZone;
-      scenery.indoor.visible=inside;scenery.outdoor.visible=!inside;landscape.visible=!inside;sun.visible=moon.visible=!inside;groundShadows.visible=!inside;
+      const label=nearbyAction();
+      if(!label)return;
+      const throughPortal=label==='ЛОББИ'||label==='НА ОСТРОВ';
+      if(throughPortal){
+        inLobby=!inLobby;
+        if(!inLobby)lobby.leave();
+        player.position.set(0,.017,portalZ[inLobby?'lobby':'home']-2.2);
+        player.rotation.y=Math.PI;yaw=targetYaw=0;
+      }else{
+        inside=!inside;sounds?.door(inside);
+        player.position.set(0,.017,inside?3.7:3.6+tavernOffset);
+        player.rotation.y=inside?Math.PI:0;
+      }
+      const home=!inside&&!inLobby;
+      zone=inside?scenery.indoorZone:inLobby?scenery.lobbyZone:scenery.outdoorZone;
+      scenery.indoor.visible=inside;scenery.outdoor.visible=home;
+      if(scenery.lobby)scenery.lobby.visible=inLobby;
+      landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
       lightingAt=-Infinity;updateLighting(Date.now());
-      jumpHeight=0;jumpVelocity=0;player.position.set(0,.017,inside?3.7:3.6);player.rotation.y=inside?Math.PI:0;
-      root.querySelector('.nora-world-bar small').textContent=inside?'ТАВЕРНА':'ЛЕСНАЯ ПОЛЯНА';
+      jumpHeight=0;jumpVelocity=0;action.hidden=true;action.blur();
+      locationLabel.textContent=inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
+      canvas.setAttribute('aria-label',inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
       for(const g of gusts)g.age=1;companion.reset();reset();
     });
+    on(document,'visibilitychange',()=>{if(document.hidden)lobby.leave();});
     function resize(){
       const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
       // Bound fill rate independently of orientation / Retina density. CSS stays full resolution.
@@ -338,20 +443,30 @@ window.NoraWorld = (() => {
         }
         records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen());
         syncRecordButton();
-        const doorHidden=!nearDoor();if(action.hidden!==doorHidden)action.hidden=doorHidden;
-        const doorText=inside?'Выйти из таверны':'Войти в таверну';if(action.textContent!==doorText)action.textContent=doorText;
+        const actionText=nearbyAction();
+        if(action.hidden!==!actionText)action.hidden=!actionText;
+        if(actionText&&action.textContent!==actionText){
+          action.textContent=actionText;
+          action.classList?.toggle('nora-portal-action',actionText==='ЛОББИ'||actionText==='НА ОСТРОВ');
+        }
+        if(inLobby)lobby.update(time,dt);
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
-        sounds?.spatial(tavernAcoustics(inside,player.position.x,player.position.z,yaw+(view===2?Math.PI:0)));
-        scenery.update?.(dt,inside,daylight,camera,recordPlaying&&(!records||records.hasRecord()));
+        sounds?.spatial(inLobby?{gain:0,cutoff:450,pan:0}:
+          tavernAcoustics(inside,player.position.x,player.position.z-(inside?0:tavernOffset),yaw+(view===2?Math.PI:0)));
+        if(inLobby)scenery.updatePortal(dt);
+        else{
+          scenery.update?.(dt,inside,daylight,camera,recordPlaying&&(!records||records.hasRecord()));
+          if(!inside)scenery.updatePortal?.(dt);
+        }
         sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
-        atmosphere.update(dt,daylight,inside);
+        atmosphere.update(dt,daylight,inside||inLobby);
         companion.update(dt,camera);
         renderer.render(scene,camera);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;lobby.leave();sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }

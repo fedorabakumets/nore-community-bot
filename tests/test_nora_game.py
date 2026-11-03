@@ -174,3 +174,45 @@ async def test_invalid_stored_appearance_falls_back_to_defaults(tmp_path, saved)
     assert content(await nora_game_api.status(request(db, 1)))['outfit'] == {
         **clothes, **nora_game_api.APPEARANCE_DEFAULTS,
     }
+
+
+@pytest.mark.asyncio
+async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'lobby.db')
+    await db.initialize()
+    now = 100
+    monkeypatch.setattr(nora_game_api, 'time', SimpleNamespace(monotonic=lambda: now))
+    presence = {}
+    clothes = {'shirt': 'gray', 'pants': 'burgundy_wide', 'shoes': 'red_air'}
+    for uid, nickname in ((1, 'Alice'), (2, 'Robin')):
+        await nora_game_api.register(request(db, uid, {'nickname': nickname}))
+        await nora_game_api.save_outfit(request(db, uid, clothes))
+
+    async def exchange(uid, *, session=None, **fields):
+        body = {
+            'session': session or f'00000000-0000-4000-8000-{uid:012d}',
+            'x': 1, 'y': .017, 'z': 2, 'heading': 0, **fields,
+        }
+        req = request(db, uid, body)
+        req.app['nora_lobby'] = presence
+        return content(await nora_game_api.lobby(req))['players']
+
+    with pytest.raises(ValueError, match='персонажа'):
+        await exchange(3)
+    for bad_x in (True, float('nan'), float('inf'), 17, '1'):
+        with pytest.raises(ValueError, match='координаты'):
+            await exchange(1, x=bad_x)
+    assert await exchange(1, nickname='Spoofed', telegram_id=2) == []
+    assert await exchange(2) == [{
+        'nickname': 'Alice', 'outfit': {**clothes, **nora_game_api.APPEARANCE_DEFAULTS},
+        'x': 1, 'y': .017, 'z': 2, 'heading': 0,
+    }]
+    assert (await exchange(1))[0]['nickname'] == 'Robin'
+    await exchange(2, session='00000000-0000-4000-8000-000000000099', x=5)
+    await exchange(2, leave=True)
+    assert (await exchange(1))[0]['x'] == 5
+    await exchange(2, session='00000000-0000-4000-8000-000000000099', leave=True)
+    assert await exchange(1) == []
+    await exchange(2)
+    now += nora_game_api.LOBBY_TTL
+    assert await exchange(1) == []

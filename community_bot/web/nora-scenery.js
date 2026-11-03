@@ -1,5 +1,6 @@
 'use strict';
 window.NoraScenery = (() => {
+  const tavernOffset=-4.95, portalZ={home:6.75,lobby:9.75};
   function create(T, geometry, material) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
@@ -39,7 +40,8 @@ window.NoraScenery = (() => {
       distantTree(x,z,Math.round(i*3)+edge);
     }
     for(const [x,z] of [[-6,1],[5,-1],[4,4],[-4,4],[1,-5],[-4,-4]]){bush(x,z,.8);for(let i=0;i<3;i++)flower(x+.7+i*.23,z+.3-i*.3,['#eb939f','#e9c55f','#c7b2e6'][i]);}
-    // Center tavern: pale irregular masonry, oak framing and a tiled stepped roof.
+    const tavernStart=blocks.length;
+    // Tavern: pale irregular masonry, oak framing and a tiled stepped roof.
     for(let x=-11;x<=11;x++)for(let y=0;y<11;y++){
       const px=x*.25,py=.125+y*.25;
       for(const side of [-1,1]){
@@ -95,6 +97,10 @@ window.NoraScenery = (() => {
     box(2.3,2.35,2.8,.12,.7,.12,'#50392d');box(1.95,2.6,2.8,.8,.12,.12,'#50392d');box(1.8,2.25,2.8,.75,.4,.13,'#90643c');box(1.8,2.25,2.88,.35,.08,.04,'#dfc38a');
     for(let z=3;z<7;z++)for(let x=-1;x<=1;x++)box(x*.45,.012,z*.8,.43,.025,.7,['#a8a99a','#b5b29c','#999f8b'][(x+z+3)%3]);
     solid(0,1.6,0,6,3.2,4.7);cameraOnly(0,3.8,0,6.6,2,5.6);
+    for(const block of blocks.slice(tavernStart))block[2]+=tavernOffset;
+    for(const window of windows)window.z+=tavernOffset;
+    solids[0][2]+=tavernOffset;solids[0][3]+=tavernOffset;
+    for(const bounds of cameraBoxes.slice(-2)){bounds[4]+=tavernOffset;bounds[5]+=tavernOffset;}
     // Original trees are solid too, including their canopies for the camera.
     for(const [x,z] of [[-5.7,-5.6],[5.2,-4.7],[-5.6,5.3],[5.5,5.7]]){solid(x,1,z,.6,2,.6);cameraOnly(x,2.8,z,3,2.6,3);}
     outdoorZone.boxes=solids;outdoorZone.cameraBoxes=cameraBoxes;
@@ -209,7 +215,96 @@ window.NoraScenery = (() => {
       }
       notes.instanceMatrix.needsUpdate=true;notes.instanceColor.needsUpdate=true;
     }
-    return {outdoor,indoor,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    blocks=[];solids=[];cameraBoxes=[];
+    const lobbyZone={limitX:16.35,limitZ:11.35,boxes:solids,cameraBoxes};
+    for(let x=-18;x<18;x++)for(let z=-13;z<13;z++){
+      const tone=Math.abs(x*17+z*13)%3;
+      box(x+.5,-.25,z+.5,1,.5,1,['#3e4949','#414d4e','#374447'][tone]);
+      if(Math.abs(x+.5)>16.5||Math.abs(z+.5)>11.5)
+        box(x+.5,-.85,z+.5,1,.7,1,'#34343e');
+      if(x===0||x===-1||z===0||z===-1||(
+        x>=-11&&x<11&&z>=-7&&z<7&&(x===-11||x===10||z===-7||z===6)))
+        box(x+.5,.015,z+.5,.96,.03,.96,['#626071','#777384','#555765'][tone]);
+    }
+    for(let x=-26;x<26;x+=2)for(let z=-22;z<22;z+=2){
+      if(Math.abs(x+.5)<18&&Math.abs(z+.5)<13)continue;
+      box(x+1,-1.35,z+1,2,1.45,2,(x+z)%3?'#313a40':'#354047');
+    }
+    for(let edge=0;edge<4;edge++){
+      const end=edge<2?18:13;
+      for(let i=-end;i<=end;i++){
+        const x=edge<2?i:(edge===2?-17:17),z=edge<2?(edge===0?-12:12):i;
+        box(x,.25,z,1.03,.5,.85,i%3?'#4f535f':'#636173');
+        if(i%2===0)bush(x,z,.85);
+      }
+      for(let i=-end;i<=end;i+=3){
+        const x=edge<2?i:(edge===2?-19:19),z=edge<2?(edge===0?-14:14):i;
+        for(const layer of [0,1]){
+          const start=blocks.length;
+          distantTree(x+(edge<2?layer:Math.sign(x)*layer*5),z+(edge<2?Math.sign(z)*layer*5:layer),i+edge);
+          const height=1.1+Math.abs(i*7+edge*3+layer*5)%9*.31;
+          for(const [index,block] of blocks.slice(start).entries()){
+            block[1]*=height;block[4]*=height;
+            block[6]=['#3e3547','#303f48','#3f5258','#35454d'][index];
+          }
+        }
+      }
+    }
+    const flameMaterial=new T.MeshBasicMaterial({color:'#ffd18a'});
+    const lanterns=new T.Group();
+    for(const x of [-12,-4,4,12])for(const z of [-5,5]){
+      box(x,.39,z,2.25,.15,.65,'#624943');
+      box(x,.67,z-.28,2.25,.48,.12,'#59454a');
+      for(const dx of [-.85,.85])box(x+dx,.16,z,.18,.32,.53,'#797282');
+      solid(x,.45,z,2.25,.9,.65);
+      const lx=x+Math.sign(x)*1.8;
+      box(lx,1.05,z,.17,2.1,.17,'#3f3b4b');
+      for(const y of [1.83,2.37])box(lx,y,z,.48,.12,.48,'#4d4757');
+      for(const dx of [-.2,.2])for(const dz of [-.2,.2])box(lx+dx,2.1,z+dz,.05,.49,.05,'#534759');
+      solid(lx,1,z,.32,2,.32);
+      const flame=new T.Mesh(geometry,flameMaterial);
+      flame.position.set(lx,2.1,z);flame.scale.set(.29,.42,.29);lanterns.add(flame);
+      const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
+    }
+    const lobby=mesh();lobby.add(lanterns);lobby.visible=false;
+    const portal=new T.Group();
+    const gateMaterial=new T.MeshLambertMaterial({color:'#4c475b'});
+    const coreMaterial=new T.MeshBasicMaterial({color:'#7654ff',transparent:true,opacity:.88});
+    const rayMaterial=new T.MeshBasicMaterial({
+      color:'#8a8fff',transparent:true,opacity:.26,depthWrite:false,blending:T.AdditiveBlending,
+    });
+    function portalBox(mat,x,y,z,w,h,d){
+      const part=new T.Mesh(geometry,mat);part.position.set(x,y,z);part.scale.set(w,h,d);portal.add(part);return part;
+    }
+    for(const side of [-1,1]){
+      portalBox(gateMaterial,side*1.1,1.13,0,.39,2.26,.65);
+      portalBox(gateMaterial,side*.83,2.36,0,.43,.38,.65);
+      portalBox(gateMaterial,side*.53,2.61,0,.43,.34,.65);
+    }
+    portalBox(gateMaterial,0,2.78,0,.74,.32,.65);
+    portalBox(gateMaterial,0,.1,0,2.65,.2,1.1);
+    portalBox(coreMaterial,0,1.25,0,1.83,2.13,.13);
+    portalBox(coreMaterial,0,2.37,0,1.27,.24,.13);
+    for(let i=-2;i<=2;i++){
+      const ray=portalBox(rayMaterial,i*.27,1.45+i*.29,-.75,.07,.11,1.55);
+      ray.rotation.y=i*.18;ray.rotation.x=i*.09;
+    }
+    const portalLight=new T.PointLight('#9b70ff',9,5);
+    portalLight.position.set(0,1.32,-.45);portal.add(portalLight);
+    const lobbyPortal=portal.clone();portal.position.z=portalZ.home;lobbyPortal.position.z=portalZ.lobby;
+    outdoor.add(portal);lobby.add(lobbyPortal);
+    for(const [zone,z] of [[outdoorZone,portalZ.home],[lobbyZone,portalZ.lobby]]){
+      zone.boxes.push([-1.3,1.3,z-.38,z+.38]);
+      zone.cameraBoxes.push([-1.3,1.3,0,2.94,z-.38,z+.38]);
+    }
+    let portalTime=0;
+    function updatePortal(dt){
+      if(reduced)return;
+      portalTime+=dt;
+      coreMaterial.opacity=.78+.13*Math.sin(portalTime*2);
+      rayMaterial.opacity=.24+.07*Math.sin(portalTime*3);
+    }
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();gateMaterial.dispose();coreMaterial.dispose();rayMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
-  return {create};
+  return {create,tavernOffset,portalZ};
 })();

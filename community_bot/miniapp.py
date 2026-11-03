@@ -379,6 +379,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/nora-game/records', music_api.record_action)
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
+    app['nora_lobby'] = {}
+    app.router.add_post('/api/nora-game/lobby', nora_game_api.lobby)
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)

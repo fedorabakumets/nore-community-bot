@@ -1,7 +1,9 @@
 """Private registration for the standalone NORA game."""
 import json
+import math
 import re
 import sqlite3
+import time
 
 from aiohttp import web
 
@@ -47,21 +49,22 @@ async def _appearance(db, telegram_id):
     }
 
 
-async def status(request):
-    async with request.app['db'].connect() as db:
+async def _player_profile(database, telegram_id):
+    async with database.connect() as db:
         row = await (await db.execute(
-            'SELECT nickname FROM nora_game_players WHERE telegram_id = ?',
-            (request['actor']['id'],),
+            'SELECT p.nickname, o.shirt, o.pants, o.shoes FROM nora_game_players AS p '
+            'LEFT JOIN nora_game_outfits AS o USING (telegram_id) WHERE p.telegram_id = ?',
+            (telegram_id,),
         )).fetchone()
-    outfit = None
-    if row:
-        async with request.app['db'].connect() as db:
-            saved = await (await db.execute(
-                'SELECT shirt, pants, shoes FROM nora_game_outfits WHERE telegram_id = ?',
-                (request['actor']['id'],),
-            )).fetchone()
-            outfit = {**dict(saved), **await _appearance(db, request['actor']['id'])} if saved else None
-    return web.json_response({'nickname': row['nickname'] if row else None, 'outfit': outfit})
+        outfit = None
+        if row and row['shirt'] is not None:
+            outfit = {key: row[key] for key in ('shirt', 'pants', 'shoes')}
+            outfit.update(await _appearance(db, telegram_id))
+    return {'nickname': row['nickname'] if row else None, 'outfit': outfit}
+
+
+async def status(request):
+    return web.json_response(await _player_profile(request.app['db'], request['actor']['id']))
 
 
 async def companion(request):
@@ -130,3 +133,45 @@ async def save_outfit(request):
         )
         await db.commit()
     return web.json_response({'outfit': {**{key: body[key] for key in choices}, **appearance}})
+
+
+# Lobby presence expires automatically when a client closes or loses its connection.
+LOBBY_TTL = 8
+LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'y': (0, .8), 'heading': (-math.pi, math.pi)}
+
+
+async def lobby(request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise ValueError('Проверь данные игрока')
+    session = body.get('session')
+    if not isinstance(session, str) or not re.fullmatch(r'[a-f0-9-]{36}', session):
+        raise ValueError('Проверь данные сессии')
+    presence = request.app['nora_lobby']
+    user_id = request['actor']['id']
+    now = time.monotonic()
+    for key, (seen, _, _) in tuple(presence.items()):
+        if now - seen >= LOBBY_TTL:
+            del presence[key]
+    current = presence.get(user_id)
+    if body.get('leave') is True:
+        if current and current[1] == session:
+            del presence[user_id]
+        return web.json_response({'players': []})
+    pose = {}
+    for key, (minimum, maximum) in LOBBY_BOUNDS.items():
+        value = body.get(key)
+        if type(value) not in (int, float) or not minimum <= value <= maximum:
+            raise ValueError('Проверь координаты игрока')
+        pose[key] = value
+
+    if current and current[1] == session:
+        profile = current[2]
+    else:
+        profile = await _player_profile(request.app['db'], user_id)
+        if not profile['nickname'] or not profile['outfit']:
+            raise ValueError('Сначала создай персонажа')
+    presence[user_id] = (time.monotonic(), session, {**profile, **pose})
+    others = [player for key, (_, _, player) in presence.items() if key != user_id]
+    others.sort(key=lambda player: (player['x'] - pose['x']) ** 2 + (player['z'] - pose['z']) ** 2)
+    return web.json_response({'players': others[:20]})
