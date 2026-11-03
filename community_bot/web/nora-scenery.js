@@ -293,9 +293,6 @@ window.NoraScenery = (() => {
     const highlightMaterial=new T.MeshBasicMaterial({
       color:'#ffb38d',transparent:true,opacity:.66,depthWrite:false,
     });
-    const rayMaterial=new T.MeshBasicMaterial({
-      color:'#ef7c87',transparent:true,opacity:.22,depthWrite:false,blending:T.AdditiveBlending,
-    });
     function portalBox(mat,x,y,z,w,h,d){
       const part=new T.Mesh(geometry,mat);part.position.set(x,y,z);part.scale.set(w,h,d);portal.add(part);return part;
     }
@@ -310,10 +307,6 @@ window.NoraScenery = (() => {
     for(const side of [-1,1])for(const [x,y,w,h] of [
       [-.33,.40,.14,.16],[-.33,.96,.14,.76],[-.22,1.43,.36,.18],[-.07,1.66,.14,.32],
     ])portalBox(highlightMaterial,x*side,y,side*.196,w,h,.012);
-    for(let i=-2;i<=2;i++){
-      const ray=portalBox(rayMaterial,i*.27,1.45+i*.29,-.83,.07,.10,1.36);
-      ray.rotation.y=i*.18;ray.rotation.x=i*.09;
-    }
     const portalLight=new T.PointLight('#ef6575',8,5);
     portalLight.position.set(0,1.32,-.45);portal.add(portalLight);
     const lobbyPortal=portal.clone(), lobbyPortalStone=portalStone.clone();
@@ -329,9 +322,8 @@ window.NoraScenery = (() => {
       if(reduced)return;
       portalTime+=dt;
       highlightMaterial.opacity=.61+.13*Math.sin(portalTime*2);
-      rayMaterial.opacity=.22+.07*Math.sin(portalTime*3);
     }
-    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();rayMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
   return {create,tavernOffset,portalZ};
 })();
