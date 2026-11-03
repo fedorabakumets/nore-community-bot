@@ -208,9 +208,9 @@ async def change_wings(request):
 # Lobby presence expires automatically when a client closes or loses its connection.
 LOBBY_TTL = 8
 LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi, math.pi)}
-# 0.017 ground offset plus 4.4² / (2 × 13), with 1.4× height for equipped wings.
+# Ground offset plus the ordinary apex and, with wings, the 6.8-speed second launch.
 LOBBY_HEIGHT = .8
-LOBBY_WING_HEIGHT = 1.07
+LOBBY_WING_HEIGHT = 2.56
 
 
 async def lobby(request):

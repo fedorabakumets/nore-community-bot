@@ -237,12 +237,15 @@ try {
   h.stop();
   for (const fps of [30,60,120]) {
     const peaks=[];
+    let normalPeak=0;
     for (const id of [null,'raven','flame','frost']) {
       const w=await setup(0,fps,undefined,undefined,fps===30,false,id);
       const model=w.player.getObjectByName('wings');
       assert.equal(Boolean(model),Boolean(id));
       if (model) {
         assert.equal(model.parent.name,'torso');
+        assert.ok(Math.abs(model.scale.x/model.scale.z-1.5)<1e-9);
+        assert.ok(Math.abs(model.scale.y/model.scale.z-1.5)<1e-9);
         const meshes=[];
         model.traverse(mesh=>{if(mesh.isMesh)meshes.push(mesh);});
         assert.equal(meshes.length,4);
@@ -252,22 +255,54 @@ try {
         w.frames(3);
         assert.notEqual(model.children[0].rotation.y,idle);
       }
-      if(fps===30)w.root.querySelector('.nora-world-jump').emit('pointerdown');
-      else w.key('Space');
-      let peak=0;
-      for(let i=0;i<fps;i++){
+      const jump=()=>{
+        if(fps!==30){w.key('Space');return;}
+        const button=w.root.querySelector('.nora-world-jump');
+        button.emit('pointerdown',{button:0,pointerType:'touch'});
         w.frames(1);
-        const height=w.player.position.y-.017;
-        peak=Math.max(peak,height);
-        if(i===Math.floor(fps*.2))w.key('Space'); // Airborne input cannot add another jump.
+        button.emit('click',{detail:1,pointerType:'touch'});
+      };
+      function flight(seconds) {
+        let peak=0, fastestFall=0;
+        for(let i=0;i<fps*seconds;i++){
+          const before=w.player.position.y;
+          w.frames(1);
+          peak=Math.max(peak,w.player.position.y-.017);
+          fastestFall=Math.max(fastestFall,(before-w.player.position.y)*fps);
+        }
+        assert.equal(w.player.position.y,.017);
+        return {peak,fastestFall};
       }
-      assert.equal(w.player.position.y,.017);
+      jump();
+      const single=flight(1);
+      if(!id)normalPeak=single.peak;
+      else assert.equal(single.peak,normalPeak,'one tap retains ordinary jump');
+      jump();w.frames(Math.round(fps*.25));jump();
+      w.frames(Math.round(fps*.12));jump(); // A third press cannot add another impulse.
+      const {peak,fastestFall}=flight(2);
+      if (id) {
+        assert.ok(peak>2.2&&peak<2.56);
+        assert.ok(fastestFall<=3.401,'second jump caps descending speed');
+        jump();w.frames(Math.round(fps*.25));jump();
+        assert.ok(flight(2).peak>2.2,'landing recharges the wing boost');
+      } else assert.ok(peak<=normalPeak,'unequipped players cannot double jump');
       peaks.push(peak);
       w.stop();
     }
-    assert.ok(peaks[1]/peaks[0]>1.39&&peaks[1]/peaks[0]<1.44);
     assert.equal(peaks[1],peaks[2]);assert.equal(peaks[2],peaks[3]);
   }
+  const ceiling=await setup(0,60,undefined,undefined,false,true,'flame');
+  ceiling.player.position.set(0,.017,3.6+ceiling.window.NoraScenery.tavernOffset);
+  ceiling.root.querySelector('.nora-world-action').emit('click');
+  ceiling.key('Space');ceiling.frames(15);ceiling.key('Space');
+  let indoorPeak=0;
+  for(let i=0;i<120;i++){
+    ceiling.frames(1);
+    indoorPeak=Math.max(indoorPeak,ceiling.player.position.y);
+  }
+  assert.equal(indoorPeak,1.517,'tavern ceiling stops the second jump');
+  assert.equal(ceiling.player.position.y,.017);
+  ceiling.stop();
   const env=await setup();
   const api=env.world;
   assert.equal(api.timeOfDay(Date.UTC(2026,10,2,0)).hour,3,'Moscow UTC+3');

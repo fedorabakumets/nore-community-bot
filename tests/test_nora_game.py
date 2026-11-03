@@ -261,20 +261,22 @@ async def test_wing_purchase_and_lobby_bonus_use_persisted_equipment(tmp_path):
 
     await exchange(1, .017)
     with pytest.raises(ValueError, match='высоту'):
-        await exchange(1, 1.02)
+        await exchange(1, 2.4)
     await change(1, 'equip', 'raven')
     await change(1, 'equip', 'frost')
     reopened = Database(tmp_path / 'wings.db')
     profile = content(await nora_game_api.status(request(reopened, 1)))
     assert profile['wings'] == {'owned': ['raven', 'frost'], 'equipped': 'frost'}
     assert profile['outfit']['wings'] == 'frost'
-    await exchange(1, 1.02)
+    await exchange(1, 2.4)
+    with pytest.raises(ValueError, match='высоту'):
+        await exchange(1, 2.7)
     peer, = await exchange(2, .017)
     assert peer['outfit']['wings'] == 'frost'
     assert not {'wings', 'owned', 'telegram_id'} & peer.keys()
     await change(1, 'equip', None)
     with pytest.raises(ValueError, match='высоту'):
-        await exchange(1, 1.02)
+        await exchange(1, 2.4)
     await exchange(1, .017)
     peer, = await exchange(2, .017)
     assert 'wings' not in peer['outfit']

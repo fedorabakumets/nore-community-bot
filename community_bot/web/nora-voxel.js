@@ -289,7 +289,7 @@ window.NoraVoxel = (() => {
       wings=window.NoraWings?.attach(T,torso,id,unit,material);
       wings?.tick(0);
     }
-    function animateWings(dt,airborne) { wings?.tick(dt,airborne); }
+    function animateWings(dt,airborne,boosting) { wings?.tick(dt,airborne,boosting); }
     function walk(distance,dt,sprinting=false){
       run+=((sprinting&&distance>0?1:0)-run)*(1-Math.exp(-8*dt));
       gait+=(Math.min(1,distance/Math.max(dt,.001)/1.7)-gait)*(1-Math.exp(-12*dt));
@@ -341,7 +341,7 @@ window.NoraVoxel = (() => {
     const character = createCharacter(T, outfit), pivot = character.group; scene.add(pivot);
     let preview = outfit.wings, previous = 0;
     let raf = 0, lastTouch = 0, dragging = false, startX = 0, disposed = false;
-    function resize() { const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);const aspect=w/h, halfHeight=Math.max(2.95,(preview?3.1:1.65)/aspect);camera.top=halfHeight;camera.bottom=-halfHeight;camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.updateProjectionMatrix(); }
+    function resize() { const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);const aspect=w/h, halfHeight=Math.max(preview?3.25:2.95,(preview?4.65:1.65)/aspect);camera.top=halfHeight;camera.bottom=-halfHeight;camera.left=-halfHeight*aspect;camera.right=halfHeight*aspect;camera.updateProjectionMatrix(); }
     const observer=new ResizeObserver(resize); observer.observe(canvas);resize();
     const changed=()=>character.rebuild();root.addEventListener('outfit-change',changed);
     function previewWings(event) {

@@ -72,7 +72,7 @@ window.NoraWings = (() => {
     const mount=new T.Group();
     mount.name='wings';torso.add(mount);
     mount.position.set(0,12*unit,-5*unit);
-    mount.scale.setScalar(1.18*unit);
+    mount.scale.set(1.77*unit,1.77*unit,1.18*unit);
     const sides=[-1,1].map(sign=>{
       const hinge=new T.Group(), spar=new T.Group(), tipHinge=new T.Group();
       hinge.position.x=sign*3;
@@ -87,9 +87,9 @@ window.NoraWings = (() => {
     });
     let phase=0, spread=0;
     return {
-      tick(dt,airborne=false) {
+      tick(dt,airborne=false,boosting=false) {
         spread+=((airborne?1:0)-spread)*(1-Math.exp(-9*dt));
-        phase=(phase+dt*style.speed*(1+1.9*spread))%(2*Math.PI);
+        phase=(phase+dt*style.speed*(1+(boosting?3:1.9)*spread))%(2*Math.PI);
         for (const {sign,hinge,tipHinge} of sides) {
           // Sweep stays behind the shoulder line throughout the cycle.
           hinge.rotation.y=sign*(.52-.20*spread+Math.sin(phase)*(.13+.16*spread));

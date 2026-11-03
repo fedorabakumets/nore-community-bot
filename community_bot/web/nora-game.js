@@ -265,7 +265,7 @@
             aria-pressed="${preview===id}" class="${preview===id?'selected':''}">
             ${wingShop.icon(id)}<strong>${item.name}</strong>
           </button>
-          <span>50 🍪</span><small>Усиленный прыжок +40%</small>
+          <span>50 🍪</span><small>Двойной прыжок с плавным спуском</small>
           <button type="button" data-wing-action="${id}">${action}</button>
         </article>`;
       }).join('');
