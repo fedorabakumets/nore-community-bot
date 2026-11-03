@@ -10,9 +10,12 @@ window.NoraRecords = (() => {
     const side=Math.min(image.width,image.height);
     ctx.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,48,48);
     const letters={d:['001','001','111','101','101','101','111'],e:['000','000','111','101','111','100','111'],z:['000','000','111','001','010','100','111'],y:['000','000','101','101','111','001','110'],t:['010','010','111','010','010','010','011'],w:['000','000','101','101','111','111','101'],o:['000','000','111','101','101','101','111']};
-    ctx.fillStyle='#1b101a';ctx.fillRect(0,38,48,10);
+    const pixels=[];
+    [...'dedzytwo'].forEach((letter,i)=>letters[letter].forEach((row,y)=>[...row].forEach((pixel,x)=>{if(pixel==='1')pixels.push([8+i*4+x,30+y]);})));
+    ctx.fillStyle='#1b101a';
+    for(const [x,y] of pixels)for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)ctx.fillRect(x+dx,y+dy,1,1);
     ctx.fillStyle='#fff1db';
-    [...'dedzytwo'].forEach((letter,i)=>letters[letter].forEach((row,y)=>[...row].forEach((pixel,x)=>{if(pixel==='1')ctx.fillRect(8+i*4+x,40+y,1,1);})));
+    for(const [x,y] of pixels)ctx.fillRect(x,y,1,1);
   }
   const cover=new Image();
   cover.onload=()=>{

@@ -150,6 +150,8 @@ window.NoraScenery = (() => {
     const mark=new T.Mesh(geometry,labelMaterial);mark.position.set(.24,.022,0);mark.scale.set(.11,.012,.035);record.add(mark);
     let recordsDisposed=false,coverTexture=null;
     const coverMaterial=new T.MeshLambertMaterial({color:'#b94b67'});
+    const recordFaceGeometry=new T.CircleGeometry(.378,32);
+    const recordFace=new T.Mesh(recordFaceGeometry,coverMaterial);recordFace.rotation.x=-Math.PI/2;recordFace.position.y=.019;recordFace.visible=false;record.add(recordFace);
     if(window.NoraRecords&&typeof Image!=='undefined'){
       const image=new Image();image.onload=()=>{
         if(recordsDisposed)return;
@@ -175,7 +177,8 @@ window.NoraScenery = (() => {
     for(const item of Object.values(carried)){item.scale.setScalar(.65);item.visible=false;carriedRecord.add(item);}
     function setRecords(state){
       record.visible=!!state.player;
-      label.material=state.player==='dedzytwo'?coverMaterial:labelMaterial;
+      recordFace.visible=state.player==='dedzytwo';
+      label.visible=mark.visible=state.player!=='dedzytwo';
       for(const id of ['standard','dedzytwo']){shelfRecords[id].visible=state.shelf.includes(id);carried[id].visible=state.hand===id;}
     }
     const noteMaterial=new T.MeshBasicMaterial({color:'#ffffff',transparent:true,depthWrite:false});
@@ -206,7 +209,7 @@ window.NoraScenery = (() => {
       }
       notes.instanceMatrix.needsUpdate=true;notes.instanceColor.needsUpdate=true;
     }
-    return {outdoor,indoor,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
   return {create};
 })();
