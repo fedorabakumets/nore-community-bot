@@ -371,8 +371,14 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
-    from community_bot import nora_game_api
+    from community_bot import music_api, nora_game_api
 
+    app.router.add_get('/api/community/music', music_api.delivery_status)
+    app.router.add_post('/api/community/music', music_api.send_track)
+    app.router.add_get('/api/nora-game/records', music_api.collection)
+    app.router.add_post('/api/nora-game/records', music_api.record_action)
+    for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
+        app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)
@@ -413,7 +419,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-scenery.js', 'nora-companion.js',
-                 'nora-world.js', 'nora-game.js', 'people.js',
+                 'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
                  'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))

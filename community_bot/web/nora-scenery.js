@@ -123,8 +123,12 @@ window.NoraScenery = (() => {
     furniture(-3.1,.65,-2.6,1.25,1.3,3.6,'#765033');box(-3.1,1.34,-2.6,1.55,.15,3.8,'#ab7a48');
     for(let z=-4;z<=-1;z+=.45)box(-3.1,1.57,z,.16,.32,.16,z%1?'#64805a':'#b8915b');
     for(const [x,z] of [[-3.6,4],[3.6,3.8],[-3.7,-4.4],[3.6,-4.4]])barrel(x,z);
-    // Fireplace, mantle, logs and glowing embers at the far wall.
-    furniture(.1,.8,-4.7,1.75,1.6,.65,'#77776c');box(.1,.65,-4.32,1.1,.95,.1,'#342a27');box(.1,.32,-4.18,.9,.18,.35,'#70472f');box(-.1,.5,-4.13,.22,.35,.2,'#e98b45');box(.22,.47,-4.13,.22,.25,.2,'#f2c76a');box(.1,1.64,-4.6,2,.2,.9,'#72543b');
+    // Collection rack replaces the fireplace: records below, trophies and finds above.
+    furniture(.1,1.42,-4.78,2.7,2.84,.38,'#49372d');
+    for(const x of [-1.25,1.45])box(x,1.42,-4.45,.14,2.84,.64,'#b08a56');
+    for(const y of [.14,.98,1.82,2.76])box(.1,y,-4.4,2.7,.13,.8,'#977044');
+    for(const x of [-.6,.8])box(x,1.45,-4.5,.08,.65,.45,'#765339');
+    box(.1,2.88,-4.52,2.9,.16,.78,'#c09b65');
     for(const x of [-3.8,3.8]){box(x,2.3,-4.95,1.2,.12,.35,'#65452e');for(let i=0;i<4;i++)box(x-.4+i*.25,2.5,-4.88,.14,.32,.14,['#748352','#b16f4e','#d0ac72','#577373'][i]);}
     // Scattered sacks, books, crates and rugs retain a clear center aisle.
     furniture(3.7,.3,-2.2,.7,.6,.7,'#9a7044');box(3.7,.64,-2.2,.75,.1,.75,'#6b4c34');
@@ -144,6 +148,37 @@ window.NoraScenery = (() => {
     const labelGeometry=new T.CylinderGeometry(.12,.12,.01,24),labelMaterial=new T.MeshBasicMaterial({color:'#b56d69'});
     const label=new T.Mesh(labelGeometry,labelMaterial);label.position.y=.023;record.add(label);
     const mark=new T.Mesh(geometry,labelMaterial);mark.position.set(.24,.022,0);mark.scale.set(.11,.012,.035);record.add(mark);
+    let recordsDisposed=false,coverTexture=null;
+    const coverMaterial=new T.MeshLambertMaterial({color:'#b94b67'});
+    if(window.NoraRecords&&typeof Image!=='undefined'){
+      const image=new Image();image.onload=()=>{
+        if(recordsDisposed)return;
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=48;
+        const ctx=canvas.getContext('2d');const side=Math.min(image.width,image.height);
+        ctx.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,48,48);
+        coverTexture=new T.CanvasTexture(canvas);coverTexture.magFilter=T.NearestFilter;coverTexture.minFilter=T.NearestFilter;coverTexture.colorSpace=T.SRGBColorSpace;
+        coverMaterial.map=coverTexture;coverMaterial.color.set('#ffffff');coverMaterial.needsUpdate=true;
+      };image.src='/game/dedzytwo-cover.png';
+    }
+    const sleeveGeometry=new T.BoxGeometry(.56,.56,.045),faceGeometry=new T.PlaneGeometry(.5,.5);
+    function sleeve(id){
+      const group=new T.Group(),jacket=new T.Mesh(sleeveGeometry,id==='dedzytwo'?coverMaterial:labelMaterial);
+      group.add(jacket);
+      if(id==='dedzytwo'){const face=new T.Mesh(faceGeometry,coverMaterial);face.position.z=.026;group.add(face);}
+      const vinyl=new T.Mesh(discGeometry,discMaterial);vinyl.rotation.x=Math.PI/2;vinyl.position.set(.22,0,0);vinyl.scale.setScalar(.68);group.add(vinyl);
+      const sticker=new T.Mesh(labelGeometry,id==='dedzytwo'?coverMaterial:labelMaterial);sticker.position.y=.023;vinyl.add(sticker);
+      return group;
+    }
+    const shelfRecords={};
+    for(const id of ['standard','dedzytwo']){const item=sleeve(id);item.name='nora-shelf-'+id;item.position.set(id==='standard'?-.53:.58,.6,-4.13);item.visible=false;indoor.add(item);shelfRecords[id]=item;}
+    const carriedRecord=new T.Group();carriedRecord.name='nora-carried-record';
+    const carried={standard:sleeve('standard'),dedzytwo:sleeve('dedzytwo')};
+    for(const item of Object.values(carried)){item.scale.setScalar(.65);item.visible=false;carriedRecord.add(item);}
+    function setRecords(state){
+      record.visible=!!state.player;
+      label.material=state.player==='dedzytwo'?coverMaterial:labelMaterial;
+      for(const id of ['standard','dedzytwo']){shelfRecords[id].visible=state.shelf.includes(id);carried[id].visible=state.hand===id;}
+    }
     const noteMaterial=new T.MeshBasicMaterial({color:'#ffffff',transparent:true,depthWrite:false});
     const notes=new T.InstancedMesh(geometry,noteMaterial,12*4),o=new T.Object3D();notes.name='nora-music-notes';notes.frustumCulled=false;indoor.add(notes);
     notes.instanceMatrix.setUsage(T.DynamicDrawUsage);let elapsed=0;
@@ -172,7 +207,7 @@ window.NoraScenery = (() => {
       }
       notes.instanceMatrix.needsUpdate=true;notes.instanceColor.needsUpdate=true;
     }
-    return {outdoor,indoor,outdoorZone,indoorZone,update,dispose(){outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
   return {create};
 })();

@@ -4,13 +4,14 @@
   const defaults = window.NoraVoxel.defaults;
   let outfit = { ...defaults };
   let helpDismissed = false;
-  let music = null;
+  let music = null, pendingGift = false;
   const logo = '<span class="nora-game-logo">N<span>O</span>RA</span>';
   function createMusic() {
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
     let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
-    let recordPlaying=true;
+    let recordPlaying=true, selectedRecord='/game/nora-theme.mp3', trackVersion=0;
+    const tracks=new Map();
     let musicGain=null, musicFilter=null, musicPan=null, spatial={gain:1,cutoff:18000,pan:0};
     function positionMusic(value) {
       spatial=value;
@@ -40,13 +41,32 @@
       if (closed || !buffer) return;
       const source = context.createBufferSource(), gain = context.createGain();
       const start = Math.max(context.currentTime + .02, nextStart), end = start + buffer.duration;
-      source.buffer = buffer; source.connect(gain); gain.connect(musicGain);
+      source.buffer = buffer; source.recordGain=gain; source.connect(gain); gain.connect(musicGain);
       gain.gain.setValueAtTime(0, start);
       gain.gain.linearRampToValueAtTime(1, start + overlap);
       gain.gain.setValueAtTime(1, end - overlap);
       gain.gain.linearRampToValueAtTime(0, end);
       sources.add(source); source.onended = () => { sources.delete(source); source.disconnect(); gain.disconnect(); if (!closed) schedule(); };
       source.start(start); nextStart = start + buffer.duration - overlap;
+    }
+    async function selectRecord(url,force=false) {
+      if(!force&&url===selectedRecord)return;
+      selectedRecord=url;const version=++trackVersion;
+      for(const source of sources){source.onended=null;try{source.stop();}catch(_){}source.disconnect();source.recordGain?.disconnect();}
+      sources.clear();buffer=null;
+      if(!url||!context||closed)return;
+      const current=context;
+      try {
+        if(!tracks.has(url))tracks.set(url,(async()=>{
+          const response=await fetch(url);if(!response.ok)throw Error('audio unavailable');
+          return current.decodeAudioData(await response.arrayBuffer());
+        })());
+        const decoded=await tracks.get(url);
+        if(closed||version!==trackVersion||current!==context)return;
+        if(!Number.isFinite(decoded.duration)||decoded.duration<.2)throw Error('invalid audio');
+        buffer=decoded;overlap=Math.min(3,buffer.duration/3);nextStart=context.currentTime+.03;
+        schedule();schedule();blocked=context.state!=='running';update();
+      }catch(_){tracks.delete(url);if(!closed&&version===trackVersion){blocked=true;update();}}
     }
     async function start() {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -59,15 +79,7 @@
         positionMusic(spatial);
         await context.resume();
         if (closed) return;
-        const response = await fetch('/game/nora-theme.mp3');
-        if (!response.ok) throw Error('audio unavailable');
-        const bytes = await response.arrayBuffer();
-        buffer = await context.decodeAudioData(bytes);
-        if (closed) return;
-        if (!Number.isFinite(buffer.duration) || buffer.duration < .2) throw Error('invalid audio');
-        overlap = Math.min(3, buffer.duration / 3);
-        nextStart = context.currentTime + .03; schedule(); schedule();
-        blocked = context.state !== 'running'; update();
+        await selectRecord(selectedRecord,true);
         if (!muted) volume(level, .6);
       } catch (_) { if (!closed) { blocked = true; update(); } }
     }
@@ -75,7 +87,7 @@
       if (!context) { blocked = false; start(); return; }
       if (blocked || context.state !== 'running') {
         try { await context.resume(); blocked = context.state !== 'running'; } catch (_) { blocked = true; }
-        if (!blocked && !buffer) { context.close(); context = null; start(); }
+        if (!blocked && !buffer && selectedRecord) { context.close(); context = null; start(); }
       }
     }
     function attach(parent) {
@@ -150,6 +162,7 @@
           distance += travelled;
           if (distance >= .65) { distance %= .65; step(inside); }
         },
+        record(url) { if(!stopped)return selectRecord(url); },
         playing(value) { if(!stopped){recordPlaying=value;positionMusic(spatial);if(value)ensureAudio();} },
         spatial(value) { if(!stopped)positionMusic(value); },
         jump(inside) { distance = 0; step(inside, .8); },
@@ -161,7 +174,7 @@
     return {start,attach,close,worldAudio};
   }
   function close() {
-    active++;
+    active++;pendingGift=false;
     music?.close(); music = null;
     sceneStop?.(); sceneStop = null;
     overlay?.remove(); overlay = null;
@@ -180,6 +193,7 @@
   async function world(nickname) {
     frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</span><button class="nora-world-help-close" type="button" aria-label="Закрыть инструкцию движения">×</button></p><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-action nora-record-toggle" type="button" aria-pressed="true" hidden>Выключить проигрыватель</button><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
+    root.dataset.recordGift=pendingGift?'1':'';pendingGift=false;
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
     root.querySelector('.nora-world-help-close').onclick = () => {
       helpDismissed = true;
@@ -269,8 +283,9 @@
       catch (error) { if (version === active) { form.querySelector('.nora-game-error').textContent = error.message; button.disabled = false; } }
     };
   }
-  async function open() {
+  async function open(gift=false) {
     if (overlay) return;
+    pendingGift=gift;
     const version = ++active;
     overlay = document.createElement('section'); overlay.className = 'nora-game-screen';
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Игра НОРА');
@@ -279,8 +294,8 @@
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
     try { const result = await api('nora-game'); if (version === active) { outfit = {...defaults,...result.outfit}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
-    catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { close(); open(); }; } }
+    catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const gift=pendingGift;close();open(gift); }; } }
   }
-  document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay && !overlay.querySelector('.nora-pet-panel')?.open) close(); });
+  document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); if(event.target.closest('[data-record-gift]'))open(true); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay && ![...overlay.querySelectorAll('dialog')].some(dialog=>dialog.open)) close(); });
 })();

@@ -135,7 +135,7 @@ window.NoraWorld = (() => {
     sun.position.set(-8,12,-45);sun.scale.set(4,4,1);scene.add(sun);
     const moonMaterial=new T.MeshBasicMaterial({color:'#c6d4dc',fog:false,transparent:true,depthWrite:false});
     const moon=new T.Mesh(geometry,moonMaterial);moon.scale.set(2.6,2.6,.8);scene.add(moon);
-    const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);
+    const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
     let inside=false,zone=scenery.outdoorZone;
     const atmosphere=createAtmosphere(T,scene,geometry);
     const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
@@ -189,16 +189,16 @@ window.NoraWorld = (() => {
     on(joystick,'pointerdown',e=>{if(joyId!==null)return;e.preventDefault();joyId=e.pointerId;joystick.setPointerCapture(joyId);joystickMove(e);});
     on(joystick,'pointermove',e=>{if(e.pointerId===joyId)joystickMove(e);});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
-    on(canvas,'pointerdown',e=>{if(companion.panelOpen()||orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
+    on(canvas,'pointerdown',e=>{if(inputPaused()||orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
     on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
-    function jump(){if(companion.panelOpen())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
+    function jump(){if(inputPaused())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
     on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;actualDistance=4.6;syncView();});
     on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
     on(jumpButton,'click',jump);
     on(window,'keydown',e=>{
-      if(companion.panelOpen())return;
+      if(inputPaused())return;
       if(!['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
       if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
       if(e.code==='Space'&&e.target?.closest?.('button'))return;
@@ -211,9 +211,10 @@ window.NoraWorld = (() => {
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');
     let recordPlaying=true;
-    function nearRecord(){return inside&&!companion.panelOpen()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
+    function inputPaused(){return companion.panelOpen()||!!records?.panelOpen();}
+    function nearRecord(){return inside&&!inputPaused()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
     function syncRecordButton(){
-      recordButton.hidden=!nearRecord();
+      recordButton.hidden=!nearRecord()||(!!records&&!records.hasRecord());
       recordButton.textContent=recordPlaying?'Выключить проигрыватель':'Включить проигрыватель';
       recordButton.setAttribute('aria-pressed',String(recordPlaying));
     }
@@ -246,13 +247,14 @@ window.NoraWorld = (() => {
     }
     const target=new T.Vector3(), offset=new T.Vector3(), direction=new T.Vector3();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
+    const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
     function tick(time){
       if(disposed)return;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
         let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
-        if(companion.panelOpen()){inputX=inputZ=0;}
+        if(inputPaused()){inputX=inputZ=0;}
         const inputLength=Math.hypot(inputX,inputZ);if(inputLength<=.025){inputX=inputZ=0;}if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
         // Movement is always relative to the visible camera, including selfie.
         // Turning the model must not rotate the camera or the input frame.
@@ -277,6 +279,7 @@ window.NoraWorld = (() => {
         const heading=Math.hypot(travelledX,travelledZ)>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
         player.rotation.y+=turn*(1-Math.exp(-12*dt));
+        if(scenery.carriedRecord){const angle=player.rotation.y;scenery.carriedRecord.position.set(player.position.x+Math.cos(angle)*.26+Math.sin(angle)*.2,player.position.y+.64,player.position.z-Math.sin(angle)*.26+Math.cos(angle)*.2);scenery.carriedRecord.rotation.y=angle;}
         playerShadow.position.set(player.position.x,.008,player.position.z);
         target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
         const wanted=inside?4.6:(camera.aspect<.7?5.7:5.1);
@@ -296,12 +299,13 @@ window.NoraWorld = (() => {
           offset.copy(direction).multiplyScalar(actualDistance);
           camera.position.copy(target).add(offset);camera.lookAt(target);
         }
+        records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen());
         syncRecordButton();
         action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
         sounds?.spatial(tavernAcoustics(inside,player.position.x,player.position.z,yaw+(view===2?Math.PI:0)));
-        scenery.update?.(dt,inside,daylight,camera,recordPlaying);
+        scenery.update?.(dt,inside,daylight,camera,recordPlaying&&(!records||records.hasRecord()));
         sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),jumpHeight===0&&jumpVelocity===0);
         atmosphere.update(dt,daylight,inside);
         companion.update(dt,camera);
@@ -309,7 +313,7 @@ window.NoraWorld = (() => {
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }
