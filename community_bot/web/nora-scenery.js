@@ -268,30 +268,57 @@ window.NoraScenery = (() => {
     }
     const lobby=mesh();lobby.add(lanterns);lobby.visible=false;
     const portal=new T.Group();
-    const gateMaterial=new T.MeshLambertMaterial({color:'#4c475b'});
-    const coreMaterial=new T.MeshBasicMaterial({color:'#7654ff',transparent:true,opacity:.88});
+    portal.name='nora-world-portal';
+    // Stepped stone surround and brass inlays from the NORA cover.
+    blocks=[];
+    const stone=['#58675c','#69776a','#48574e'];
+    const brass='#ba9b60';
+    box(0,.07,0,2.60,.14,.76,stone[2]);
+    box(0,2.75,0,1.66,.38,.71,stone[0]);
+    box(0,2.91,0,1.66,.06,.72,stone[1]);
+    for(const side of [-1,1]){
+      box(side*1.07,1.13,0,.45,2.06,.65,stone[2]);
+      box(side*1.17,1.13,0,.24,2.06,.73,stone[0]);
+      box(side*.91,2.24,0,.48,.38,.68,stone[1]);
+      box(side*.72,2.51,0,.48,.26,.70,stone[0]);
+      box(side*1.09,.19,0,.42,.15,.75,stone[1]);
+      for(const y of [.52,1.47])box(side*1.05,y,0,.38,.13,.75,brass);
+      for(const y of [.83,1.82])box(side*1.12,y,0,.28,.034,.74,stone[1]);
+      box(0,2.74,side*.365,.39,.16,.03,brass);
+      box(0,2.74,side*.383,.12,.08,.015,'#d6b77c');
+    }
+    const portalStone=mesh();
+    const rimMaterial=new T.MeshBasicMaterial({color:'#542232'});
+    const coreMaterial=new T.MeshBasicMaterial({color:'#ac4959'});
+    const highlightMaterial=new T.MeshBasicMaterial({
+      color:'#ffb38d',transparent:true,opacity:.66,depthWrite:false,
+    });
     const rayMaterial=new T.MeshBasicMaterial({
-      color:'#8a8fff',transparent:true,opacity:.26,depthWrite:false,blending:T.AdditiveBlending,
+      color:'#ef7c87',transparent:true,opacity:.22,depthWrite:false,blending:T.AdditiveBlending,
     });
     function portalBox(mat,x,y,z,w,h,d){
       const part=new T.Mesh(geometry,mat);part.position.set(x,y,z);part.scale.set(w,h,d);portal.add(part);return part;
     }
-    for(const side of [-1,1]){
-      portalBox(gateMaterial,side*1.1,1.13,0,.39,2.26,.65);
-      portalBox(gateMaterial,side*.83,2.36,0,.43,.38,.65);
-      portalBox(gateMaterial,side*.53,2.61,0,.43,.34,.65);
+    // Recessed wine-red edge, rose-colored surface, and an offset pixel reflection.
+    for(const [mat,width,bottom,shoulder,top,depth] of [
+      [rimMaterial,1.86,.12,2.27,2.61,.34],
+      [coreMaterial,1.51,.15,2.06,2.45,.38],
+    ]){
+      portalBox(mat,0,(bottom+shoulder)/2,0,width,shoulder-bottom,depth);
+      portalBox(mat,0,(shoulder+top)/2,0,width-.52,top-shoulder,depth);
     }
-    portalBox(gateMaterial,0,2.78,0,.74,.32,.65);
-    portalBox(gateMaterial,0,.1,0,2.65,.2,1.1);
-    portalBox(coreMaterial,0,1.25,0,1.83,2.13,.13);
-    portalBox(coreMaterial,0,2.37,0,1.27,.24,.13);
+    for(const side of [-1,1])for(const [x,y,w,h] of [
+      [-.33,.40,.14,.16],[-.33,.96,.14,.76],[-.22,1.43,.36,.18],[-.07,1.66,.14,.32],
+    ])portalBox(highlightMaterial,x*side,y,side*.196,w,h,.012);
     for(let i=-2;i<=2;i++){
-      const ray=portalBox(rayMaterial,i*.27,1.45+i*.29,-.75,.07,.11,1.55);
+      const ray=portalBox(rayMaterial,i*.27,1.45+i*.29,-.83,.07,.10,1.36);
       ray.rotation.y=i*.18;ray.rotation.x=i*.09;
     }
-    const portalLight=new T.PointLight('#9b70ff',9,5);
+    const portalLight=new T.PointLight('#ef6575',8,5);
     portalLight.position.set(0,1.32,-.45);portal.add(portalLight);
-    const lobbyPortal=portal.clone();portal.position.z=portalZ.home;lobbyPortal.position.z=portalZ.lobby;
+    const lobbyPortal=portal.clone(), lobbyPortalStone=portalStone.clone();
+    portal.add(portalStone);lobbyPortal.add(lobbyPortalStone);
+    portal.position.z=portalZ.home;lobbyPortal.position.z=portalZ.lobby;
     outdoor.add(portal);lobby.add(lobbyPortal);
     for(const [zone,z] of [[outdoorZone,portalZ.home],[lobbyZone,portalZ.lobby]]){
       zone.boxes.push([-1.3,1.3,z-.38,z+.38]);
@@ -301,10 +328,10 @@ window.NoraScenery = (() => {
     function updatePortal(dt){
       if(reduced)return;
       portalTime+=dt;
-      coreMaterial.opacity=.78+.13*Math.sin(portalTime*2);
-      rayMaterial.opacity=.24+.07*Math.sin(portalTime*3);
+      highlightMaterial.opacity=.61+.13*Math.sin(portalTime*2);
+      rayMaterial.opacity=.22+.07*Math.sin(portalTime*3);
     }
-    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();gateMaterial.dispose();coreMaterial.dispose();rayMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();rayMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
   }
   return {create,tavernOffset,portalZ};
 })();
