@@ -6,11 +6,18 @@ window.NoraRecords = (() => {
   };
   const giftIcon = '<svg viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true"><path fill="#160d16" d="M5 12h22v17H5zM3 9h26v7H3zM8 1h6v3h4V1h6v3h3v5H5V4h3z"/><path fill="#e64a57" d="M6 16h20v11H6zM4 10h24v4H4zM9 2h4v3h-4zM19 2h4v3h-4zM6 5h4v3H6zM22 5h4v3h-4z"/><path fill="#9c243e" d="M23 16h3v11h-3zM6 25h20v2H6z"/><path fill="#ffd39a" d="M14 9h4v18h-4zM10 5h4v3h-4zM18 5h4v3h-4z"/><path fill="#fff0cb" d="M14 9h2v18h-2z"/></svg>';
   let coverUrl='/game/dedzytwo-cover.png';
+  function drawCover(ctx,image) {
+    const side=Math.min(image.width,image.height);
+    ctx.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,48,48);
+    const letters={d:['001','001','111','101','101','101','111'],e:['000','000','111','101','111','100','111'],z:['000','000','111','001','010','100','111'],y:['000','000','101','101','111','001','110'],t:['010','010','111','010','010','010','011'],w:['000','000','101','101','111','111','101'],o:['000','000','111','101','101','101','111']};
+    ctx.fillStyle='#1b101a';ctx.fillRect(0,38,48,10);
+    ctx.fillStyle='#fff1db';
+    [...'dedzytwo'].forEach((letter,i)=>letters[letter].forEach((row,y)=>[...row].forEach((pixel,x)=>{if(pixel==='1')ctx.fillRect(8+i*4+x,40+y,1,1);})));
+  }
   const cover=new Image();
   cover.onload=()=>{
     const canvas=document.createElement('canvas');canvas.width=canvas.height=48;
-    const side=Math.min(cover.width,cover.height);
-    canvas.getContext('2d').drawImage(cover,(cover.width-side)/2,(cover.height-side)/2,side,side,0,0,48,48);
+    drawCover(canvas.getContext('2d'),cover);
     coverUrl=canvas.toDataURL();document.querySelectorAll('[data-record-cover]').forEach(img=>img.src=coverUrl);
   };
   cover.src=coverUrl;
@@ -101,5 +108,5 @@ window.NoraRecords = (() => {
       dispose(){disposed=true;controls.abort();panel.remove();actions.remove();held.remove();},
     };
   }
-  return {mount,art,giftIcon,catalog};
+  return {mount,art,drawCover,giftIcon,catalog};
 })();

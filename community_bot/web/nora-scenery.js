@@ -154,8 +154,7 @@ window.NoraScenery = (() => {
       const image=new Image();image.onload=()=>{
         if(recordsDisposed)return;
         const canvas=document.createElement('canvas');canvas.width=canvas.height=48;
-        const ctx=canvas.getContext('2d');const side=Math.min(image.width,image.height);
-        ctx.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,48,48);
+        window.NoraRecords.drawCover(canvas.getContext('2d'),image);
         coverTexture=new T.CanvasTexture(canvas);coverTexture.magFilter=T.NearestFilter;coverTexture.minFilter=T.NearestFilter;coverTexture.colorSpace=T.SRGBColorSpace;
         coverMaterial.map=coverTexture;coverMaterial.color.set('#ffffff');coverMaterial.needsUpdate=true;
       };image.src='/game/dedzytwo-cover.png';
