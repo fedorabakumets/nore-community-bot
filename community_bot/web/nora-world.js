@@ -90,7 +90,8 @@ window.NoraWorld = (() => {
     const T = await import('/vendor/three.module.js');
     if (!root.isConnected) { sounds?.stop(); return () => {}; }
     const renderer = new T.WebGLRenderer({canvas, antialias:false, powerPreference:'low-power'});
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    const mobile=window.matchMedia?.('(pointer:coarse)').matches||false;
+    let quality=1,frameTotal=0,frameCount=0,qualityAt=0,renderWidth=0,renderHeight=0,renderRatio=0;
     renderer.outputColorSpace = T.SRGBColorSpace;
     const scene = new T.Scene(); scene.background = new T.Color('#b2d5d2');
     scene.fog = new T.Fog('#b2d5d2', 12, 42);
@@ -206,7 +207,7 @@ window.NoraWorld = (() => {
       if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
     });
     on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
-    function reset(){resetStick();keys.clear();orbitId=null;previous=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
+    function reset(){resetStick();keys.clear();orbitId=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
     on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');
@@ -214,9 +215,10 @@ window.NoraWorld = (() => {
     function inputPaused(){return companion.panelOpen()||!!records?.panelOpen();}
     function nearRecord(){return inside&&!inputPaused()&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0;}
     function syncRecordButton(){
-      recordButton.hidden=!nearRecord()||(!!records&&!records.hasRecord());
-      recordButton.textContent=recordPlaying?'Выключить проигрыватель':'Включить проигрыватель';
-      recordButton.setAttribute('aria-pressed',String(recordPlaying));
+      const hidden=!nearRecord()||(!!records&&!records.hasRecord());
+      if(recordButton.hidden!==hidden)recordButton.hidden=hidden;
+      const text=recordPlaying?'Выключить проигрыватель':'Включить проигрыватель';
+      if(recordButton.textContent!==text){recordButton.textContent=text;recordButton.setAttribute('aria-pressed',String(recordPlaying));}
     }
     on(recordButton,'click',()=>{
       if(!nearRecord())return;
@@ -232,7 +234,16 @@ window.NoraWorld = (() => {
       root.querySelector('.nora-world-bar small').textContent=inside?'ТАВЕРНА':'ЛЕСНАЯ ПОЛЯНА';
       for(const g of gusts)g.age=1;companion.reset();reset();
     });
-    function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+    function resize(){
+      const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
+      // Bound fill rate independently of orientation / Retina density. CSS stays full resolution.
+      const ratio=Math.min(window.devicePixelRatio||1,mobile?1.25:1.5,Math.sqrt((mobile?420000:1600000)/(w*h)))*quality;
+      if(w===renderWidth&&h===renderHeight&&Math.abs(ratio-renderRatio)<.001)return;
+      renderWidth=w;renderHeight=h;renderRatio=ratio;
+      renderer.setPixelRatio(ratio);renderer.setSize(w,h,false);
+      camera.aspect=w/h;camera.updateProjectionMatrix();
+      frameTotal=frameCount=0;qualityAt=0;
+    }
     const observer=new ResizeObserver(resize);observer.observe(canvas);resize();
     const windMaterial=new T.MeshBasicMaterial({color:'#d5e4df',transparent:true,opacity:.09,depthWrite:false});
     const wind=new T.InstancedMesh(geometry,windMaterial,24);wind.frustumCulled=false;scene.add(wind);
@@ -249,8 +260,18 @@ window.NoraWorld = (() => {
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
     function tick(time){
-      if(disposed)return;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
+      if(disposed)return;const previousFrame=previous;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
+        // Sustained slow frames lower only drawing resolution, never simulation speed.
+        const elapsed=previousFrame? (time-previousFrame)/1000 : 0;
+        if(mobile&&elapsed>0&&elapsed<.25){frameTotal+=elapsed;frameCount++;}
+        if(!qualityAt)qualityAt=time;
+        if(mobile&&time-qualityAt>2500&&frameCount>30){
+          const average=frameTotal/frameCount;
+          const next=average>1/45?Math.max(.6,quality-.1):average<1/58?Math.min(1,quality+.05):quality;
+          frameTotal=frameCount=0;qualityAt=time;
+          if(Math.abs(next-quality)>.001){quality=next;resize();}
+        }
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
         let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
@@ -301,7 +322,8 @@ window.NoraWorld = (() => {
         }
         records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen());
         syncRecordButton();
-        action.hidden=!nearDoor();action.textContent=inside?'Выйти из таверны':'Войти в таверну';
+        const doorHidden=!nearDoor();if(action.hidden!==doorHidden)action.hidden=doorHidden;
+        const doorText=inside?'Выйти из таверны':'Войти в таверну';if(action.textContent!==doorText)action.textContent=doorText;
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
         sounds?.spatial(tavernAcoustics(inside,player.position.x,player.position.z,yaw+(view===2?Math.PI:0)));

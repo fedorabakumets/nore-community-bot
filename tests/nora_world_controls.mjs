@@ -59,16 +59,18 @@ try {
   tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
+    window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
+    let resizeCallback;
     let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
-    const renderer = {setPixelRatio(){}, setSize(){}, dispose(){}, render(s,c){camera=c;scene=s;}};
+    const renderer = {ratio:1,resizes:0,setPixelRatio(value){this.ratio=value;}, setSize(w,h){this.width=w;this.height=h;this.resizes++;}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, ResizeObserver:class {observe(){} disconnect(){}},
+      Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
@@ -83,8 +85,21 @@ try {
     const joystick = root.querySelector('.nora-world-joystick');
     const stick = (x,z,down=false) => joystick.emit(down?'pointerdown':'pointermove',{pointerId:1,clientX:60+x*36,clientY:60+z*36});
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
-    return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
+    return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
+  const mobileWorld=await setup(0,30,undefined,undefined,true);
+  const r=mobileWorld.renderer;
+  assert.ok(r.width*r.height*r.ratio**2<=420001,'Retina mobile buffer has a pixel budget');
+  const initial=r.ratio, resizeCount=r.resizes;
+  mobileWorld.resize();assert.equal(r.resizes,resizeCount,'unchanged resize does not reallocate canvas');
+  mobileWorld.frames(180);assert.ok(r.ratio<initial,'sustained low FPS reduces drawing resolution');
+  const low=r.ratio;mobileWorld.setFps(60);mobileWorld.frames(600);
+  assert.ok(r.ratio>low&&r.ratio<=initial,'stable fast frames recover quality within the cap');
+  mobileWorld.canvas.clientWidth=780;mobileWorld.canvas.clientHeight=390;mobileWorld.resize();
+  mobileWorld.frames(1);assert.equal(mobileWorld.camera().aspect,2,'rotation updates projection');
+  assert.ok(r.width*r.height*r.ratio**2<=420001,'landscape retains mobile pixel budget');
+  mobileWorld.stop();
+  console.log('NORA mobile rendering: Retina budget, resize deduplication, low-FPS adaptation, recovery and rotation passed.');
   const soundEvents=[];
   const sounds={playing:value=>soundEvents.push(['playing',value]),spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
     land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};

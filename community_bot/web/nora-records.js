@@ -23,7 +23,7 @@ window.NoraRecords = (() => {
     const actions=document.createElement('div');actions.className='nora-record-actions';actions.hidden=true;
     const held=document.createElement('p');held.className='nora-record-held';held.hidden=true;
     const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Коллекция пластинок');
-    root.append(actions,held,panel);
+    (root.querySelector('.nora-world-context')||root).append(actions,held);root.append(panel);
     function apply(next) {
       state=next;scenery.setRecords?.(state);
       sounds?.record?.(state.player?catalog[state.player].url:null);
