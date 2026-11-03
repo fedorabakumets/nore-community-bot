@@ -95,7 +95,8 @@ window.NoraWorld = (() => {
   }
   function lobbyPlayers(T,scene,player,status){
     const peers=new Map();
-    let session=null,pending=null,next=0;
+    const interval=80, playbackDelay=150, maxPrediction=65, correctionSpeed=4.8;
+    let session=null,pending=null,next=0,clockOffset=null,lastReply=0,failures=0;
     function remove(nickname){
       const peer=peers.get(nickname);
       scene.remove(peer.avatar.group);
@@ -114,7 +115,7 @@ window.NoraWorld = (() => {
       const label=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthWrite:false}));
       label.position.y=5.5;label.scale.set(4.5,.84,1);avatar.group.add(label);
       scene.add(avatar.group);
-      const peer={avatar,label,target:null};peers.set(nickname,peer);return peer;
+      const peer={avatar,label,samples:[],stamp:null};peers.set(nickname,peer);return peer;
     }
     function leave(){
       if(!session)return Promise.resolve();
@@ -124,45 +125,79 @@ window.NoraWorld = (() => {
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
       return pending;
     }
-    function update(time,dt){
+    function update(time,dt,grounded,sprinting,boosting){
       if(!session){
-        session=crypto.randomUUID();next=0;
+        session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
         status.textContent='ЛОББИ · ПОДКЛЮЧЕНИЕ';
       }
       if(!pending&&time>=next){
-        next=time+400;
+        next=time+interval;
         const {x,y,z}=player.position,angle=player.rotation.y;
         const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
-        const sentSession=session;
-        pending=api('nora-game/lobby',{session,x,y,z,heading},AbortSignal.timeout(3000)).then(({players})=>{
+        const sentSession=session,sentAt=performance.now();
+        pending=api('nora-game/lobby',{session,x,y,z,heading,grounded,sprinting,boosting},
+          AbortSignal.timeout(1200)).then(({players,time:serverTime})=>{
           if(session!==sentSession)return;
+          const receivedAt=performance.now();
+          lastReply=receivedAt;failures=0;
           if(status.textContent!=='ЛОББИ')status.textContent='ЛОББИ';
+          if(Number.isFinite(serverTime)){
+            const offset=(sentAt+receivedAt)/2-serverTime;
+            // Translate server timestamps to the local frame clock.
+            clockOffset=clockOffset===null?offset:clockOffset+(offset-clockOffset)*.1;
+          }
           const online=new Set();
           for(const pose of players){
             online.add(pose.nickname);
             const peer=peers.get(pose.nickname)||add(pose);
-            peer.avatar.setWings(pose.outfit.wings);
-            peer.target=pose;
+            const stamp=Number.isFinite(pose.time)?pose.time:null;
+            if(stamp!==null&&stamp===peer.stamp)continue;
+            const samples=peer.samples,last=samples.at(-1);
+            const at=stamp!==null&&clockOffset!==null?Math.min(receivedAt,stamp+clockOffset):receivedAt;
+            // Discard old motion after a prolonged interruption.
+            if(last&&(at-last.at>1000||(stamp!==null&&peer.stamp!==null&&stamp<peer.stamp))){
+              samples.length=0;
+              peer.avatar.group.position.set(pose.x,pose.y,pose.z);
+              peer.avatar.group.rotation.y=pose.heading;
+            }else if(last&&at<=last.at)continue;
+            peer.stamp=stamp;
+            samples.push({...pose,at});
+            if(samples.length>16)samples.shift();
           }
           for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
         }).catch(()=>{
           if(session!==sentSession)return;
-          if(status.textContent!=='ЛОББИ · СВЯЗЬ ПОТЕРЯНА')status.textContent='ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
-          for(const nickname of peers.keys())remove(nickname);
+          failures++;
+          next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
+          if(failures>=2)status.textContent='ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
         });
         const sent=pending;
         sent.finally(()=>{if(pending===sent)pending=null;});
       }
-      const ease=1-Math.exp(-9*dt);
-      for(const {avatar,target} of peers.values()){
+      if(time-lastReply>=8000)for(const nickname of peers.keys())remove(nickname);
+      const playback=time-playbackDelay;
+      for(const {avatar,samples} of peers.values()){
+        // Retain the last segment to cover brief gaps in grounded movement.
+        while(samples.length>2&&samples[1].at<=playback)samples.shift();
+        const [a,b=a]=samples;
+        const span=b.at-a.at;
+        const t=span?Math.max(0,Math.min(1,(playback-a.at)/span)):0;
+        const state=t<1?a:b;
+        const lead=span&&b.grounded!==false?Math.min(maxPrediction,Math.max(0,playback-b.at))/Math.max(span,interval):0;
         const {position,rotation}=avatar.group;
-        const dx=(target.x-position.x)*ease,dz=(target.z-position.z)*ease;
-        position.x+=dx;position.z+=dz;position.y+=(target.y-position.y)*ease;
-        const angle=target.heading-rotation.y;
-        rotation.y+=Math.atan2(Math.sin(angle),Math.cos(angle))*ease;
+        const dx=a.x+(b.x-a.x)*(t+lead)-position.x;
+        const dz=a.z+(b.z-a.z)*(t+lead)-position.z;
         const distance=Math.hypot(dx,dz);
-        avatar.walk(position.y>.04?0:distance,dt,distance>2.2*dt);
-        avatar.animateWings(dt,target.y>.04);
+        // Absorb late corrections over several frames instead of snapping back.
+        const step=Math.min(1,correctionSpeed*dt/Math.max(distance,1e-6));
+        position.set(position.x+dx*step,a.y+(b.y-a.y)*t,position.z+dz*step);
+        const angle=b.heading-a.heading;
+        rotation.y=a.heading+Math.atan2(Math.sin(angle),Math.cos(angle))*t;
+        avatar.setWings(state.outfit.wings);
+        const airborne=!(state.grounded??(state.y<=.04));
+        const travelled=distance*step;
+        avatar.walk(airborne?0:travelled,dt,state.sprinting??(travelled>2.2*dt));
+        avatar.animateWings(dt,airborne,state.boosting);
       }
     }
     return {update,leave};
@@ -492,7 +527,7 @@ window.NoraWorld = (() => {
           action.textContent=actionText;
           action.classList?.toggle('nora-portal-action',actionText==='ЛОББИ'||actionText==='НА ОСТРОВ');
         }
-        if(inLobby)lobby.update(time,dt);
+        if(inLobby)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0);
         updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
         const daylight=updateLighting(Date.now());
         const audioYaw=yaw+(view===2?Math.PI:0);

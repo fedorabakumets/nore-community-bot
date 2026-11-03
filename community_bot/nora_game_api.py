@@ -261,10 +261,11 @@ async def lobby(request):
     presence = request.app['nora_lobby']
     user_id = request['actor']['id']
     now = time.monotonic()
-    for key, (seen, expired_session, _) in tuple(presence.items()):
-        if now - seen >= LOBBY_TTL:
-            del presence[key]
-            await music_api.return_departed_record(request.app['db'], key, expired_session)
+    expired = [(key, sid) for key, (seen, sid, _) in presence.items() if now - seen >= LOBBY_TTL]
+    for key, _ in expired:
+        del presence[key]
+    for key, expired_session in expired:
+        await music_api.return_departed_record(request.app['db'], key, expired_session)
     current = presence.get(user_id)
     if body.get('leave') is True:
         if current and current[1] == session:
@@ -292,13 +293,27 @@ async def lobby(request):
     if type(height) not in (int, float) or not 0 <= height <= maximum:
         raise ValueError('Проверь высоту прыжка')
     pose['y'] = height
+    for key in ('grounded', 'sprinting', 'boosting'):
+        if key in body:
+            if type(body[key]) is not bool:
+                raise ValueError('Проверь данные игрока')
+            pose[key] = body[key]
+    if pose.get('boosting') and not equipped:
+        pose['boosting'] = False
     outfit = dict(profile['outfit'])
     if equipped:
         outfit['wings'] = equipped
     else:
         outfit.pop('wings', None)
     profile = {'nickname': profile['nickname'], 'outfit': outfit}
-    presence[user_id] = (time.monotonic(), session, {**profile, **pose})
-    others = [player for key, (_, _, player) in presence.items() if key != user_id]
-    others.sort(key=lambda player: (player['x'] - pose['x']) ** 2 + (player['z'] - pose['z']) ** 2)
-    return web.json_response({'players': others[:20]})
+    now = time.monotonic()
+    presence[user_id] = (now, session, {**profile, **pose})
+    others = [
+        (seen, player) for key, (seen, _, player) in presence.items()
+        if key != user_id and now - seen < LOBBY_TTL
+    ]
+    others.sort(key=lambda entry: (entry[1]['x'] - pose['x']) ** 2 + (entry[1]['z'] - pose['z']) ** 2)
+    return web.json_response({
+        'time': now * 1000,
+        'players': [{**player, 'time': seen * 1000} for seen, player in others[:20]],
+    })

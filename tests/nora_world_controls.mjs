@@ -95,7 +95,7 @@ try {
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
       crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
-      requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
+      performance:{now:()=>time}, requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     if(realScenery)vm.runInContext(sceneryCode, context);
     vm.runInContext(wings, context);
     vm.runInContext(voxel, context);
@@ -403,25 +403,55 @@ try {
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
   console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
   const exchanges=[];
+  let remoteTime=0,dropReply=false;
   const lobbyWorld=await setup(0,60,async(path,body)=>{
     if(path!=='nora-game/lobby')return {pet:null};
     exchanges.push(body);
-    return {players:body.leave?[]:[{nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},x:2,y:.017,z:4,heading:0}]};
+    if(dropReply&&!body.leave)throw Error('temporary loss');
+    return {time:remoteTime,players:body.leave?[]:[{
+      nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+      x:2+remoteTime*.003,y:.017,z:4,heading:remoteTime<750?3.13:-3.13,grounded:true,time:remoteTime,
+    }]};
   },undefined,false,true);
   const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
   assert.equal(lobbyAction.hidden,true,'portal button only appears nearby');
   lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
-  lobbyAction.emit('click');lobbyWorld.frames(1);await flush();
-  const hasPeer=()=>lobbyWorld.scene().children.some(node=>node.children.some(child=>child.isSprite));
+  lobbyAction.emit('click');remoteTime=1000/60*32;lobbyWorld.frames(1);await flush();
+  const hasPeer=()=>lobbyWorld.scene().children.find(node=>node.children.some(child=>child.isSprite));
   assert.ok(hasPeer(),'authenticated lobby snapshot creates a labeled avatar');
+  let previousX=hasPeer().position.x;
+  for(let i=0;i<34;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+    const peer=hasPeer();
+    if(i>12){
+      assert.ok(Math.abs(peer.position.x-previousX-.05)<.001,'steady running has constant frame-to-frame speed');
+      assert.ok(Math.abs(2+remoteTime*.003-peer.position.x-.45)<.001,'steady playback trails the sender by 150 ms');
+      assert.ok(Math.abs(peer.rotation.y)>3,'turning across pi uses the short arc');
+    }
+    previousX=peer.position.x;
+  }
+  assert.ok(exchanges.length>=7,'movement is exchanged more often than every 400 ms');
+  dropReply=true;
+  for(let i=0;i<30;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  assert.ok(hasPeer(),'temporary packet loss preserves the remote avatar');
+  assert.ok(hasPeer().position.x-previousX<.8,'prediction stops during a connection gap');
+  dropReply=false;
+  for(let i=0;i<18;i++){
+    previousX=hasPeer().position.x;
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+    assert.ok(Math.abs(hasPeer().position.x-previousX)<=.081,'recovering after delayed data does not snap');
+  }
+  assert.ok(hasPeer().position.x>previousX,'movement resumes after the connection recovers');
   lobbyWorld.player.position.set(0,.017,8.6);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'НА ОСТРОВ');
   lobbyAction.emit('click');await flush();
   assert.ok(exchanges.at(-1).leave,'returning to the island leaves the shared lobby');
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.stop();
-  console.log('NORA lobby: proximity, return portal, shared avatar and cleanup passed.');
+  console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
   const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
   function widget(){
     const children=[],listeners={};

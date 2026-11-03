@@ -205,9 +205,16 @@ async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path,
     assert await exchange(1, nickname='Spoofed', telegram_id=2) == []
     assert await exchange(2) == [{
         'nickname': 'Alice', 'outfit': {**clothes, **nora_game_api.APPEARANCE_DEFAULTS},
-        'x': 1, 'y': .017, 'z': 2, 'heading': 0,
+        'x': 1, 'y': .017, 'z': 2, 'heading': 0, 'time': 100_000,
     }]
     assert (await exchange(1))[0]['nickname'] == 'Robin'
+    with pytest.raises(ValueError):
+        await exchange(2, grounded='false')
+    now += .125
+    await exchange(2, grounded=True, sprinting=True, boosting=True)
+    peer, = await exchange(1)
+    assert peer['time'] == 100_125
+    assert (peer['grounded'], peer['sprinting'], peer['boosting']) == (True, True, False)
     await exchange(2, session='00000000-0000-4000-8000-000000000099', x=5)
     await exchange(2, leave=True)
     assert (await exchange(1))[0]['x'] == 5
