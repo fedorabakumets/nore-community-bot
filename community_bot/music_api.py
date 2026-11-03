@@ -166,8 +166,8 @@ async def send_track(request):
         await save(db, 'nora_music_chat', now)
         await db.commit()
     tracks = load_tracks(
-        request.app['db'].path.with_name('dedzytwo-playlist.json'),
-        Track(FSInputFile(ASSETS / 'dedzytwo-s1.mp3'), 'Музыкальная пластинка «?» (S1)', 'dedzytwo'),
+        ASSETS / 'dedzytwo-playlist.json',
+        Track(FSInputFile(ASSETS / 'dedzytwo-s1.mp3'), 'Музыкальная пластинка «?» (S1)', 'dedzytwo', 66),
     )
     delivery = PlaylistDelivery(
         request.app['bot'], FSInputFile(ASSETS / 'dedzytwo-playlist.jpg'), tracks,

@@ -6,8 +6,8 @@
 
 - Worktree C:/Users/User/Projects/nore-dedzytwo-rich, ветка chatgpt/dedzytwo-rich от production efe3dc6. Исходная копия с локальными правками сохранена.
 - Play отправляет нативные блоки Telegram через aiogram 3.31. Общий кулдаун увеличен с 60 до 300 секунд, совместное ограничение доставки сохранено. При отказе из-за формата есть fallback.
-- Первый MP3 из вложений совпадает с существующим dedzytwo-s1.mp3 по SHA-256. Остальные четыре MP3 и манифест собраны вне Git в C:/Users/User/Projects/dedzytwo-railway-media.zip.
-- Выпуск ожидает доступа к Railway. Разместить файлы архива рядом с SQLite на production-томе (сначала MP3, затем манифест), сверить production HEAD и выполнить обычный fast-forward push в cursor/nora-2-update-d133. Формат манифеста описан в docs/MINIAPP.md. Живая отправка не проверялась.
+- Первый MP3 из вложений совпадает с существующим dedzytwo-s1.mp3 по SHA-256. По уточнению владельца четыре остальных MP3 и манифест добавлены в assets/game. Railway получает их при сборке из production-ветки.
+- Выпуск через обычный push в cursor/nora-2-update-d133 после проверок. Живая отправка в Telegram не проверялась.
 
 ## Инвентарь и проигрыватель лобби (03.11.2026)
 

@@ -203,11 +203,12 @@ async def test_music_and_records_require_signed_staff_identity(tmp_path, path):
 
 
 @pytest.mark.asyncio
-async def test_delivers_native_playlist_to_both_recipients(tmp_path):
+async def test_delivers_native_playlist_to_both_recipients(tmp_path, monkeypatch):
     db = Database(tmp_path / 'delivery.db')
     await db.initialize()
     (tmp_path / 'extra.mp3').touch()
-    db.path.with_name('dedzytwo-playlist.json').write_text(json.dumps([
+    monkeypatch.setattr(music_api, 'ASSETS', tmp_path)
+    (tmp_path / 'dedzytwo-playlist.json').write_text(json.dumps([
         {'media': 'test-file-id', 'title': 'L.O.T.R', 'performer': 'kizaru', 'duration': 123},
         {'media': './extra.mp3', 'title': 'Holla Holla'},
     ]), encoding='utf-8')
@@ -258,3 +259,13 @@ async def test_ambiguous_rich_delivery_failure_does_not_duplicate_message(tmp_pa
     assert not content(await music_api.send_track(request(db, bot=bot)))['sent']
     assert bot.send_rich_message.await_count == 2
     bot.send_audio.assert_not_awaited()
+
+
+def test_bundled_playlist_has_all_five_tracks():
+    from community_bot.dedzytwo_playlist import Track, load_tracks
+
+    assets = music_api.ASSETS
+    original = Track('original', 'Original')
+    tracks = load_tracks(assets / 'dedzytwo-playlist.json', original)
+    assert len(tracks) == 5
+    assert all(track.media.path.stat().st_size > 0 for track in tracks[1:])
