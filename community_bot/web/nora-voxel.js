@@ -1,7 +1,7 @@
 'use strict';
 window.NoraVoxel = (() => {
   const unit = .105;
-  const colors = { skin: '#f2a07d', shadow: '#d67c64', mouth: '#9e5351', white: '#e9e7e1', gray: '#777982', burgundy: '#702a3d', blue: '#344e72', denimGray: '#555965', sole: '#c5c1ba', black: '#24262b', red: '#9c3348', stripe: '#202124', stripeWhite: '#eee8df' };
+  const colors = { skin: '#f2a07d', shadow: '#d67c64', cheek: '#e7977e', mouth: '#9e5351', cream: '#e4d7bc', white: '#e9e7e1', gray: '#777982', burgundy: '#702a3d', blue: '#344e72', denimGray: '#555965', sole: '#c5c1ba', black: '#24262b', red: '#9c3348', stripe: '#202124', stripeWhite: '#eee8df' };
   const defaults = { gender: 'male', hairstyle: 'crop', hair_color: 'black', eye_color: 'brown', shirt: 'white', pants: 'blue_slim', shoes: 'white_stripes' };
   const hairColors = {black:'#29252c',chestnut:'#633b30',brown:'#91634a',blonde:'#ddbc76',ginger:'#b75e35',ash:'#b0adb4',rose:'#bc758d',blue:'#536c9b'};
   const eyeColors = {brown:'#68412c',hazel:'#9b7939',green:'#4c8055',blue:'#538cbc',gray:'#8896a0',violet:'#8a65ad'};
@@ -23,12 +23,14 @@ window.NoraVoxel = (() => {
       art = `<path fill="${colors.skin}" d="M11 4h10v11H11z"/><path fill="${hair}" d="M10 3h12v5H10z"/><path fill="#c7b99b" d="${value==='female'?'M9 17h14v5h-3v4h-8v-4H9z':'M7 17h18v6h-4v3H11v-3H7z'}"/>`;
       art += `<path fill="#e3bc82" d="${value==='female'?'M25 20h2v3h3v2h-3v4h-2v-4h-3v-2h3z':'M24 2h6v6h-2V6l-5 5-2-2 5-5h-2z'}"/>`;
     } else if (category === 'hairstyle' || category === 'hair_color') {
-      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M7 6h18v3h2v17h-6V13H11v13H5V9h2z':style==='ponytail'?'M7 7h18v3h2v16h-4V14h-2v-3H11v7H7z':'M7 7h3V4h6v2h7v3h2v8h-4v-5h-4v2h-6v4H7z'}"/><path fill="#fff" opacity=".18" d="M10 7h10v2H10z"/>`;
+      art = `<path fill="${colors.skin}" d="M9 10h14v14H9z"/><path fill="${hair}" d="${style==='bob'?'M8 6h16v2h2v16h-2v2h-3V13h-3v-2h-5v2h-2v13H8v-2H6V8h2z':style==='ponytail'?'M8 7h16v3h4v3h2v11h-2v3h-3V14h-3v10h-2V12h-5v2h-4v10H9V14H7V9h1z':'M9 7V5h13v2h3v4h-2v3h-4v-2h-5v2h-4v3H7V7z'}"/><path fill="#fff" opacity=".18" d="M10 7h10v2H10z"/>`;
+      if(style==='ponytail') art += `<path fill="${colors.burgundy}" d="M25 12h5v2h-5z"/>`;
       if(category==='hair_color') art += '<path fill="#e3bc82" d="M25 18h3v3h-3zM22 21h3v3h-3zM19 24h3v3h-3z"/>';
     } else if (category === 'eye_color') {
       art = `<path fill="#e9e7e1" d="M5 11h4V8h14v3h4v10h-4v3H9v-3H5z"/><path fill="${eyeColors[value]||eyeColors.brown}" d="M11 9h10v14H11z"/><path fill="#202124" d="M14 12h4v9h-4z"/><path fill="#fff" d="M12 10h3v3h-3z"/>`;
     } else if (category === 'shirt') {
       art = `<path fill="${colors[value]||colors.white}" d="M11 5H8L2 11l4 6 4-2v12h12V15l4 2 4-6-6-6h-3l-2 3h-6z"/><path fill="#000" opacity=".22" d="M10 24h12v3H10zM13 5h6v3h-6z"/><path fill="#fff" opacity=".25" d="M18 12h3v4h-3z"/>`;
+      art += `<path fill="${colors.cream}" d="M11 5h2v3h6V5h2v3h-2v2h-6V8h-2zM4 14l2 3 4-2v-2l-4 2zM22 13v2l4 2 2-3-2 1zM10 25h12v2H10z"/>`;
     } else if (category === 'pants') {
       const wide = value === 'burgundy_wide';
       art = `<path fill="${value==='blue_slim'?colors.blue:value==='gray_slim'?colors.denimGray:colors.burgundy}" d="M7 4h18v9l${wide?'2':'-2'} 15h-${wide?'10':'6'}l-1-14-1 14H${wide?'5':'9'}l${wide?'2':'-2'}-15z"/><path fill="#000" opacity=".25" d="M7 4h18v3H7z"/><path fill="#c5c1ba" d="M15 5h2v2h-2z"/>`;
@@ -69,45 +71,73 @@ window.NoraVoxel = (() => {
       const shoe = outfit.shoes === 'white_stripes' ? 'white' : outfit.shoes === 'black_stripes' ? 'black' : 'red';
       for (const side of [-1,1]) {
         const x = side*4;
-        box(x-3,x+3,0,2,-3,9,shoe); box(x-3,x+3,0,0,-3,9, outfit.shoes==='red_air'?'black':'sole');
+        box(x-3,x+3,0,2,-3,8,shoe);box(x-2,x+2,0,1,9,9,shoe);
+        box(x-3,x+3,0,0,-3,8, outfit.shoes==='red_air'?'black':'sole');
+        box(x-2,x+2,0,0,9,9,outfit.shoes==='red_air'?'black':'sole');
         if (outfit.shoes==='red_air') { for (let z=3;z<=8;z++) dot(x-3,1,z,'stripeWhite'); box(x-2,x+2,2,2,4,8,'red'); }
         else for (let i=0;i<3;i++) { dot(x-3,2,3+i*2,outfit.shoes==='white_stripes'?'stripe':'stripeWhite'); dot(x+3,2,3+i*2,outfit.shoes==='white_stripes'?'stripe':'stripeWhite'); }
       }
       section='legs';
       const wide = outfit.pants==='burgundy_wide', pant = outfit.pants==='blue_slim'?'blue':outfit.pants==='gray_slim'?'denimGray':'burgundy';
-      for (const side of [-1,1]) { const x=side*4; box(x-(wide?4:3),x+(wide?4:3),2,13,-3,3,pant); box(x-3,x+3,3,3,3,3,pant); }
+      for (const side of [-1,1]) {
+        const x=side*4;
+        for(let y=4;y<=13;y++) {
+          const edge=wide&&y>=5&&y<=11?4:3;
+          box(x-(side<0?edge:3),x+(side>0?edge:3),y,y,-3,3,pant);
+        }
+      }
       section='body';
-      // A stepped waist and softer jaw distinguish the two voxel silhouettes.
+      // Continuous shirt shell: one-voxel steps at the waist, hips and shoulders.
+      // The fitted front grows out of the torso, rather than two attached blocks.
+      const shirtWidths=female?[7,7,6,6,6,6,7,7,8,8,8,7]:[7,7,7,8,8,8,8,8,8,8,8,7];
+      for(let y=14;y<=25;y++) {
+        const width=shirtWidths[y-14];
+        box(-width,width,y,y,-4,4,outfit.shirt);
+      }
       if(female) {
-        box(-7,7,14,15,-4,4,outfit.shirt); box(-6,6,16,21,-4,4,outfit.shirt); box(-8,8,22,25,-4,4,outfit.shirt);
-      } else box(-8,8,14,25,-4,4,outfit.shirt);
-      box(female?-7:-8,female?7:8,14,14,-4,4,outfit.shirt==='white'?'gray':'black');
+        box(-5,5,21,21,5,5,outfit.shirt);
+        box(-6,6,22,23,5,5,outfit.shirt);
+        box(-4,4,22,22,6,6,outfit.shirt);box(-3,3,23,23,6,6,outfit.shirt);
+        box(-5,5,24,24,5,5,outfit.shirt);
+        box(-4,4,21,21,5,5,outfit.shirt+'Trim');
+      }
       section='arms';
-      for (const side of [-1,1]) { const x=side*10; box(x-2,x+2,20,25,-3,3,outfit.shirt); box(x-2,x+2,13,19,-2,2,'skin'); box(x-2,x+2,12,13,-2,3,'shadow'); }
-      // Raised stitching, ribbed hems, collar and a small chest pocket.
-      const shirtTrim = outfit.shirt + 'Trim', shirtLight = outfit.shirt + 'Light';
-      section='body';
-      box(female?-7:-8,female?7:8,14,14,-4,4,shirtTrim);
-      box(-3,3,25,25,4,4,shirtTrim);
       for (const side of [-1,1]) {
         const x=side*10;
-        section='arms';box(x-2,x+2,20,20,-3,3,shirtTrim);section='body';
-        for (let y=16;y<=22;y++) dot(side*(female&&y<22?6:8),y,4,shirtTrim);
-        for (let y=15;y<=18;y++) dot(side*(5+(y%2)),y,5,shirtLight);
+        box(x-2,x+2,20,24,-3,3,outfit.shirt);
+        box(x-1,x+1,25,25,-2,2,outfit.shirt);
+        box(x-2,x+2,12,19,-2,2,'skin');
+        box(x-2,x+2,12,12,3,3,'shadow');
       }
-      box(3,6,21,23,5,5,shirtLight); box(3,6,20,20,5,5,shirtTrim);
+      // Cream knit edging and restrained, flush fabric shading.
+      const shirtTrim = outfit.shirt + 'Trim', shirtLight = outfit.shirt + 'Light';
+      section='body';
+      box(-7,7,14,14,-4,4,'cream');
+      box(-2,2,25,25,4,4,'skin');
+      box(-3,-3,25,25,4,4,'cream');box(3,3,25,25,4,4,'cream');
+      box(-2,2,24,24,5,5,'cream');
+      if(!female) dot(0,23,5,'cream');
+      for (const side of [-1,1]) {
+        const x=side*10;
+        section='arms';box(x-2,x+2,20,20,-3,3,'cream');section='body';
+        for (let y=16;y<=21;y++) dot(side*shirtWidths[y-14],y,4,shirtTrim);
+        for (let y=15;y<=17;y++) dot(side*5,y,4,shirtLight);
+        const fold=side*(female?5:6),front=female?5:4;
+        box(fold,fold,23,24,front,front,shirtLight);
+      }
       section='body';
       // Denim seams, waistband, rear pockets and stepped knee creases.
       const pantTrim=pant+'Trim', pantLight=pant+'Light';
       box(-7,7,13,13,-3,3,pantTrim);
       section='legs';
       for (const side of [-1,1]) {
-        const x=side*4, edge=wide?4:3;
-        for (let y=3;y<=12;y++) dot(x+side*edge,y,3,pantTrim);
-        box(x-2,x+2,9,11,-4,-4,pantLight);
-        box(x-2,x+2,8,8,-4,-4,pantTrim);
-        for (let i=0;i<4;i++) dot(x-2+i,6+(i%2),4,pantLight);
-        box(x-edge,x+edge,2,2,-3,3,pantTrim);
+        const x=side*4;
+        for (let y=4;y<=12;y++) dot(x+side*(wide&&y>=5&&y<=11?4:3),y,3,pantTrim);
+        box(x-2,x+2,9,11,-3,-3,pantLight);
+        box(x-2,x+2,8,8,-3,-3,pantTrim);
+        box(x-1,x+1,6,6,3,3,pantLight);
+        box(x-3,x+3,4,4,-3,3,pantTrim);
+        box(x-2,x+2,3,4,-2,2,pant);
         dot(x,13,4,'sole');
       }
       section='shoes';
@@ -117,7 +147,7 @@ window.NoraVoxel = (() => {
         box(x-2,x+2,2,3,-3,5,shoe);
         box(x-2,x+2,2,2,6,8,shoe);
         box(x-1,x+1,3,3,3,5,trim);
-        for (let z=4;z<=7;z++) box(x-1,x+1,3,3,z,z,'stripeWhite');
+        for (const z of [4,6]) box(x-1,x+1,3,3,z,z,'stripeWhite');
         if (outfit.shoes==='red_air') {
           for (const edge of [-3,3]) {
             for (let z=2;z<=8;z++) { dot(x+edge,1,z,'sole'); dot(x+edge,2,z,'burgundy'); }
@@ -132,46 +162,74 @@ window.NoraVoxel = (() => {
       }
       section='body';
       box(-2,2,25,27,-2,2,'skin');
-      // Big cubic head, ears, pixel hair and small facial details.
-      box(female?-8:-10,female?8:10,28,30,-7,7,'skin');
-      box(-10,10,31,44,-7,7,'skin'); box(-11,-10,33,37,-2,2,'shadow'); box(10,11,33,37,-2,2,'skin');
-      box(-10,10,42,47,-7,7,'hair'); box(-11,11,40,44,-8,-5,'hair');
+      // Keep the square head; only the lower jaw and ear edges step inward.
+      box(female?-8:-9,female?8:9,28,28,-6,6,'skin');
+      box(female?-9:-10,female?9:10,29,30,-7,7,'skin');
+      box(-10,10,31,44,-7,7,'skin');
+      for(const side of [-1,1]) {
+        box(side*11,side*11,33,36,-1,1,'skin');
+        box(side*11,side*11,34,35,1,1,'shadow');
+        box(side<0?-9:8,side<0?-8:9,32,33,7,7,'cheek');
+      }
+      // Connected terraces replace random spikes; all colours use this shell.
+      box(-10,10,42,45,-7,7,'hair');box(-10,10,39,44,-8,-6,'hair');
+      box(-9,9,46,47,-6,6,'hair');
       const hairstyle = outfit.hairstyle || defaults.hairstyle;
       if(hairstyle==='crop') {
-        for (let x=-10;x<=10;x++) for (let z=-7;z<=7;z++) {
-          const h=47+Math.floor(2.5*Math.sin(x*1.8+z*.7)+2*Math.cos(z*1.4-x*.5));
-          if ((x+z)%3!==0) dot(x,h,z,((x*z)%5===0)?'hairLight':'hair');
-        }
-        for (let x=-10;x<=10;x++) if (x%3!==0) box(x,x,39+(x%3),43,7,8,'hair');
+        box(-7,5,48,48,-4,4,'hair');box(-6,1,48,48,2,4,'hairLight');
+        for(const [left,right,bottom] of [[-10,-8,39],[-7,-4,40],[-3,1,41],[2,5,40],[6,9,42]])
+          box(left,right,bottom,43,7,8,'hair');
+        box(-10,-10,38,41,-5,4,'hair');box(10,10,38,41,-5,4,'hair');
       } else if(hairstyle==='bob') {
-        box(-11,11,29,43,-9,-6,'hair');
+        box(-10,10,30,43,-9,-6,'hair');box(-9,9,29,29,-8,-6,'hair');
         for(const side of [-1,1]) {
-          box(side<0?-12:9,side<0?-9:12,29,43,-7,7,'hair');
-          box(side*11,side*11,30,42,8,8,'hairLight');
+          box(side<0?-11:9,side<0?-9:11,31,43,-7,6,'hair');
+          box(side<0?-10:9,side<0?-9:10,29,30,-6,5,'hair');
+          box(side*10,side*10,31,40,7,7,'hairLight');
         }
-        for(let x=-10;x<=10;x++) box(x,x,40+Math.floor((x+10)/7),43,7,8,'hair');
+        for(const [left,right,bottom] of [[-10,-7,39],[-6,-2,40],[-1,3,41],[4,8,42],[9,10,40]])
+          box(left,right,bottom,43,7,8,'hair');
       } else if(hairstyle==='ponytail') {
-        box(-10,-8,36,43,-6,7,'hair'); box(8,10,36,43,-6,7,'hair');
-        box(-7,3,40,43,7,8,'hair');
-        box(-4,4,36,44,-13,-8,'hair'); box(-3,3,26,38,-14,-10,'hair');
-        box(-4,4,38,39,-14,-10,'burgundy'); box(-2,-2,27,36,-15,-15,'hairLight');
+        box(-10,-9,37,43,-6,6,'hair');box(9,10,37,43,-6,6,'hair');
+        for(const [left,right,bottom] of [[-9,-6,40],[-5,-2,41],[-1,3,42],[4,7,40],[8,9,39]])
+          box(left,right,bottom,43,7,8,'hair');
+        for(const side of [-1,1]) {
+          box(side<0?-10:9,side<0?-9:10,31,40,7,8,'hair');
+          box(side*9,side*9,29,30,7,8,'hair');
+          box(side*9,side*9,31,37,8,8,'hairLight');
+        }
+        box(-3,3,40,44,-12,-8,'hair');
+        box(-3,3,39,40,-12,-10,'burgundy');
+        box(-4,4,32,38,-14,-10,'hair');
+        box(-3,3,28,31,-14,-11,'hair');box(-2,2,26,27,-13,-11,'hair');
+        box(-2,-2,30,37,-14,-14,'hairLight');
       }
-      // Open eyes: whites, coloured irises, pupils and one pixel of reflected light.
+      // All eye pixels share one shallow plane: no protruding pupil stack.
       for (const center of [-5,5]) {
         box(center-2,center+2,34,37,8,8,'white',false);
-        box(center-1,center+1,34,37,9,9,'eye',false);
-        box(center,center,34,36,10,10,'black',false);
-        dot(center-1,37,10,'white');
-        box(center-2,center+2,39,39,8,8,'hair');
-        if(female) box(center-3,center+2,38,38,8,8,'hair');
+        box(center-1,center+1,34,37,8,8,'eye',false);
+        box(center,center,34,36,8,8,'black',false);
+        dot(center-1,37,8,'white');
+        box(center-2,center+1,39,39,7,7,'hairTrim');dot(center+2,40,7,'hairTrim');
+        if(female) {
+          box(center-2,center+2,38,38,8,8,'black');
+          dot(center+Math.sign(center)*3,38,8,'black');
+        }
       }
-      box(-1,1,32,34,8,9,'shadow'); box(-2,2,30,30,8,8,'mouth');
+      box(0,1,32,33,8,8,'skin');dot(1,32,8,'shadow');
+      box(-1,1,30,30,7,7,'mouth');
       // Small overlapping joint caps cover the seams while limbs bend.
       for(const side of [-1,1])for(let y=12;y<=14;y++)for(let z=-2;z<=2;z++)for(let x=-2;x<=2;x++)dot(side*4+x,y,z,pant,'thigh'+(side<0?'Left':'Right'));
       for(const side of [-1,1])for(let y=7;y<=8;y++)for(let z=-1;z<=1;z++)for(let x=-2;x<=2;x++)dot(side*4+x,y,z,pant,'thigh'+(side<0?'Left':'Right'));
       for(const side of [-1,1])for(let y=19;y<=20;y++)for(let z=-1;z<=1;z++)for(let x=-1;x<=1;x++)dot(side*10+x,y,z,'skin','arm'+(side<0?'Left':'Right'));
       const temp=new T.Object3D(),tint=new T.Color(),batches=new Map();
-      for(const voxel of voxels.values()){const part=voxel[4];if(!batches.has(part))batches.set(part,[]);batches.get(part).push(voxel);}
+      // Cull only cubes enclosed by their own joint; keep articulated seam caps.
+      const neighbors=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+      for(const voxel of voxels.values()){
+        const [x,y,z,,part]=voxel;
+        if(neighbors.every(([dx,dy,dz])=>voxels.has(`${part}:${x+dx},${y+dy},${z+dz}`)))continue;
+        if(!batches.has(part))batches.set(part,[]);batches.get(part).push(voxel);
+      }
       for(const [part,items] of batches){
         const mesh=new T.InstancedMesh(cube,material,items.length),origin=origins[part];
         items.forEach(([x,y,z,color],i)=>{
