@@ -31,6 +31,14 @@ try {
     return result;
   }
   const outfit = {...defaults}, character = createCharacter(T, outfit), initial = voxels(character);
+  const fadeMeshes=[];character.group.traverse(m=>{if(m.isInstancedMesh)fadeMeshes.push(m);});
+  const fadeMaterial=fadeMeshes[0].material, version=fadeMaterial.version;
+  for(const value of [0,.05,.3,.8,1]){
+    character.setOpacity(value);
+    assert.ok(fadeMeshes.every(m=>m.visible===(value>.001)));
+    assert.equal(fadeMaterial.transparent,false);assert.equal(fadeMaterial.depthWrite,true);
+    assert.equal(fadeMaterial.version,version,'fade does not recompile/switch transparency mode');
+  }
   const skinSample=initial.get('0,33,8');assert.ok(skinSample,'nose provides a visible skin sample');
   assert.ok(initial.has('-7,35,8'), 'eye whites are visible');
   assert.ok(initial.has('-5,35,8'), 'pupil is visible on the eye plane');

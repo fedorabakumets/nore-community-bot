@@ -100,6 +100,25 @@ try {
   assert.ok(r.width*r.height*r.ratio**2<=420001,'landscape retains mobile pixel budget');
   mobileWorld.stop();
   console.log('NORA mobile rendering: Retina budget, resize deduplication, low-FPS adaptation, recovery and rotation passed.');
+  for(const fps of [30,60,120]){
+    const c=await setup(0,fps),meshes=[];c.player.traverse(m=>{if(m.isInstancedMesh)meshes.push(m);});
+    c.zone.cameraBoxes.push([-100,100,-100,100,-100,100]);c.frames(1);
+    assert.ok(meshes.every(m=>!m.visible&&m.material.opacity===0),'camera inside body hides all layers immediately');
+    const distance=()=>c.camera().position.distanceTo(new Three.Vector3(c.player.position.x,1.1,c.player.position.z));
+    assert.ok(distance()<=.551,'camera obeys obstruction');
+    for(let i=0;i<5;i++){c.zone.cameraBoxes.length=0;c.frames(1);assert.ok(distance()<=.551,'single clear frame does not pump camera');c.zone.cameraBoxes.push([-100,100,-100,100,-100,100]);c.frames(1);}
+    c.zone.cameraBoxes.length=0;let previousDistance=distance(),previousOpacity=0;
+    for(let i=0;i<fps*4;i++){
+      c.frames(1);const current=distance(),alpha=meshes[0].material.opacity;
+      assert.ok(current>=previousDistance-1e-6&&current-previousDistance<=3/fps+.001,'camera returns monotonically at bounded speed');
+      assert.ok(alpha>=previousOpacity-1e-6,'model fades back without layer popping');
+      if(current<=1.4)assert.equal(alpha,0,'background fully clear inside body');
+      assert.ok(meshes.every(m=>!m.material.transparent&&m.material.depthWrite),'depth retained throughout fade');
+      previousDistance=current;previousOpacity=alpha;
+    }
+    assert.ok(previousDistance>5&&previousOpacity===1,'camera and opaque character fully recover');c.stop();
+  }
+  console.log('NORA close camera: full hide, stable corners, bounded smooth return and depth-safe recovery at 30/60/120 FPS passed.');
   const soundEvents=[];
   const sounds={playing:value=>soundEvents.push(['playing',value]),spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
     land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};

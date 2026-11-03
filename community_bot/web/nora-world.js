@@ -176,7 +176,7 @@ window.NoraWorld = (() => {
     trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
     const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
-    let actualDistance=5.7,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
+    let actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
     const viewButton=root.querySelector('.nora-world-view');
     const views=['За спиной','От первого лица','Селфи'];
     function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
@@ -195,7 +195,7 @@ window.NoraWorld = (() => {
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
     function jump(){if(inputPaused())return;if(jumpHeight===0&&jumpVelocity===0){jumpVelocity=4.4;sounds?.jump(inside);}}
-    on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;actualDistance=4.6;syncView();});
+    on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;cameraRelease=0;cameraSpeed=0;syncView();});
     on(jumpButton,'pointerdown',e=>{e.preventDefault();jump();});
     on(jumpButton,'click',jump);
     on(window,'keydown',e=>{
@@ -314,9 +314,22 @@ window.NoraWorld = (() => {
           const cameraYaw=yaw+(view===2?Math.PI:0);
           direction.set(Math.sin(cameraYaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(cameraYaw)*Math.cos(pitch));
           const safe=cameraDistance(target,direction,wanted,zone.cameraBoxes);
-          actualDistance=Math.min(safe,actualDistance+(safe-actualDistance)*(1-Math.exp(-5*dt)));
-          const fade=Math.max(.35,Math.min(1,(actualDistance-.5)/2));
-          opacity+=(fade-opacity)*(1-Math.exp(-14*dt));character.setOpacity(opacity);
+          if(safe<=actualDistance+.001&&safe<wanted-.001){
+            // Never interpolate through a wall. Briefly hold release at corners
+            // so alternating collision hits cannot pump the camera in and out.
+            actualDistance=Math.min(actualDistance,safe);cameraRelease=.12;cameraSpeed=0;
+          }else if(cameraRelease>0){cameraRelease=Math.max(0,cameraRelease-dt);}
+          else{
+            cameraSpeed+=(Math.min(3,(safe-actualDistance)*4)-cameraSpeed)*(1-Math.exp(-8*dt));
+            actualDistance=Math.min(safe,actualDistance+cameraSpeed*dt);
+          }
+          const coverage=Math.max(0,Math.min(1,(actualDistance-1.4)/1.6));
+          const fade=coverage*coverage*(3-2*coverage);
+          // Hide immediately when the camera enters the body; restore only once
+          // it is outside, without blending the thousands of overlapping cubes.
+          opacity=fade<opacity?fade:Math.min(fade,opacity+(fade-opacity)*(1-Math.exp(-5*dt)));
+          if(opacity>.999)opacity=1;
+          character.setOpacity(opacity);
           offset.copy(direction).multiplyScalar(actualDistance);
           camera.position.copy(target).add(offset);camera.lookAt(target);
         }

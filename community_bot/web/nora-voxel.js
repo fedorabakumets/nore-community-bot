@@ -46,6 +46,16 @@ window.NoraVoxel = (() => {
     const cube = new T.BoxGeometry(unit, unit, unit);
     const voxels = new Map();
     const material = new T.MeshLambertMaterial({ color: 0xffffff });
+    // All voxel layers share one screen-space coverage mask. Kept pixels stay
+    // opaque/depth-writing, so fading never exposes internal face/hair layers.
+    material.onBeforeCompile = shader => {
+      shader.fragmentShader=shader.fragmentShader.replace('#include <alphatest_fragment>', `
+        #include <alphatest_fragment>
+        float coverage = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));
+        if (diffuseColor.a <= coverage) discard;
+      `);
+    };
+    material.customProgramCacheKey=()=> 'nora-screen-coverage-v1';
     let section='body', phase=0, gait=0, run=0;
     const meshes=[], joints={}, origins={body:[0,13.5,0]};
     const motion=new T.Group(), hips=new T.Group(), torso=new T.Group();
@@ -294,7 +304,7 @@ window.NoraVoxel = (() => {
       }
     }
     build();
-    return { group: pivot, rebuild: build, walk, setOpacity(value) { const fading=value<.995; if(material.transparent!==fading){material.transparent=fading;material.needsUpdate=true;} material.opacity=value;material.depthWrite=!fading; }, dispose() { for(const mesh of meshes)mesh.dispose(); material.dispose(); cube.dispose(); } };
+    return { group: pivot, rebuild: build, walk, setOpacity(value) { material.opacity=Math.max(0,Math.min(1,value));for(const mesh of meshes)mesh.visible=material.opacity>.001; }, dispose() { for(const mesh of meshes)mesh.dispose(); material.dispose(); cube.dispose(); } };
   }
   return { defaults, choices, icon, createCharacter, async mount(canvas, outfit, root) {
     const T = await import('/vendor/three.module.js');
