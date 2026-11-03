@@ -251,9 +251,16 @@ try {
         assert.equal(meshes.length,4);
         assert.equal(meshes[0].material.map.magFilter,Three.NearestFilter);
         assert.equal(meshes[0].geometry,meshes[2].geometry);
+        assert.equal(meshes[0].material.emissiveMap.magFilter,Three.NearestFilter);
+        const sparks=model.getObjectByName('wing-sparks');
+        assert.equal(sparks.geometry.attributes.position.count,12);
+        assert.equal(sparks.material.transparent,true);
+        assert.equal(sparks.material.depthWrite,false);
+        const beforeSparks=sparks.geometry.attributes.position.array.slice();
         const idle=model.children[0].rotation.y;
         w.frames(3);
         assert.notEqual(model.children[0].rotation.y,idle);
+        assert.notDeepEqual(sparks.geometry.attributes.position.array,beforeSparks);
       }
       const jump=()=>{
         if(fps!==30){w.key('Space');return;}

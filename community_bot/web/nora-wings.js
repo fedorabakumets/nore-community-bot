@@ -4,19 +4,19 @@ window.NoraWings = (() => {
   // See /game/wings-license.txt for the source and license.
   const catalog = {
     raven: {
-      name: 'Ворон', palette: ['#1b1b23','#353743','#535663','#737786'],
+      name: 'Ворон', glow: '#a996f4', palette: ['#1b1b23','#353743','#535663','#737786'],
       root: ['11111111110','1111222211.','.13322221..','..2332211..','...23311...','....2311...'],
       tip: ['11111111110','1111222211.','.13332211..','...233211..','....2311...','......11...'],
       lift: .48, bend: .38, speed: 2.2,
     },
     flame: {
-      name: 'Пламя', palette: ['#672129','#a72d29','#ed5d30','#ffc060'],
+      name: 'Пламя', glow: '#ff9b42', palette: ['#672129','#a72d29','#ed5d30','#ffc060'],
       root: ['.1111111110','11333333211','12322222111','.232221111.','..32111.11.','...211...1.','....1......'],
       tip: ['01111111110','...1122331.','111233331..','123332211..','.232211111.','..211...111','...1......1'],
       lift: .63, bend: .5, speed: 3.3,
     },
     frost: {
-      name: 'Иней', palette: ['#345b81','#5596b6','#a9def0','#effbff'],
+      name: 'Иней', glow: '#86e6ff', palette: ['#345b81','#5596b6','#a9def0','#effbff'],
       root: ['..111111110','11333333221','1223222211.','.12322111..','.122211.1..','..1211..1..','..11.......','..1........'],
       tip: ['00011111110','.....11331.','..111333211','1133332211.','12222211...','.12211.11..','..111...1..','...1.......'],
       lift: .36, bend: .67, speed: 1.75,
@@ -51,6 +51,23 @@ window.NoraWings = (() => {
     return geo;
   }
 
+  function glowTextures(T) {
+    const mask=new T.DataTexture(new Uint8Array([0,0,0,255, 0,0,0,255, 26,26,26,255, 220,220,220,255]),4,1);
+    const halo=[
+      0,20,32,20,0,
+      20,100,142,100,20,
+      32,142,255,142,32,
+      20,100,142,100,20,
+      0,20,32,20,0,
+    ];
+    const spark=new T.DataTexture(new Uint8Array(halo.flatMap(alpha=>[255,255,255,alpha])),5,5);
+    for(const texture of [mask,spark]){
+      texture.magFilter=texture.minFilter=T.NearestFilter;
+      texture.needsUpdate=true;
+    }
+    return {mask,spark};
+  }
+
   function attach(T, torso, id, unit, bodyMaterial) {
     const style=catalog[id];
     if (!Object.hasOwn(catalog,id)) return null;
@@ -61,12 +78,15 @@ window.NoraWings = (() => {
       map.colorSpace=T.SRGBColorSpace;
       map.magFilter=map.minFilter=T.NearestFilter;
       map.needsUpdate=true;
-      asset={map, root:extrude(T,style.root), tip:extrude(T,style.tip), users:0};
+      asset={map, ...glowTextures(T), root:extrude(T,style.root), tip:extrude(T,style.tip), users:0};
       resources.set(id,asset);
     }
     asset.users++;
     const material=bodyMaterial.clone();
     material.map=asset.map;
+    material.emissive.set(style.glow);
+    material.emissiveMap=asset.mask;
+    material.emissiveIntensity=.7;
     material.onBeforeCompile=bodyMaterial.onBeforeCompile;
     material.customProgramCacheKey=bodyMaterial.customProgramCacheKey;
     const mount=new T.Group();
@@ -85,9 +105,47 @@ window.NoraWings = (() => {
       tipHinge.add(new T.Mesh(asset.tip,material));
       return {sign,hinge,tipHinge};
     });
-    let phase=0, spread=0;
+    // One fixed point buffer for both wings. Each spark remembers its emission point.
+    const count=12, coordinates=new Float32Array(count*3), colors=new Float32Array(count*4);
+    const sparkGeometry=new T.BufferGeometry();
+    const positions=new T.BufferAttribute(coordinates,3).setUsage(T.DynamicDrawUsage);
+    const brightness=new T.BufferAttribute(colors,4).setUsage(T.DynamicDrawUsage);
+    sparkGeometry.setAttribute('position',positions);
+    sparkGeometry.setAttribute('color',brightness);
+    const sparkMaterial=new T.PointsMaterial({
+      color:style.glow, map:asset.spark, size:.115, vertexColors:true,
+      transparent:true, opacity:.8, depthWrite:false,
+    });
+    const sparks=new T.Points(sparkGeometry,sparkMaterial);
+    sparks.name='wing-sparks';sparks.frustumCulled=false;mount.add(sparks);
+    sparks.onBeforeRender=(_renderer,_scene,camera)=>{
+      sparkMaterial.size=camera.isOrthographicCamera?8:.115;
+    };
+    const origins=Array.from({length:count},()=>new T.Vector3());
+    const ages=Array.from({length:count},(_,i)=>i/count);
+    const inverse=new T.Matrix4();
+    let phase=0, spread=0, initialized=false;
+
+    function updateSparks(dt,boosting) {
+      mount.updateWorldMatrix(true,true);
+      inverse.copy(mount.matrixWorld).invert();
+      for(let i=0;i<count;i++){
+        const side=sides[i%2], origin=origins[i];
+        let age=ages[i]+dt*(boosting?1.65:1);
+        if(!initialized||age>=1){
+          age%=1;
+          origin.set(5+(i%5),-1-i%3,-.6).applyMatrix4(side.tipHinge.matrixWorld).applyMatrix4(inverse);
+        }
+        ages[i]=age;
+        positions.setXYZ(i,origin.x+side.sign*age*(2+i%3),origin.y-4*age,origin.z-5*age);
+        const light=Math.min(1,age*12)*(1-age);
+        brightness.setXYZW(i,1,1,1,light);
+      }
+      initialized=true;positions.needsUpdate=brightness.needsUpdate=true;
+    }
     return {
       tick(dt,airborne=false,boosting=false) {
+        if(!mount.visible)return;
         spread+=((airborne?1:0)-spread)*(1-Math.exp(-9*dt));
         phase=(phase+dt*style.speed*(1+(boosting?3:1.9)*spread))%(2*Math.PI);
         for (const {sign,hinge,tipHinge} of sides) {
@@ -95,12 +153,14 @@ window.NoraWings = (() => {
           hinge.rotation.y=sign*(.52-.20*spread+Math.sin(phase)*(.13+.16*spread));
           tipHinge.rotation.y=.12+Math.sin(phase-.75)*(.09+.13*spread);
         }
+        material.emissiveIntensity=.67+.13*Math.sin(phase*1.5)+.18*spread;
+        updateSparks(dt,boosting);
       },
-      setOpacity(value) { material.opacity=value;mount.visible=value>.001; },
+      setOpacity(value) { material.opacity=value;sparkMaterial.opacity=.8*value;mount.visible=value>.001; },
       dispose() {
-        torso.remove(mount);material.dispose();
+        torso.remove(mount);material.dispose();sparkMaterial.dispose();sparkGeometry.dispose();
         if (--asset.users===0) {
-          asset.root.dispose();asset.tip.dispose();asset.map.dispose();resources.delete(id);
+          asset.root.dispose();asset.tip.dispose();asset.map.dispose();asset.mask.dispose();asset.spark.dispose();resources.delete(id);
         }
       },
     };
