@@ -6,11 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 from community_bot.access import miniapp_allowed
+from community_bot.admin_workspace import button_meta
 from community_bot.community_api import directory
 from community_bot.community_reset import MARKER, apply_reset, prepare_reset, reset_settings
 from community_bot.database import Database
 from community_bot.friends_api import snapshot
-from community_bot.role_prefixes import decorate_game_people, prefix_for
+from community_bot.role_prefixes import EMOJI_LABELS, EMOJIS, decorate_game_people, prefix_for
 from community_bot.social_profiles import heartbeat
 
 
@@ -67,6 +68,42 @@ async def test_prefix_survives_initialization_and_updates_all_views(env):
         await db.update_staff_role('custom', prefix_color='red" onclick="bad')
     with pytest.raises(ValueError):
         await db.create_staff_role('bad', 'Bad', 30, prefix_emoji='<img>')
+
+
+@pytest.mark.parametrize('emoji', EMOJIS)
+async def test_symbol_choices_survive_save_and_match_admin_controls(env, emoji):
+    from community_bot.routers.private import _prefix_keyboard
+
+    db = env.db
+    await db.create_staff_role('symbols', 'Команда', 30, prefix_color='purple', prefix_emoji=emoji)
+    await db.set_role(4, 'symbols')
+    await db.initialize()
+    assert (await prefix_for(db, env.settings, 4))['emoji'] == emoji
+    buttons = [button for row in _prefix_keyboard('purple', emoji).inline_keyboard for button in row
+               if button.callback_data.startswith('admin:prefix:emoji:')]
+    selected = [button for button in buttons if button.text.startswith('✓')]
+    assert len(buttons) == len(EMOJIS) and len(selected) == 1
+    meta = button_meta(selected[0].callback_data, selected[0].text)
+    assert meta['checked'] and meta['prefix_emoji'] == emoji
+    assert meta['label'] == EMOJI_LABELS[emoji]
+
+
+async def test_prefix_is_public_even_when_profile_is_hidden(env):
+    from community_bot.social_profiles import profile
+
+    db = env.db
+    await db.create_staff_role('symbols', 'Команда', 30, prefix_color='blue', prefix_emoji='👮')
+    await db.set_role(4, 'symbols')
+    await db.execute('UPDATE users SET profile_private=1 WHERE user_id=4')
+
+    class Request(dict):
+        app = {'db': db, 'settings': env.settings}
+        match_info = {'user_id': '4'}
+
+    result = json.loads((await profile(Request(actor={'id': 5}))).body)
+    assert result['hidden']
+    assert result['prefix'] == {'text': 'Команда', 'color': 'blue', 'emoji': '👮'}
+    assert 'bio' not in result and 'cookies' not in result
 
 
 async def test_online_sort_uses_visible_presence_before_pagination_and_friends(env):

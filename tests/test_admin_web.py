@@ -355,11 +355,12 @@ async def test_catalog_and_role_creation_use_shared_database(env):
     assert not any(r['name'] == 'Помощник тест' for r in await env.db.list_staff_roles())
     assert not view['form'] and view['workspace']['prefix_preview']['text'] == 'Помощник тест'
     view = await click(env, view, 'Голубой')
-    view = await click(env, view, '⭐')
+    view = await click(env, view, 'Полицейский')
     assert view['workspace']['prefix_preview']['color'] == 'blue'
+    assert view['workspace']['prefix_preview']['emoji'] == '👮'
     view = await click(env, view, 'Сохранить')
     role = next(r for r in await env.db.list_staff_roles() if r['name'] == 'Помощник тест')
-    assert role['prefix_color'] == 'blue' and role['prefix_emoji'] == '⭐'
+    assert role['prefix_color'] == 'blue' and role['prefix_emoji'] == '👮'
     view = await click(env, view, 'Префикс')
     view = await click(env, view, 'Без плашки')
     await click(env, view, 'Сохранить')

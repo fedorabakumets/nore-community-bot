@@ -127,8 +127,27 @@ function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebr
   update();
 })();
 
+// Monochrome symbols inherit the prefix color on every platform.
+window.NoraPrefixSymbol = emoji => {
+  const paths = {
+    '🎉':'m4 20 4-13 9 9-13 4Z M7 11l6 6 M12 3v3 M17 3l-2 4 M21 8l-4 1 M19 13h2 M5 4l1 2',
+    '🛡️':'M12 3 4 6v6c0 4 5 7 8 9 3-2 8-5 8-9V6l-8-3Z M9 12l2 2 4-4',
+    '👑':'m3 6 5 5 4-7 4 7 5-5-2 12H5L3 6Z M6 21h12',
+    '👮':'m4 7 8-4 8 4-3 4H7L4 7Z M7 11c-1 6 2 9 5 9s6-3 5-9 M10 7h4 M6 22l3-2 M18 22l-3-2',
+    '♥':'M20 5c-3-3-6-1-8 1-2-2-5-4-8-1-5 5 2 11 8 16 6-5 13-11 8-16Z',
+    '★':'m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z',
+    '⭐':'m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6Z',
+    '🔥':'M13 3c1 5 6 7 6 12a7 7 0 0 1-14 0c0-3 2-5 4-7 0 3 1 4 2 5 2-3 2-6 2-10Z',
+    '🌙':'M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11Z',
+    '💎':'m3 9 4-5h10l4 5-9 12L3 9Z M3 9h18 M7 4l5 17 5-17',
+    '🌿':'M5 21C5 10 10 4 20 3c0 10-5 17-15 14 M5 17l9-8'
+  };
+  if (emoji === '67') return '<span class="role-prefix-symbol role-prefix-number" aria-hidden="true">67</span>';
+  const path = Object.hasOwn(paths, emoji) ? paths[emoji] : '';
+  return path ? `<svg class="role-prefix-symbol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>` : '';
+};
 // Role colors and text are allowlisted/escaped before becoming markup.
 window.NoraPrefix = p => {
   if (!p || !['red','orange','gold','green','blue','purple','pink'].includes(p.color)) return '';
-  return `<span class="role-prefix role-prefix--${p.color}">${p.emoji ? esc(p.emoji)+' ' : ''}${esc(p.text)}</span>`;
+  return `<span class="role-prefix role-prefix--${p.color}">${NoraPrefixSymbol(p.emoji)}${esc(p.text)}</span>`;
 };

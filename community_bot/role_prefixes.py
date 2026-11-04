@@ -2,11 +2,15 @@
 
 COLORS = {'red': 'Красный', 'orange': 'Оранжевый', 'gold': 'Золотой',
           'green': 'Зелёный', 'blue': 'Голубой', 'purple': 'Фиолетовый', 'pink': 'Розовый'}
-EMOJIS = ('', '⭐', '🔥', '🌙', '💎', '🌿', '🛡️', '👑')
+EMOJI_LABELS = {'': 'Без символа', '🎉': 'Вечеринка', '🛡️': 'Щит', '👑': 'Корона',
+                '👮': 'Полицейский', '♥': 'Сердечко', '★': 'Звёздочка', '67': '67'}
+EMOJIS = tuple(EMOJI_LABELS)
+# Existing role settings remain valid; the picker offers the new symbol set.
+LEGACY_EMOJIS = ('⭐', '🔥', '🌙', '💎', '🌿')
 
 
 def validate(color, emoji):
-    if color not in ('', *COLORS) or emoji not in EMOJIS:
+    if color not in ('', *COLORS) or emoji not in (*EMOJIS, *LEGACY_EMOJIS):
         raise ValueError('Выбери цвет и эмодзи из списка')
 
 
@@ -17,7 +21,7 @@ async def prefix_for(db, settings, uid):
     if not role or role.get('prefix_color') not in COLORS:
         return None
     return {'text': role['name'], 'color': role['prefix_color'],
-            'emoji': role['prefix_emoji'] if role.get('prefix_emoji') in EMOJIS else ''}
+            'emoji': role['prefix_emoji'] if role.get('prefix_emoji') in (*EMOJIS, *LEGACY_EMOJIS) else ''}
 
 
 async def decorate_game_people(db, settings, payload):

@@ -8,7 +8,7 @@ window.NoraAdmin = (() => {
   const expanded = new Set(['profile', 'wallet', 'roles', 'actions', 'settings', 'permissions', 'directory', 'community', 'protection', 'perm_people', 'reports', 'tools', 'catalog', 'storefront', 'prefix_color', 'prefix_emoji']);
   const groups = {profile:'Профиль', wallet:'Печеньки и баланс', moderation:'Репутация и модерация',
     roles:'Роль и права', permissions:'Разрешения роли', settings:'Настройки',
-    prefix_color:'Цвет префикса', prefix_emoji:'Эмодзи префикса', directory:'Участники', actions:'Действия', danger:'Опасные действия',
+    prefix_color:'Цвет префикса', prefix_emoji:'Символ префикса', directory:'Участники', actions:'Действия', danger:'Опасные действия',
     community:'Возможности сообщества', protection:'Защита чата', automation:'Автоматизация',
     perm_people:'Участники и модерация', perm_content:'Чат и публикации', perm_system:'Инструменты и доступ',
     reports:'Отчёты и история', tools:'Инструменты Норы', catalog:'Каталог', storefront:'Витрина и оформление'};
@@ -84,7 +84,7 @@ window.NoraAdmin = (() => {
     if (b.url) return `<a class="${classes}" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;
     if (b.kind === 'choice') {
       const color=['red','orange','gold','green','blue','purple','pink'].includes(b.prefix_color)?b.prefix_color:'';
-      return `<button type="button" class="adm-prefix-choice ${b.checked?'is-selected':''}" aria-pressed="${Boolean(b.checked)}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}>${color?`<i class="role-prefix--${color}" aria-hidden="true"></i>`:''}<span>${esc(label)}</span>${b.checked?'<b aria-hidden="true">✓</b>':''}</button>`;
+      return `<button type="button" class="adm-prefix-choice ${b.checked?'is-selected':''}" aria-pressed="${Boolean(b.checked)}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}>${color?`<i class="role-prefix--${color}" aria-hidden="true"></i>`:''}${NoraPrefixSymbol(b.prefix_emoji)}<span>${esc(label)}</span>${b.checked?'<b aria-hidden="true">✓</b>':''}</button>`;
     }
     if (b.kind === 'toggle') return `<button type="button" class="adm-toggle" role="switch" aria-checked="${Boolean(b.checked)}" aria-label="${esc(label)}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}><span><span>${esc(label)}</span>${b.description ? `<small>${esc(b.description)}</small>` : ''}</span><small>${b.checked ? 'Включено' : 'Выключено'}</small><i aria-hidden="true"></i></button>`;
     if (b.kind === 'user') {
@@ -113,7 +113,7 @@ window.NoraAdmin = (() => {
   }
   function card(c) {
     const member = c.member;
-    const summary = member ? `<div class="adm-member"><div class="adm-member-title">${avatar(member, member.name, true)}<div><h2>${NoraPrefix(member.prefix)}${esc(member.name)}</h2><p>${esc(member.role)}${member.username ? ` · @${esc(member.username)}` : ''}</p><small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,'год','года','лет')}` : ''}</small></div></div><dl class="adm-member-stats"><div><dt>Печеньки</dt><dd>${number(member.cookies)}</dd></div><div><dt>Репутация</dt><dd>${number(member.reputation)}</dd><small>Щиты: ${number(member.hate_shields)}</small></div><div><dt>Нарушения</dt><dd>${number(member.warnings)}</dd></div></dl>${member.moderator_note ? `<p class="adm-member-note"><b>Заметка модератора</b>${esc(member.moderator_note)}</p>` : ''}</div>` : c.html && c.layout !== 'features' ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
+    const summary = member ? `<div class="adm-member"><div class="adm-member-title">${avatar(member, member.name, true)}<div><h2>${esc(member.name)}</h2><p>${NoraPrefix(member.prefix)||esc(member.role)}${member.username ? ` · @${esc(member.username)}` : ''}</p><small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,'год','года','лет')}` : ''}</small></div></div><dl class="adm-member-stats"><div><dt>Печеньки</dt><dd>${number(member.cookies)}</dd></div><div><dt>Репутация</dt><dd>${number(member.reputation)}</dd><small>Щиты: ${number(member.hate_shields)}</small></div><div><dt>Нарушения</dt><dd>${number(member.warnings)}</dd></div></dl>${member.moderator_note ? `<p class="adm-member-note"><b>Заметка модератора</b>${esc(member.moderator_note)}</p>` : ''}</div>` : c.html && c.layout !== 'features' && !panel?.workspace?.prefix_preview ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
     return `<section class="adm-card">${media(c.media)}${summary}${controls(c.buttons)}</section>`;
   }
   function composer() {

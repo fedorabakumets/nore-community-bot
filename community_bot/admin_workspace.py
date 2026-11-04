@@ -60,6 +60,12 @@ def button_meta(callback, text):
                     group='prefix_color' if ':color:' in callback else 'prefix_emoji')
         if ':color:' in callback:
             meta['prefix_color'] = callback.rsplit(':', 1)[1]
+        else:
+            from community_bot.role_prefixes import EMOJIS
+
+            index = callback.rsplit(':', 1)[1]
+            if index.isdigit() and int(index) < len(EMOJIS):
+                meta['prefix_emoji'] = EMOJIS[int(index)]
     if callback in {row[3] for row in SECTIONS} or callback in {row[4] for row in TOOLS}:
         meta['kind'] = 'link'
     if text.startswith(('←', '⬅', '🔙', '↩')) or callback in {'ui:close', 'flow:cancel', 'flow:restart'}:

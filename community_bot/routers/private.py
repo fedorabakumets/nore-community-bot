@@ -1563,13 +1563,13 @@ async def admin_role_create_name(message: Message, state: FSMContext, db: Databa
 
 
 def _prefix_keyboard(color, emoji):
-    from community_bot.role_prefixes import COLORS, EMOJIS
+    from community_bot.role_prefixes import COLORS, EMOJI_LABELS, EMOJIS
 
     colors = list({'': 'Без плашки', **COLORS}.items())
     rows = [[InlineKeyboardButton(text=('✓ ' if color == key else '') + label,
                                   callback_data='admin:prefix:color:' + key)
              for key, label in colors[i:i + 2]] for i in range(0, len(colors), 2)]
-    rows += [[InlineKeyboardButton(text=('✓ ' if emoji == value else '') + (value or 'Без эмодзи'),
+    rows += [[InlineKeyboardButton(text=('✓ ' if emoji == value else '') + EMOJI_LABELS[value],
                                    callback_data=f'admin:prefix:emoji:{i}')
               for i, value in enumerate(EMOJIS) if i // 4 == group] for group in (0, 1)]
     rows += [[InlineKeyboardButton(text='Сохранить', callback_data='admin:prefix:save')],
