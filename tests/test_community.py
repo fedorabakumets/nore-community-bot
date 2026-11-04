@@ -84,6 +84,8 @@ async def test_blocks_privacy_presence_and_thumbnail(env):
     await heartbeat(env.db, 2, 'b' * 20, 1, True)
     online = json.loads((await presence(Request(env))).body)
     assert online['3']['online'] and not online['2']['online']
+    staff = json.loads((await status(Request(env))).body)['staff']
+    assert [p['id'] for p in staff] == [1, 2, 6, 3, 4]
     await env.db.execute("INSERT INTO mini_friend_blocks VALUES(3,5,'token','now')")
     assert '3' not in json.loads((await presence(Request(env))).body)
     assert 3 not in [p['id'] for p in json.loads(

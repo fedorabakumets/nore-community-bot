@@ -101,9 +101,9 @@ async def status(request):
     if winner and winner['user_id'] in by_id:
         winner_card = await card(db, settings, viewer, by_id[winner['user_id']])
     staff = []
-    statuses = await presence_map(db, [r['user_id'] for r in rows])
-    ordered = sorted(rows, key=lambda r: (not statuses.get(r['user_id'], {}).get('online', False),
-                                          -r['rank'], str(r['profile_name'] or r['telegram_name']).casefold()))
+    ordered = sorted(rows, key=lambda r: (-r['rank'],
+                                          str(r['profile_name'] or r['telegram_name'] or '').casefold(),
+                                          r['user_id']))
     for row in ordered:
         if row['rank'] > 0:
             staff.append({**await card(db, settings, viewer, row),
