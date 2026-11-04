@@ -84,6 +84,73 @@ async def text(env, view, value):
     return await env.bridge.input(env.actor, {'form': view['form'], 'version': view['version'], 'text': value})
 
 
+async def navigate(env, view, section):
+    target = next(item for item in view['workspace']['navigation'] if item['id'] == section)
+    return await env.bridge.action(env.actor, {'action': target['action'], 'version': view['version']})
+
+
+async def test_workspace_navigation_invalidates_drafts_and_cannot_replay(env):
+    root = await env.bridge.open(env.actor)
+    people = await navigate(env, root, 'people')
+    view = await click(env, people, 'Найти')
+    old_form = {'form': view['form'], 'version': view['version'], 'text': '8'}
+    target = next(item for item in view['workspace']['navigation'] if item['id'] == 'settings')
+    action = {'action': target['action'], 'version': view['version']}
+    settings = await env.bridge.action(env.actor, action)
+    assert settings['workspace']['section'] == 'settings'
+    assert settings['state'] is None
+    assert any(b.get('kind') == 'toggle' for c in settings['cards'] for row in c['buttons'] for b in row)
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.input(env.actor, old_form)
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action(env.actor, action)
+    assert not env.telegram.calls
+
+
+async def test_workspace_profile_and_role_have_direct_return_paths(env):
+    view = await click(env, await navigate(env, await env.bridge.open(env.actor), 'people'), 'Профили')
+    view = await click(env, view, 'Участник 8')
+    assert view['cards'][0]['member']['id'] == 8
+    assert view['cards'][0]['member']['cookies'] == 0
+    buttons = [b for c in view['cards'] for row in c['buttons'] for b in row]
+    assert {b['group'] for b in buttons} >= {'profile', 'wallet', 'moderation', 'roles', 'danger'}
+    view = await click(env, view, 'Роль и права')
+    assert 'Текущая роль' in view['cards'][0]['html']
+    view = await click(env, view, 'Профиль и печеньки')
+    assert 'Баланс' in view['cards'][0]['html']
+    view = await click(env, view, 'Начислить')
+    view = await text(env, view, '12')
+    assert view['cards'][0]['member']['cookies'] == 12
+    assert view['state'] is None
+    assert not env.telegram.calls
+
+
+async def test_workspace_tools_respect_granular_permissions(env):
+    await env.db.create_staff_role('reviewer', 'Проверяющий', 50, ['admin.panel', 'applications'])
+    await env.db.set_role(8, 'reviewer')
+    view = await env.bridge.open({'id': 8})
+    sections = {item['id'] for item in view['workspace']['navigation']}
+    assert not sections & {'settings', 'shop', 'events'}
+    tools = {item['id'] for item in view['workspace']['tools']}
+    assert 'applications' in tools
+    assert not tools & {'directory', 'roles', 'search', 'payments', 'tickets', 'post', 'commands'}
+    assert set(view['workspace']['counts']) == {'applications', 'reports', 'mail'}
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action({'id': 8}, {'action': 'admin:features', 'version': view['version']})
+
+
+async def test_workspace_feature_toggle_metadata_tracks_persisted_state(env):
+    view = await navigate(env, await env.bridge.open(env.actor), 'settings')
+    toggle = next(b for c in view['cards'] for row in c['buttons'] for b in row
+                  if b.get('kind') == 'toggle' and b['label'] == 'Антифлуд')
+    assert toggle['group'] == 'protection' and toggle['description']
+    result = await env.bridge.action(env.actor, {'action': toggle['action'], 'version': view['version']})
+    updated = next(b for c in result['cards'] for row in c['buttons'] for b in row
+                   if b.get('kind') == 'toggle' and b['label'] == 'Антифлуд')
+    assert updated['checked'] != toggle['checked']
+    assert updated['checked'] == await env.db.feature_enabled('anti_flood')
+
+
 async def test_all_main_sections_and_system_tools_render_without_telegram_messages(env):
     for label, nested in [('Очередь', ['Анкеты', 'Платежи', 'Тикеты', 'Репорты', 'Почта']),
                           ('Люди', ['Права', 'Профили', 'Инактив']),

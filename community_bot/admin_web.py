@@ -40,7 +40,8 @@ from aiogram.types import (
 from aiohttp import web
 
 from community_bot.access import miniapp_allowed
-from community_bot.helpers import has_permission, user_permissions
+from community_bot.admin_workspace import SECTIONS, TOOLS, button_meta, permitted
+from community_bot.helpers import has_permission, role_title, user_permissions
 from community_bot.permissions import PERM_ADMIN_PANEL
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets'
@@ -128,6 +129,9 @@ class Session:
     version: str = ''
     counter: int = 0
     input_message: Message | None = None
+    navigation: dict[str, str] = field(default_factory=dict)
+    section: str = 'overview'
+    screen: str = 'admin:panel'
 
     def next_id(self):
         self.counter -= 1
@@ -296,6 +300,7 @@ class AdminBridge:
 
     async def snapshot(self, session):
         session.actions.clear()
+        session.navigation.clear()
         session.media.clear()
         session.form = ''
         session.version = secrets.token_urlsafe(16)
@@ -309,7 +314,8 @@ class AdminBridge:
                 for row in card['markup'].inline_keyboard:
                     buttons = []
                     for button in row:
-                        item = {'text': button.text, 'style': button.style or ''}
+                        item = {'text': button.text, 'style': button.style or '',
+                                **button_meta(button.callback_data or '', button.text)}
                         if button.callback_data and button.callback_data.startswith('shop:'):
                             item['tab'] = 'shop'
                         elif button.callback_data:
@@ -325,6 +331,8 @@ class AdminBridge:
                     if buttons:
                         rows.append(buttons)
             output = {'html': card.get('html', ''), 'buttons': rows}
+            if any(b.get('kind') == 'toggle' and b.get('description') for row in rows for b in row):
+                output['layout'] = 'features'
             if card.get('media'):
                 media_id = secrets.token_urlsafe(18)
                 session.media[media_id] = card['media']
@@ -334,17 +342,77 @@ class AdminBridge:
                 else:
                     output['media'] = {'id': media_id, 'kind': card['media'][0]}
             cards.append(output)
-        state = await (await self.context(session.uid)).get_state()
+        context = await self.context(session.uid)
+        state = await context.get_state()
         if state:
             session.form = secrets.token_urlsafe(18)
+        # Persistent navigation uses the same one-use, versioned capabilities as screen controls.
+        # These targets are fixed by the server and are checked again by existing handlers.
+        navigation = []
+        for key, title, description, callback, required in SECTIONS:
+            if not permitted(session.permissions, required):
+                continue
+            action = self.navigation_action(session, callback, key)
+            navigation.append({'id': key, 'title': title, 'description': description, 'action': action})
+        tools = []
+        for section, key, title, description, callback, required in TOOLS:
+            if not permitted(session.permissions, required):
+                continue
+            tools.append({'section': section, 'id': key, 'title': title, 'description': description,
+                          'current': callback == session.screen,
+                          'action': self.navigation_action(session, callback, section)})
+        # Keep role assignment beside the profile it belongs to, including the return path.
+        for mid, output in zip(session.visible, cards, strict=True):
+            markup = session.cards[mid].get('markup')
+            callbacks = [b.callback_data or '' for row in markup.inline_keyboard for b in row] if markup else []
+            edit = next((c for c in callbacks if c.startswith('admin:edit:')), None)
+            role = next((c for c in callbacks if c.startswith('admin:setrole:')), None)
+            if edit or role:
+                uid = int(edit.rsplit(':', 1)[1] if edit else role.split(':')[2])
+                member = await self.db.get_user(uid)
+                if edit and member:
+                    output['member'] = {
+                        'id': uid,
+                        'name': member['profile_name'] or member['telegram_name'] or member['username'] or str(uid),
+                        'role': await role_title(self.db, str(member['role'])),
+                        **{key: member.get(key) for key in ('username', 'age', 'cookies', 'reputation', 'hate_shields',
+                                                         'warnings', 'moderator_note')},
+                    }
+                callback = f'admin:user:{uid}' if edit else f'admin:manage:{uid}'
+                required = ('roles.assign',) if edit else ('users.edit', 'users.cookies')
+                if permitted(session.permissions, required):
+                    action = secrets.token_urlsafe(18)
+                    session.actions[action] = (mid, callback)
+                    output['buttons'].append([{'text': 'Роль и права' if edit else 'Профиль и печеньки',
+                                               'label': 'Роль и права' if edit else 'Профиль и печеньки',
+                                               'action': action, 'group': 'roles' if edit else 'profile'}])
+        form_data = await context.get_data() if state else {}
+        form_kind = str(form_data.get('admin_action') or '')
+        stats = await self.db.dashboard_stats() if session.section in {'overview', 'queue'} else {}
+        counts = {key: int(stats.get(source) or 0) for key, source in (
+            ('applications', 'pending_applications'), ('payments', 'pending_orders'),
+            ('tickets', 'open_tickets'), ('reports', 'pending_reports'), ('mail', 'pending_mail'))
+            if any(tool['id'] == key for tool in tools)}
         return {'cards': cards, 'notices': session.notices, 'form': session.form, 'state': state,
-                'version': session.version, 'draft': bool(state)}
+                'version': session.version, 'draft': bool(state),
+                'workspace': {'section': session.section, 'screen': session.screen,
+                              'navigation': navigation, 'tools': tools, 'counts': counts,
+                              'form_kind': form_kind}}
+
+    @staticmethod
+    def navigation_action(session, callback, section):
+        action = secrets.token_urlsafe(18)
+        mid = session.visible[0] if session.visible else session.next_id()
+        session.actions[action] = (mid, callback)
+        session.navigation[action] = section
+        return action
 
     async def open(self, actor, reset=False):
         session = await self.session(actor['id'])
         async with session.lock:
             await self.check_permissions(session)
             if reset or not session.visible:
+                session.section, session.screen = 'overview', 'admin:panel'
                 await (await self.context(session.uid)).clear()
                 session.cards.clear()
                 session.visible.clear()
@@ -364,7 +432,23 @@ class AdminBridge:
             session.actions.clear()
             session.form = ''
             mid, callback = control
+            section = session.navigation.get(data['action'])
+            session.screen = callback
+            if section:
+                await (await self.context(session.uid)).clear()
+                session.cards.clear()
+                session.visible.clear()
+                session.section = section
+            else:
+                target = next((row[0] for row in SECTIONS if row[3] == callback), None)
+                if target:
+                    session.section = target
+                if callback.startswith('ashop:'):
+                    session.section = 'shop'
+                if callback.startswith(('admin:manage:', 'admin:user:', 'admin:role', 'admin:setrole:')):
+                    session.section = 'people'
             if callback in {'ui:close', 'flow:cancel', 'flow:restart'}:
+                session.section, session.screen = 'overview', 'admin:panel'
                 await (await self.context(session.uid)).clear()
                 await self.feed(session, actor, callback='admin:panel')
             else:
@@ -386,6 +470,8 @@ class AdminBridge:
                 raise ValueError('Нужен текст до 4096 символов или файл')
             if not await (await self.context(session.uid)).get_state():
                 raise web.HTTPConflict(text='Нет открытой формы')
+            context = await self.context(session.uid)
+            previous_state, previous_data = await context.get_state(), await context.get_data()
             from community_bot.admin_text import compose
 
             text, entities = compose(text, data.get('format', 'plain'))
@@ -416,6 +502,16 @@ class AdminBridge:
                 incoming = Message(message_id=session.next_id(), date=datetime.now(UTC),
                                    chat=Chat(id=session.uid, type='private'), text=text, entities=entities)
             await self.feed(session, actor, message=incoming)
+            # Saving a member field should return to that member, not a confirmation-only dead end.
+            profile_fields = {'cookies', 'add_cookies', 'rep', 'note', 'name', 'age', 'avatar',
+                              'warnings', 'clear_name', 'clear_bio'}
+            if (previous_state == 'AdminFlow:user_value' and previous_data.get('admin_action') in profile_fields
+                    and previous_data.get('target_user_id') and not await context.get_state()):
+                notices = list(session.notices) + [session.cards[mid].get('text', '') for mid in session.visible]
+                callback = f'admin:manage:{int(previous_data["target_user_id"])}'
+                await self.feed(session, actor, callback=callback)
+                session.notices = notices + session.notices
+                session.section, session.screen = 'people', callback
             return await self.snapshot(session)
 
     async def get_media(self, actor, media_id):
