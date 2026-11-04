@@ -215,8 +215,7 @@ async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
     from aiogram.types import FSInputFile
 
     from community_bot.covers import cover_path_for
-    from community_bot.telegraph import member_dm_text
-    from community_bot.updates import community_announcement, latest_update
+    from community_bot.updates import latest_update, update_keyboard, update_page
 
     item = latest_update()
     user_id = callback.from_user.id
@@ -226,14 +225,45 @@ async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
             await bot.send_photo(
                 user_id,
                 FSInputFile(cover),
-                caption=community_announcement(item),
+                caption=update_page(item, 0),
                 parse_mode="HTML",
+                reply_markup=update_keyboard(item, 0),
             )
-        await bot.send_message(user_id, member_dm_text(item), parse_mode="HTML")
+        else:
+            await bot.send_message(
+                user_id, update_page(item, 0), parse_mode="HTML", reply_markup=update_keyboard(item, 0),
+            )
     except (TelegramBadRequest, TelegramForbiddenError):
         await callback.answer("Напишите боту /start в личке, затем нажмите снова.", show_alert=True)
         return
     await callback.answer("Обновление отправлено в личный диалог с ботом")
+
+
+@router.callback_query(F.data.startswith("updates:page:"))
+async def switch_update_page(callback: CallbackQuery) -> None:
+    from community_bot.updates import UPDATES, update_keyboard, update_page
+
+    message = callback.message
+    if not message or message.chat.type != "private" or message.chat.id != callback.from_user.id:
+        await callback.answer()
+        return
+    try:
+        _, _, number, raw_page = (callback.data or "").split(":")
+        item = next(item for item in UPDATES if item.number == int(number))
+        page = int(raw_page)
+        text = update_page(item, page)
+    except (ValueError, StopIteration):
+        await callback.answer("Страница недоступна", show_alert=True)
+        return
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=update_keyboard(item, page))
+        else:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=update_keyboard(item, page))
+    except TelegramBadRequest as error:
+        if "message is not modified" not in str(error).lower():
+            raise
+    await callback.answer()
 
 
 @router.callback_query(F.data == "g:hide")

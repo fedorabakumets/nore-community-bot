@@ -87,6 +87,7 @@ class PrivateAccessMiddleware(BaseMiddleware):
                 'start:apply', 'menu:apply', 'menu:question', 'flow:cancel', 'flow:restart', 'ui:close',
             }
             allowed |= action.startswith('birthday:claim:')
+            allowed |= action.startswith('updates:page:')
             allowed |= current == 'ApplicationForm:interview' and action.startswith('application:interview:')
             if allowed:
                 return await handler(event, data)
@@ -128,7 +129,7 @@ class PrivateAccessMiddleware(BaseMiddleware):
 class ProfileAccessMiddleware(BaseMiddleware):
     """The same profile gate for customer actions in Telegram, including old buttons."""
     async def __call__(self, handler, event, data):
-        from community_bot.aliases import parse_trigger
+        from community_bot.aliases import message_trigger
         from community_bot.profile_fill import profile_is_complete
 
         if not event.from_user:
@@ -139,9 +140,9 @@ class ProfileAccessMiddleware(BaseMiddleware):
             gated |= action in {'menu:shop'}
             gated &= action not in {'shop:close'}
         elif isinstance(event, Message):
-            parsed = parse_trigger(event.text or '')
+            parsed = message_trigger(event)
             gated = bool(parsed and parsed[0] in {'shop', 'store', 'buycookies', 'gift'})
-            gated |= event.text == '🛒 Магазин'
+            gated |= event.chat.type == 'private' and event.text == '🛒 Магазин'
         else:
             gated = False
         if isinstance(event, Message) and data.get('state'):

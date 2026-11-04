@@ -86,7 +86,7 @@ async def send_profile_card(
 
 
 @router.message(command_or_alias("profile"))
-@router.message(F.text == "👤 Мой профиль")
+@router.message(F.chat.type == "private", F.text == "👤 Мой профиль")
 async def show_profile(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return

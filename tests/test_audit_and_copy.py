@@ -98,15 +98,15 @@ def test_media_payloads_are_not_swept_as_group_commands() -> None:
     assert not is_group_command_to_sweep(payload(voice=object()))
     assert not is_group_command_to_sweep(payload(video_note=object()))
     assert not is_group_command_to_sweep(payload(photo=object(), caption="красивый вечер"))
-    assert is_group_command_to_sweep(payload(photo=object(), caption="/shop"))
-    assert is_group_command_to_sweep(payload(text="баланс"))
+    assert is_group_command_to_sweep(payload(photo=object(), caption="Нора /shop"))
+    assert is_group_command_to_sweep(payload(text="Нора баланс"))
     assert not is_group_command_to_sweep(payload(text="Вопрос к чату, почему удалили?"))
-    assert is_group_command_to_sweep(payload(text="вопрос"))
-    assert is_group_command_to_sweep(payload(text="Вопрос"))
+    assert is_group_command_to_sweep(payload(text="Нора вопрос"))
+    assert is_group_command_to_sweep(payload(text="Нора Вопрос"))
     assert not is_group_command_to_sweep(payload(text="закрыть тему"))
-    assert is_group_command_to_sweep(payload(text="/question"))
-    assert is_group_command_to_sweep(payload(text="команды"))
-    assert is_group_command_to_sweep(payload(text="магазин"))
+    assert is_group_command_to_sweep(payload(text="Нора /question"))
+    assert is_group_command_to_sweep(payload(text="Нора команды"))
+    assert is_group_command_to_sweep(payload(text="Нора магазин"))
     assert is_game_callback("cg:join:8")
     assert is_game_callback("game:start:1")
     assert is_game_callback("roulette:accept:2")
@@ -311,7 +311,7 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 20
+    assert latest.number == 21
     text = updates_text()
     assert "№15" in text
     assert "№14" in text
@@ -345,13 +345,13 @@ def test_updates_are_admin_only_and_numbered() -> None:
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
-    assert "Обновление №20" in pin
+    assert f"Обновление №{latest.number}" in pin
     details = member_details_text(latest)
-    assert "ОБНОВА" in details
-    assert "стикер" in details.casefold()
+    assert "Нора профиль" in details
+    assert "не согласен" in details
     assert "админка" not in details.casefold()
     staff = staff_announcement(latest)
-    assert "Служебные стикеры" in staff
+    assert "Групповые команды" in staff
     assert "Админка" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
     assert "рулетка" in labels
@@ -417,7 +417,7 @@ async def test_housekeeping_deletes_command_before_handler() -> None:
             "date": 1_725_000_000,
             "chat": {"id": -1004331642093, "type": "supergroup", "title": "Nora"},
             "from": {"id": 1, "is_bot": False, "first_name": "Анна"},
-            "text": "команды",
+            "text": "Нора команды",
         }
     )
     seen_before_handler = False
