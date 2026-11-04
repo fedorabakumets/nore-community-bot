@@ -13,7 +13,7 @@ const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
 const labels={loan:'НОРА — СТАРТЕР-ПАК',loan_repay:'Возврат стартер-пака',sbp_payment:'Пополнение СБП',pet_shop:'Припасы питомцу',pet_expedition:'Находка из похода',transfer:'Перевод',profile_complete:'Бонус за заполнение профиля',shop:'Покупка в магазине',seasonal_purchase:'Сезонный предмет',rsvp:'Участие в мероприятии',rsvp_refund:'Возврат залога',transfer_in:'Входящий перевод',transfer_out:'Перевод',bonus:'Бонус',daily_leader:'Бонус за активность',admin:'Начисление',debt_repay:'Возврат долга'};
 function transactions(){return data.history.length?data.history.map(t=>`<div class="transaction"><span class="tx-icon">${t.amount>0?'↙':'↗'}</span><div class="tx-info"><b>${esc(labels[t.kind]||'Операция с печеньками')}</b><span>${esc(new Date(t.date).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</span></div><strong class="${t.amount>0?'positive':''}">${t.amount>0?'+':''}${number(t.amount)} 🍪</strong></div>`).join(''):'<div class="empty">Пока без операций.<br>Твоя история появится здесь.</div>'}
-function render(){window.NoraShop?.preloadSeasonal();const feedback=pressFeedback.snapshot();pressFeedback.clear();const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
+function render(){window.NoraShop?.preloadSeasonal();const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=window.NoraHome?.screen()||'';
 if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
@@ -26,9 +26,9 @@ if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
 $('#app').innerHTML=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='friends'?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-wrap${data.unread_notices?' has-unread':''}"><span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span><i class="nav-unread-dot" aria-hidden="true"></i></span>`:navTabIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();pressFeedback.restore(feedback);loadAvatar()}
+const selected=tab==='friends'?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-wrap${data.unread_notices?' has-unread':''}"><span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span><i class="nav-unread-dot" aria-hidden="true"></i></span>`:navTabIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
-function sheet(html){pressFeedback.clear();$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
+function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
 async function product(sku){await window.NoraShop?.product(sku)}
 async function perform(path,payload){
   if(busy)return;
@@ -67,92 +67,6 @@ async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebrow">Репутация в Норе</span><h2>Твой вклад —<br>твои возможности</h2><p class="sub">Сейчас у тебя ${number(data.user.reputation)} / 100. Поддержка участников даёт +5 репутации, отрицательная оценка — −5. Себе менять репутацию нельзя. Одного человека можно отметить один раз в день.</p>${levels.map(l=>`<section class="rep-level"><h3>${esc(l.label)} · ${esc(l.range)}</h3><p>Скидка ${number(l.discount)}% · ${number(l.daily_actions)} ${plural(l.daily_actions,"действие","действия","действий")} в день.<br>${l.can_minus?'Можно поддерживать и понижать репутацию.':'Можно только поддерживать участников.'}</p></section>`).join('')}<p class="sub">Серебро — от 70, золото — от 90. Чтобы расти выше 69, заполни все пять блоков профиля. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников. Ниже порога ограничений взаимодействия недоступны.</p><h2>Для твоей репутации</h2>${products(data.products.filter(p=>p.category==='reputation'))}`)}
-// Feedback belongs to the activated control, never to a viewport overlay.
-const pressFeedback = (() => {
-  let gesture = null, holdTimer = null;
-  const active = new Map();
-  function clear() {
-    clearTimeout(holdTimer);
-    for (const [node, state] of active) {
-      clearTimeout(state.timer);
-      node.classList.remove('press-feedback');
-    }
-    active.clear();
-  }
-  function cancel() {
-    if (gesture) gesture.cancelled = true;
-    clear();
-  }
-  document.addEventListener('pointerdown', e => {
-    clear();
-    if (!e.isPrimary || e.button !== 0) { cancel(); return; }
-    gesture = {id:e.pointerId,x:e.clientX,y:e.clientY,
-      node:e.target.closest?.('button,a.admin-control'),cancelled:false,ended:false};
-    const press = gesture;
-    holdTimer = setTimeout(() => {
-      if (gesture === press && !press.cancelled && !press.ended) show(press.node);
-    },80);
-  }, {capture:true,passive:true});
-  document.addEventListener('pointermove', e => {
-    if (gesture?.id === e.pointerId && Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>8) cancel();
-  }, {capture:true,passive:true});
-  document.addEventListener('pointercancel', cancel, {capture:true,passive:true});
-  document.addEventListener('pointerup', e => {
-    if (gesture?.id === e.pointerId) {
-      if (Math.hypot(e.clientX-gesture.x,e.clientY-gesture.y)>8) cancel();
-      gesture.ended = true;
-    }
-  }, {capture:true,passive:true});
-  function show(node, duration=460) {
-    if (!node?.isConnected || node.disabled || node.getAttribute('aria-disabled') === 'true') return;
-    clear();
-    // Restart an existing press without creating a floating layer.
-    void node.offsetWidth;
-    node.classList.add('press-feedback');
-    active.set(node,{until:performance.now()+duration,timer:setTimeout(() => {
-      node.classList.remove('press-feedback');
-      active.delete(node);
-    },duration)});
-  }
-  document.addEventListener('click', e => {
-    const node = e.target.closest?.('button,a.admin-control');
-    const tap = gesture;
-    gesture = null;
-    if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return;
-    if (e.detail !== 0 && (!tap || !tap.ended || tap.cancelled || tap.node !== node)) return;
-    // Let every screen/modal action finish before deciding whether this control is still visible.
-    queueMicrotask(() => {
-      const dialog = document.querySelector('dialog[open]');
-      let control = node;
-      if (!control.isConnected) {
-        if (node.dataset.tab) control = [...document.querySelectorAll('#nav button[data-tab]')].find(b => b.dataset.tab === node.dataset.tab);
-        else if (node.hasAttribute('data-profile')) control = document.querySelector('[data-profile]');
-      }
-      if (!control?.isConnected || control.disabled || (dialog && !dialog.contains(control))) return;
-      show(control);
-    });
-  }, true);
-  document.addEventListener('scroll', cancel, {capture:true,passive:true});
-  document.addEventListener('visibilitychange', cancel);
-  document.addEventListener('close', clear, true);
-  window.addEventListener('blur', cancel);
-  window.addEventListener('popstate', cancel);
-  new MutationObserver(clear).observe(document.querySelector('#sheet'), {attributes:true,attributeFilter:['open']});
-  function snapshot() {
-    return [...active].map(([node,state]) => ({
-      tab:node.closest('#nav') ? node.dataset.tab : null,
-      profile:node.hasAttribute('data-profile'), until:state.until,
-    }));
-  }
-  function restore(saved) {
-    for (const item of saved) {
-      const node = item.profile ? document.querySelector('[data-profile]') :
-        [...document.querySelectorAll('#nav button.active')].find(b => b.dataset.tab === item.tab);
-      if (node && item.until>performance.now()) show(node,item.until-performance.now());
-    }
-  }
-  return {clear,snapshot,restore};
-})();
 // Floating scroll toggle: jumps to the very bottom of the page and back to the top.
 (() => {
   const btn = $('#scroll-jump');
