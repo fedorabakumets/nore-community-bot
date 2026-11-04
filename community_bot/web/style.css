@@ -106,7 +106,7 @@ main:has(.lk-screen) header{margin-bottom:14px}
 body{font-family:var(--body-font);line-height:1.5;background:var(--bg)}
 h1,h2,h3,.brand,.play-hero strong{font-family:var(--heading-font);font-weight:600}
 h1{font-size:clamp(28px,7vw,38px);line-height:1.2;margin-bottom:16px}
-#app h1:not(.nora-game-screen h1){font-family:NoraCraft,var(--heading-font);font-weight:400;overflow-wrap:anywhere}
+#app h1:not(.nora-game-screen h1){overflow-wrap:anywhere}
 h2{font-size:22px;line-height:1.35;margin:24px 0 12px}
 h3{font-size:16px;line-height:1.4}
 .brand{font-size:26px;letter-spacing:1px}.city{font-size:13px;text-transform:none;letter-spacing:0;max-width:none;color:#aaa9b2;margin-top:0;line-height:1.6}header{margin-bottom:22px;padding:10px 0}
