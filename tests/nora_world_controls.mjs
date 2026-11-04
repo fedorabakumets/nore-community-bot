@@ -341,6 +341,40 @@ try {
   let disposed=0;
   stars.material.addEventListener('dispose',()=>disposed++);leaves.material.addEventListener('dispose',()=>disposed++);
   env.stop();assert.equal(disposed,2,'effect materials released');assert.equal(scene.getObjectByName('nora-stars'),undefined);
+  const motionWorld=await setup();
+  const joint=name=>motionWorld.player.getObjectByName(name);
+  const footY=side=>joint('foot'+side).getWorldPosition(new Three.Vector3()).y;
+  const standingFoot=footY('Left');
+  const thighSplit=()=>Math.abs(joint('thighLeft').rotation.x-joint('thighRight').rotation.x);
+  motionWorld.key('Space');motionWorld.frames(12);
+  assert.ok(motionWorld.player.position.y>.4&&joint('shinLeft').rotation.x>.75,'standing jump tucks both knees');
+  assert.ok(thighSplit()<.01&&joint('armLeft').rotation.x<-.65,'standing jump lifts both arms symmetrically');
+  const tuckedKnee=joint('shinLeft').rotation.x;
+  motionWorld.frames(25);
+  assert.ok(motionWorld.player.position.y>.017&&joint('shinLeft').rotation.x<tuckedKnee-.2,'legs extend during descent');
+  motionWorld.frames(35);
+  assert.ok(Math.abs(joint('shinLeft').rotation.x)<.001,'landing returns to standing');
+  motionWorld.key('KeyW');motionWorld.frames(30);
+  for(const [sprinting,clearance] of [[false,.13],[true,.20]]){
+    motionWorld.key('ShiftLeft',sprinting);motionWorld.frames(45);
+    const lifted=new Set();
+    for(let frame=0;frame<60;frame++){
+      motionWorld.frames(1);
+      for(const [swing,stance] of [['Left','Right'],['Right','Left']]){
+        if(footY(swing)-standingFoot>clearance&&Math.abs(footY(stance)-standingFoot)<.005)lifted.add(swing);
+      }
+    }
+    assert.equal(lifted.size,2,'both feet clear the ground in turn while the other foot supports the avatar');
+  }
+  const beforeJumpZ=motionWorld.player.position.z;
+  motionWorld.key('Space');motionWorld.frames(12);
+  assert.ok(motionWorld.player.position.y>.4&&beforeJumpZ-motionWorld.player.position.z>.55,'running jump travels forward');
+  assert.ok(thighSplit()>.8&&joint('torso').rotation.x>.22,'moving jump splits the legs and leans into travel');
+  motionWorld.frames(60);
+  assert.equal(motionWorld.player.position.y,.017);
+  assert.ok(joint('armLeft').rotation.x>.6,'landing resumes the running pose');
+  motionWorld.stop();
+
   const runner=await setup();runner.key('KeyD');runner.frames(30);
   const walking=runner.delta(30).length();runner.key('ShiftLeft');runner.frames(30);
   assert.ok(runner.delta(30).length()>walking*1.65,'Shift accelerates');
@@ -403,14 +437,16 @@ try {
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
   console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
   const exchanges=[];
-  let remoteTime=0,dropReply=false,remoteOffset=0;
+  let remoteTime=0,dropReply=false,remoteOffset=0,remoteTakeoff=Infinity;
   const lobbyWorld=await setup(0,60,async(path,body)=>{
     if(path!=='nora-game/lobby')return {pet:null};
     exchanges.push(body);
     if(dropReply&&!body.leave)throw Error('temporary loss');
+    const jumpTime=(remoteTime-remoteTakeoff)/1000;
+    const height=jumpTime>0?Math.max(0,4.4*jumpTime-6.5*jumpTime**2):0;
     return {time:remoteTime,players:body.leave?[]:[{
       nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
-      x:2+remoteTime*.003+remoteOffset,y:.017,z:4,heading:remoteTime<750?3.13:-3.13,grounded:true,time:remoteTime,
+      x:2+remoteTime*.003+remoteOffset,y:.017+height,z:4,heading:remoteTime<750?3.13:-3.13,grounded:height===0,time:remoteTime,
     }]};
   },undefined,false,true);
   const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
@@ -450,6 +486,13 @@ try {
     remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
   }
   assert.ok(hasPeer().position.x>10,'remote teleport discards the old movement samples');
+  remoteTakeoff=remoteTime;
+  for(let i=0;i<25;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  const peer=hasPeer();
+  const remoteSplit=peer.getObjectByName('thighRight').rotation.x-peer.getObjectByName('thighLeft').rotation.x;
+  assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
   lobbyWorld.player.position.set(0,.017,8.6);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'НА ОСТРОВ');
   lobbyAction.emit('click');await flush();

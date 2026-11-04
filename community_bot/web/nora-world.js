@@ -197,7 +197,8 @@ window.NoraWorld = (() => {
         avatar.setWings(state.outfit.wings);
         const airborne=!(state.grounded??(state.y<=.04));
         const travelled=distance*step;
-        avatar.walk(airborne?0:travelled,dt,state.sprinting??(travelled>2.2*dt));
+        const verticalSpeed=span?(b.y-a.y)*1000/span:0;
+        avatar.animateMotion(travelled,dt,state.sprinting??(travelled>2.2*dt),airborne?verticalSpeed:null);
         avatar.animateWings(dt,airborne,state.boosting);
       }
     }
@@ -503,10 +504,11 @@ window.NoraWorld = (() => {
         }
         player.position.y=.017+jumpHeight;
         character.animateWings(dt,!grounded,wingBoostUsed&&jumpVelocity>0);
-        character.walk(!grounded?0:Math.hypot(player.position.x-oldX,player.position.z-oldZ),dt,sprinting);
-        // Face actual travel, preserving the last heading when stopped/blocked.
         const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
-        const heading=Math.hypot(travelledX,travelledZ)>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
+        const travelled=Math.hypot(travelledX,travelledZ);
+        character.animateMotion(travelled,dt,sprinting,grounded?null:jumpVelocity);
+        // Face actual travel, preserving the last heading when stopped/blocked.
+        const heading=travelled>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
         player.rotation.y+=turn*(1-Math.exp(-12*dt));
         if(scenery.carriedRecord){const angle=player.rotation.y;scenery.carriedRecord.position.set(player.position.x+Math.cos(angle)*.26+Math.sin(angle)*.2,player.position.y+.64,player.position.z-Math.sin(angle)*.26+Math.cos(angle)*.2);scenery.carriedRecord.rotation.y=angle;}
@@ -553,7 +555,7 @@ window.NoraWorld = (() => {
           action.classList?.toggle('nora-parkour-action',actionText===parkourAction);
         }
         if(inLobby)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0);
-        updateWind(dt,sprinting&&Math.hypot(player.position.x-oldX,player.position.z-oldZ)>.001);
+        updateWind(dt,sprinting&&travelled>.001);
         const daylight=updateLighting(Date.now());
         const audioYaw=yaw+(view===2?Math.PI:0);
         const playing=inLobby?!!records?.lobbyPlaying():recordPlaying;
@@ -570,7 +572,7 @@ window.NoraWorld = (() => {
           if(!inside)scenery.updatePortal?.(dt);
         }
         scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
-        sounds?.update(inside,daylight,Math.hypot(player.position.x-oldX,player.position.z-oldZ),grounded);
+        sounds?.update(inside,daylight,travelled,grounded);
         atmosphere.update(dt,daylight,inside||inLobby);
         companion.update(dt,camera);
         renderer.render(scene,camera);

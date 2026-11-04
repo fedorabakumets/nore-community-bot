@@ -208,7 +208,7 @@ try {
     Object.assign(outfit,{gender,pants});character.rebuild();
     const resources=[];character.group.traverse(mesh=>{if(mesh.isInstancedMesh)resources.push([mesh,mesh.count,mesh.instanceMatrix.array,mesh.geometry,mesh.material]);});
     for(const sprint of [false,true])for(let frame=0;frame<90;frame++) {
-      character.walk((sprint?3:1.7)/60,1/60,sprint);character.group.updateMatrixWorld(true);
+      character.animateMotion((sprint?3:1.7)/60,1/60,sprint);character.group.updateMatrixWorld(true);
       for(const side of ['Left','Right']) {
         const foot=character.group.getObjectByName('foot'+side),q=foot.getWorldQuaternion(new T.Quaternion());
         assert.ok(Math.abs(q.x)<1e-6,'foot remains level through the IK stride');

@@ -56,7 +56,10 @@ window.NoraVoxel = (() => {
       `);
     };
     material.customProgramCacheKey=()=> 'nora-screen-coverage-v1';
-    let section='body', phase=0, gait=0, run=0;
+    let section='body', phase=0, gait=0, run=0, airBlend=0, forward=0, tuck=0;
+    const strideSides=[['Left',0,-1],['Right',Math.PI,1]];
+    const L1=6*unit,L2=5*unit;
+    const mix=(from,to,weight)=>from+(to-from)*weight;
     const meshes=[], joints={}, origins={body:[0,13.5,0]};
     const motion=new T.Group(), hips=new T.Group(), torso=new T.Group();
     motion.name='gaitRoot';hips.name='hips';torso.name='torso';
@@ -290,32 +293,49 @@ window.NoraVoxel = (() => {
       wings?.tick(0);
     }
     function animateWings(dt,airborne,boosting) { wings?.tick(dt,airborne,boosting); }
-    function walk(distance,dt,sprinting=false){
-      run+=((sprinting&&distance>0?1:0)-run)*(1-Math.exp(-8*dt));
-      gait+=(Math.min(1,distance/Math.max(dt,.001)/1.7)-gait)*(1-Math.exp(-12*dt));
-      phase=(phase+distance/(1.15+run*.55)*Math.PI*2)%(Math.PI*2);
-      motion.position.y=(-.1+.015*Math.cos(phase*2))*gait;
-      torso.rotation.x=(.025+run*.27)*gait;torso.rotation.z=Math.sin(phase)*.018*gait;
-      for(const [key,offset] of [['Left',0],['Right',Math.PI]]){
-        const t=((phase+offset)%(Math.PI*2))/(Math.PI*2),stance=.6;
+    function animateMotion(distance,dt,sprinting=false,verticalSpeed=null){
+      const onGround=verticalSpeed===null;
+      const speed=distance/Math.max(dt,.001);
+      const groundDistance=onGround?distance:0;
+      run+=((sprinting&&groundDistance>0?1:0)-run)*(1-Math.exp(-8*dt));
+      gait+=(Math.min(1,onGround?speed/1.7:0)-gait)*(1-Math.exp(-12*dt));
+      phase=(phase+groundDistance/(1.15+run*.55)*Math.PI*2)%(Math.PI*2);
+      airBlend=mix(airBlend,onGround?0:1,1-Math.exp(-(onGround?16:24)*dt));
+      if(!onGround){
+        const blend=1-Math.exp(-16*dt);
+        forward=mix(forward,Math.min(1,speed/.95),blend);
+        tuck=mix(tuck,Math.max(0,Math.min(1,(verticalSpeed+3)/3)),blend);
+      }
+      motion.position.y=(-.1-run*.095+.015*Math.cos(phase*2))*gait*(1-airBlend);
+      torso.rotation.x=mix((.025+run*.27)*gait,.04+forward*(.18+.12*tuck),airBlend);
+      torso.rotation.z=Math.sin(phase)*.018*gait*(1-airBlend);
+      for(const [key,offset,side] of strideSides){
+        const t=((phase+offset)%(Math.PI*2))/(Math.PI*2),stance=.6-run*.06;
         const swing=t<stance?0:(t-stance)/(1-stance);
         const stride=.42+run*.2;
         const z=(t<stance?stride*(1-2*t/stance):-stride+2*stride*(swing*swing*(3-2*swing)))*gait;
-        const lift=Math.sin(swing*Math.PI)*(.24+run*.3)*gait,L1=6*unit,L2=5*unit;
+        const lift=Math.sin(swing*Math.PI)*(.46+run*.26)*gait;
         const down=L1+L2+motion.position.y-lift,r=Math.min(L1+L2-.00001,Math.hypot(down,z));
-        const hip=Math.atan2(-z,down)-Math.acos(Math.max(-1,Math.min(1,(L1*L1+r*r-L2*L2)/(2*L1*r))));
-        const knee=Math.PI-Math.acos(Math.max(-1,Math.min(1,(L1*L1+L2*L2-r*r)/(2*L1*L2))));
-        joints['thigh'+key].rotation.x=gait<.001?0:hip;
-        joints['shin'+key].rotation.x=gait<.001?0:knee;
-        joints['foot'+key].rotation.x=gait<.001?0:-hip-knee;
-        joints['arm'+key].rotation.x=(Math.cos(phase+offset)*.34*(1-run)+run*(.85+Math.sin(phase+offset)*.06))*gait;
-        joints['forearm'+key].rotation.x=(-.12*gait-Math.max(0,-z)*.18)*(1-run);
+        const hip=gait<.001?0:Math.atan2(-z,down)-Math.acos(Math.max(-1,Math.min(1,(L1*L1+r*r-L2*L2)/(2*L1*r))));
+        const knee=gait<.001?0:Math.PI-Math.acos(Math.max(-1,Math.min(1,(L1*L1+L2*L2-r*r)/(2*L1*L2))));
+        // A standing jump draws both knees up. Travel splits the legs and counter-swings the arms.
+        const split=side*forward*(.15+.48*tuck);
+        const jumpHip=-.24-.28*tuck+split;
+        const jumpKnee=.42+.56*tuck+split*.45;
+        joints['thigh'+key].rotation.x=mix(hip,jumpHip,airBlend);
+        joints['shin'+key].rotation.x=mix(knee,jumpKnee,airBlend);
+        joints['foot'+key].rotation.x=mix(-hip-knee,-jumpHip-jumpKnee,airBlend);
+        const arm=(Math.cos(phase+offset)*.34*(1-run)+run*(.85+Math.sin(phase+offset)*.06))*gait;
+        const forearm=(-.12*gait-Math.max(0,-z)*.18)*(1-run);
+        joints['arm'+key].rotation.x=mix(arm,-.36-.54*tuck-split*.95,airBlend);
+        joints['arm'+key].rotation.z=side*((outfit.gender==='female'?.04:0)+mix(.06*gait,.15,airBlend));
+        joints['forearm'+key].rotation.x=mix(forearm,-.16-.34*tuck,airBlend);
       }
     }
     build();
     setWings(outfit.wings);
     return {
-      group:pivot, rebuild:build, walk, setWings, animateWings,
+      group:pivot, rebuild:build, animateMotion, setWings, animateWings,
       setOpacity(value) {
         material.opacity=Math.max(0,Math.min(1,value));
         for(const mesh of meshes)mesh.visible=material.opacity>.001;
