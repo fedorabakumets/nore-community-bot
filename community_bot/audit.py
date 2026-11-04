@@ -28,6 +28,8 @@ ACTION_LABELS: dict[str, str] = {
     "set_cookies": "Установка баланса 🍪",
     "role": "Смена роли",
     "role_create": "Создание роли",
+    "role_prefix": "Префикс роли",
+    "community_reset": "Сброс сообщества",
     "role_perm": "Права роли",
     "role_delete": "Удаление роли",
     "set_status": "Кастомный статус",

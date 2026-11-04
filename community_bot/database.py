@@ -257,6 +257,8 @@ CREATE TABLE IF NOT EXISTS staff_roles (
     slug TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     rank INTEGER NOT NULL DEFAULT 0,
+    prefix_color TEXT NOT NULL DEFAULT '',
+    prefix_emoji TEXT NOT NULL DEFAULT '',
     permissions_json TEXT NOT NULL DEFAULT '[]',
     is_system INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
@@ -602,6 +604,11 @@ class Database:
                 await db.execute("ALTER TABLE pets ADD COLUMN expedition_loot TEXT")
             if "expedition_notice_sent" not in pet_columns:
                 await db.execute("ALTER TABLE pets ADD COLUMN expedition_notice_sent INTEGER NOT NULL DEFAULT 1")
+            role_columns = {str(row[1]) for row in await (
+                await db.execute("PRAGMA table_info(staff_roles)")).fetchall()}
+            for column in ('prefix_color', 'prefix_emoji'):
+                if column not in role_columns:
+                    await db.execute(f"ALTER TABLE staff_roles ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
             audit_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(admin_audit_log)")).fetchall()
             }
@@ -1352,16 +1359,22 @@ class Database:
         row["permissions"] = parse_permissions(str(row.get("permissions_json") or "[]"))
         return row
 
-    async def create_staff_role(self, slug: str, name: str, rank: int, permissions: list[str] | None = None) -> bool:
+    async def create_staff_role(
+        self, slug: str, name: str, rank: int, permissions: list[str] | None = None,
+        *, prefix_color: str = '', prefix_emoji: str = '',
+    ) -> bool:
         from community_bot.permissions import dump_permissions
+        from community_bot.role_prefixes import validate
 
+        validate(prefix_color, prefix_emoji)
         try:
             await self.execute(
                 """
-                INSERT INTO staff_roles(slug, name, rank, permissions_json, is_system, created_at)
-                VALUES (?, ?, ?, ?, 0, ?)
+                INSERT INTO staff_roles(slug, name, rank, permissions_json, is_system, created_at,
+                                        prefix_color, prefix_emoji)
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
                 """,
-                (slug, name, rank, dump_permissions(permissions or []), utcnow()),
+                (slug, name, rank, dump_permissions(permissions or []), utcnow(), prefix_color, prefix_emoji),
             )
         except Exception:
             return False
@@ -1374,18 +1387,25 @@ class Database:
         name: str | None = None,
         rank: int | None = None,
         permissions: list[str] | None = None,
+        prefix_color: str | None = None,
+        prefix_emoji: str | None = None,
     ) -> bool:
         from community_bot.permissions import dump_permissions
 
         role = await self.get_staff_role(slug)
         if not role:
             return False
+        from community_bot.role_prefixes import validate
+
+        color = prefix_color if prefix_color is not None else role['prefix_color']
+        emoji = prefix_emoji if prefix_emoji is not None else role['prefix_emoji']
+        validate(color, emoji)
         new_name = name if name is not None else str(role["name"])
         new_rank = rank if rank is not None else int(role["rank"])
         new_perms = dump_permissions(permissions if permissions is not None else list(role["permissions"]))
         await self.execute(
-            "UPDATE staff_roles SET name = ?, rank = ?, permissions_json = ? WHERE slug = ?",
-            (new_name, new_rank, new_perms, slug),
+            "UPDATE staff_roles SET name=?, rank=?, permissions_json=?, prefix_color=?, prefix_emoji=? WHERE slug=?",
+            (new_name, new_rank, new_perms, color, emoji, slug),
         )
         return True
 

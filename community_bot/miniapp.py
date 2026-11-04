@@ -65,7 +65,7 @@ async def protection(request, handler):
             from community_bot.access import miniapp_allowed
 
             if not await miniapp_allowed(request.app['db'], request.app['settings'], request['actor']['id']):
-                return web.json_response({'error': 'Миниапка пока доступна модераторам и администраторам'},
+                return web.json_response({'error': 'Миниапка доступна ролям от 30 ранга'},
                                          status=403, headers={'Cache-Control': 'no-store'})
             if request.path.startswith('/api/shop/') or request.path == '/api/events/join':
                 from community_bot.profile_fill import profile_is_complete
@@ -75,6 +75,14 @@ async def protection(request, handler):
                     return web.json_response({'error': 'Заполни профиль на 100% в ЛК, чтобы открыть магазин и события'},
                                              status=403, headers={'Cache-Control': 'no-store'})
         response = await handler(request)
+        if (request.path in {'/api/sea', '/api/mafia', '/api/community'}
+            or request.path.startswith(('/api/sea/', '/api/mafia/'))) and (
+            response.content_type == 'application/json' and response.status < 400
+        ):
+            from community_bot.role_prefixes import decorate_game_people
+
+            payload = await decorate_game_people(request.app['db'], request.app['settings'], json.loads(response.body))
+            response.body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     except web.HTTPRequestEntityTooLarge:
         large = request.path.startswith(('/api/admin', '/api/events/upload'))
         limit = 'Файл должен быть не больше 20 МБ' if large else (
@@ -138,7 +146,10 @@ async def overview(request):
     today = datetime.now(ZoneInfo(getattr(settings, 'timezone', 'Europe/Moscow'))).date()
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
+    from community_bot.role_prefixes import prefix_for
+
     stats = {
+        'prefix': await prefix_for(db, settings, user['user_id']),
         'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
         'tier': tier.label, 'discount': tier.discount, 'daily_actions': tier.daily_actions,
         'actions_used': used, 'actions_left': max(0, tier.daily_actions - used), 'can_minus': tier.can_minus,

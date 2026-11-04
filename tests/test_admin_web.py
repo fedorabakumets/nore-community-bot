@@ -136,7 +136,8 @@ async def test_workspace_directory_identity_and_avatar_metadata_without_file_ids
     view = await click(env, await navigate(env, await env.bridge.open(env.actor), 'people'), 'Профили')
     people = {b['person']['id']: b['person'] for c in view['cards'] for row in c['buttons'] for b in row
               if b.get('kind') == 'user'}
-    assert people[8] == {'id': 8, 'name': 'Очень длинное имя участника ' * 3, 'username': 'anna', 'has_avatar': True}
+    assert people[8] == {'id': 8, 'name': 'Очень длинное имя участника ' * 3,
+                         'username': 'anna', 'has_avatar': True, 'prefix': None}
     assert people[9]['username'] is None and people[9]['has_avatar'] is False
     assert people[7]['has_avatar'] is False
     assert 'fake-avatar' not in json.dumps(view) and 'fake-video' not in json.dumps(view)
@@ -350,8 +351,19 @@ async def test_catalog_and_role_creation_use_shared_database(env):
     view = await click(env, await env.bridge.open(env.actor, reset=True), 'Люди')
     view = await click(env, view, 'Права')
     view = await click(env, view, 'Создать роль')
-    await text(env, view, 'Помощник тест')
-    assert any(r['name'] == 'Помощник тест' for r in await env.db.list_staff_roles())
+    view = await text(env, view, 'Помощник тест')
+    assert not any(r['name'] == 'Помощник тест' for r in await env.db.list_staff_roles())
+    assert not view['form'] and view['workspace']['prefix_preview']['text'] == 'Помощник тест'
+    view = await click(env, view, 'Голубой')
+    view = await click(env, view, '⭐')
+    assert view['workspace']['prefix_preview']['color'] == 'blue'
+    view = await click(env, view, 'Сохранить')
+    role = next(r for r in await env.db.list_staff_roles() if r['name'] == 'Помощник тест')
+    assert role['prefix_color'] == 'blue' and role['prefix_emoji'] == '⭐'
+    view = await click(env, view, 'Префикс')
+    view = await click(env, view, 'Без плашки')
+    await click(env, view, 'Сохранить')
+    assert (await env.db.get_staff_role(role['slug']))['prefix_color'] == ''
 
 
 async def test_broadcast_copies_web_text_to_real_recipients_once(env):

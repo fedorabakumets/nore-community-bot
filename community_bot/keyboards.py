@@ -353,6 +353,8 @@ def staff_role_view_keyboard(role: dict[str, object], can_edit: bool) -> InlineK
     slug = str(role["slug"])
     perms = list(role.get("permissions") or [])
     rows: list[list[InlineKeyboardButton]] = []
+    if can_edit:
+        rows.append([ibtn("🎨 Префикс", f"admin:roleprefix:{slug}")])
     if can_edit and slug != "owner":
         for key, _label in PERMISSIONS:
             mark = "✅" if role_has_permission(perms, key) else "⚪"

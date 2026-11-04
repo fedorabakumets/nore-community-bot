@@ -142,6 +142,7 @@ async def _counts(connection, uid: int, now: float) -> tuple[int, int]:
 
 async def snapshot(db, settings, uid: int) -> dict:
     from community_bot.helpers import can_view_profile
+    from community_bot.role_prefixes import prefix_for
 
     now = time.time()
     rows = await db.fetchall(
@@ -169,6 +170,7 @@ async def snapshot(db, settings, uid: int) -> dict:
         other = int(row["user_id"])
         item = {
             "id": other,
+            "prefix": await prefix_for(db, settings, other),
             "has_avatar": bool(row["avatar_file_id"] and row["avatar_media_type"] == "photo"
                                and await can_view_profile(db, settings, uid, row)),
             "name": row["profile_name"] or row["telegram_name"] or row["username"] or "Участник",
@@ -187,6 +189,7 @@ async def snapshot(db, settings, uid: int) -> dict:
     statuses = await presence_map(db, [p['id'] for p in result['friends']])
     for person in result['friends']:
         person['presence'] = statuses.get(person['id'], {'visible': False, 'online': False, 'last_seen': None})
+    result['friends'].sort(key=lambda p: not p['presence']['online'])
     result["counts"] = {key: len(value) for key, value in result.items()}
     result["limits"] = {
         "max_friends": MAX_FRIENDS, "max_pending": MAX_PENDING,

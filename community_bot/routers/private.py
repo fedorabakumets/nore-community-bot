@@ -1557,27 +1557,90 @@ async def admin_role_create_name(message: Message, state: FSMContext, db: Databa
     if not 2 <= len(name) <= 40:
         await message.answer("Название — от 2 до 40 символов.")
         return
-    slug = slugify_role(name)
-    existing = await db.get_staff_role(slug)
-    suffix = 2
-    while existing:
-        slug = f"{slugify_role(name)[:20]}_{suffix}"
-        existing = await db.get_staff_role(slug)
-        suffix += 1
-    actor_rank = await rank_of_user(db, settings, message.from_user.id)
-    rank = min(50, max(1, actor_rank - 1))
-    if not await db.create_staff_role(slug, name, rank, []):
-        await message.answer("Не удалось создать роль, попробуйте другое имя.")
+    await state.set_state(AdminFlow.role_prefix)
+    await state.set_data({'prefix_name': name, 'prefix_color': '', 'prefix_emoji': ''})
+    await message.answer('Настрой префикс роли:', reply_markup=_prefix_keyboard('', ''))
+
+
+def _prefix_keyboard(color, emoji):
+    from community_bot.role_prefixes import COLORS, EMOJIS
+
+    colors = list({'': 'Без плашки', **COLORS}.items())
+    rows = [[InlineKeyboardButton(text=('✓ ' if color == key else '') + label,
+                                  callback_data='admin:prefix:color:' + key)
+             for key, label in colors[i:i + 2]] for i in range(0, len(colors), 2)]
+    rows += [[InlineKeyboardButton(text=('✓ ' if emoji == value else '') + (value or 'Без эмодзи'),
+                                   callback_data=f'admin:prefix:emoji:{i}')
+              for i, value in enumerate(EMOJIS) if i // 4 == group] for group in (0, 1)]
+    rows += [[InlineKeyboardButton(text='Сохранить', callback_data='admin:prefix:save')],
+             [InlineKeyboardButton(text='Отменить', callback_data='admin:prefix:cancel')]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith('admin:roleprefix:'))
+async def admin_role_prefix(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
         return
-    await state.clear()
-    await db.log_admin_action(message.from_user.id, "role_create", slug, name)
-    role = await db.get_staff_role(slug)
-    assert role
-    await message.answer(
-        f"✅ Роль <b>{html.escape(name)}</b> создана (ранг {rank}). Включите нужные права:",
-        parse_mode="HTML",
-        reply_markup=staff_role_view_keyboard(role, True),
-    )
+    role = await db.get_staff_role(callback.data.rsplit(':', 1)[1])
+    if not role:
+        await callback.answer('Роль не найдена', show_alert=True)
+        return
+    await state.set_state(AdminFlow.role_prefix)
+    await state.set_data({'prefix_slug': role['slug'], 'prefix_name': role['name'],
+                          'prefix_color': role['prefix_color'], 'prefix_emoji': role['prefix_emoji']})
+    await callback.answer()
+    await callback.message.edit_text('Настрой префикс роли:',
+                                     reply_markup=_prefix_keyboard(role['prefix_color'], role['prefix_emoji']))
+
+
+@router.callback_query(AdminFlow.role_prefix, F.data.startswith('admin:prefix:'))
+async def admin_prefix_choice(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings):
+    from community_bot.role_prefixes import COLORS, EMOJIS
+
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    data = await state.get_data()
+    action = callback.data.removeprefix('admin:prefix:')
+    if action == 'cancel':
+        await state.clear()
+        await callback.answer('Отменено')
+        await callback.message.edit_text('Настройка отменена.', reply_markup=roles_hub_keyboard(True))
+        return
+    color, emoji = data.get('prefix_color', ''), data.get('prefix_emoji', '')
+    if action.startswith('color:') and action[6:] in ('', *COLORS):
+        color = action[6:]
+    elif action.startswith('emoji:') and action[6:].isdigit() and int(action[6:]) < len(EMOJIS):
+        emoji = EMOJIS[int(action[6:])]
+    elif action == 'save':
+        name, slug = data['prefix_name'], data.get('prefix_slug')
+        if slug:
+            if not await db.update_staff_role(slug, prefix_color=color, prefix_emoji=emoji):
+                await callback.answer('Роль больше не существует', show_alert=True)
+                return
+        else:
+            slug = slugify_role(name)
+            suffix = 2
+            while await db.get_staff_role(slug):
+                slug = f'{slugify_role(name)[:20]}_{suffix}'
+                suffix += 1
+            rank = min(50, max(1, await rank_of_user(db, settings, callback.from_user.id) - 1))
+            if not await db.create_staff_role(slug, name, rank, [], prefix_color=color, prefix_emoji=emoji):
+                await callback.answer('Не удалось создать роль', show_alert=True)
+                return
+        await db.log_admin_action(callback.from_user.id, 'role_prefix' if data.get('prefix_slug')
+                                  else 'role_create', slug, name)
+        await state.clear()
+        await callback.answer('Сохранено')
+        await _show_role_view(callback, db, settings, slug)
+        return
+    else:
+        await callback.answer('Выбери вариант из списка', show_alert=True)
+        return
+    await state.update_data(prefix_color=color, prefix_emoji=emoji)
+    await callback.answer()
+    preview = f'{emoji} {data["prefix_name"]}'.strip() if color else 'Без плашки'
+    await callback.message.edit_text(f'Префикс: {preview}\nЦвет: {COLORS.get(color, "без цвета")}',
+                                     reply_markup=_prefix_keyboard(color, emoji))
 
 
 async def _show_role_view(callback: CallbackQuery, db: Database, settings: Settings, slug: str) -> None:

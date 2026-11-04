@@ -145,9 +145,12 @@ async def profile(request):
 
     db, uid, settings = request.app["db"], request["actor"]["id"], request.app["settings"]
     target = await target_for(request)
+    from community_bot.role_prefixes import prefix_for
+
     friend = await accepted(db, uid, target["user_id"])
     result = {
         "id": target["user_id"],
+        "prefix": await prefix_for(db, settings, target["user_id"]),
         "name": target["profile_name"] or target["telegram_name"] or "Участник",
         "username": target["username"],
         "friend": friend,

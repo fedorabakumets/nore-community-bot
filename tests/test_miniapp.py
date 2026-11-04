@@ -112,6 +112,30 @@ async def test_role_gate_accepts_staff_and_rejects_signed_member_and_revoked_adm
     assert (await db.get_user(7))['cookies'] == 100
 
 
+async def test_current_role_badges_enrich_game_views_without_changing_seasonal_catalog(db):
+    import time
+    from unittest.mock import AsyncMock
+
+    from aiohttp import web
+
+    from community_bot.miniapp import protection
+
+    await db.set_role(7, 'moderator')
+    await db.create_staff_role('styled', 'Team', 30, prefix_color='blue', prefix_emoji='⭐')
+    await db.set_role(8, 'styled')
+    req = Request(db)
+    req.headers = {'Authorization': 'tma ' + signed(date=int(time.time()))}
+    payload = {'players': [{'id': 8, 'name': 'Cached name'}]}
+    for path in ('/api/sea', '/api/mafia', '/api/community', '/api/seasonal'):
+        req.path = path
+        result = await protection(req, AsyncMock(return_value=web.json_response(payload)))
+        person = json.loads(result.body)['players'][0]
+        if path == '/api/seasonal':
+            assert 'prefix' not in person
+        else:
+            assert person['prefix'] == {'text': 'Team', 'color': 'blue', 'emoji': '⭐'}
+
+
 async def test_profile_save_is_atomic_validated_and_protects_bot_edits(db):
     from community_bot.miniapp import save_profile
     from community_bot.profile_fields import profile_revision

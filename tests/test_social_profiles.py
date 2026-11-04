@@ -108,7 +108,7 @@ async def test_hidden_and_blocked_profiles_and_avatars_are_enforced_on_server(en
     await befriend(env, 8, 9)
     await env.db.update_profile(9, "profile_private", 1)
     p = json.loads((await profile(Request(env))).body)
-    assert p["hidden"] and set(p) == {"id", "name", "username", "friend", "hidden", "private"}
+    assert p["hidden"] and set(p) == {"id", "name", "username", "friend", "hidden", "private", "prefix"}
     with pytest.raises(web.HTTPForbidden):
         await avatar(Request(env))
     # Existing see-private permission still works for the configured owner.

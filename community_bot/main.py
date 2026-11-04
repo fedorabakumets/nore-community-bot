@@ -395,8 +395,13 @@ async def main() -> None:
     )
     settings = load_settings()
     db = Database(settings.database_path)
+    from community_bot.community_reset import apply_reset, prepare_reset, reset_settings
+
+    await prepare_reset(db)
     await verify_requested_release_backup(db)
     await db.initialize()
+    await apply_reset(db, settings)
+    settings = await reset_settings(db, settings)
     if await db.get_bot_state("emergency_disabled") == "1":
         logger.critical("Бот заблокирован аварийным выключателем")
         await asyncio.Event().wait()

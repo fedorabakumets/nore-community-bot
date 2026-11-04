@@ -53,7 +53,7 @@ window.NoraSea = (() => {
     const label = i.stake ? "ставка " + number(i.stake) + " 🍪" : "бесплатно";
     return (
       `<section class="card mafia-invite"><span class="eyebrow">Друг приглашает в Морской бой</span><h3>${esc(i.title)}</h3>` +
-      `<p class="sub">${esc(i.sender_name)} зовёт · ${label}</p>` +
+      `<p class="sub">${NoraPrefix(i.sender_prefix)}${esc(i.sender_name)} зовёт · ${label}</p>` +
       `<div class="pet-action-row"><button class="primary" data-sea-respond="yes" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>Принять</button>` +
       `<button class="secondary" data-sea-respond="no" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>Отклонить</button></div></section>`
     );
@@ -120,7 +120,7 @@ window.NoraSea = (() => {
     const turn = state.sea?.room?.turn === p.id;
     const inLobby = state.sea?.room?.status === "lobby";
     const kick = inLobby && state.sea.room.host_id === data.user.user_id && p.id !== data.user.user_id && p.id > 0 ? `<button class="text-btn" data-sea-kick="${p.id}">Исключить</button>` : "";
-    return `<div class="mafia-player ${turn ? "you" : ""}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><b>${esc(p.name)}</b><small>${inLobby ? (p.ready ? "Готов" : "Собирается") : turn ? "Стреляет" : "Ждёт"} · кораблей: ${ships}${p.left ? " · вышел" : ""}</small>${kick}</div>`;
+    return `<div class="mafia-player ${turn ? "you" : ""}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>${inLobby ? (p.ready ? "Готов" : "Собирается") : turn ? "Стреляет" : "Ждёт"} · кораблей: ${ships}${p.left ? " · вышел" : ""}</small>${kick}</div>`;
   }
 
   function lobbyView(r) {
@@ -291,7 +291,7 @@ window.NoraSea = (() => {
     const list = (friends.friends || []).filter((p) => p.available !== false);
     const rows = list.length
       ? list
-          .map((p) => `<button class="invite-person" data-sea-invite-person="${p.id}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><span><b>${esc(p.name)}</b><small>Пригласить в комнату</small></span></button>`)
+          .map((p) => `<button class="invite-person" data-sea-invite-person="${p.id}"><span class="person-avatar">${esc((p.name || "?").match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || "?")}</span><span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>Пригласить в комнату</small></span></button>`)
           .join("")
       : '<p class="sub">Нет друзей для приглашения. Сначала добавь друзей в разделе «Коммьюнити».</p>';
     sheet(`<span class="eyebrow">Собираем флот</span><h2>Позвать в Морской бой</h2>${rows}<button class="secondary" id="sea-to-friends">Добавить друзей</button>`);

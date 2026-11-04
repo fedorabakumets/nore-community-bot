@@ -55,6 +55,11 @@ def button_meta(callback, text):
     """Describe controls, without exposing callbacks to the browser."""
     clean = re.sub(r'^[\W_]+', '', text, flags=re.UNICODE).strip() or text
     meta = {'label': clean, 'group': 'actions'}
+    if callback.startswith(('admin:prefix:color:', 'admin:prefix:emoji:')):
+        meta.update(kind='choice', checked=text.startswith('✓'),
+                    group='prefix_color' if ':color:' in callback else 'prefix_emoji')
+        if ':color:' in callback:
+            meta['prefix_color'] = callback.rsplit(':', 1)[1]
     if callback in {row[3] for row in SECTIONS} or callback in {row[4] for row in TOOLS}:
         meta['kind'] = 'link'
     if text.startswith(('←', '⬅', '🔙', '↩')) or callback in {'ui:close', 'flow:cancel', 'flow:restart'}:

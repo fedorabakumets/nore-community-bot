@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from aiohttp import web
 
 from community_bot.helpers import can_view_profile
+from community_bot.role_prefixes import prefix_for
 from community_bot.social_profiles import presence_map
 
 
@@ -46,6 +47,7 @@ async def people(db, settings, viewer):
 async def card(db, settings, viewer, row):
     return {
         'id': row['user_id'],
+        'prefix': await prefix_for(db, settings, row['user_id']),
         'name': row['profile_name'] or row['telegram_name'] or row['username'] or 'Участник',
         'username': row['username'],
         'has_avatar': bool(row['avatar_file_id'] and row['avatar_media_type'] == 'photo'
@@ -58,18 +60,23 @@ async def directory(request):
     query = request.query.get('q', '').strip()
     try:
         offset = int(request.query.get('offset', '0'))
+        limit = int(request.query.get('limit', '50'))
     except ValueError:
         raise web.HTTPBadRequest() from None
-    if len(query) > 80 or not 0 <= offset <= 1_000_000:
+    if len(query) > 80 or not 0 <= offset <= 1_000_000 or not 1 <= limit <= 500:
         raise web.HTTPBadRequest()
     normalized = lambda s: str(s or '').casefold().replace('ё', 'е')  # noqa: E731
     needle = normalized(query.lstrip('@'))
     rows = [r for r in await people(db, settings, viewer) if not needle or any(
         needle in normalized(r[k]) for k in ('profile_name', 'telegram_name', 'username', 'user_id'))]
-    rows.sort(key=lambda r: (normalized(r['profile_name'] or r['telegram_name'] or r['username']), r['user_id']))
-    items = [await card(db, settings, viewer, r) for r in rows[offset:offset + 50]]
+    statuses = await presence_map(db, [r['user_id'] for r in rows])
+    rows.sort(key=lambda r: (not statuses.get(r['user_id'], {}).get('online', False),
+                             normalized(r['profile_name'] or r['telegram_name'] or r['username']), r['user_id']))
+    items = [await card(db, settings, viewer, r) for r in rows[offset:offset + limit]]
+    for item in items:
+        item['presence'] = statuses.get(item['id'])
     return web.json_response({'items': items, 'total': len(rows),
-                              'next_offset': offset + 50 if offset + 50 < len(rows) else None})
+                              'next_offset': offset + limit if offset + limit < len(rows) else None})
 
 
 async def status(request):
@@ -94,9 +101,13 @@ async def status(request):
     if winner and winner['user_id'] in by_id:
         winner_card = await card(db, settings, viewer, by_id[winner['user_id']])
     staff = []
-    for row in sorted(rows, key=lambda r: (-r['rank'], str(r['profile_name'] or r['telegram_name']).casefold())):
+    statuses = await presence_map(db, [r['user_id'] for r in rows])
+    ordered = sorted(rows, key=lambda r: (not statuses.get(r['user_id'], {}).get('online', False),
+                                          -r['rank'], str(r['profile_name'] or r['telegram_name']).casefold()))
+    for row in ordered:
         if row['rank'] > 0:
-            staff.append({**await card(db, settings, viewer, row), 'role': row['role_name'] or row['role']})
+            staff.append({**await card(db, settings, viewer, row),
+                          'role': row['role_name'] or row['role'], 'rank': row['rank']})
     from community_bot.helpers import has_permission
     from community_bot.permissions import PERM_GAMES
     from community_bot.sea_api import public_lobbies

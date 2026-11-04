@@ -43,6 +43,7 @@ from community_bot.access import miniapp_allowed
 from community_bot.admin_workspace import SECTIONS, TOOLS, button_meta, permitted
 from community_bot.helpers import has_permission, role_title, user_permissions
 from community_bot.permissions import PERM_ADMIN_PANEL
+from community_bot.role_prefixes import prefix_for
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets'
 ACTIVE: ContextVar[Any] = ContextVar('nora_admin_web_request', default=None)
@@ -324,6 +325,8 @@ class AdminBridge:
                          or str(member['user_id'])),
                 'username': member['username'], 'has_avatar': bool(member['has_avatar']),
             } for member in members}
+        for uid, person in people.items():
+            person['prefix'] = await prefix_for(self.db, self.settings, uid)
         cards = []
         for mid in session.visible:
             card = session.cards.get(mid)
@@ -366,7 +369,7 @@ class AdminBridge:
             cards.append(output)
         context = await self.context(session.uid)
         state = await context.get_state()
-        if state:
+        if state and state != 'AdminFlow:role_prefix':
             session.form = secrets.token_urlsafe(18)
         # Persistent navigation uses the same one-use, versioned capabilities as screen controls.
         # These targets are fixed by the server and are checked again by existing handlers.
@@ -397,6 +400,7 @@ class AdminBridge:
                         'id': uid,
                         'name': member['profile_name'] or member['telegram_name'] or member['username'] or str(uid),
                         'role': await role_title(self.db, str(member['role'])),
+                        'prefix': await prefix_for(self.db, self.settings, uid),
                         'has_avatar': bool(member.get('avatar_file_id') and member.get('avatar_media_type') == 'photo'),
                         **{key: member.get(key) for key in ('username', 'age', 'cookies', 'reputation', 'hate_shields',
                                                          'warnings', 'moderator_note')},
@@ -411,6 +415,13 @@ class AdminBridge:
                                                'action': action, 'group': 'roles' if edit else 'profile'}])
         form_data = await context.get_data() if state else {}
         form_kind = str(form_data.get('admin_action') or '')
+        prefix_preview = None
+        if state == 'AdminFlow:role_prefix':
+            prefix_preview = {'text': form_data.get('prefix_name', ''),
+                              'color': form_data.get('prefix_color', ''),
+                              'emoji': form_data.get('prefix_emoji', '')}
+        elif state == 'AdminFlow:role_name':
+            form_kind = 'role_name'
         stats = await self.db.dashboard_stats() if session.section in {'overview', 'queue'} else {}
         counts = {key: int(stats.get(source) or 0) for key, source in (
             ('applications', 'pending_applications'), ('payments', 'pending_orders'),
@@ -420,7 +431,7 @@ class AdminBridge:
                 'version': session.version, 'draft': bool(state),
                 'workspace': {'section': session.section, 'screen': session.screen,
                               'navigation': navigation, 'tools': tools, 'counts': counts,
-                              'form_kind': form_kind}}
+                              'form_kind': form_kind, 'prefix_preview': prefix_preview}}
 
     @staticmethod
     def navigation_action(session, callback, section):

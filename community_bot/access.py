@@ -1,4 +1,4 @@
-"""Private onboarding gate and staff Mini App visibility (moderator rank and above)."""
+"""Private onboarding gate and staff Mini App visibility (rank 30 and above)."""
 from __future__ import annotations
 
 import os
@@ -25,7 +25,7 @@ def guest_keyboard():
 
 
 async def miniapp_allowed(db, settings, uid):
-    return await rank_of_user(db, settings, uid) >= 40
+    return await rank_of_user(db, settings, uid) >= 30
 
 
 async def private_allowed(db, settings, uid):
