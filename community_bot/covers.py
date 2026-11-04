@@ -18,4 +18,6 @@ def render_update_cover(number: int, title: str, dest: Path) -> Path:
 
 
 def cover_path_for(item: BotUpdate, cache_dir: Path | None = None) -> Path:
+    if item.cover:
+        return Path(__file__).resolve().parent.parent / "assets" / "updates" / item.cover
     return render_update_cover(item.number, item.title, cover_cache_path(item.number, cache_dir))

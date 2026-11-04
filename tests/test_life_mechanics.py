@@ -38,13 +38,14 @@ def test_public_update_omits_staff_and_has_member_copy() -> None:
     item = latest_update()
     pin = community_announcement(item)
     staff = staff_announcement(item)
-    assert item.number == 20
+    assert item.number == 21
     assert f"Обновление №{item.number}" in pin
     assert "Админское" not in pin
-    assert "стикер" in pin.casefold() and "vstickere" in pin
+    assert "Норе" in pin
+    assert "Сначала — Нора" in pin
     assert "Витрина после выбора" not in pin
     assert f"Админское обновление №{item.number}" in staff
-    assert "Служебные стикеры" in staff
+    assert "Групповые команды" in staff
     assert len(pin) <= 1024
 
 
@@ -159,15 +160,7 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
         async def unpin_chat_message(self, chat_id, message_id):
             return None
 
-    async def fake_publish(_db, _item):
-        return None
 
-    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
-
-    async def no_staff(_db, _item):
-        return None
-
-    monkeypatch.setattr("community_bot.main.publish_staff_update", no_staff)
     settings = SimpleNamespace(community_chat_id=-100)
     await announce_latest_update(FakeBot(), db, settings)
     chats = [chat_id for chat_id, _ in dms]
@@ -177,4 +170,4 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
     public = [text for chat_id, text in dms if chat_id == -100]
     assert staff_texts and "Админское" in staff_texts[0]
     assert public and "Админское" not in public[0]
-    assert "Обновление №20" in public[0]
+    assert "Обновление №21" in public[0]

@@ -177,7 +177,7 @@ async def _show_pet(
 
 
 @router.message(command_or_alias("pet"))
-@router.message(F.text.in_({"🐾 Тамагочи", "🐾 Питомец"}))
+@router.message(F.chat.type == "private", F.text.in_({"🐾 Тамагочи", "🐾 Питомец"}))
 async def show_pet(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return

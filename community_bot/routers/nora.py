@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Filter
 from aiogram.types import LinkPreviewOptions, Message
 
-from community_bot.aliases import parse_trigger
+from community_bot.aliases import message_trigger, parse_trigger
 from community_bot.command_registry import get_command
 from community_bot.config import Settings
 from community_bot.ephemeral import delete_user_command, reply_ttl
@@ -22,6 +23,8 @@ async def nora_address(message: Message, settings: Settings) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
     text = message.text or ""
+    if parse_trigger(text):
+        raise SkipHandler
     if strip_address(text) is None:
         return
     from datetime import datetime
@@ -42,7 +45,7 @@ async def nora_address(message: Message, settings: Settings) -> None:
 
 class CustomCommand(Filter):
     async def __call__(self, message: Message) -> bool:
-        parsed = parse_trigger(message.text or message.caption or "")
+        parsed = message_trigger(message)
         if not parsed:
             return False
         view = get_command(parsed[0])

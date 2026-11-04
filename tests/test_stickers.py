@@ -69,8 +69,6 @@ async def test_update_sticker_failure_does_not_block_post_and_outbox_delivers_la
     from community_bot.updates import announcement_key, latest_update
 
     monkeypatch.setattr(main, "cover_path_for", lambda item: None)
-    monkeypatch.setattr(main, "publish_member_update", AsyncMock(return_value="https://telegra.ph/test"))
-    monkeypatch.setattr(main, "publish_staff_update", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "notify_staff_update", AsyncMock())
     bot = SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=60)),
@@ -238,8 +236,6 @@ async def test_update_announcement_sticker_is_not_duplicated_on_startup(sticker_
         order.append("pin")
 
     monkeypatch.setattr(main, "cover_path_for", lambda item: None)
-    monkeypatch.setattr(main, "publish_member_update", AsyncMock(return_value="https://telegra.ph/test"))
-    monkeypatch.setattr(main, "publish_staff_update", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "notify_staff_update", AsyncMock())
     bot = SimpleNamespace(send_message=post, send_sticker=sticker, pin_chat_message=pin)
     settings = SimpleNamespace(community_chat_id=-100123)

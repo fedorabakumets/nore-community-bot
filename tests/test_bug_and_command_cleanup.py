@@ -21,7 +21,7 @@ def group_message(text, **extra):
                                       for alias in (slug, *aliases) if slug not in {'start', 'apply', 'close'}])
 async def test_every_spoken_group_command_is_swept_and_replies_get_ttl(slug, alias):
     restore_defaults()
-    message = group_message(alias)
+    message = group_message('Нора ' + alias)
     deleted = AsyncMock(return_value=True)
     assert parse_trigger(alias) == (slug, '')
     assert is_group_command_to_sweep(message)
@@ -53,7 +53,7 @@ async def test_recent_commands_use_shared_alias_filters():
         handlers = [h for h in router.message.handlers if h.callback.__name__ == handler_name]
         filters = [f.callback for h in handlers for f in h.filters if isinstance(f.callback, CommandOrAlias)]
         assert len(filters) == 1
-        assert await filters[0](group_message(text))
+        assert await filters[0](group_message('Нора, ' + text))
 
 
 async def test_cleanup_also_wraps_profile_gate_and_reply_to_deleted_command(monkeypatch):
@@ -62,7 +62,7 @@ async def test_cleanup_also_wraps_profile_gate_and_reply_to_deleted_command(monk
     from community_bot.access import ProfileAccessMiddleware
 
     restore_defaults()
-    message = group_message('магазин')
+    message = group_message('Нора магазин')
     delete = AsyncMock(return_value=True)
     sent, scheduled = [], []
     bot = SimpleNamespace(delete_message=delete)
@@ -147,7 +147,7 @@ async def test_bug_on_bot_and_anonymous_messages_is_allowed(tmp_path):
 def test_reputation_and_transfer_words_are_commands_only_when_replying(text):
     message = group_message(text)
     assert not is_group_command_to_sweep(message)
-    assert is_group_command_to_sweep(message.model_copy(update={'reply_to_message': group_message('Оригинал')}))
+    assert not is_group_command_to_sweep(message.model_copy(update={'reply_to_message': group_message('Оригинал')}))
 
 
 async def test_bot_reply_cleanup_does_not_touch_private_chat_or_published_posts(monkeypatch):

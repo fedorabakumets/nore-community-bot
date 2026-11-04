@@ -987,7 +987,7 @@ async def _shop_home_markup(db: Database):
 
 
 @router.message(command_or_alias("shop"))
-@router.message(F.text == "🛒 Магазин")
+@router.message(F.chat.type == "private", F.text == "🛒 Магазин")
 async def show_shop(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -1687,7 +1687,10 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
     target = await resolve_reply_target(message, db)
     if not target:
         return
-    amount = transfer_amount(message.text or "")
+    from community_bot.aliases import strip_command_address
+
+    addressed = strip_command_address(message.text or "")
+    amount = transfer_amount(addressed) if addressed is not None else None
     if amount is not None:
         await _prepare_transfer(message, db, settings, target, amount)
         return

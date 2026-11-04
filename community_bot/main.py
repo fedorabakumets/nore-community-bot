@@ -44,9 +44,7 @@ from community_bot.routers import (
 )
 from community_bot.telegraph import (
     publish_commands_guide,
-    publish_member_update,
     publish_staff_guide,
-    publish_staff_update,
     repair_member_images,
 )
 from community_bot.ui_owner import UiOwnerMiddleware
@@ -75,29 +73,7 @@ async def configure_commands(bot: Bot) -> None:
         language_code="ru",
     )
     await bot.set_my_commands(
-        [
-            BotCommand(command="profile", description="Профиль (можно ответом)"),
-            BotCommand(command="balance", description="Кошелёк"),
-            BotCommand(command="commands", description="Команды бота"),
-            BotCommand(command="reputation", description="Система репутации"),
-            BotCommand(command="store", description="Магазин и оплата"),
-            BotCommand(command="shop", description="Магазин"),
-            BotCommand(command="pet", description="Открыть питомца"),
-            BotCommand(command="games", description="Мини-игры: рулетка, блэкджек, кубик, рейс, капкан"),
-            BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
-            BotCommand(command="dice", description="Кубик 1 на 1: /dice 10"),
-            BotCommand(command="crash", description="Рейс на 🍪: /crash 10"),
-            BotCommand(command="trap", description="Капкан на 🍪: /trap 10"),
-            BotCommand(command="mafia", description="Мафия: роли в личку"),
-            BotCommand(command="bunker", description="Бункер: досье в личку"),
-            BotCommand(command="roulette", description="Рулетка на мут 30 мин"),
-            BotCommand(command="gift", description="Подарить товар ответом"),
-            BotCommand(command="report", description="Репорт ответом на сообщение"),
-            BotCommand(command="board", description="Доска недели"),
-            BotCommand(command="gamecancel", description="Отменить текущую игру"),
-            BotCommand(command="pogoda", description="Погода в Петербурге"),
-            BotCommand(command="stickers", description="Стикеры Норы"),
-        ],
+        [],
         scope=BotCommandScopeAllGroupChats(),
         language_code="ru",
     )
@@ -133,15 +109,9 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
         return
     if not settings.community_chat_id:
         return
-    url = await publish_member_update(db, item)
-    if url:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", url=url)]]
-        )
-    else:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
-        )
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
+    )
     if item.sticker_pack_url:
         markup.inline_keyboard.append([InlineKeyboardButton(text="😎 Забрать стикеры", url=STICKER_PACK_URL)])
     caption = community_announcement(item)
@@ -171,8 +141,7 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
     await db.set_bot_state("last_announced_update", announcement_key(item))
     if _same_release(last, item.number):
         return
-    staff_url = await publish_staff_update(db, item)
-    await notify_staff_update(bot, db, item, staff_url)
+    await notify_staff_update(bot, db, item)
 
 
 async def notify_staff_update(bot: Bot, db: Database, item, staff_url: str | None = None) -> None:

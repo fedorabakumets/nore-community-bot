@@ -36,7 +36,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "bunker": ("бункер",),
     "purge": ("чистить", "очистить", "пурж"),
     "botsweep": ("чиститьбота", "убратьбота"),
-    "transfer": ("трансфер",),
+    "transfer": ("трансфер", "перевести", "передать"),
     "balance": ("баланс", "кошелек", "кошелёк"),
     "updates": ("обновления", "обновление"),
     "freebie": ("халява",),
@@ -131,14 +131,12 @@ _EXACT_TEXT_COMMANDS = {
     "updates",
 }
 
-# These only do something in a private chat. Do not delete them from the group:
-# a sentence or a lone «вопрос» is not a reason to erase the message.
-_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "start"})
-
-
 def parse_trigger(text: str) -> tuple[str, str] | None:
     """Return (canonical_command, args) if the message starts with a command or alias."""
     raw = (text or "").strip()
+    addressed = strip_command_address(raw)
+    if addressed is not None:
+        raw = addressed
     if not raw:
         return None
     folded = raw.casefold()
@@ -224,6 +222,19 @@ def message_has_media_payload(message: Message) -> bool:
     )
 
 
+def strip_command_address(text: str) -> str | None:
+    match = re.match(r"^нора(?:,\s*|\s+)(.*)$", text.strip(), re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def message_trigger(message: Message) -> tuple[str, str] | None:
+    source = message.text or message.caption or ""
+    chat_type = getattr(getattr(message, "chat", None), "type", "")
+    if chat_type in {"group", "supergroup"} and strip_command_address(source) is None:
+        return None
+    return parse_trigger(source)
+
+
 def is_group_command_to_sweep(message: Message) -> bool:
     """Delete only real commands. Media, stickers, voice and circles are never swept as commands."""
     caption = (message.caption or "").strip()
@@ -234,22 +245,7 @@ def is_group_command_to_sweep(message: Message) -> bool:
         source = text or caption
     if not source:
         return False
-    parsed = parse_trigger(source)
-    if source[:1] in {"/", "／"}:
-        return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
-    if not parsed:
-        # Reply-keyboard shortcuts have their own handlers outside the alias filter.
-        if text in {"🛒 Магазин", "🐾 Тамагочи", "🐾 Питомец", "👤 Мой профиль", "🛡 Админ-панель"}:
-            return True
-        from community_bot.domain import reputation_delta, transfer_amount
-        from community_bot.nora import strip_address
-
-        replied = getattr(message, "reply_to_message", None)
-        if replied and getattr(replied, "from_user", None) and text:
-            if reputation_delta(text) is not None or transfer_amount(text) is not None:
-                return True
-        return bool(text and strip_address(text) is not None)
-    return parsed[0] not in _PRIVATE_CHAT_COMMANDS
+    return strip_command_address(source) is not None
 
 
 class CommandOrAlias(Filter):
@@ -260,7 +256,7 @@ class CommandOrAlias(Filter):
 
     async def __call__(self, message: Message, **kwargs: Any) -> bool | dict[str, Any]:
         del kwargs
-        parsed = parse_trigger(message.text or message.caption or "")
+        parsed = message_trigger(message)
         if not parsed:
             return False
         name, args = parsed

@@ -187,10 +187,10 @@ def test_member_announcement_omits_staff() -> None:
     assert "Админ" not in pin
     assert "четыре комнаты" not in details.casefold()
     assert "Админка" not in nodes
-    assert "ОБНОВА" in details
-    assert "стикер" in details.casefold()
+    assert "Нора профиль" in details
+    assert "не согласен" in details
     assert staff not in pin
-    assert "Служебные стикеры" in staff
+    assert "Групповые команды" in staff
 
 
 async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
@@ -263,7 +263,7 @@ async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:
     assert int((await db.get_user(2))["hate_shields"]) == 0
 
 
-async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch) -> None:
+async def test_announce_pins_rich_post_with_personal_pages(tmp_path, monkeypatch) -> None:
     from pathlib import Path
 
     from community_bot.database import Database
@@ -300,18 +300,13 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
         async def unpin_chat_message(self, chat_id, message_id):
             return None
 
-    async def fake_publish(_db, _item):
-        return "https://telegra.ph/NORA"
-
-    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
-    monkeypatch.setattr("community_bot.main.publish_staff_update", fake_publish)
     settings = SimpleNamespace(community_chat_id=-100)
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Обновление №20" in sent[0].text
-    assert sent[0].reply_markup.inline_keyboard[0][0].url == "https://telegra.ph/NORA"
-    assert await db.get_bot_state("last_announced_update") == "20:photo-v2"
+    assert "Обновление №21" in sent[0].text
+    assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
+    assert await db.get_bot_state("last_announced_update") == "21:photo-v2"
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -319,19 +314,14 @@ async def test_announce_pins_telegraph_or_falls_back_to_dm(tmp_path, monkeypatch
     sent.clear()
     pinned.clear()
 
-    async def no_publish(_db, _item):
-        return None
-
     class NoPinBot(FakeBot):
         async def pin_chat_message(self, chat_id, message_id, disable_notification=True):
             raise RuntimeError("no pin rights")
 
-    monkeypatch.setattr("community_bot.main.publish_member_update", no_publish)
-    monkeypatch.setattr("community_bot.main.publish_staff_update", no_publish)
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "20:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == "21:photo-v2"
 
 
 async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeypatch) -> None:
@@ -347,7 +337,7 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
     await db.ensure_user(10, telegram_name="Owner")
     await db.set_role(10, "owner")
     today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
-    await db.set_bot_state("last_announced_update", "20:photo-v1")
+    await db.set_bot_state("last_announced_update", "21:photo-v1")
     await db.set_bot_state("morning_digest_day", today)
     await db.set_bot_state("morning_pin_message_id", "42")
     pinned: list[int] = []
@@ -372,19 +362,14 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
         async def unpin_chat_message(self, chat_id, message_id):
             raise AssertionError(message_id)
 
-    async def fake_publish(_db, _item):
-        return "https://telegra.ph/NORA"
-
-    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
-    monkeypatch.setattr("community_bot.main.publish_staff_update", fake_publish)
     settings = SimpleNamespace(community_chat_id=-100, timezone="Europe/Moscow")
     await announce_latest_update(Bot(), db, settings)
     assert cleared == []
     assert pinned == [9]
     assert 10 not in dms
-    assert await db.get_bot_state("last_announced_update") == "20:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == "21:photo-v2"
 
-    await db.set_bot_state("last_announced_update", "20:photo-v1")
+    await db.set_bot_state("last_announced_update", "21:photo-v1")
     await db.set_bot_state("morning_digest_day", "2020-01-01")
     pinned.clear()
     cleared.clear()
