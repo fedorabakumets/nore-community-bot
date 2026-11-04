@@ -13,6 +13,14 @@
 - Проверки: node --check для всех JS, Ruff, check_local (734 passed, 1 skipped — symlink Windows), pip check и diff --check. Python-тесты изолированы от сети/production SQLite; бот не запускался.
 - Стенд и PNG вне Git: `%TEMP%/nora-design-preview/verify.cjs`, `shots/`. Публикация — обычный atomic push feature + `cursor/nora-2-update-d133`; фактический SHA и результат — в Git/итоговом ответе. После публикации проверки не выполняются. Завершение Railway и реальный Telegram WebView проверяет владелец.
 
+## Продолжение: контур предмета и motion бара (04.11.2026)
+
+- Та же ветка `chatgpt/reference-redesign`, база продолжения `05a7cb0`, после fetch совпала с production; исходная рабочая копия не затронута.
+- Из `style.css` удалены псевдоэлемент контура сезонного предмета и `season-flame`. В нижнем баре одна красная капля плавно перемещается и заполняет кнопку целиком. На профиле сжимается к аватару и исчезает; подпись становится красной, рамка аватара белой.
+- `app.js`: DOM навигации сохраняется при render/polling; обновляются активность, доступное имя аватара и индикатор уведомлений. Прерывание движения начинается с текущего положения, resize выравнивает каплю, reduced-motion отключает перемещение.
+- Headless Chromium с fake API: три ширины, полная заливка, профиль, быстрые переключения, отсутствие перезапуска при render, reduced-motion и отсутствие старого контура — пройдены. Стенд `%TEMP%/nora-design-preview/dock.cjs`. JS syntax, diff --check, Ruff и pip check пройдены; check_local: 734 passed, 1 skipped (symlink Windows).
+- После обычного push в production проверку Telegram и Railway выполняет владелец. Две защищённые пиксельные детали не редактировались.
+
 ## Анимация персонажа NORA 3D (04.11.2026)
 
 - `chatgpt/nora-movement-animation` от production `02e0b84` в отдельном worktree `C:/Users/User/Projects/nora-movement-animation`. Локальные правки исходной копии сохранены.

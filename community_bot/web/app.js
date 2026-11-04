@@ -26,7 +26,46 @@ if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
 $('#app').innerHTML=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
-const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-wrap${data.unread_notices?' has-unread':''}"><span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span><i class="nav-unread-dot" aria-hidden="true"></i></span>`:navTabIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+
+
+// Keep the dock mounted: polling must not restart the travelling selection.
+let navSelection='', navMotion=null;
+const navReducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+function positionNavDrop(animate=false){
+  const nav=$('#nav'),drop=nav.querySelector('.nav-drop'),target=nav.querySelector('.active');
+  if(!drop||!target)return;
+  const before=getComputedStyle(drop),from=before.transform,opacity=before.opacity;
+  navMotion?.cancel();
+  const x=target.offsetLeft,y=target.offsetTop,profile=target.dataset.tab==='lk';
+  drop.style.width=target.offsetWidth+'px';drop.style.height=target.offsetHeight+'px';
+  const end=`translate(${x}px,${profile?y-14:y}px) scale(${profile?'.08': '1'})`;
+  drop.style.transform=end;drop.style.opacity=profile?'0':'1';
+  if(!animate||navReducedMotion.matches)return;
+  const oldX=from==='none'?x:new DOMMatrixReadOnly(from).m41;
+  navMotion=drop.animate([
+    {transform:from,opacity,borderRadius:'18px',offset:0},
+    {transform:`translate(${oldX+(x-oldX)*.65}px,${y}px) scale(1.14,.82)`,opacity:1,borderRadius:'45% 55% 55% 45% / 55% 45% 55% 45%',offset:.55},
+    {transform:end,opacity:profile?0:1,borderRadius:'18px',offset:1}
+  ],{duration:profile?760:640,easing:'cubic-bezier(.22,1,.36,1)'});
+}
+function renderNav(selected,name){
+  const nav=$('#nav');
+  if(!nav.querySelector('.nav-drop')){
+    nav.innerHTML='<i class="nav-drop" aria-hidden="true"></i>'+[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button data-tab="${id}" aria-current="false">${id==='lk'?'<span class="nav-profile-wrap"><span class="nav-profile-photo" data-own-avatar></span><i class="nav-unread-dot" aria-hidden="true"></i></span>':navTabIcon(id)}${label}</button>`).join('');
+    navSelection='';
+  }
+  const photo=nav.querySelector('[data-own-avatar]');
+  if(!data.has_avatar||data.avatar_video||!photo.querySelector('img'))photo.textContent=(name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase();
+  nav.querySelector('.nav-profile-wrap').classList.toggle('has-unread',!!data.unread_notices);
+  for(const button of nav.querySelectorAll('button')){
+    const active=button.dataset.tab===selected;
+    button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false');
+  }
+  if(navSelection!==selected){positionNavDrop(!!navSelection);navSelection=selected;}
+}
+new ResizeObserver(()=>positionNavDrop()).observe($('#nav'));
+navReducedMotion.addEventListener('change',()=>positionNavDrop());
 
 function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
 async function product(sku){await window.NoraShop?.product(sku)}
