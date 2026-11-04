@@ -7,7 +7,6 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from difflib import SequenceMatcher
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -552,7 +551,19 @@ def _same_story(left: NewsItem, right: NewsItem) -> bool:
     b = " ".join(word for word in re.findall(r"[а-яёa-z0-9]+", right.title.casefold()) if word not in generic)
     if not a or not b:
         return left.title.casefold() == right.title.casefold()
-    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.72
+    if a == b:
+        return True
+    # Compare meaningful word stems in both headlines and RSS descriptions,
+    # independent of word order and common Russian inflectional endings.
+    stop = generic | {"после", "стало", "стали", "будет", "будут", "городе", "города", "сообщили",
+                      "рассказали", "петербурга", "ленинградской", "области", "сегодня", "который",
+                      "экспозиция", "откроют", "откроется"}
+    def terms(item: NewsItem) -> set[str]:
+        words = re.findall(r"[а-яёa-z0-9]+", f"{item.title} {item.lead}".casefold().replace("ё", "е"))
+        return {word[:5] for word in words if len(word) >= 5 and word not in stop}
+    left_terms, right_terms = terms(left), terms(right)
+    common = left_terms & right_terms
+    return len(common) >= 3 and len(common) / min(len(left_terms), len(right_terms)) >= 0.6
 
 
 def news_value(item: NewsItem, now: datetime) -> int | None:
@@ -958,8 +969,7 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
     reply_markup = None
     if username:
         reply_markup = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="BOT", url=f"https://t.me/{username}?start=private"),
-            InlineKeyboardButton(text="APP", url=f"https://t.me/{username}?startapp"),
+            InlineKeyboardButton(text="НОРА", url=f"https://t.me/{username}?startapp"),
         ]])
     rich_send = getattr(bot, "send_rich_message", None)
     rich_message = render_rich_brief(brief, username) if callable(rich_send) else None
@@ -971,7 +981,7 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
         if callable(rich_send):
             try:
                 app_markup = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="APP", url=f"https://t.me/{username}?startapp"),
+                    InlineKeyboardButton(text="НОРА", url=f"https://t.me/{username}?startapp"),
                 ]]) if username else None
                 sent = await rich_send(chat_id, rich_message=rich_message, reply_markup=app_markup)
             except (TelegramBadRequest, TelegramNotFound) as exc:

@@ -39,8 +39,8 @@ def test_rich_blocks_keep_complete_headlines_and_embedded_photo():
     assert len(files) == 1 and "attach://" in data
     assert "https://example.org/news" in data and "https://example.org/history" in data
     assert "https://example.org/road" in data
-    assert "https://t.me/test_bot?start=private" in data
-    assert '"text": "BOT"' in data
+    assert "start=private" not in data
+    assert '"text": "BOT"' not in data
     assert "Неизвестная станция" not in data
 
 
@@ -58,7 +58,7 @@ async def test_rich_send_pin_retry_without_duplicate(tmp_path, monkeypatch):
         async def me(self):
             return SimpleNamespace(username="test_bot")
         async def send_rich_message(self, chat, *, rich_message, reply_markup):
-            assert reply_markup.inline_keyboard[0][0].text == "APP"
+            assert reply_markup.inline_keyboard[0][0].text == "НОРА"
             assert reply_markup.inline_keyboard[0][0].url == "https://t.me/test_bot?startapp"
             self.calls.append(rich_message)
             return SimpleNamespace(message_id=8)

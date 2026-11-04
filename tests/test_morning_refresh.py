@@ -67,6 +67,17 @@ def test_date_window_duplicate_stories_and_two_item_limit():
     assert len(select_day_news(traffic, NOW)) == 1
 
 
+def test_reworded_stories_use_descriptions_and_preserve_distinct_events():
+    first = article("В Петербурге откроют музей трамваев",
+                    lead="Экспозиция появится в бывшем депо на Васильевском острове.")
+    duplicate = article("Бывшее депо на Васильевском острове станет музеем городских трамваев",
+                        link="https://example.org/other", lead="Новая экспозиция откроется в Петербурге.")
+    different = article("В Петербурге откроют музей авиации", link="https://example.org/aviation",
+                        lead="Экспозиция разместится в аэропорту Пулково.")
+    assert len(select_day_news([first, duplicate], NOW)) == 1
+    assert len(select_day_news([first, different], NOW)) == 2
+
+
 def test_recent_archive_reprint_is_not_current_news_and_useful_news_beats_weather():
     archive = article("Работницы вышли на митинг в Петрограде в 1917 году", age=0.1)
     weather = article("Погода в Петербурге демонстрирует аномалии", age=0.2, link="https://example.org/w")
