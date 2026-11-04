@@ -4,6 +4,7 @@
 window.NoraAdmin = (() => {
   let panel = null, loading = false, working = false, error = '', mediaURLs = [];
   let draft = emptyDraft(), directoryQuery = '', menuOpen = false, focusAfter = '';
+  const expandedPeople = new Set();
   const expanded = new Set(['profile', 'wallet', 'roles', 'actions', 'settings', 'permissions', 'directory', 'community', 'protection', 'perm_people', 'reports', 'tools', 'catalog', 'storefront']);
   const groups = {profile:'Профиль', wallet:'Печеньки и баланс', moderation:'Репутация и модерация',
     roles:'Роль и права', permissions:'Разрешения роли', settings:'Настройки',
@@ -82,8 +83,15 @@ window.NoraAdmin = (() => {
     if (b.tab) return `<button class="${classes}" data-tab="${esc(b.tab)}">${esc(label)}</button>`;
     if (b.url) return `<a class="${classes}" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;
     if (b.kind === 'toggle') return `<button type="button" class="adm-toggle" role="switch" aria-checked="${Boolean(b.checked)}" aria-label="${esc(label)}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}><span><span>${esc(label)}</span>${b.description ? `<small>${esc(b.description)}</small>` : ''}</span><small>${b.checked ? 'Включено' : 'Выключено'}</small><i aria-hidden="true"></i></button>`;
-    if (b.kind === 'user') return `<button class="adm-person" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}><span class="adm-avatar" aria-hidden="true">${esc(Array.from(label)[0] || 'Н')}</span><span>${esc(label)}</span>${icon('arrow')}</button>`;
+    if (b.kind === 'user') {
+      const person = b.person, name = person?.name || label;
+      const open = person && expandedPeople.has(String(person.id)), infoId = `adm-identity-${b.action}`;
+      return `<div class="adm-person-row" ${person ? `data-adm-person-row="${esc(person.id)}"` : ''}><button class="adm-person" data-admin-action="${esc(b.action)}" data-control-label="${esc(name)}" ${disabled()}>${avatar(person, name)}<span>${esc(name)}</span>${icon('arrow')}</button>${person ? `<button type="button" class="adm-person-info" data-adm-identity="${esc(person.id)}" aria-label="Контакты ${esc(name)}: username и Telegram ID" aria-expanded="${Boolean(open)}" aria-controls="${esc(infoId)}">@ / ID${icon('arrow')}</button><div class="adm-person-contact" id="${esc(infoId)}" ${open ? '' : 'hidden'}><span>${person.username ? `@${esc(person.username)}` : 'Без @username'}</span><span>Telegram ID: <b>${esc(person.id)}</b></span></div>` : ''}</div>`;
+    }
     return `<button class="${classes}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}>${esc(label)}${b.kind === 'link' ? icon('arrow') : ''}</button>`;
+  }
+  function avatar(person, name, large = false) {
+    return `<span class="${large ? 'adm-member-avatar' : 'adm-avatar'} person-avatar" ${person ? `data-person-avatar="${esc(person.id)}" ${person.has_avatar ? '' : 'data-avatar-unavailable'}` : ''} aria-hidden="true">${esc(Array.from(name)[0] || 'Н')}</span>`;
   }
   function controls(buttons) {
     const flat = buttons.flat(), back = flat.filter(b => b.kind === 'back');
@@ -101,7 +109,7 @@ window.NoraAdmin = (() => {
   }
   function card(c) {
     const member = c.member;
-    const summary = member ? `<div class="adm-member"><div class="adm-member-title"><span class="adm-member-avatar" aria-hidden="true">${esc(Array.from(member.name)[0])}</span><div><h2>${esc(member.name)}</h2><p>${esc(member.role)}${member.username ? ` · @${esc(member.username)}` : ''}</p><small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,'год','года','лет')}` : ''}</small></div></div><dl class="adm-member-stats"><div><dt>Печеньки</dt><dd>${number(member.cookies)}</dd></div><div><dt>Репутация</dt><dd>${number(member.reputation)}</dd><small>Щиты: ${number(member.hate_shields)}</small></div><div><dt>Нарушения</dt><dd>${number(member.warnings)}</dd></div></dl>${member.moderator_note ? `<p class="adm-member-note"><b>Заметка модератора</b>${esc(member.moderator_note)}</p>` : ''}</div>` : c.html && c.layout !== 'features' ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
+    const summary = member ? `<div class="adm-member"><div class="adm-member-title">${avatar(member, member.name, true)}<div><h2>${esc(member.name)}</h2><p>${esc(member.role)}${member.username ? ` · @${esc(member.username)}` : ''}</p><small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,'год','года','лет')}` : ''}</small></div></div><dl class="adm-member-stats"><div><dt>Печеньки</dt><dd>${number(member.cookies)}</dd></div><div><dt>Репутация</dt><dd>${number(member.reputation)}</dd><small>Щиты: ${number(member.hate_shields)}</small></div><div><dt>Нарушения</dt><dd>${number(member.warnings)}</dd></div></dl>${member.moderator_note ? `<p class="adm-member-note"><b>Заметка модератора</b>${esc(member.moderator_note)}</p>` : ''}</div>` : c.html && c.layout !== 'features' ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
     return `<section class="adm-card">${media(c.media)}${summary}${controls(c.buttons)}</section>`;
   }
   function composer() {
@@ -203,6 +211,14 @@ window.NoraAdmin = (() => {
   });
   document.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.admIdentity) {
+      const id = b.dataset.admIdentity, open = !expandedPeople.has(id);
+      if (open) expandedPeople.add(id); else expandedPeople.delete(id);
+      for (const row of document.querySelectorAll(`[data-adm-person-row="${id}"]`)) {
+        row.querySelector('.adm-person-info').setAttribute('aria-expanded', String(open));
+        row.querySelector('.adm-person-contact').hidden = !open;
+      }
+    }
     if (b.dataset.adminAction) { focusAfter = b.dataset.controlLabel || 'heading'; act(b.dataset.adminAction); }
     if (b.dataset.admGo) act(b.dataset.admGo, true);
     if (b.hasAttribute('data-admin-refresh')) load();

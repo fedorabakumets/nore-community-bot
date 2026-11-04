@@ -304,6 +304,26 @@ class AdminBridge:
         session.media.clear()
         session.form = ''
         session.version = secrets.token_urlsafe(16)
+        directory_ids = {
+            int(button.callback_data.rsplit(':', 1)[1])
+            for card in session.cards.values() if card.get('markup')
+            for row in card['markup'].inline_keyboard for button in row
+            if (button.callback_data or '').startswith(('admin:manage:', 'admin:user:'))
+        }
+        people = {}
+        if directory_ids:
+            placeholders = ','.join('?' for _ in directory_ids)
+            members = await self.db.fetchall(
+                'SELECT user_id,profile_name,telegram_name,username,'
+                "(COALESCE(avatar_file_id,'') != '' AND avatar_media_type = 'photo') AS has_avatar "
+                f'FROM users WHERE user_id IN ({placeholders})', tuple(directory_ids),
+            )
+            people = {member['user_id']: {
+                'id': member['user_id'],
+                'name': (member['profile_name'] or member['telegram_name'] or member['username']
+                         or str(member['user_id'])),
+                'username': member['username'], 'has_avatar': bool(member['has_avatar']),
+            } for member in members}
         cards = []
         for mid in session.visible:
             card = session.cards.get(mid)
@@ -316,6 +336,8 @@ class AdminBridge:
                     for button in row:
                         item = {'text': button.text, 'style': button.style or '',
                                 **button_meta(button.callback_data or '', button.text)}
+                        if item.get('kind') == 'user':
+                            item['person'] = people.get(int(button.callback_data.rsplit(':', 1)[1]))
                         if button.callback_data and button.callback_data.startswith('shop:'):
                             item['tab'] = 'shop'
                         elif button.callback_data:
@@ -375,6 +397,7 @@ class AdminBridge:
                         'id': uid,
                         'name': member['profile_name'] or member['telegram_name'] or member['username'] or str(uid),
                         'role': await role_title(self.db, str(member['role'])),
+                        'has_avatar': bool(member.get('avatar_file_id') and member.get('avatar_media_type') == 'photo'),
                         **{key: member.get(key) for key in ('username', 'age', 'cookies', 'reputation', 'hate_shields',
                                                          'warnings', 'moderator_note')},
                     }

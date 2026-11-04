@@ -125,6 +125,30 @@ async def test_workspace_profile_and_role_have_direct_return_paths(env):
     assert not env.telegram.calls
 
 
+async def test_workspace_directory_identity_and_avatar_metadata_without_file_ids(env):
+    await env.db.execute(
+        "UPDATE users SET username='anna',profile_name=?,avatar_file_id='fake-avatar',"
+        "avatar_media_type='photo' WHERE user_id=8", ('Очень длинное имя участника ' * 3,),
+    )
+    await env.db.execute(
+        "UPDATE users SET avatar_file_id='fake-video',avatar_media_type='video' WHERE user_id=9",
+    )
+    view = await click(env, await navigate(env, await env.bridge.open(env.actor), 'people'), 'Профили')
+    people = {b['person']['id']: b['person'] for c in view['cards'] for row in c['buttons'] for b in row
+              if b.get('kind') == 'user'}
+    assert people[8] == {'id': 8, 'name': 'Очень длинное имя участника ' * 3, 'username': 'anna', 'has_avatar': True}
+    assert people[9]['username'] is None and people[9]['has_avatar'] is False
+    assert people[7]['has_avatar'] is False
+    assert 'fake-avatar' not in json.dumps(view) and 'fake-video' not in json.dumps(view)
+    view = await click(env, view, 'Очень длинное')
+    assert view['cards'][0]['member']['has_avatar'] is True
+    view = await click(env, await navigate(env, view, 'people'), 'Права')
+    view = await click(env, view, 'Назначить человеку')
+    assert any(b.get('person', {}).get('username') == 'anna'
+               for c in view['cards'] for row in c['buttons'] for b in row)
+    assert not env.telegram.calls  # Photos use the existing authenticated avatar route on demand.
+
+
 async def test_workspace_tools_respect_granular_permissions(env):
     await env.db.create_staff_role('reviewer', 'Проверяющий', 50, ['admin.panel', 'applications'])
     await env.db.set_role(8, 'reviewer')
