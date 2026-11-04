@@ -1,5 +1,5 @@
 'use strict';
-const tg=window.Telegram?.WebApp; tg?.ready();tg?.expand();tg?.setHeaderColor('#101011');tg?.setBackgroundColor('#101011');
+const tg=window.Telegram?.WebApp; tg?.ready();tg?.expand();tg?.setHeaderColor('#111013');tg?.setBackgroundColor('#111013');
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
@@ -26,7 +26,7 @@ if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
 $('#app').innerHTML=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='friends'?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-wrap${data.unread_notices?' has-unread':''}"><span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span><i class="nav-unread-dot" aria-hidden="true"></i></span>`:navTabIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;$('#nav').innerHTML=[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button class="${selected===id?'active':''}" data-tab="${id}" aria-current="${selected===id?'page':'false'}">${id==='lk'?`<span class="nav-profile-wrap${data.unread_notices?' has-unread':''}"><span class="nav-profile-photo" data-own-avatar>${esc((name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span><i class="nav-unread-dot" aria-hidden="true"></i></span>`:navTabIcon(id)}${label}</button>`).join('');window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
 function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
 async function product(sku){await window.NoraShop?.product(sku)}
