@@ -503,34 +503,50 @@ try {
   const parkour=await setup(0,60,undefined,undefined,false,true);
   const parkourAction=parkour.root.querySelector('.nora-world-action');
   parkour.player.position.set(0,.017,5.6);parkour.frames(1);parkourAction.emit('click');
-  const jumpCourse=()=>{
+  const plate=parkour.scene().getObjectByName('nora-parkour-plate');
+  const finish=parkour.scene().getObjectByName('nora-parkour-finish');
+  const raisedY=plate.position.y;
+  const jump=()=>{parkour.key('Space');parkour.key('Space',false);};
+  const jumpToPenultimate=()=>{
     parkour.player.position.set(8.6,.017,10.55);
     parkour.frames(1);
-    for(const [z,top] of [[9.15,.34],[7.45,.68],[5.8,1.02],[4.15,1.36],[2.45,1.7]]){
-      parkour.key('ShiftLeft');parkour.key('KeyW');parkour.key('Space');parkour.key('Space',false);
+    for(const [z,top] of [[9.15,.34],[7.45,.68],[5.8,1.02],[4.15,1.36]]){
+      parkour.key('ShiftLeft');parkour.key('KeyW');jump();
       for(let i=0;i<42&&parkour.player.position.z>z+.08;i++)parkour.frames(1);
       parkour.key('KeyW',false);parkour.key('ShiftLeft',false);parkour.frames(24);
       assert.equal(parkour.player.position.y,top+.017,'each platform is reachable without wings');
     }
-    assert.equal(parkourAction.hidden,false,'the return button is available on the finish platform');
-    assert.equal(parkourAction.textContent,'К СТАРТУ ПАРКУРА');
   };
-  parkour.player.position.set(8.2,.017,2.45);parkour.frames(1);
-  assert.equal(parkourAction.hidden,true,'the finish button cannot be activated from ground level');
-  jumpCourse();
-  parkourAction.emit('click');
-  assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'screen button teleports synchronously');
-  parkour.frames(1);
-  assert.equal(parkourAction.hidden,true);
-  jumpCourse();
-  const finishButton=parkour.scene().getObjectByName('nora-parkour-button');
-  parkour.scene().updateMatrixWorld(true);parkour.camera().updateMatrixWorld(true);
-  const point=finishButton.getWorldPosition(new Three.Vector3()).project(parkour.camera());
-  const pointer={button:0,pointerId:2,clientX:(point.x+1)*60,clientY:(1-point.y)*60};
-  parkour.canvas.emit('pointerdown',pointer);parkour.canvas.emit('pointerup',pointer);
-  assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'tapping the 3D button teleports synchronously');
+  parkour.player.position.set(8.2,.017,1.23);parkour.frames(12);
+  assert.equal(plate.position.y,raisedY,'the finish does not activate on ground level');
+  jumpToPenultimate();
+  parkour.key('KeyW');
+  for(let i=0;i<40&&parkour.player.position.z>3.48;i++)parkour.frames(1);
+  assert.equal(parkour.player.position.y,1.36+.017,'the walking jump starts on the edge');
+  jump();parkour.frames(64);parkour.key('KeyW',false);
+  assert.equal(parkour.player.position.y,.017,'a walking jump from the lip falls short');
+  assert.equal(plate.position.y,raisedY);
+  parkour.frames(24);
+  for(let lap=0;lap<2;lap++){
+    jumpToPenultimate();
+    parkour.key('ShiftLeft');parkour.key('KeyW');
+    for(let i=0;i<25&&parkour.player.position.z>3.55;i++)parkour.frames(1);
+    jump();
+    for(let i=0;i<44&&plate.position.y===raisedY;i++)parkour.frames(1);
+    assert.equal(parkour.player.position.y,1.7+.017,'a sprint jump lands on the finish');
+    assert.ok(plate.position.y<raisedY,'landing depresses the plate automatically');
+    assert.equal(finish.material.color.getHexString(),'42d76b','the whole finish changes to green');
+    assert.equal(parkourAction.hidden,true,'the finish needs no manual action');
+    parkour.frames(5);
+    assert.ok(Math.abs(plate.position.y-(raisedY-.06))<1e-8,'the plate finishes depressing before teleport');
+    parkour.frames(8);
+    assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'the flash is followed by teleport to start');
+    assert.equal(plate.position.y,raisedY,'the plate rises again');
+    assert.equal(plate.material.color.getHexString(),'d1d4da');
+    assert.equal(finish.material.color.getHexString(),'777b83');
+  }
   parkour.stop();
-  console.log('NORA parkour: five jumps, finish access and both teleport controls passed.');
+  console.log('NORA parkour: sprint-only ordinary jump, automatic pressure plate, teleport and reset passed.');
   const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
   function widget(){
     const children=[],listeners={};

@@ -343,4 +343,3 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .nora-wing-card button{min-height:44px;font-size:11px}
 .nora-wing-card button[data-wing-preview]{min-height:70px}
 body:has(.nora-game-screen) #toast{z-index:10001}
-.nora-world-action.nora-parkour-action{background:#b51e36;border-color:#ff9a99;box-shadow:4px 4px #611626;color:#fff}
