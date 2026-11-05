@@ -94,7 +94,7 @@ try {
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
+      auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       performance:{now:()=>time}, requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     if(realScenery)vm.runInContext(sceneryCode, context);
     vm.runInContext(wings, context);
@@ -500,6 +500,53 @@ try {
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.stop();
   console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
+  // Delay all server replies: outgoing poses must still stream at 80 ms.
+  const sockets=[],fallback=[];
+  const streamed=await setup(0,60,async(path,body)=>{
+    if(path==='nora-game/lobby')fallback.push(body);
+    return {players:[]};
+  },undefined,false,true);
+  streamed.window.WebSocket=class {
+    readyState=0;bufferedAmount=0;sent=[];
+    constructor(url){assert.equal(url,'wss://nora.invalid/nora-game/socket');sockets.push(this);}
+    send(raw){this.sent.push(JSON.parse(raw));}
+    close(){this.readyState=3;this.onclose?.();}
+  };
+  streamed.player.position.set(0,.017,5.6);streamed.frames(1);
+  streamed.root.querySelector('.nora-world-action').emit('click');streamed.frames(1);await flush();
+  const ws=sockets[0];ws.readyState=1;ws.onopen();
+  assert.deepEqual(ws.sent[0],{auth:'test-auth'},'credentials are in the first frame, never the URL');
+  streamed.frames(60);
+  const poses=ws.sent.filter(body=>body.session);
+  assert.ok(poses.length>=11,'stream sends poses without waiting for delayed replies');
+  const beforeCongestion=ws.sent.length;ws.bufferedAmount=20000;streamed.frames(12);
+  assert.equal(ws.sent.length,beforeCongestion,'congested socket does not queue obsolete poses');
+  ws.bufferedAmount=0;
+  ws.close();streamed.frames(6);await flush();
+  assert.ok(fallback.length>=2,'closed WebSocket falls back to HTTP');
+  streamed.stop();
+
+  let slowTime=0;
+  const slow=await setup(0,60,async(path,body)=>({time:slowTime,players:path==='nora-game/lobby'&&!body.leave?[{
+    nickname:'Slow',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+    x:slowTime*.0017,y:.017,z:4,heading:0,grounded:true,time:Math.floor(slowTime/1100)*1100,
+  }]:[]}),undefined,false,true);
+  slow.player.position.set(0,.017,5.6);slow.frames(1);slow.root.querySelector('.nora-world-action').emit('click');
+  let previous=null,movingFrames=0,maxStep=0,legMin=Infinity,legMax=-Infinity;
+  for(let i=0;i<240;i++){
+    slowTime+=1000/60;slow.frames(1);await flush();
+    const avatar=slow.scene().children.find(node=>node.children.some(child=>child.isSprite));
+    if(!avatar)continue;
+    if(previous!==null){const step=Math.abs(avatar.position.x-previous);maxStep=Math.max(maxStep,step);if(step>.001)movingFrames++;}
+    previous=avatar.position.x;
+    const leg=avatar.getObjectByName('thighRight').rotation.x;legMin=Math.min(legMin,leg);legMax=Math.max(legMax,leg);
+  }
+  assert.ok(maxStep<=.081,'1.1 second snapshot gaps do not teleport the remote avatar');
+  assert.ok(movingFrames>100,'rare snapshots animate movement across many frames');
+  assert.ok(legMax-legMin>.2,'remote legs keep walking when snapshots arrive once a second');
+  slow.stop();
+  console.log('NORA realtime: delayed replies, congestion, HTTP fallback and one-second snapshot animation passed.');
+
   const parkour=await setup(0,60,undefined,undefined,false,true);
   const parkourAction=parkour.root.querySelector('.nora-world-action');
   parkour.player.position.set(0,.017,5.6);parkour.frames(1);parkourAction.emit('click');

@@ -98,6 +98,54 @@ window.NoraWorld = (() => {
     const peers=new Map();
     const interval=80, playbackDelay=150, maxPrediction=65, correctionSpeed=4.8;
     let session=null,pending=null,next=0,clockOffset=null,lastReply=0,failures=0;
+    let socket=null,retrySocket=0;
+    function connect(time){
+      if(!window.WebSocket||socket||time<retrySocket)return;
+      retrySocket=time+30000;
+      let ws;
+      try{ws=new window.WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/nora-game/socket`);}
+      catch{return;}
+      socket=ws;
+      ws.onopen=()=>{if(socket===ws)ws.send(JSON.stringify({auth}));};
+      ws.onmessage=event=>{
+        if(socket!==ws||!session)return;
+        try{receive(JSON.parse(event.data),performance.now());}catch{ws.close();}
+      };
+      ws.onclose=()=>{if(socket===ws){socket=null;next=0;}};
+      ws.onerror=()=>ws.close();
+    }
+    function receive({players,time:serverTime},sentAt){
+      const receivedAt=performance.now();
+      lastReply=receivedAt;failures=0;
+      if(status.textContent!=='ЛОББИ')status.textContent='ЛОББИ';
+      if(Number.isFinite(serverTime)){
+        // Streamed snapshots use arrival time; HTTP snapshots use the RTT midpoint.
+        // Smooth offset changes so clock jitter does not restart the gait.
+        const offset=(sentAt+receivedAt)/2-serverTime;
+        clockOffset=clockOffset===null?offset:clockOffset+(offset-clockOffset)*.1;
+      }
+      const online=new Set();
+      for(const pose of players){
+        online.add(pose.nickname);
+        const peer=peers.get(pose.nickname)||add(pose);
+        const stamp=Number.isFinite(pose.time)?pose.time:null;
+        if(stamp!==null&&peer.stamp!==null&&stamp<=peer.stamp)continue;
+        const samples=peer.samples,last=samples.at(-1);
+        const at=stamp!==null&&clockOffset!==null?Math.min(receivedAt,stamp+clockOffset):receivedAt;
+        // A one-second network stall is ordinary movement, not a teleport.
+        const gap=last?at-last.at:0;
+        if(last&&(gap>3000||Math.hypot(pose.x-last.x,pose.z-last.z)>Math.max(4,gap*.0048+1))){
+          samples.length=0;
+          peer.avatar.group.position.set(pose.x,pose.y,pose.z);
+          peer.avatar.group.rotation.y=pose.heading;
+        }else if(last&&at<=last.at)continue;
+        if(last)peer.delay=Math.max(playbackDelay,Math.min(1000,gap),peer.delay*.5);
+        peer.stamp=stamp;
+        samples.push({...pose,at});
+        if(samples.length>24)samples.shift();
+      }
+      for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
+    }
     function remove(nickname){
       const peer=peers.get(nickname);
       scene.remove(peer.avatar.group);
@@ -116,11 +164,13 @@ window.NoraWorld = (() => {
       const label=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthWrite:false}));
       label.position.y=5.5;label.scale.set(4.5,.84,1);avatar.group.add(label);
       scene.add(avatar.group);
-      const peer={avatar,label,samples:[],stamp:null};peers.set(nickname,peer);return peer;
+      const peer={avatar,label,samples:[],stamp:null,delay:playbackDelay};peers.set(nickname,peer);return peer;
     }
     function leave(){
       if(!session)return Promise.resolve();
       const departed=session;session=null;
+      if(socket){const ws=socket;socket=null;ws.close();}
+      retrySocket=0;
       for(const nickname of peers.keys())remove(nickname);
       const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000)).catch(()=>{});
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
@@ -131,54 +181,35 @@ window.NoraWorld = (() => {
         session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
         status.textContent='ЛОББИ · ПОДКЛЮЧЕНИЕ';
       }
-      if(!pending&&time>=next){
+      connect(time);
+      if(socket&&time-lastReply>2500){socket.close();socket=null;retrySocket=time+30000;next=0;}
+      const streaming=socket?.readyState===1;
+      if((streaming||!pending)&&time>=next){
         next=time+interval;
         const {x,y,z}=player.position,angle=player.rotation.y;
         const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
-        const sentSession=session,sentAt=performance.now();
-        pending=api('nora-game/lobby',{session,x,y,z,heading,grounded,sprinting,boosting},
-          AbortSignal.timeout(1200)).then(({players,time:serverTime})=>{
-          if(session!==sentSession)return;
-          const receivedAt=performance.now();
-          lastReply=receivedAt;failures=0;
-          if(status.textContent!=='ЛОББИ')status.textContent='ЛОББИ';
-          if(Number.isFinite(serverTime)){
-            const offset=(sentAt+receivedAt)/2-serverTime;
-            // Translate server timestamps to the local frame clock.
-            clockOffset=clockOffset===null?offset:clockOffset+(offset-clockOffset)*.1;
-          }
-          const online=new Set();
-          for(const pose of players){
-            online.add(pose.nickname);
-            const peer=peers.get(pose.nickname)||add(pose);
-            const stamp=Number.isFinite(pose.time)?pose.time:null;
-            if(stamp!==null&&stamp===peer.stamp)continue;
-            const samples=peer.samples,last=samples.at(-1);
-            const at=stamp!==null&&clockOffset!==null?Math.min(receivedAt,stamp+clockOffset):receivedAt;
-            // Discard old motion after a prolonged interruption or a teleport.
-            if(last&&(at-last.at>1000||Math.hypot(pose.x-last.x,pose.z-last.z)>4||
-                (stamp!==null&&peer.stamp!==null&&stamp<peer.stamp))){
-              samples.length=0;
-              peer.avatar.group.position.set(pose.x,pose.y,pose.z);
-              peer.avatar.group.rotation.y=pose.heading;
-            }else if(last&&at<=last.at)continue;
-            peer.stamp=stamp;
-            samples.push({...pose,at});
-            if(samples.length>16)samples.shift();
-          }
-          for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
-        }).catch(()=>{
-          if(session!==sentSession)return;
-          failures++;
-          next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
-          if(failures>=2)status.textContent='ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
-        });
-        const sent=pending;
-        sent.finally(()=>{if(pending===sent)pending=null;});
+        const body={session,x,y,z,heading,grounded,sprinting,boosting};
+        if(streaming){
+          // Do not wait a round trip before sending the next pose, and do not
+          // accumulate obsolete positions when the connection is congested.
+          if(socket.bufferedAmount<1024)socket.send(JSON.stringify(body));
+        }else{
+          const sentSession=session,sentAt=performance.now();
+          pending=api('nora-game/lobby',body,AbortSignal.timeout(3000)).then(payload=>{
+            if(session===sentSession&&!socket)receive(payload,sentAt);
+          }).catch(()=>{
+            if(session!==sentSession)return;
+            failures++;
+            next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
+            if(failures>=2)status.textContent='ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
+          });
+          const sent=pending;
+          sent.finally(()=>{if(pending===sent)pending=null;});
+        }
       }
       if(time-lastReply>=8000)for(const nickname of peers.keys())remove(nickname);
-      const playback=time-playbackDelay;
-      for(const {avatar,samples} of peers.values()){
+      for(const {avatar,samples,delay} of peers.values()){
+        const playback=time-delay;
         // Retain the last segment to cover brief gaps in grounded movement.
         while(samples.length>2&&samples[1].at<=playback)samples.shift();
         const [a,b=a]=samples;

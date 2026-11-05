@@ -289,3 +289,82 @@ async def test_wing_purchase_and_lobby_bonus_use_persisted_equipment(tmp_path):
     peer, = await exchange(2, .017)
     assert 'wings' not in peer['outfit']
     assert (await db.get_user(1))['cookies'] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('authorized', [True, False])
+async def test_lobby_socket_checks_access_and_caches_profile(monkeypatch, authorized):
+    from community_bot import access, miniapp
+
+    now = 100.
+    presence = {}
+    session = '00000000-0000-4000-8000-000000000001'
+    profile = {'nickname': 'Alice', 'outfit': {'shirt': 'gray'}}
+    read_profile = AsyncMock(return_value=profile)
+    allowed = AsyncMock(return_value=authorized)
+    monkeypatch.setattr(nora_game_api, '_player_profile', read_profile)
+    monkeypatch.setattr(access, 'miniapp_allowed', allowed)
+    monkeypatch.setattr(miniapp, 'validate_init_data', lambda raw, token: {'id': 1})
+    monkeypatch.setattr(nora_game_api, 'time', SimpleNamespace(monotonic=lambda: now))
+    departed = AsyncMock()
+    monkeypatch.setattr(nora_game_api.music_api, 'return_departed_record', departed)
+
+    class Socket:
+        replies = []
+        codes = []
+        prepare = AsyncMock()
+        receive_json = AsyncMock(return_value={'auth': 'test-only'})
+
+        def __aiter__(self):
+            return self.messages()
+
+        async def messages(self):
+            nonlocal now
+            for index in range(20):
+                now = 100 + index * .08
+                yield SimpleNamespace(type=nora_game_api.WSMsgType.TEXT, data=json.dumps({
+                    'session': session, 'x': index * .1, 'y': .017, 'z': 2, 'heading': 0,
+                    'grounded': True, 'sprinting': True, 'boosting': True, 'telegram_id': 2,
+                }))
+
+        async def send_json(self, payload):
+            assert presence[1][2]['x'] == pytest.approx(len(self.replies) * .1)
+            assert presence[1][2]['boosting'] is False
+            assert 2 not in presence
+            self.replies.append(payload)
+
+        async def close(self, code=1000, **kwargs):
+            self.codes.append(code)
+
+    socket = Socket()
+    monkeypatch.setattr(nora_game_api.web, 'WebSocketResponse', lambda **kwargs: socket)
+    req = SimpleNamespace(app={'nora_lobby': presence, 'db': object(), 'settings': SimpleNamespace(bot_token='test')})
+    assert await nora_game_api.lobby_socket(req) is socket
+    assert len(socket.replies) == (20 if authorized else 0)
+    assert read_profile.await_count == (2 if authorized else 0)
+    assert allowed.await_count == 1
+    assert presence == {}
+    if authorized:
+        departed.assert_awaited_once_with(req.app['db'], 1, session)
+    else:
+        assert 1008 in socket.codes
+        departed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lobby_socket_rejects_unsigned_auth_before_reading_profiles(monkeypatch):
+    from community_bot import miniapp
+
+    def reject(raw, token):
+        raise ValueError('Invalid signature')
+
+    monkeypatch.setattr(miniapp, 'validate_init_data', reject)
+    profile = AsyncMock()
+    monkeypatch.setattr(nora_game_api, '_player_profile', profile)
+    socket = SimpleNamespace(prepare=AsyncMock(), receive_json=AsyncMock(return_value={'auth': 'forged'}),
+                             close=AsyncMock())
+    monkeypatch.setattr(nora_game_api.web, 'WebSocketResponse', lambda **kwargs: socket)
+    req = SimpleNamespace(app={'settings': SimpleNamespace(bot_token='test')})
+    await nora_game_api.lobby_socket(req)
+    assert socket.close.await_args_list[0].kwargs['code'] == 1008
+    profile.assert_not_awaited()

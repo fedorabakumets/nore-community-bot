@@ -7,7 +7,7 @@ import re
 import sqlite3
 import time
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 
 from community_bot import music_api
 from community_bot.database import utcnow
@@ -252,26 +252,28 @@ async def lobby_record_lifecycle(app):
 
 
 async def lobby(request):
-    body = await request.json()
+    return web.json_response(await lobby_snapshot(request.app, request['actor']['id'], await request.json()))
+
+
+async def lobby_snapshot(app, user_id, body, profile=None):
     if not isinstance(body, dict):
         raise ValueError('Проверь данные игрока')
     session = body.get('session')
     if not isinstance(session, str) or not re.fullmatch(r'[a-f0-9-]{36}', session):
         raise ValueError('Проверь данные сессии')
-    presence = request.app['nora_lobby']
-    user_id = request['actor']['id']
+    presence = app['nora_lobby']
     now = time.monotonic()
     expired = [(key, sid) for key, (seen, sid, _) in presence.items() if now - seen >= LOBBY_TTL]
     for key, _ in expired:
         del presence[key]
     for key, expired_session in expired:
-        await music_api.return_departed_record(request.app['db'], key, expired_session)
+        await music_api.return_departed_record(app['db'], key, expired_session)
     current = presence.get(user_id)
     if body.get('leave') is True:
         if current and current[1] == session:
             del presence[user_id]
-            await music_api.return_departed_record(request.app['db'], user_id, session)
-        return web.json_response({'players': []})
+            await music_api.return_departed_record(app['db'], user_id, session)
+        return {'players': []}
     pose = {}
     for key, (minimum, maximum) in LOBBY_BOUNDS.items():
         value = body.get(key)
@@ -279,15 +281,21 @@ async def lobby(request):
             raise ValueError('Проверь координаты игрока')
         pose[key] = value
 
-    if current and current[1] == session:
+    supplied_profile = profile is not None
+    if supplied_profile:
+        equipped = profile['outfit'].get('wings') if profile['outfit'] else None
+    elif current and current[1] == session:
         profile = current[2]
     else:
-        profile = await _player_profile(request.app['db'], user_id)
+        profile = await _player_profile(app['db'], user_id)
         if not profile['nickname'] or not profile['outfit']:
             raise ValueError('Сначала создай персонажа')
     # Only the persisted equipment can authorize the higher replicated jump.
-    async with request.app['db'].connect() as db:
-        equipped = (await _wings(db, user_id))['equipped']
+    if not supplied_profile:
+        async with app['db'].connect() as db:
+            equipped = (await _wings(db, user_id))['equipped']
+    if not profile['nickname'] or not profile['outfit']:
+        raise ValueError('Сначала создай персонажа')
     height = body.get('y')
     maximum = LOBBY_PLATFORM_HEIGHT + (LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT)
     if type(height) not in (int, float) or not 0 <= height <= maximum:
@@ -313,7 +321,52 @@ async def lobby(request):
         if key != user_id and now - seen < LOBBY_TTL
     ]
     others.sort(key=lambda entry: (entry[1]['x'] - pose['x']) ** 2 + (entry[1]['z'] - pose['z']) ** 2)
-    return web.json_response({
+    return {
         'time': now * 1000,
         'players': [{**player, 'time': seen * 1000} for seen, player in others[:20]],
-    })
+    }
+
+
+async def lobby_socket(request):
+    # Browser WebSockets cannot set Authorization. Authenticate the first frame;
+    # initData never appears in a URL, access log or response.
+    from community_bot.access import miniapp_allowed
+    from community_bot.miniapp import validate_init_data
+
+    socket = web.WebSocketResponse(heartbeat=10, max_msg_size=16384, receive_timeout=10)
+    await socket.prepare(request)
+    session = None
+    user_id = None
+    try:
+        credentials = await socket.receive_json(timeout=5)
+        user = validate_init_data(credentials.get('auth', ''), request.app['settings'].bot_token)
+        user_id = user['id']
+        checked = -float('inf')
+        refreshed = -float('inf')
+        profile = None
+        async for message in socket:
+            if message.type != WSMsgType.TEXT:
+                break
+            now = time.monotonic()
+            if now - checked >= 5:
+                # Also enforce initData expiry and role revocation on open sockets.
+                validate_init_data(credentials.get('auth', ''), request.app['settings'].bot_token)
+                if not await miniapp_allowed(request.app['db'], request.app['settings'], user_id):
+                    raise ValueError('Доступ к миниапке закрыт')
+                checked = now
+            if now - refreshed >= 1:
+                profile = await _player_profile(request.app['db'], user_id, private=True)
+                refreshed = now
+            body = json.loads(message.data)
+            payload = await lobby_snapshot(request.app, user_id, body, profile)
+            session = body['session']
+            await socket.send_json(payload)
+            if body.get('leave') is True:
+                break
+    except (ValueError, KeyError, TypeError, AttributeError, asyncio.TimeoutError):
+        await socket.close(code=1008, message=b'Lobby session ended')
+    finally:
+        if session is not None:
+            await lobby_snapshot(request.app, user_id, {'session': session, 'leave': True})
+        await socket.close()
+    return socket

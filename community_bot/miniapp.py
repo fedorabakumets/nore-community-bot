@@ -393,6 +393,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app['nora_lobby'] = {}
     app.cleanup_ctx.append(nora_game_api.lobby_record_lifecycle)
     app.router.add_post('/api/nora-game/lobby', nora_game_api.lobby)
+    app.router.add_get('/nora-game/socket', nora_game_api.lobby_socket)
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)
