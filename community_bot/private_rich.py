@@ -65,6 +65,7 @@ class Turn:
     screen: str = field(default_factory=lambda: uuid4().hex)
     task: object = field(default_factory=asyncio.current_task)
     active: bool = True
+    reopen: bool = False
 
     @property
     def is_handler(self):
@@ -72,6 +73,13 @@ class Turn:
 
 
 _TURN: ContextVar[Turn | None] = ContextVar("private_rich_turn", default=None)
+
+
+def reopen_private_panel():
+    """Explicit /start must restore visibility even after a local chat deletion."""
+    turn = _TURN.get()
+    if turn and turn.is_handler:
+        turn.reopen = True
 
 
 class RichHTML(HTMLParser):
@@ -378,6 +386,19 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         body = blocks + buttons
         footer = await navigation(bot, uid, body, current)
         rich = InputRichMessage(blocks=body + footer)
+        if personal_turn and turn.reopen and uid not in turn.sent:
+            if message_id:
+                try:
+                    await make_request(bot, DeleteMessage(chat_id=uid, message_id=message_id))
+                except TelegramBadRequest as error:
+                    detail = str(error).casefold()
+                    if not any(reason in detail for reason in (
+                        "message to delete not found", "message can't be deleted", "message_id_invalid",
+                    )):
+                        raise
+            # Telegram may accept edits after the user deleted the chat only locally.
+            # A fresh send is the only reliable way to make /start visible again.
+            message_id = None
         if message_id:
             request = EditMessageText(chat_id=uid, message_id=message_id, rich_message=rich,
                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))

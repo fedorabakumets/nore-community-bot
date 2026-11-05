@@ -226,6 +226,9 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
     if not message.from_user:
         return
     if message.chat.type == "private":
+        from community_bot.private_rich import reopen_private_panel
+
+        reopen_private_panel()
         from community_bot.birthday import (
             SPECIAL_DAY,
             SPECIAL_USERNAME,

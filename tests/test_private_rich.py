@@ -495,7 +495,7 @@ async def test_web_admin_ui_is_captured_before_rich_and_recipients_receive_rich(
 
 
 @pytest.mark.parametrize('cover', [False, True])
-async def test_actual_start_guest_is_one_request_and_repeated_start_edits(setup, monkeypatch, cover):
+async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatch, cover):
     from community_bot.routers.private import start
 
     db, bot, session, state = setup
@@ -514,9 +514,38 @@ async def test_actual_start_guest_is_one_request_and_repeated_start_edits(setup,
     assert session.calls[0].reply_markup is None
     assert 'start:apply' in actions(session.calls[0])
     await turn(setup, handler, incoming(uid=8))
-    assert len(session.calls) == 2
+    assert [c.__api_method__ for c in session.calls] == [
+        'sendRichMessage', 'deleteMessage', 'sendRichMessage',
+    ]
+    assert session.calls[1].message_id == 100
+    assert session.calls[-1].reply_markup is None
+    await bot.send_message(8, 'Следующая страница')
     assert isinstance(session.calls[-1], EditMessageText)
-    assert session.calls[-1].message_id == 100
+    assert session.calls[-1].message_id == 101
+
+
+@pytest.mark.parametrize('deletion_error', [None, "message to delete not found", "message can't be deleted"])
+async def test_start_restores_locally_deleted_panel_once_for_multiple_answers(setup, deletion_error):
+    from community_bot.private_rich import reopen_private_panel
+
+    db, bot, session, _ = setup
+    await bot.send_message(7, 'Hidden locally; Telegram would still accept edits')
+    if deletion_error:
+        session.fail = TelegramBadRequest(method=session.calls[0], message=deletion_error)
+
+    async def handler(message, data):
+        reopen_private_panel()
+        await bot.send_message(7, 'Обложка')
+        await bot.send_message(7, 'Текст страницы')
+
+    await turn(setup, handler)
+    assert [c.__api_method__ for c in session.calls] == [
+        'sendRichMessage', 'deleteMessage', 'sendRichMessage', 'editMessageText',
+    ]
+    assert session.calls[-1].message_id == 101
+    assert 'Обложка' in session.calls[-1].rich_message.model_dump_json()
+    assert 'Текст страницы' in session.calls[-1].rich_message.model_dump_json()
+    assert json.loads(await db.get_bot_state('private_rich_panel:7'))['message_id'] == 101
 
 
 async def test_legacy_uneditable_panel_is_deleted_before_one_time_replacement(setup):
