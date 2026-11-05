@@ -23,7 +23,6 @@ from aiogram.types import (
     InputRichMessage,
     Message,
     MessageEntity,
-    ReplyKeyboardRemove,
     RichMessageButton,
     Update,
     User,
@@ -49,6 +48,7 @@ class RecordingSession(BaseSession):
         self.calls = []
         self.fail = None
         self.next_id = 100
+        self.uneditable = set()
 
     async def close(self):
         pass
@@ -67,9 +67,13 @@ class RecordingSession(BaseSession):
         if method.__api_method__ in {"answerCallbackQuery", "deleteMessage"}:
             return True
         uid = method.chat_id
+        if isinstance(method, EditMessageText) and (uid, method.message_id) in self.uneditable:
+            raise TelegramBadRequest(method=method, message="Bad Request: message can't be edited")
         if isinstance(method, SendRichMessage):
             mid = self.next_id
             self.next_id += 1
+            if method.reply_markup is not None and not isinstance(method.reply_markup, InlineKeyboardMarkup):
+                self.uneditable.add((uid, mid))
         else:
             mid = getattr(method, "message_id", 2)
         rich = getattr(method, "rich_message", None)
@@ -161,7 +165,7 @@ async def test_commands_and_repeated_callbacks_edit_one_rich_message(setup):
     _, bot, session, _ = setup
     first = await bot.send_message(7, "<b>Главная</b>", parse_mode="HTML", reply_markup=main_private_keyboard())
     assert isinstance(session.calls[0], SendRichMessage)
-    assert isinstance(session.calls[0].reply_markup, ReplyKeyboardRemove)
+    assert session.calls[0].reply_markup is None
     await replace_block(first, "wallet", "Баланс", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
         ibtn("Оплатить", "wallet:pay"), ibtn("Назад", "menu:home"),
     ]]))
@@ -264,12 +268,13 @@ async def test_deleted_panel_is_recreated_once(setup):
     assert [type(call) for call in session.calls] == [SendRichMessage, EditMessageText, SendRichMessage]
 
 
-@pytest.mark.parametrize("error", ["format", "network", "rate", "unchanged"])
+@pytest.mark.parametrize("error", ["format", "network", "rate", "unchanged", "uneditable"])
 async def test_errors_do_not_send_duplicate_messages(setup, error):
     _, bot, session, _ = setup
     await bot.send_message(7, "Экран")
     method = EditMessageText(chat_id=7, message_id=100, text="x")
     errors = {
+        "uneditable": TelegramBadRequest(method=method, message="Bad Request: message can't be edited"),
         "format": TelegramBadRequest(method=method, message="Bad Request: invalid rich block"),
         "network": TelegramNetworkError(method=method, message="timeout"),
         "rate": TelegramRetryAfter(method=method, message="flood", retry_after=1),
@@ -487,3 +492,63 @@ async def test_web_admin_ui_is_captured_before_rich_and_recipients_receive_rich(
         assert "Ответ модератора по тикету" in sent[-1].rich_message.model_dump_json()
         assert sum(isinstance(call, SendRichMessage) for call in sent) == 1
     await bridge.dispatcher.storage.close()
+
+
+@pytest.mark.parametrize('cover', [False, True])
+async def test_actual_start_guest_is_one_request_and_repeated_start_edits(setup, monkeypatch, cover):
+    from community_bot.routers.private import start
+
+    db, bot, session, state = setup
+    bot.community_settings.timezone = 'Europe/Moscow'
+    bot.community_settings.welcome_cover = ''
+    state.clear = AsyncMock()
+    if not cover:
+        monkeypatch.setattr('community_bot.menu_art.menu_cover', lambda name: None)
+
+    async def handler(message, data):
+        await start(message, state, db, bot.community_settings)
+
+    await turn(setup, handler, incoming(uid=8))
+    assert len(session.calls) == 1
+    assert isinstance(session.calls[0], SendRichMessage)
+    assert session.calls[0].reply_markup is None
+    assert 'start:apply' in actions(session.calls[0])
+    await turn(setup, handler, incoming(uid=8))
+    assert len(session.calls) == 2
+    assert isinstance(session.calls[-1], EditMessageText)
+    assert session.calls[-1].message_id == 100
+
+
+async def test_legacy_uneditable_panel_is_deleted_before_one_time_replacement(setup):
+    db, bot, session, _ = setup
+    await bot.send_message(7, 'Old panel')
+    page = json.loads(await db.get_bot_state('private_rich_panel:7'))
+    page.pop('version')
+    await db.set_bot_state('private_rich_panel:7', json.dumps(page))
+    session.uneditable.add((7, 100))
+    await bot.send_message(7, 'New page')
+    assert [c.__api_method__ for c in session.calls] == [
+        'sendRichMessage', 'editMessageText', 'deleteMessage', 'sendRichMessage',
+    ]
+    assert session.calls[-1].reply_markup is None
+    await bot.send_message(7, 'Next page')
+    assert isinstance(session.calls[-1], EditMessageText)
+    assert session.calls[-1].message_id == 101
+    assert json.loads(await db.get_bot_state('private_rich_panel:7'))['version'] == 2
+
+
+async def test_failed_legacy_deletion_cannot_create_another_panel(setup):
+    db, bot, session, _ = setup
+    await db.set_bot_state('private_rich_panel:7', json.dumps({'message_id': 100, 'body': []}))
+    session.uneditable.add((7, 100))
+    original = session.make_request
+
+    async def request(bot, method, **kwargs):
+        if method.__api_method__ == 'deleteMessage':
+            raise TelegramBadRequest(method=method, message="message can't be deleted")
+        return await original(bot, method, **kwargs)
+
+    session.make_request = request
+    with pytest.raises(TelegramBadRequest):
+        await bot.send_message(7, 'Next page')
+    assert not any(isinstance(c, SendRichMessage) for c in session.calls)

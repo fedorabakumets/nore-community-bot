@@ -18,7 +18,7 @@ from aiogram import BaseMiddleware
 from aiogram.client.default import Default
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import CopyMessage, EditMessageText, SendRichMessage
+from aiogram.methods import CopyMessage, DeleteMessage, EditMessageText, SendRichMessage
 from aiogram.types import (
     CallbackQuery,
     Chat,
@@ -29,7 +29,6 @@ from aiogram.types import (
     InputRichMessage,
     Message,
     MessageId,
-    ReplyKeyboardRemove,
     RichMessageButton,
 )
 from aiogram.utils.text_decorations import html_decoration
@@ -44,7 +43,7 @@ _SEND = {"sendMessage", "sendRichMessage", "sendSticker", "sendPoll", *(
     "send" + kind.title() for kind in _MEDIA
 )}
 _EDIT = {"editMessageText", "editMessageCaption", "editMessageMedia", "editMessageReplyMarkup"}
-_MISSING = ("message to edit not found", "message can't be edited", "message_id_invalid")
+_MISSING = ("message to edit not found", "message_id_invalid")
 _LOCKS: WeakValueDictionary[tuple[int, int], asyncio.Lock] = WeakValueDictionary()
 _EVENT_LOCKS: WeakValueDictionary[tuple[int, int], asyncio.Lock] = WeakValueDictionary()
 
@@ -383,7 +382,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             request = EditMessageText(chat_id=uid, message_id=message_id, rich_message=rich,
                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
         else:
-            request = SendRichMessage(chat_id=uid, rich_message=rich, reply_markup=ReplyKeyboardRemove(),
+            request = SendRichMessage(chat_id=uid, rich_message=rich,
                                       message_thread_id=getattr(original, "message_thread_id", None),
                                       disable_notification=getattr(original, "disable_notification", None),
                                       protect_content=getattr(original, "protect_content", None))
@@ -396,9 +395,14 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                     turn.sent.add(uid)
                 result = _message(bot, uid, message_id)
                 return MessageId(message_id=message_id) if isinstance(original, CopyMessage) else result
-            elif message_id and any(reason in detail for reason in _MISSING):
+            elif message_id and (any(reason in detail for reason in _MISSING)
+                                 or "message can't be edited" in detail and page.get("version") != 2):
+                if "message can't be edited" in detail:
+                    # Repair the old ReplyKeyboardRemove panel once. Delete it first:
+                    # if deletion fails, do not leave another message in the dialog.
+                    await make_request(bot, DeleteMessage(chat_id=uid, message_id=message_id))
                 result = await make_request(bot, SendRichMessage(
-                    chat_id=uid, rich_message=rich, reply_markup=ReplyKeyboardRemove(),
+                    chat_id=uid, rich_message=rich,
                     message_thread_id=getattr(original, "message_thread_id", None),
                 ))
             else:
@@ -409,7 +413,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             reusable = _reusable(returned.model_dump(exclude_none=True)["blocks"])
             body = reusable[:-len(footer)] if footer else reusable
         screen = turn.screen if turn else uuid4().hex
-        await db.set_bot_state(key, json.dumps({"message_id": result.message_id, "body": body,
+        await db.set_bot_state(key, json.dumps({"version": 2, "message_id": result.message_id, "body": body,
                                               "screen": screen, "flow": current},
                                               ensure_ascii=False))
         if turn and turn.is_handler:

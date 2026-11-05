@@ -150,15 +150,10 @@ async def _send_welcome(message: Message, db: Database, settings: Settings, repl
         text = WELCOME_PENDING_TEXT
     else:
         apply_markup = start_apply_keyboard()
-        text = WELCOME_TEXT
+        text = WELCOME_TEXT + "\n\nЭто анкета вступления. Отвечай по одному вопросу — решение придёт сюда."
     first_markup = apply_markup or reply_markup
     if not cover:
         await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
-        if apply_markup:
-            await message.answer(
-                "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
-                reply_markup=reply_markup,
-            )
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
@@ -167,11 +162,6 @@ async def _send_welcome(message: Message, db: Database, settings: Settings, repl
         await message.answer_photo(source, caption=text, reply_markup=first_markup, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
         await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
-    if apply_markup:
-        await message.answer(
-            "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
-            reply_markup=reply_markup,
-        )
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
