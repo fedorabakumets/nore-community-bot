@@ -36,6 +36,14 @@ class CabinetNavigationMiddleware(BaseMiddleware):
                     for prefix in ("shop:pay:", "wallet:loan:yes:", "wallet:repay:yes:"):
                         if callback_data.startswith(prefix):
                             tokens.add(callback_data.removeprefix(prefix))
+        rich = getattr(event.message, "rich_message", None)
+        if rich:
+            for block in rich.blocks:
+                for button in getattr(block, "buttons", []):
+                    callback_data = button.callback_data or ""
+                    for prefix in ("shop:pay:", "wallet:loan:yes:", "wallet:repay:yes:"):
+                        if callback_data.startswith(prefix):
+                            tokens.add(callback_data.removeprefix(prefix))
         for token in tokens:
             await db.cancel_wallet_intent(event.from_user.id, token)
         if action == "flow:cancel":

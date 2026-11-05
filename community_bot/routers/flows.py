@@ -275,6 +275,9 @@ async def game_hide(callback: CallbackQuery) -> None:
 async def _delete_callback_message(callback: CallbackQuery) -> None:
     if not callback.message:
         return
+    if callback.message.chat.type == "private":
+        await callback.message.answer("Раздел закрыт. Выбери следующий раздел кнопками ниже.")
+        return
     try:
         await callback.message.delete()
         return

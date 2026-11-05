@@ -12,6 +12,15 @@ COVERS = Path(__file__).resolve().parent.parent / "assets" / "covers"
 CAPTION_LIMIT = 1024
 
 
+def _private_rich(message: Message) -> bool:
+    from community_bot.private_rich import PrivateRichMiddleware
+
+    bot = getattr(message, "bot", None)
+    session = getattr(bot, "session", None)
+    return (getattr(getattr(message, "chat", None), "type", None) == "private" and session is not None
+            and any(isinstance(item, PrivateRichMiddleware) for item in session.middleware))
+
+
 def fits_caption(text: str) -> bool:
     # Conservative for HTML: count markup too, and never slice a finished tag/entity.
     return len(text.encode("utf-16-le")) // 2 <= CAPTION_LIMIT
@@ -78,6 +87,9 @@ async def answer_block(
     path = cover_path(block)
     if path:
         try:
+            if _private_rich(message):
+                # Rich blocks have no legacy photo-caption split; keep the complete body once.
+                return await message.answer_photo(FSInputFile(path), caption=text, **kwargs)
             split = cover_caption is not None or not fits_caption(text)
             if split:
                 photo_kwargs = {key: value for key, value in kwargs.items() if key != "reply_markup"}
@@ -112,7 +124,7 @@ async def replace_block(message: Message, block: str, text: str, **kwargs: Any) 
     path = cover_path(block)
     markup = kwargs.get("reply_markup")
     parse_mode = kwargs.get("parse_mode")
-    if path and fits_caption(text):
+    if path and (fits_caption(text) or _private_rich(message)):
         try:
             media = InputMediaPhoto(media=FSInputFile(path), caption=text, parse_mode=parse_mode)
             return await message.edit_media(media=media, reply_markup=markup)

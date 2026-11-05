@@ -423,10 +423,15 @@ async def main() -> None:
     from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMiddleware
 
     bot.session.middleware.register(OnboardingKeyboardMiddleware())
+    from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware
+
+    bot.session.middleware.register(PrivateRichMiddleware())
     patch_bot_ephemeral(bot)
     from community_bot.access import ProfileAccessMiddleware
 
     dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())

@@ -88,9 +88,12 @@ def safe_html(text, parse_mode):
 
 def build_dispatcher():
     from community_bot import event_access
+    from community_bot.private_rich import PrivateRichContextMiddleware
     from community_bot.routers import command_admin, contest, group, private, shop_admin
 
     dispatcher = Dispatcher(storage=MemoryStorage())
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     extras = {'approve_application', 'reject_application', 'rejection_reason', 'begin_ticket_reply',
               'send_ticket_reply', 'moderator_close_ticket', 'review_cookie_order', 'participant_page'}
     for source in (command_admin.router, shop_admin.router, contest.router, private.router,
@@ -227,7 +230,14 @@ class AdminBridge:
         self.runtime = runtime or {}
         self.sessions: dict[int, Session] = {}
         if not getattr(bot, '_nora_admin_capture', False):
+            from community_bot.private_rich import PrivateRichMiddleware
+
+            rich = [item for item in bot.session.middleware if isinstance(item, PrivateRichMiddleware)]
+            for item in rich:
+                bot.session.middleware.unregister(item)
             bot.session.middleware.register(CaptureAdminUI())
+            for item in rich:
+                bot.session.middleware.register(item)
             bot._nora_admin_capture = True
 
     async def allowed(self, uid):
