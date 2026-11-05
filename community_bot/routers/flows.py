@@ -38,6 +38,13 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
 
     uid = message.chat.id
     allowed = await private_allowed(db, settings, uid)
+    if allowed:
+        await message.answer(
+            "Выбери раздел.",
+            reply_markup=private_menu_keyboard(await has_permission(db, settings, uid, PERM_ADMIN_PANEL),
+                                               unread=await db.notify_unread_count(uid)),
+        )
+        return
     await message.answer(
         "Можно открыть профиль, магазин, кошелёк или написать тикет." if allowed
         else "Дождись одобрения анкеты. Если нужна помощь — кнопка внизу.",
@@ -78,7 +85,7 @@ async def _show_own_profile(message: Message, db: Database, settings: Settings) 
     if not message.from_user:
         return
     user = await db.ensure_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=message.chat.type == "private")
     markup = profile_keyboard(message.from_user.id, bool(user.get("profile_private")))
     if user["avatar_file_id"]:
         try:

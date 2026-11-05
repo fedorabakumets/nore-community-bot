@@ -84,6 +84,8 @@ async def answer_block(
     cover_caption: str | None = None,
     **kwargs: Any,
 ) -> Message:
+    if _private_rich(message):
+        return await message.answer(text, **kwargs)
     path = cover_path(block)
     if path:
         try:
@@ -121,6 +123,8 @@ async def edit_block(message: Message, text: str, **kwargs: Any) -> Message | No
 
 
 async def replace_block(message: Message, block: str, text: str, **kwargs: Any) -> Message | None:
+    if _private_rich(message):
+        return await message.edit_text(text, **kwargs)
     path = cover_path(block)
     markup = kwargs.get("reply_markup")
     parse_mode = kwargs.get("parse_mode")

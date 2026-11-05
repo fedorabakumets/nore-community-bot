@@ -155,7 +155,7 @@ def test_rich_buttons_preserve_callbacks_links_webapps_and_colors():
     rich = InputRichMessage(blocks=rows)
     assert all(isinstance(b, RichMessageButton) for b in rich.blocks[0].buttons)
     buttons = rows[0]["buttons"]
-    assert [b["style"] for b in buttons[:3]] == ["primary", "success", "danger"]
+    assert [b["style"] for b in buttons[:3]] == ["link", "success", "danger"]
     assert buttons[3]["url"] == "https://example.org"
     assert buttons[4]["web_app"]["url"].endswith("/app")
     assert buttons[5]["copy_text"]["text"] == "Рома"
@@ -174,7 +174,7 @@ async def test_commands_and_repeated_callbacks_edit_one_rich_message(setup):
     assert all(isinstance(call, EditMessageText) and call.message_id == first.message_id for call in session.calls[1:])
     assert not session.calls[-1].reply_markup.inline_keyboard
     assert actions(session.calls[1])["wallet:pay"]["style"] == "success"
-    assert actions(session.calls[1])["menu:home"]["style"] == "danger"
+    assert actions(session.calls[1])["menu:home"]["style"] == "link"
 
 
 async def test_cover_long_text_and_secondary_keyboard_stay_in_one_page(setup):
@@ -190,7 +190,7 @@ async def test_cover_long_text_and_secondary_keyboard_stay_in_one_page(setup):
     raw = json.dumps(content(last), ensure_ascii=False, default=str)
     assert "Большой текст" in raw and "Следующий шаг" in raw
     assert raw.count("Большой текст") == 150
-    assert any(block["type"] == "photo" for block in content(last))
+    assert not any(block["type"] == "photo" for block in content(last))
     assert actions(last)["application:interview:yes"]["style"] == "success"
 
 
@@ -204,8 +204,8 @@ async def test_guest_and_form_controls_do_not_expose_member_sections(setup):
         await message.answer("Как тебя зовут?", reply_markup=flow_reply_keyboard())
 
     await turn(setup, handler, incoming(uid=8))
-    assert set(actions(session.calls[-1])) == {"flow:cancel", "flow:restart", "menu:question"}
-    assert actions(session.calls[-1])["flow:cancel"]["style"] == "danger"
+    assert set(actions(session.calls[-1])) == {"flow:cancel", "flow:restart"}
+    assert actions(session.calls[-1])["flow:cancel"]["style"] == "link"
     await bot.send_message(8, "Уведомление")
     raw = session.calls[-1].rich_message.model_dump_json()
     assert "Как тебя зовут?" in raw and "Уведомление" in raw
@@ -581,3 +581,75 @@ async def test_failed_legacy_deletion_cannot_create_another_panel(setup):
     with pytest.raises(TelegramBadRequest):
         await bot.send_message(7, 'Next page')
     assert not any(isinstance(c, SendRichMessage) for c in session.calls)
+
+
+async def test_home_has_only_section_buttons_without_home_or_close(setup):
+    from community_bot.keyboards import private_menu_keyboard
+
+    _, bot, session, _ = setup
+    await bot.send_message(7, 'Кабинет', reply_markup=private_menu_keyboard(False))
+    assert set(actions(session.calls[-1])) == {
+        'menu:wallet', 'menu:shop', 'menu:profile', 'menu:pet', 'menu:notices', 'menu:question',
+    }
+    assert all(b['style'] == 'link' for b in actions(session.calls[-1]).values())
+
+
+async def test_nested_page_keeps_one_parent_back_and_deduplicates_actions(setup):
+    _, bot, session, _ = setup
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [ibtn('История', 'wallet:history'), ibtn('История ещё раз', 'wallet:history')],
+        [ibtn('Назад', 'wallet:home'), ibtn('Меню', 'menu:home')],
+        [ibtn('Закрыть', 'ui:close')],
+    ])
+    await bot.send_message(7, 'История', reply_markup=markup)
+    buttons = [b for block in content(session.calls[-1]) if block['type'] == 'buttons' for b in block['buttons']]
+    assert len([b for b in buttons if b.get('callback_data') == 'wallet:history']) == 1
+    assert actions(session.calls[-1])['wallet:home']['text'] == '← Назад'
+    assert 'ui:close' not in actions(session.calls[-1])
+    assert 'menu:home' not in actions(session.calls[-1])
+    await bot.send_message(7, 'Фоновое уведомление')
+    assert actions(session.calls[-1])['wallet:home']['text'] == '← Назад'
+
+
+async def test_profile_input_back_returns_to_profile_without_global_navigation(setup):
+    _, _, session, state = setup
+    state.get_state.return_value = 'ProfileEdit:name'
+
+    async def handler(message, data):
+        await message.answer('Имя?', reply_markup=flow_reply_keyboard())
+
+    await turn(setup, handler)
+    assert set(actions(session.calls[-1])) == {'menu:profile'}
+    assert actions(session.calls[-1])['menu:profile']['text'] == '← Назад'
+
+
+async def test_cancel_restores_complete_home_without_footer(setup):
+    from community_bot.routers.flows import restore_private_menu
+
+    _, _, session, _ = setup
+
+    async def handler(message, data):
+        await restore_private_menu(message, data['db'], data['bot'].community_settings)
+
+    await turn(setup, handler)
+    assert {'menu:wallet', 'menu:profile', 'menu:shop'} <= set(actions(session.calls[-1]))
+    assert 'menu:home' not in actions(session.calls[-1])
+
+
+async def test_private_profile_compacts_ornate_style_preserving_fields_and_escaping(setup):
+    from community_bot.helpers import render_profile
+
+    db, bot, _, _ = setup
+    bot.community_settings.restricted_reputation_threshold = 0
+    user = await db.get_user(7)
+    user.update(profile_ornate=1, profile_name='<Рома>', hobbies='Чай & игры', profile_bio='<script>')
+    compact = await render_profile(db, bot.community_settings, user, compact=True)
+    assert '&lt;Рома&gt;' in compact and 'Чай &amp; игры' in compact and '&lt;script&gt;' in compact
+    assert 'Репутация:' in compact and 'Варны:' in compact
+    assert '━' not in compact and '<code>' not in compact and 'Ｎ Ｏ Ｒ Ａ' not in compact
+    assert len(compact.splitlines()) <= 7
+
+
+def test_compact_text_removes_decoration_but_preserves_code_layout():
+    assert text_blocks('Заголовок\n\n━━━━━━━━\nТекст')[0]['text'] == 'Заголовок\nТекст'
+    assert text_blocks('<pre>a\n\nb</pre>', 'HTML')[0]['text'] == 'a\n\nb'

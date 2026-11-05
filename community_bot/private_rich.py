@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -66,6 +67,7 @@ class Turn:
     task: object = field(default_factory=asyncio.current_task)
     active: bool = True
     reopen: bool = False
+    action: str = ""
 
     @property
     def is_handler(self):
@@ -157,6 +159,9 @@ def text_blocks(text, parse_mode=None, entities=None):
         return []
     if entities:
         text, parse_mode = html_decoration.unparse(text, entities), "HTML"
+    if not re.search(r"<(pre|code)\b", text, re.I):
+        text = re.sub(r"(?m)^[ \t]*[━─═✦✧·•\-_=]{3,}[ \t]*\n?", "", text)
+        text = re.sub(r"\n[ \t]*\n+", "\n", text).strip()
     if str(parse_mode).upper() == "HTML":
         parser = RichHTML()
         parser.feed(text)
@@ -172,7 +177,11 @@ def button_rows(markup):
         buttons = []
         for button in row:
             fields = button.model_dump(exclude_none=True, include=set(RichMessageButton.model_fields))
-            fields["style"] = ((button_style(button) if button.callback_data else button.style) or "primary")
+            style = button_style(button) if button.callback_data else button.style
+            fields["style"] = ((style if style in {"success", "danger"} else "link")
+                               if button.callback_data else (style or "primary"))
+            if button.callback_data and (button.text.startswith(("↩", "←")) or "назад" in button.text.casefold()):
+                fields.update(text="← Назад", style="link")
             if button.icon_custom_emoji_id:
                 fields["text"] = [{"type": "custom_emoji", "alternative_text": "▫️",
                                    "custom_emoji_id": button.icon_custom_emoji_id}, " " + button.text]
@@ -187,30 +196,74 @@ def _plain_buttons(buttons):
             for button in block["buttons"]}
 
 
-async def navigation(bot, uid, body, current):
+async def navigation(bot, uid, body, current, previous_back=None):
     from community_bot.access import private_allowed
 
     db, settings = bot.community_db, bot.community_settings
+    turn = _TURN.get()
+    route = turn.action if turn and turn.is_handler else ""
+    actions = _plain_buttons(body)
+    home = {"menu:profile", "menu:wallet", "menu:pet"} <= actions
+    seen, backs = set(), []
+    for block in body:
+        if block.get("type") != "buttons":
+            continue
+        kept = []
+        for button in block["buttons"]:
+            action, text = button.get("callback_data"), button.get("text", "")
+            identity = json.dumps({k: v for k, v in button.items() if k not in {"text", "style"}}, sort_keys=True)
+            if identity in seen or action in {"ui:close", "shop:close"}:
+                continue
+            seen.add(identity)
+            if action == route and action and (action.startswith("menu:") or action in {"wallet:home", "shop:home"}):
+                continue
+            if action == "menu:home" or (isinstance(text, str)
+                                         and (text.startswith(("↩", "←")) or "назад" in text.casefold())):
+                backs.append(button)
+            elif action == "flow:cancel":
+                backs.append(button)
+            else:
+                kept.append(button)
+        block["buttons"] = kept
+    body[:] = [block for block in body if block.get("type") != "buttons" or block["buttons"]]
+    packed = []
+    for block in body:
+        if (block.get("type") == "buttons" and packed and packed[-1].get("type") == "buttons"
+                and all(b.get("style") == "link" and isinstance(b.get("text"), str)
+                        and len(b["text"]) <= 24 for b in packed[-1]["buttons"] + block["buttons"])
+                and len(packed[-1]["buttons"]) + len(block["buttons"]) <= 3):
+            packed[-1]["buttons"].extend(block["buttons"])
+        else:
+            packed.append(block)
+    body[:] = packed
     actions = _plain_buttons(body)
     rows = []
     if current:
         row = []
         if current.startswith("ApplicationForm:") and "flow:restart" not in actions:
-            row.append(RichMessageButton(text="🔄 Начать заново", callback_data="flow:restart", style="primary"))
-        if "flow:cancel" not in actions:
-            row.append(RichMessageButton(text="❌ Отмена", callback_data="flow:cancel", style="danger"))
+            row.append(RichMessageButton(text="Начать заново", callback_data="flow:restart", style="link"))
+        parents = {"ProfileEdit": "menu:profile", "PetFlow": "menu:pet", "GiftFlow": "menu:shop",
+                   "FlexiblePurchase": "menu:shop", "CookiePurchase": "menu:shop",
+                   "ShopAdminFlow": "menu:admin", "AdminFlow": "menu:admin"}
+        parent = parents.get(current.split(":", 1)[0], "flow:cancel")
+        row.append(RichMessageButton(text="← Назад", callback_data=parent, style="link"))
         if row:
             rows.append(row)
+        return [InputRichBlockButtons(buttons=row).model_dump(exclude_none=True) for row in rows]
     if await private_allowed(db, settings, uid):
-        choices = [[("📋 Меню", "menu:home"), ("👤 Профиль", "menu:profile"), ("🛒 Магазин", "menu:shop")],
-                   [("💼 Кошелёк", "menu:wallet"), ("🎫 Поддержка", "menu:question")]]
+        if home:
+            return []
+        back = next((b for b in backs if b.get("callback_data") != "menu:home"), None)
+        back = back or (backs[0] if backs else {"callback_data": previous_back or "menu:home"})
+        rows.append([RichMessageButton(text="← Назад", callback_data=back["callback_data"], style="link")])
+        choices = []
     else:
         choices = [[("🎫 Помощь", "menu:question")]]
         if not await db.has_pending_application(uid) and not current:
             choices.insert(0, [("📝 Заполнить анкету", "start:apply")])
     for row in choices:
         buttons = [RichMessageButton(text=text, callback_data=action,
-                                     style="success" if action == "start:apply" else "primary")
+                                     style="success" if action == "start:apply" else "link")
                    for text, action in row if action not in actions]
         if buttons:
             rows.append(buttons)
@@ -313,7 +366,8 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                         "Это старое меню. Открой актуальное сообщение или отправь /start.", show_alert=True,
                     )
                     return
-            context = Turn(source, data.get("state"))
+            action = (event.data or "") if isinstance(event, CallbackQuery) else ""
+            context = Turn(source, data.get("state"), action=action)
             token = _TURN.set(context)
             try:
                 return await handler(event, data)
@@ -384,7 +438,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             # Keep them together, including ticket headers and their copied attachments.
             blocks = page.get("body", []) + blocks
         body = blocks + buttons
-        footer = await navigation(bot, uid, body, current)
+        footer = await navigation(bot, uid, body, current, page.get("back") if append or not personal_turn else None)
         rich = InputRichMessage(blocks=body + footer)
         if personal_turn and turn.reopen and uid not in turn.sent:
             if message_id:
@@ -435,6 +489,9 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             body = reusable[:-len(footer)] if footer else reusable
         screen = turn.screen if turn else uuid4().hex
         await db.set_bot_state(key, json.dumps({"version": 2, "message_id": result.message_id, "body": body,
+                                              "back": next((b.get("callback_data") for block in footer
+                                                            for b in block["buttons"]
+                                                            if b.get("text") == "← Назад"), None),
                                               "screen": screen, "flow": current},
                                               ensure_ascii=False))
         if turn and turn.is_handler:

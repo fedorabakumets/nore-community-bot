@@ -321,7 +321,7 @@ async def menu_profile(callback: CallbackQuery, db: Database, settings: Settings
     from community_bot.routers.profile import send_profile_card
 
     user = await register_telegram_user(db, callback.from_user)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=True)
     await callback.answer()
     await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 

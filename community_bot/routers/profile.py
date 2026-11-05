@@ -72,7 +72,7 @@ async def send_profile_card(
         except TelegramBadRequest:
             sent = None
     if sent is None:
-        cover = cover_file("profile")
+        cover = cover_file("profile") if message.chat.type != "private" else None
         if cover:
             try:
                 sent = await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
@@ -100,7 +100,7 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
     if not await can_view_profile(db, settings, message.from_user.id, target):
         await message.answer("🔒 Этот профиль скрыт.")
         return
-    text = await render_profile(db, settings, target)
+    text = await render_profile(db, settings, target, compact=message.chat.type == "private")
     await send_profile_card(message, target, settings, editable=editable, text=text, db=db)
 
 
@@ -217,7 +217,7 @@ async def menu_verify(callback: CallbackQuery, db: Database, settings: Settings)
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=callback.message.chat.type == "private")
     await callback.answer()
     await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 

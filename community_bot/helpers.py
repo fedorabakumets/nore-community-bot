@@ -335,11 +335,32 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     )
 
 
-async def render_profile(db: Database, settings: Settings, user: dict[str, Any]) -> str:
+def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: str) -> str:
+    name = str(user.get("profile_name") or user.get("telegram_name") or f"ID {user['user_id']}")
+    tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
+    identity = f" · @{html.escape(str(user['username']))}" if user.get("username") else ""
+    lines = [
+        f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
+        f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {user.get('age') or '—'}",
+    ]
+    if user.get("profile_private"):
+        lines.append("🔒 Закрытый профиль")
+    if user.get("profile_bio"):
+        lines.append(html.escape(str(user["profile_bio"])))
+    if user.get("hobbies"):
+        lines.append(f"Увлечения: {html.escape(str(user['hobbies']))}")
+    lines.extend([
+        f"Репутация: {int(user['reputation'])}/100 · {tier.label} · скидка {tier.discount}%",
+        f"🍪 {user['cookies']} · Профиль: {profile_fill_percent(user)}% · Варны: {user['warnings']}",
+    ])
+    return "\n".join(lines)
+
+
+async def render_profile(db: Database, settings: Settings, user: dict[str, Any], *, compact: bool = False) -> str:
     from community_bot.life import achievement_lines
 
     title = await role_title(db, str(user["role"]))
-    text = profile_text(user, settings, title)
+    text = compact_profile_text(user, settings, title) if compact else profile_text(user, settings, title)
     extra = achievement_lines(await db.list_achievements(int(user["user_id"])))
     if extra:
         return f"{text}\n{extra}"
