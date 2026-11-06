@@ -406,7 +406,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             if method.message_id == message_id:
                 return True  # Private close actions must keep the navigation surface.
             return await make_request(bot, method)
-        if page.get("widget") and not personal_turn:
+        if (page.get("widget") or page.get("number_choice")) and not personal_turn:
             # A background notice must leave the active number picker usable.
             if name in _EDIT:
                 return _message(bot, uid, message_id)
@@ -451,9 +451,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             blocks = page.get("body", []) + blocks
         body = blocks + buttons
         footer = await navigation(bot, uid, body, current, page.get("back") if append or not personal_turn else None)
-        rich = InputRichMessage(blocks=body + footer)
         widget = None
-        from community_bot.message_widgets import picker
+        from community_bot.message_widgets import PICKERS, picker
 
         if personal_turn and name in _SEND | _EDIT:
             widget = await picker(make_request, bot, uid, current, footer)
@@ -470,6 +469,17 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             if message_id:
                 await self.remove_old(make_request, bot, uid, message_id)
             return result
+        number_choice = None
+        if personal_turn and current in PICKERS and name in _SEND | _EDIT:
+            low, high = PICKERS[current]
+            token = turn.screen[:16]
+            number_choice = {"token": token, "min": low, "max": high}
+            presets = (16, 18, 21, 25) if current.endswith(":age") else (100, 500, 1000)
+            body.append({"type": "buttons", "buttons": [
+                {"text": str(value), "callback_data": f"nora:{token}:{value}", "style": "link"}
+                for value in presets
+            ]})
+        rich = InputRichMessage(blocks=body + footer)
         old_widget_id = message_id if page.get("widget") else None
         if old_widget_id:
             message_id = None
@@ -525,7 +535,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                                               "back": next((b.get("callback_data") for block in footer
                                                             for b in block["buttons"]
                                                             if b.get("text") == "← Назад"), None),
-                                              "screen": screen, "flow": current},
+                                              "screen": screen, "flow": current, "number_choice": number_choice},
                                               ensure_ascii=False))
         if turn and turn.is_handler:
             turn.sent.add(uid)

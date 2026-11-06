@@ -414,7 +414,9 @@ async def main() -> None:
         if moderator["role"] == "member":
             await db.set_role(moderator_id, "moderator")
 
-    bot = Bot(settings.bot_token)
+    from community_bot.message_widgets import WidgetSession
+
+    bot = Bot(settings.bot_token, session=WidgetSession())
     bot.community_db = db  # type: ignore[attr-defined]
     bot.community_settings = settings  # type: ignore[attr-defined]
     from community_bot.profile_maintenance import run_requested_reset

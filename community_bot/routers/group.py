@@ -627,7 +627,7 @@ async def profile_transfer(callback: CallbackQuery, db: Database, settings: Sett
     if await transfer_card(callback.message, target, amount, percent, received, transfer_keyboard(transfer_id)):
         return
     await callback.message.answer(
-        f"Перевести {_target_display(target)} {amount} 🍪?\n"
+        f"<b>Перевод · {amount} 🍪</b>\nПолучатель: {_target_display(target)}\n"
         f"Комиссия {percent}% (по уровню репутации), пользователь получит {received} 🍪.",
         parse_mode="HTML",
         reply_markup=transfer_keyboard(transfer_id),
@@ -1650,7 +1650,7 @@ async def _prepare_transfer(
             return
         await _respond(
             message,
-            f"Перевести {_target_display(target)} {amount} 🍪?\n"
+            f"<b>Перевод · {amount} 🍪</b>\nПолучатель: {_target_display(target)}\n"
             f"Комиссия {percent}% (по уровню репутации), пользователь получит {received} 🍪.",
             parse_mode="HTML",
             reply_markup=transfer_keyboard(transfer_id),

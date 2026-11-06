@@ -65,10 +65,11 @@ inline-кнопки подтверждения/отмены и серверны�
 Контракт: [TelegramMessenger/widget-sandbox](https://github.com/TelegramMessenger/widget-sandbox),
 [руководство авторов](https://github.com/TelegramMessenger/widget-sandbox/blob/v0.6.0/docs/widget-runtime-profile.md),
 [Bot API 10.4](https://github.com/TelegramMessenger/widget-sandbox/blob/v0.6.0/docs/tgw-format.md#the-bot-api-104).
-На момент реализации sendWidget описан для beta; обычная публичная документация
-Bot API остаётся на 10.3. Код использует штатный endpoint бота. Beta endpoint,
-токены и переменные Railway не меняются. Успех на сервере и поддержка рендера
-конкретным клиентом Telegram локальными проверками не подтверждены.
+Отправка виджета, ответ и получение обновлений идут через официальный адрес
+api.telegram.org/beta для обычных чатов, как в scripts/conformance/publish-channel.ts.
+Остальные методы используют стабильный API. При недоступности beta единый poller
+возвращается к стабильному адресу. При отказе виджету панель предлагает выбор
+числа кнопками Rich Message и принимает ввод текстом.
 
 Если API не поддерживает метод/виджет, бот продолжает прежним Rich-сообщением
 и повторяет попытку не чаще раза в 10 минут на процесс. Ошибка сети/лимит

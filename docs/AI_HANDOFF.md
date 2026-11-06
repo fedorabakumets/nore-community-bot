@@ -8,7 +8,9 @@
 - База origin/cursor/nora-2-update-d133: 5d76418; fetch + ls-remote совпали.
 - Исходная копия chatgpt/codex-dev-setup с локальными AGENTS.md/handoff не переносилась.
 - TelegramMessenger/widget-sandbox: profile 1, sendWidget описан для Bot API 10.4 beta.
-- Обычный Bot API ещё документирует 10.3; beta endpoint не включаем.
+- Исправлен транспорт виджетов и getUpdates: официальный /beta для обычных чатов.
+- При отказе возраст/сумму выбирают кнопками Rich Message или вводят вручную.
+- Ветка продолжена от 1773669; Railway подтвердил SUCCESS для предыдущего выпуска.
 - Сделано: возраст анкеты/профиля, произвольная сумма оплаты, карточка перевода.
 - Неизвестный/неподдерживаемый sendWidget возвращает прежнее сообщение; cooldown 10 минут.
 - Внешних runtime-зависимостей sandbox нет: один HTML profile 1, CSS/JS внутри.
@@ -43,3 +45,4 @@
 - Тесты — временная SQLite, fake Bot, PYTHON_DOTENV_DISABLED=1.
 - Python окружения исходной копии: C:/Users/User/Projects/nore-community-bot/.venv/Scripts/python.exe.
 - Базовые изменения lazy S3 уже в production-ветке; реальная экономия RAM здесь не проверяется.
+- Исправление beta и запасных кнопок: полный check_local — 859 passed, 1 skipped. После финальной правки активной панели — 65 passed, Ruff и pip check прошли. Живой показ владельцу предстоит проверить после выпуска.

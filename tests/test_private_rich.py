@@ -699,13 +699,14 @@ async def test_widget_unknown_method_falls_back_with_capability_cooldown(setup):
     assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
 
 
-async def test_real_age_widget_update_uses_actor_fsm_and_rejects_replay(setup):
+@pytest.mark.parametrize('native', [True, False])
+async def test_real_age_widget_update_uses_actor_fsm_and_rejects_replay(setup, native):
     from community_bot.message_widgets import WidgetUpdateMiddleware
     from community_bot.routers.profile import edit_profile_age
     from community_bot.states import ProfileEdit
 
     db, bot, session, _ = setup
-    session.widgets = True
+    session.widgets = native
     dispatcher = Dispatcher()
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
@@ -721,19 +722,29 @@ async def test_real_age_widget_update_uses_actor_fsm_and_rejects_replay(setup):
     await dispatcher.feed_update(bot, Update(update_id=1, message=incoming(text='/age')),
                                  db=db, settings=bot.community_settings)
     page = json.loads(await db.get_bot_state('private_rich_panel:7'))
+    choice = page['widget' if native else 'number_choice']
     query = {'id': 'query-age', 'from': incoming().from_user.model_dump(),
              'chat': incoming().chat.model_dump(), 'message_id': page['message_id'],
-             'data': f"nora:{page['widget']['token']}:25"}
+             'data': f"nora:{choice['token']}:25"}
     for update_id in (2, 3):
-        await dispatcher.feed_update(bot, Update(update_id=update_id, widget_query=query),
+        update = Update(update_id=update_id, widget_query=query)
+        if not native:
+            button = CallbackQuery(id='button', from_user=incoming().from_user, chat_instance='private',
+                                   message=incoming().model_copy(update={'message_id': page['message_id']}),
+                                   data=query['data'])
+            update = Update(update_id=update_id, callback_query=button)
+        await dispatcher.feed_update(bot, update,
                                      db=db, settings=bot.community_settings)
         answer = session.calls[-1]
-        assert answer.__api_method__ == 'answerWidgetQuery'
-        assert json.loads(answer.data)['ok'] == (update_id == 2)
+        if native:
+            assert json.loads(answer.data)['ok'] == (update_id == 2)
+        else:
+            assert answer.__api_method__ == 'answerCallbackQuery'
+            assert (answer.text == 'Готово') == (update_id == 2)
     assert (await db.get_user(7))['age'] == 25
     assert await dispatcher.fsm.get_context(bot, 7, 7).get_state() is None
     assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
-    assert sum(c.__api_method__ == 'deleteMessage' for c in session.calls) == 1
+    assert sum(c.__api_method__ == 'deleteMessage' for c in session.calls) == int(native)
     await dispatcher.storage.close()
 
 
@@ -836,3 +847,31 @@ async def test_transfer_widget_is_read_only_keeps_confirmation_and_escapes_names
     assert len(zlib.compress(call.html.encode(), 9)) < 4096
     with pytest.raises(ValueError):
         document({'note': 'x' * 40000})
+
+async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeypatch):
+    from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.methods import GetUpdates, SendMessage
+
+    from community_bot.message_widgets import AnswerWidgetQuery, WidgetSession
+
+    session = WidgetSession()
+    calls = []
+
+    async def record(transport, bot, method, timeout=None):  # noqa: ASYNC109
+        calls.append((transport.api.base, method.__api_method__))
+        if transport is session.widget_api and isinstance(method, GetUpdates):
+            raise TelegramNotFound(method=method, message='Not Found')
+        return True
+
+    monkeypatch.setattr(AiohttpSession, 'make_request', record)
+    try:
+        await session.make_request(None, AnswerWidgetQuery(widget_query_id='x', data='ok'))
+        await session.make_request(None, SendMessage(chat_id=1, text='test'))
+        await session.make_request(None, GetUpdates())
+        await session.make_request(None, GetUpdates())
+    finally:
+        await session.close()
+    assert [('/beta/' in base, method) for base, method in calls] == [
+        (True, 'answerWidgetQuery'), (False, 'sendMessage'),
+        (True, 'getUpdates'), (False, 'getUpdates'), (False, 'getUpdates'),
+    ]

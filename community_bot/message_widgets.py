@@ -1,11 +1,12 @@
 """Profile-1 Telegram widgets, with ordinary-message fallback on older Bot APIs.
 
 Contract: TelegramMessenger/widget-sandbox docs/tgw-format.md (Bot API 10.4).
-No beta endpoint, credentials, shared widgets or client-supplied prices are used.
+Widget methods and their updates use Telegram beta route for regular chats.
 """
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import zlib
@@ -15,13 +16,51 @@ from typing import Any
 from uuid import uuid4
 
 from aiogram import BaseMiddleware
-from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramNotFound,
+    TelegramServerError,
+    TelegramUnauthorizedError,
+)
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import InlineKeyboardMarkup, Message, Update
+
+logger = logging.getLogger(__name__)
 
 TEMPLATE = Path(__file__).with_name("widgets") / "number.html"
 PICKERS = {"ApplicationForm:age": (14, 120), "ProfileEdit:age": (14, 120),
            "FlexiblePurchase:amount": (1, 1_000_000)}
+
+
+class WidgetSession(AiohttpSession):
+    """One poller, with regular API calls kept on the stable transport."""
+
+    def __init__(self):
+        super().__init__()
+        self.widget_api = AiohttpSession(api=TelegramAPIServer.from_base("https://api.telegram.org/beta"))
+        self.retry_poll_at = 0.0
+
+    async def close(self):
+        try:
+            await self.widget_api.close()
+        finally:
+            await super().close()
+
+    async def make_request(self, bot, method, timeout=None):  # noqa: ASYNC109
+        name = method.__api_method__
+        if name in {"sendWidget", "answerWidgetQuery"}:
+            return await self.widget_api.make_request(bot, method, timeout)
+        if name == "getUpdates" and time.monotonic() >= self.retry_poll_at:
+            try:
+                return await self.widget_api.make_request(bot, method, timeout)
+            except (TelegramNotFound, TelegramUnauthorizedError, TelegramForbiddenError,
+                    TelegramServerError, TelegramNetworkError):
+                self.retry_poll_at = time.monotonic() + 60
+        return await super().make_request(bot, method, timeout)
 
 
 class SendWidget(TelegramMethod[Message]):
@@ -61,15 +100,20 @@ async def try_send(make_request, bot, request: SendWidget) -> Message | None:
         return None
     try:
         return await make_request(bot, request)
-    except TelegramNotFound:
+    except (TelegramNotFound, TelegramUnauthorizedError) as error:
+        logger.warning("Telegram widget API unavailable (%s); using chat controls", type(error).__name__)
         bot._nora_widgets_retry_at = time.monotonic() + 600
+    except TelegramForbiddenError:
+        logger.info("Telegram denied widget delivery for this request; using chat controls")
     except TelegramBadRequest as error:
         detail = str(error).casefold()
         if not any(reason in detail for reason in (
             "method not found", "unknown method", "method is not available", "not supported", "widget",
         )):
             raise
-        bot._nora_widgets_retry_at = time.monotonic() + 600
+        logger.info("Telegram rejected widget delivery; using chat controls")
+        if "widget" not in detail:
+            bot._nora_widgets_retry_at = time.monotonic() + 600
     return None
 
 
@@ -119,7 +163,7 @@ def submission(event, page, current):
     incoming = getattr(event, "nora_widget", None)
     if not incoming:
         return True
-    saved = page.get("widget") or {}
+    saved = page.get("widget") or page.get("number_choice") or {}
     return bool(current in PICKERS and current == page.get("flow")
                 and event.message_id == page.get("message_id") and event.from_user
                 and event.from_user.id == event.chat.id and incoming == saved.get("token")
@@ -134,6 +178,12 @@ class WidgetUpdateMiddleware(BaseMiddleware):
         query = getattr(event, "widget_query", None)
         if hasattr(query, "model_dump"):
             query = query.model_dump(by_alias=True, exclude_none=True)
+        callback = event.callback_query
+        button = callback and (callback.data or "").startswith("nora:")
+        if button and isinstance(callback.message, Message):
+            query = {"id": callback.id, "from": callback.from_user.model_dump(by_alias=True),
+                     "chat": callback.message.chat.model_dump(), "message_id": callback.message.message_id,
+                     "data": callback.data}
         if not isinstance(query, dict):
             return await handler(event, data)
         bot = data["bot"]
@@ -153,5 +203,8 @@ class WidgetUpdateMiddleware(BaseMiddleware):
             )
             if outcome != "nora_widget_rejected":
                 answer = {"ok": True, "message": "Готово"}
+        if button:
+            await callback.answer(answer["message"])
+            return
         await bot(AnswerWidgetQuery(widget_query_id=str(query["id"]),
                                     data=json.dumps(answer, ensure_ascii=False)))
