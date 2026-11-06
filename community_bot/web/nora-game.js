@@ -15,7 +15,7 @@
     return scripts.get(name);
   }
   async function loadGame() {
-    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-world", "nora-records"]) await loadScript(name);
+    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-world"]) await loadScript(name);
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;
