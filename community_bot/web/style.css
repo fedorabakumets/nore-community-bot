@@ -849,3 +849,9 @@ form label{font-size:14px;color:var(--poster-muted)}
 
 .community-staff .community-person{padding-block:8px}
 .community-staff .person-visit{align-items:center}
+
+/* Profile photos fill their icon without a frame. */
+nav button .nav-profile-photo:has(img),.person-avatar:has(img),.avatar:has(img),.profile-photo:has(img){border:0;box-shadow:none;padding:0;overflow:hidden}
+nav button .nav-profile-photo img,.person-avatar img[data-mini-avatar],.avatar img,.profile-photo img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+
+nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
