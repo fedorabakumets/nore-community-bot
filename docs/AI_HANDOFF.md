@@ -2,56 +2,44 @@
 
 > Обновлено 06.11.2026. При расхождении доверять Git; секреты не записывать.
 
-## Текущая задача: lazy import и S3-кэш изображений
+## Текущая задача: виджеты сообщений
 
-- Worktree: C:/Users/User/Projects/nora-lazy-s3; ветка chatgpt/lazy-s3.
-- База: origin/cursor/nora-2-update-d133 = 7ceba13; fetch выполнен, база 0/0.
-- Исходная копия chatgpt/codex-dev-setup с изменениями AGENTS.md/handoff не переносилась.
-- Запрос владельца: экономия RAM, lazy import, S3 bucket; публикация разрешена.
-- Railway проект nora-community-bot: 865a77d3-9729-44a2-9ba8-3f36717c4718.
-- Production environment: 136c278e-4a0f-4b54-986c-8b64f9d69ad6.
-- Сервис nora-bot: dae67cd6-25ee-4710-b11a-7c8f6801e35b; одна реплика, SQLite /app/data.
-- Список проектов MCP пуст, но прямой запрос по ID работает. Токен в файлы не сохранялся.
+- Worktree: C:/Users/User/Projects/nora-message-widgets, chatgpt/message-widgets.
+- База origin/cursor/nora-2-update-d133: 5d76418; fetch + ls-remote совпали.
+- Исходная копия chatgpt/codex-dev-setup с локальными AGENTS.md/handoff не переносилась.
+- TelegramMessenger/widget-sandbox: profile 1, sendWidget описан для Bot API 10.4 beta.
+- Обычный Bot API ещё документирует 10.3; beta endpoint не включаем.
+- Сделано: возраст анкеты/профиля, произвольная сумма оплаты, карточка перевода.
+- Неизвестный/неподдерживаемый sendWidget возвращает прежнее сообщение; cooldown 10 минут.
+- Внешних runtime-зависимостей sandbox нет: один HTML profile 1, CSS/JS внутри.
+- PrivateRich меняет тип панели через отправку новой/сохранение указателя/удаление старой.
+- Виджет суммы готовит прежний wallet intent, подтверждение списания остаётся отдельным.
+- widget_query входит в штатный access/FSM pipeline; проверка nonce, владельца,
+  актуального сообщения, шага и диапазона выполняется под блокировкой панели.
+- Перевод только визуализирован; прежние inline-кнопки/авторизация/атомарность сохранены.
+- Фоновые уведомления не закрывают активный выбор; текстовый ввод и навигация сохранены.
+- Описание/ограничения: docs/INLINE_STYLE.md. Файлы: message_widgets.py,
+  widgets/number.html, private_rich.py, main.py, routers/group.py, test_private_rich.py.
+- check_local.py: Ruff + 856 passed, 1 skipped (Windows symlink), 68 warnings.
+  Есть прежние aiohttp warnings и warning фонового aiosqlite thread/закрытого loop.
+- После небольших финальных правок и добавления проверки оплаты: 13 widget tests
+  passed; Ruff, pip check и git diff --check прошли. Полный suite повторно не запускался.
+- Sandbox v0.6.0/d6f39f3: QuickJS + validator + renderer; возраст +/сохранить,
+  сумма 100 -> 150/ответ «Готово»; ширины 200/320/430/600, высоты <=434 px.
+  Размеры 2133–2199 байт zlib; overflow/лимитов/unsupported diagnostics нет.
+- Исходники sandbox/его инструменты только во временной папке вне Git.
+- Превью: C:/Users/User/Projects/nora-message-widgets-preview/{age,transfer}.png.
+- Проверенные изменения подготовлены к commit/push в feature и production;
+  итоговый SHA — git log, статус push — результат отправки. Live deploy не проверен.
+- Настоящий бот/production БД не запускались.
 
-## Сделано
+## Правила выпуска
 
-- Создан приватный Railway bucket nora-media (sjc), ID d0f81031-98a2-4dd6-bb9a-1315bf21441a.
-- media_cache.py: S3-кэш готовых аватаров/миниатюр/обложек; ключи — хеш file_id.
-- Авторизация остаётся в маршрутах; повторная проверка приватности профиля сохранена.
-- Telegram остаётся источником; без S3/при сбое fallback и 60-секундный cooldown.
-- SDK и Pillow импортируются по требованию; байты изображений не копятся в RAM-кэше.
-- Обработчики аватаров, событий и сезонных загрузок делят один слот декодирования.
-- JPEG draft/thumbnail выполняются до EXIF/RGB-копий. Магазин/часть админки пока на прежних путях.
-- Пять игровых библиотек грузятся при открытии игры, запросы дедуплицируются.
-- .env.example и docs/MEDIA_STORAGE.md описывают MEDIA_S3_* и границы кэша.
-- База/миграции не менялись; настоящий бот локально не запускался.
-
-## Проверки и измерения
-
-- Локальный JPEG 20 Мп: дополнительный пик RSS до 230,0 МиБ; после 41,3 МиБ.
-- Это синтетический Windows-тест, не экономия Railway; aiogram нужен poller постоянно.
-- Railway до выпуска за 24 ч: RAM среднее 0,8652 ГБ, максимум 1,1768, текущая 1,0725.
-- 38 профильных тестов и 6 тестов S3/ошибок/параллелизма/отмены/EXIF прошли.
-- Node VM: без открытия игры 0 загрузок; конкурентные/повторные открытия — 6 скриптов один раз.
-- node --check, Ruff, pip check прошли; check_local.py: 841 passed, 1 skipped (Windows symlink), 67 warnings.
-
-## Выпуск и остаток
-
-- MEDIA_S3_* заданы в nora-bot ссылками на nora-media с skipDeploys.
-- Проверенные файлы выпускаются одним коммитом в feature + production ветки;
-  фактический SHA и успешность push сверять по Git. Live deployment не проверен.
-- После публикации дополнительных проверок не выполнять: владелец проверяет сам.
-- Реальная запись/чтение S3 и экономия RAM после выпуска пока не проверены.
-- Старые производные S3 автоматически не удаляются; безопасна очистка images/v1/.
-- Долговременные словари антифлуда/меню из аудита остаются отдельной задачей.
-
-## Исправление Коммьюнити (06.11.2026)
-
-- Продолжение lazy-s3 на той же ветке; база production 27ebad5, дерево было чистым.
-- Регрессия: community.musicCard вызывает NoraRecords.art/giftIcon до входа в игру.
-- nora-records.js возвращён в начальную загрузку перед community.js и исключён из loadGame.
-- Игровые 3D-модули остаются ленивыми; S3/серверная логика не менялись.
-- Новый Node VM тест открывает Коммьюнити дважды без NoraVoxel/NoraWorld;
-  с прежним index.html воспроизводится ошибка art, с исправлением тест проходит.
-- node --check (3 JS), pip check и git diff --check прошли; check_local: 844 passed, 1 skipped.
-- После проверок исправление публикуется в production; устройство проверяет владелец.
+- Завершённые проверенные задачи публиковать по умолчанию; Railway следит
+  за cursor/nora-2-update-d133. Feature-ветка не отслеживает production для push.
+- После публикации дополнительных проверок не выполнять, владелец проверяет сам.
+- Git SHA production-ветки не доказывает успешный Railway deploy.
+- Пользовательские AGENTS.md и docs/AI_HANDOFF.md в исходной копии не коммитить.
+- Тесты — временная SQLite, fake Bot, PYTHON_DOTENV_DISABLED=1.
+- Python окружения исходной копии: C:/Users/User/Projects/nore-community-bot/.venv/Scripts/python.exe.
+- Базовые изменения lazy S3 уже в production-ветке; реальная экономия RAM здесь не проверяется.

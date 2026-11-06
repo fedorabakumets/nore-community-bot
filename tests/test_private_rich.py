@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.base import BaseSession
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound, TelegramRetryAfter
 from aiogram.methods import EditMessageText, SendRichMessage
 from aiogram.types import (
     BufferedInputFile,
@@ -49,6 +49,7 @@ class RecordingSession(BaseSession):
         self.fail = None
         self.next_id = 100
         self.uneditable = set()
+        self.widgets = False
 
     async def close(self):
         pass
@@ -64,12 +65,14 @@ class RecordingSession(BaseSession):
         if self.fail:
             error, self.fail = self.fail, None
             raise error
-        if method.__api_method__ in {"answerCallbackQuery", "deleteMessage"}:
+        if method.__api_method__ == "sendWidget" and not self.widgets:
+            raise TelegramNotFound(method=method, message="Not Found")
+        if method.__api_method__ in {"answerCallbackQuery", "answerWidgetQuery", "deleteMessage"}:
             return True
         uid = method.chat_id
         if isinstance(method, EditMessageText) and (uid, method.message_id) in self.uneditable:
             raise TelegramBadRequest(method=method, message="Bad Request: message can't be edited")
-        if isinstance(method, SendRichMessage):
+        if isinstance(method, SendRichMessage) or method.__api_method__ == "sendWidget":
             mid = self.next_id
             self.next_id += 1
             if method.reply_markup is not None and not isinstance(method.reply_markup, InlineKeyboardMarkup):
@@ -653,3 +656,183 @@ async def test_private_profile_compacts_ornate_style_preserving_fields_and_escap
 def test_compact_text_removes_decoration_but_preserves_code_layout():
     assert text_blocks('Заголовок\n\n━━━━━━━━\nТекст')[0]['text'] == 'Заголовок\nТекст'
     assert text_blocks('<pre>a\n\nb</pre>', 'HTML')[0]['text'] == 'a\n\nb'
+
+
+@pytest.mark.parametrize('flow', ['ApplicationForm:age', 'ProfileEdit:age', 'FlexiblePurchase:amount'])
+async def test_number_widget_replaces_panel_and_keeps_navigation(setup, flow):
+    from community_bot.message_widgets import SendWidget
+
+    db, bot, session, state = setup
+    first = await bot.send_message(7, 'Кабинет')
+    session.widgets = True
+    state.get_state.return_value = flow
+
+    async def prompt(message, data):
+        await message.answer('Выбери число', reply_markup=flow_reply_keyboard())
+
+    await turn(setup, prompt)
+    widget = next(c for c in session.calls if isinstance(c, SendWidget))
+    assert widget.allow_queries and not widget.is_shared
+    assert widget.reply_markup.inline_keyboard
+    assert 'Можно отправить число в чат' in widget.caption
+    assert session.calls[-1].__api_method__ == 'deleteMessage'
+    assert session.calls[-1].message_id == first.message_id
+    page = json.loads(await db.get_bot_state('private_rich_panel:7'))
+    assert page['widget']['min'] == (1 if flow.endswith('amount') else 14)
+    assert page['message_id'] != first.message_id
+    # Notices preserve the picker and its nonce instead of making it stale.
+    await bot.send_message(7, 'Уведомление')
+    assert json.loads(await db.get_bot_state('private_rich_panel:7')) == page
+
+
+async def test_widget_unknown_method_falls_back_with_capability_cooldown(setup):
+    db, bot, session, state = setup
+    state.get_state.return_value = 'ProfileEdit:age'
+
+    async def prompt(message, data):
+        await message.answer('Возраст?', reply_markup=flow_reply_keyboard())
+
+    await turn(setup, prompt)
+    await turn(setup, prompt)
+    assert sum(c.__api_method__ == 'sendWidget' for c in session.calls) == 1
+    assert isinstance(session.calls[-1], EditMessageText)
+    assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
+
+
+async def test_real_age_widget_update_uses_actor_fsm_and_rejects_replay(setup):
+    from community_bot.message_widgets import WidgetUpdateMiddleware
+    from community_bot.routers.profile import edit_profile_age
+    from community_bot.states import ProfileEdit
+
+    db, bot, session, _ = setup
+    session.widgets = True
+    dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    router = Router()
+
+    @router.message(F.text == '/age')
+    async def begin(message, state):
+        await state.set_state(ProfileEdit.age)
+        await message.answer('Возраст?', reply_markup=flow_reply_keyboard())
+
+    router.message.register(edit_profile_age, ProfileEdit.age)
+    dispatcher.include_router(router)
+    await dispatcher.feed_update(bot, Update(update_id=1, message=incoming(text='/age')),
+                                 db=db, settings=bot.community_settings)
+    page = json.loads(await db.get_bot_state('private_rich_panel:7'))
+    query = {'id': 'query-age', 'from': incoming().from_user.model_dump(),
+             'chat': incoming().chat.model_dump(), 'message_id': page['message_id'],
+             'data': f"nora:{page['widget']['token']}:25"}
+    for update_id in (2, 3):
+        await dispatcher.feed_update(bot, Update(update_id=update_id, widget_query=query),
+                                     db=db, settings=bot.community_settings)
+        answer = session.calls[-1]
+        assert answer.__api_method__ == 'answerWidgetQuery'
+        assert json.loads(answer.data)['ok'] == (update_id == 2)
+    assert (await db.get_user(7))['age'] == 25
+    assert await dispatcher.fsm.get_context(bot, 7, 7).get_state() is None
+    assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
+    assert sum(c.__api_method__ == 'deleteMessage' for c in session.calls) == 1
+    await dispatcher.storage.close()
+
+
+async def test_amount_widget_prepares_discounted_intent_without_spending(setup, monkeypatch):
+    from community_bot.message_widgets import WidgetUpdateMiddleware
+    from community_bot.routers.group import finish_flexible_purchase
+    from community_bot.states import FlexiblePurchase
+
+    db, bot, session, _ = setup
+    session.widgets = True
+    prepare = AsyncMock(return_value='test-intent')
+    monkeypatch.setattr(db, 'create_wallet_intent', prepare)
+    before = (await db.get_user(7))['cookies']
+    dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    router = Router()
+
+    @router.message(F.text == '/amount')
+    async def begin(message, state):
+        await state.set_state(FlexiblePurchase.amount)
+        await state.update_data(flex_item='support', flex_discount=10)
+        await message.answer('Сумма?')
+
+    router.message.register(finish_flexible_purchase, FlexiblePurchase.amount)
+    dispatcher.include_router(router)
+    await dispatcher.feed_update(bot, Update(update_id=1, message=incoming(text='/amount')),
+                                 db=db, settings=bot.community_settings)
+    page = json.loads(await db.get_bot_state('private_rich_panel:7'))
+    query = {'id': 'query-amount', 'from': incoming().from_user.model_dump(),
+             'chat': incoming().chat.model_dump(), 'message_id': page['message_id'],
+             'data': f"nora:{page['widget']['token']}:500"}
+    for idx in (2, 3):
+        await dispatcher.feed_update(bot, Update(update_id=idx, widget_query=query),
+                                     db=db, settings=bot.community_settings)
+    prepare.assert_awaited_once_with(7, 'support', 450, payload={'base_amount': 500, 'discount': 10})
+    assert (await db.get_user(7))['cookies'] == before
+    rich = next(c for c in reversed(session.calls) if isinstance(c, SendRichMessage))
+    assert 'test-intent' in rich.rich_message.model_dump_json()
+    assert '450' in rich.rich_message.model_dump_json()
+    await dispatcher.storage.close()
+
+
+@pytest.mark.parametrize('change', ['nonce', 'range', 'actor', 'message', 'state'])
+async def test_widget_rejects_forged_and_stale_submissions(setup, change):
+    from community_bot.message_widgets import submission
+
+    _, _, _, _ = setup
+    page = {'message_id': 5, 'flow': 'ProfileEdit:age',
+            'widget': {'token': '0123456789abcdef', 'min': 14, 'max': 120}}
+    event = incoming(text='25').model_copy(update={
+        'message_id': 5, 'nora_widget': '0123456789abcdef',
+    })
+    flow = 'ProfileEdit:age'
+    if change == 'nonce':
+        event = event.model_copy(update={'nora_widget': 'fedcba9876543210'})
+    elif change == 'range':
+        event = event.model_copy(update={'text': '9999999'})
+    elif change == 'actor':
+        event = event.model_copy(update={'from_user': incoming(uid=8).from_user})
+    elif change == 'message':
+        event = event.model_copy(update={'message_id': 4})
+    else:
+        flow = 'ApplicationForm:age'
+    assert not submission(event, page, flow)
+
+
+async def test_widget_network_error_preserves_current_panel_without_duplicate(setup):
+    db, bot, session, state = setup
+    await bot.send_message(7, 'Кабинет')
+    page = await db.get_bot_state('private_rich_panel:7')
+    state.get_state.return_value = 'ProfileEdit:age'
+    session.fail = TelegramNetworkError(method=session.calls[0], message='Connection lost')
+
+    async def prompt(message, data):
+        await message.answer('Возраст?')
+
+    with pytest.raises(TelegramNetworkError):
+        await turn(setup, prompt)
+    assert await db.get_bot_state('private_rich_panel:7') == page
+    assert not any(c.__api_method__ == 'deleteMessage' for c in session.calls)
+
+
+async def test_transfer_widget_is_read_only_keeps_confirmation_and_escapes_names(setup):
+    from community_bot.message_widgets import document, transfer_card
+
+    _, bot, session, _ = setup
+    session.widgets = True
+    bot.community_db = None  # This display test must not schedule background DB bookkeeping.
+    markup = InlineKeyboardMarkup(inline_keyboard=[[ibtn('Подтвердить', 'transfer:yes:1')]])
+    source = incoming().model_copy(update={'chat': Chat(id=-1007, type='supergroup')}).as_(bot)
+    target = {'telegram_name': '</script><script>evil()</script>'}
+    assert await transfer_card(source, target, 100, 5, 95, markup)
+    call = session.calls[-1]
+    assert call.reply_markup.inline_keyboard[0][0].callback_data == 'transfer:yes:1'
+    assert not call.allow_queries and not call.is_shared
+    assert '</script><script>evil()' not in call.html
+    import zlib
+
+    assert len(zlib.compress(call.html.encode(), 9)) < 4096
+    with pytest.raises(ValueError):
+        document({'note': 'x' * 40000})

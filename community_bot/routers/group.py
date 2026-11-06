@@ -622,6 +622,10 @@ async def profile_transfer(callback: CallbackQuery, db: Database, settings: Sett
     transfer_id = await db.create_transfer(callback.from_user.id, target_id, amount)
     await callback.message.edit_reply_markup(reply_markup=public_profile_keyboard(target_id))
     await callback.answer("Подтвердите перевод.")
+    from community_bot.message_widgets import transfer_card
+
+    if await transfer_card(callback.message, target, amount, percent, received, transfer_keyboard(transfer_id)):
+        return
     await callback.message.answer(
         f"Перевести {_target_display(target)} {amount} 🍪?\n"
         f"Комиссия {percent}% (по уровню репутации), пользователь получит {received} 🍪.",
@@ -1640,6 +1644,10 @@ async def _prepare_transfer(
         return
     transfer_id = await db.create_transfer(message.from_user.id, int(target["user_id"]), amount)
     with keep_in_chat():
+        from community_bot.message_widgets import transfer_card
+
+        if await transfer_card(message, target, amount, percent, received, transfer_keyboard(transfer_id)):
+            return
         await _respond(
             message,
             f"Перевести {_target_display(target)} {amount} 🍪?\n"

@@ -430,6 +430,9 @@ async def main() -> None:
     from community_bot.access import ProfileAccessMiddleware
 
     dispatcher = Dispatcher()
+    from community_bot.message_widgets import WidgetUpdateMiddleware
+
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
@@ -513,6 +516,7 @@ async def main() -> None:
     try:
         await dispatcher.start_polling(
             bot,
+            allowed_updates=[*dispatcher.resolve_used_update_types(), "widget_query"],
             db=db,
             settings=settings,
             emergency_stop=emergency_stop,

@@ -359,6 +359,13 @@ class PrivateRichContextMiddleware(BaseMiddleware):
             return await handler(event, data)
         bot, uid = data["bot"], source.chat.id
         async with _lock(_EVENT_LOCKS, bot, uid):
+            if isinstance(event, Message) and getattr(event, "nora_widget", None):
+                from community_bot.message_widgets import submission
+
+                raw = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
+                current = await data["state"].get_state()
+                if not submission(event, json.loads(raw) if raw else {}, current):
+                    return "nora_widget_rejected"
             if isinstance(event, CallbackQuery) and source.message_id > 0:
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
                 if saved and json.loads(saved)["message_id"] != source.message_id:
@@ -398,6 +405,11 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         if name == "deleteMessage":
             if method.message_id == message_id:
                 return True  # Private close actions must keep the navigation surface.
+            return await make_request(bot, method)
+        if page.get("widget") and not personal_turn:
+            # A background notice must leave the active number picker usable.
+            if name in _EDIT:
+                return _message(bot, uid, message_id)
             return await make_request(bot, method)
         if name in _EDIT and message_id and method.message_id != message_id:
             # Delayed game updates must not replace a newer personal screen.
@@ -440,6 +452,27 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         body = blocks + buttons
         footer = await navigation(bot, uid, body, current, page.get("back") if append or not personal_turn else None)
         rich = InputRichMessage(blocks=body + footer)
+        widget = None
+        from community_bot.message_widgets import picker
+
+        if personal_turn and name in _SEND | _EDIT:
+            widget = await picker(make_request, bot, uid, current, footer)
+        # Telegram cannot edit a text/Rich message into a widget or vice versa.
+        # Send the replacement first so a failed send keeps the old screen usable.
+        if widget:
+            result, widget_meta = widget
+            screen = turn.screen if turn else uuid4().hex
+            await db.set_bot_state(key, json.dumps({
+                "version": 2, "message_id": result.message_id, "body": body,
+                "flow": current, "screen": screen, "widget": widget_meta,
+            }, ensure_ascii=False))
+            turn.sent.add(uid)
+            if message_id:
+                await self.remove_old(make_request, bot, uid, message_id)
+            return result
+        old_widget_id = message_id if page.get("widget") else None
+        if old_widget_id:
+            message_id = None
         if personal_turn and turn.reopen and uid not in turn.sent:
             if message_id:
                 try:
@@ -496,5 +529,17 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                                               ensure_ascii=False))
         if turn and turn.is_handler:
             turn.sent.add(uid)
+        if old_widget_id:
+            await self.remove_old(make_request, bot, uid, old_widget_id)
         return (MessageId(message_id=result.message_id) if isinstance(original, CopyMessage)
                 else _uploaded_media(result, original))
+
+    @staticmethod
+    async def remove_old(make_request, bot, uid, message_id):
+        try:
+            await make_request(bot, DeleteMessage(chat_id=uid, message_id=message_id))
+        except TelegramBadRequest as error:
+            if not any(reason in str(error).casefold() for reason in (
+                "message to delete not found", "message can't be deleted", "message_id_invalid",
+            )):
+                raise
