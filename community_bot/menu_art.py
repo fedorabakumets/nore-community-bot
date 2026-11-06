@@ -4,8 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
-
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 ART = ASSETS / "art" / "grandma"
 FONT_PATH = ASSETS / "fonts" / "Rubik-Variable.ttf"
@@ -77,6 +75,8 @@ def render_cover(key: str, *, destination: Path | None = None, subtitle: str = "
         atlas.stat().st_mtime, FONT_PATH.stat().st_mtime, Path(__file__).stat().st_mtime,
     ):
         return path
+    from PIL import Image, ImageDraw, ImageFont
+
     with Image.open(atlas) as source:
         width, height = source.size
         column, row = spec.cell % 2, spec.cell // 2

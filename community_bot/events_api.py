@@ -8,7 +8,6 @@ import json
 import re
 import secrets
 from datetime import UTC, datetime
-from io import BytesIO
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -331,11 +330,9 @@ async def cover(request):
     cfg = await config(db, eid)
     if not cfg.get("cover_id"):
         raise web.HTTPNotFound()
-    output = BytesIO()
-    await request.app["bot"].download(cfg["cover_id"], destination=output)
-    from community_bot.miniapp import normalized_photo
+    from community_bot.media_cache import images
 
-    photo = await asyncio.to_thread(normalized_photo, output.getvalue())
+    photo = await images(request).photo(cfg["cover_id"])
     return web.Response(body=photo, content_type="image/jpeg")
 
 
@@ -346,9 +343,9 @@ async def upload(request):
     if request.content_type in {"image/jpeg", "image/png", "image/webp"}:
         if len(raw) > 5 * 1024 * 1024:
             raise ValueError("Фото должно быть не больше 5 МБ")
-        from community_bot.miniapp import normalized_photo
+        from community_bot.media_cache import images
 
-        photo = await asyncio.to_thread(normalized_photo, raw)
+        photo = await images(request).normalize(raw)
         sent = await bot.send_photo(
             uid,
             BufferedInputFile(photo, filename="event.jpg"),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 from io import BytesIO
@@ -190,7 +189,7 @@ def thumbnail(photo):
 
 
 async def avatar(request):
-    from community_bot.miniapp import normalized_photo
+    from community_bot.media_cache import images
 
     target = await target_for(request)
     if not await can_view_profile(request.app["db"], request.app["settings"], request["actor"]["id"], target):
@@ -198,11 +197,7 @@ async def avatar(request):
     if not target["avatar_file_id"] or target["avatar_media_type"] != "photo" or request.app["bot"] is None:
         raise web.HTTPNotFound()
     try:
-        output = BytesIO()
-        await request.app["bot"].download(target["avatar_file_id"], destination=output)
-        photo = await asyncio.to_thread(normalized_photo, output.getvalue())
-        if request.query.get("size") == "thumb":
-            photo = await asyncio.to_thread(thumbnail, photo)
+        photo = await images(request).photo(target["avatar_file_id"], thumb=request.query.get("size") == "thumb")
         fresh = await target_for(request)
         if not await can_view_profile(request.app["db"], request.app["settings"], request["actor"]["id"], fresh):
             raise web.HTTPForbidden()

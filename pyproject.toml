@@ -13,6 +13,7 @@ dependencies = [
   "aiosqlite>=0.21,<1",
   "python-dotenv>=1.1,<2",
   "Pillow>=11,<12",
+  "boto3>=1.40,<2",
 ]
 
 [project.optional-dependencies]

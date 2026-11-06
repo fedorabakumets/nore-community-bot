@@ -1,10 +1,23 @@
 'use strict';
 (() => {
   let overlay = null, active = 0, requestedFullscreen = false, sceneStop = null;
-  const defaults = window.NoraVoxel.defaults;
+  let defaults;
   let outfit = { ...defaults };
   let wingState;
-  const wingShop = window.NoraWings;
+  let wingShop;
+  const scripts = new Map();
+  function loadScript(name) {
+    if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
+      const script = document.createElement("script"); script.src = "/" + name + ".js";
+      script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
+      document.head.appendChild(script);
+    }));
+    return scripts.get(name);
+  }
+  async function loadGame() {
+    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-world", "nora-records"]) await loadScript(name);
+    defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
+  }
   let helpDismissed = false;
   let music = null, pendingGift = false;
   const settings = {pov: 100, music: 100, effects: 100};
@@ -382,7 +395,7 @@
     music = createMusic(); music.start();
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
-    try { const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
+    try { await loadGame(); if (version !== active) return; const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const gift=pendingGift;close();open(gift); }; } }
   }
   document.addEventListener('click', event => { if (event.target.closest('#nora-game-open')) open(); if(event.target.closest('[data-record-gift]'))open(true); });

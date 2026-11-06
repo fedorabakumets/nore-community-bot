@@ -1,7 +1,6 @@
 """Same-process Mini App: Telegram-signed identity, shared economy, no browser secrets."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -17,7 +16,6 @@ from zoneinfo import ZoneInfo
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile
 from aiohttp import web
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from community_bot.database import Database
 
@@ -247,13 +245,15 @@ async def join_event(request):
 
 
 def normalized_photo(raw: bytes) -> bytes:
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
     try:
         with Image.open(BytesIO(raw)) as image:
             if image.format not in {'JPEG', 'PNG', 'WEBP'} or image.width * image.height > 20_000_000:
                 raise ValueError('Нужна фотография JPG, PNG или WebP до 20 мегапикселей')
-            image.load()
-            image = ImageOps.exif_transpose(image).convert('RGB')
+            image.draft('RGB', (1600, 1600))
             image.thumbnail((1600, 1600))
+            image = ImageOps.exif_transpose(image).convert('RGB')
             output = BytesIO()
             image.save(output, 'JPEG', quality=88)
             return output.getvalue()
@@ -297,7 +297,9 @@ async def upload_avatar(request):
     raw = await request.read()
     if not raw or len(raw) > 5 * 1024 * 1024:
         raise ValueError('Фотография должна быть не больше 5 МБ')
-    photo = await asyncio.to_thread(normalized_photo, raw)
+    from community_bot.media_cache import images
+
+    photo = await images(request).normalize(raw)
     try:
         sent = await request.app['bot'].send_photo(
             user['user_id'], BufferedInputFile(photo, filename='nora-avatar.jpg'),
@@ -313,14 +315,14 @@ async def upload_avatar(request):
 
 
 async def avatar(request):
+    from community_bot.media_cache import images
+
     user = await actor(request)
     file_id = user.get('avatar_file_id')
     if not file_id or user.get('avatar_media_type') == 'video':
         raise web.HTTPNotFound()
     try:
-        output = BytesIO()
-        await request.app['bot'].download(file_id, destination=output)
-        photo = await asyncio.to_thread(normalized_photo, output.getvalue())
+        photo = await images(request).photo(file_id)
     except (TelegramAPIError, ValueError):
         raise web.HTTPNotFound() from None
     return web.Response(body=photo, content_type='image/jpeg')
@@ -333,6 +335,12 @@ async def index(request):
 def create_app(db: Database, settings, bot, admin_runtime=None):
     app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
     app.update(db=db, settings=settings, bot=bot)
+    from community_bot.media_cache import MediaImages
+
+    app['media_images'] = MediaImages(bot)
+    async def close_media(_):
+        await app['media_images'].close()
+    app.on_cleanup.append(close_media)
     app.router.add_get('/', index)
     app.router.add_get('/game/nora-theme.mp3', lambda _: web.FileResponse(
         ASSETS / 'game' / 'nora-theme.mp3', headers={'Content-Type': 'audio/mpeg'}))

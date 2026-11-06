@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -367,7 +366,8 @@ async def items_endpoint(request):
 
 
 async def upload_image(request):
-    from community_bot.miniapp import actor, normalized_photo
+    from community_bot.media_cache import images
+    from community_bot.miniapp import actor
 
     user = await actor(request)
     db, settings = request.app["db"], request.app["settings"]
@@ -376,7 +376,7 @@ async def upload_image(request):
     raw = await request.read()
     if request.content_type not in {"image/jpeg", "image/png", "image/webp"} or len(raw) > 5 * 1024 * 1024:
         raise ValueError("Выберите фото JPG, PNG или WebP до 5 МБ")
-    photo = await asyncio.to_thread(normalized_photo, raw)
+    photo = await images(request).normalize(raw)
     sent = await request.app["bot"].send_photo(
         user["user_id"], BufferedInputFile(photo, filename="seasonal.jpg"),
         caption="Изображение сезонного предмета", disable_notification=True,
