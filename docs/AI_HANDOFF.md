@@ -2,6 +2,17 @@
 
 > Обновлено 06.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## Экран набора тестировщиков — 7 ноября 2026
+
+- Worktree C:/Users/User/Projects/nora-tester-access, ветка chatgpt/tester-access-screen;
+  база origin/cursor/nora-2-update-d133: 1f967c8. Исходная рабочая копия с
+  незавершёнными AGENTS.md и handoff не переносилась.
+- При отказе в доступе Mini App показывает изображение владельца и приглашение
+  вступить в тестировщики; кнопка ведёт в существующий тикет бота через start=idea.
+- Проверки: node --check, Ruff, pytest 859 passed / 1 skipped, pip check.
+- Серверные правила ранга не менялись. Внешний вид и переход в Telegram владельцу
+  следует проверить на устройстве после выпуска; реальный деплой не подтверждён.
+
 ## Текущая задача: виджеты сообщений
 
 - Worktree: C:/Users/User/Projects/nora-message-widgets, chatgpt/message-widgets.
