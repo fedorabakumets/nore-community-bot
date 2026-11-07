@@ -100,6 +100,14 @@ async def companion(request):
     return web.json_response({'pet': await pet_data(request.app['db'], {'user_id': request['actor']['id']})})
 
 
+async def stroke_companion(request):
+    db = request.app['db']
+    if not await db.feature_enabled('tamagotchi'):
+        return web.json_response({'ok': False, 'message': 'Действия питомца временно отключены.'})
+    ok, message = await db.stroke_pet(request['actor']['id'])
+    return web.json_response({'ok': ok, 'message': message})
+
+
 async def register(request):
     body = await request.json()
     nickname = body.get('nickname') if isinstance(body, dict) else None

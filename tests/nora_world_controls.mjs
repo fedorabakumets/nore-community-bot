@@ -94,7 +94,7 @@ try {
     window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
-      auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
+      auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, toast:()=>{}, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       performance:{now:()=>time}, requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     if(realScenery)vm.runInContext(sceneryCode, context);
     vm.runInContext(wings, context);
@@ -389,7 +389,7 @@ try {
   for(const species of ['cat','dog','fox','raccoon','dragon']) {
     let current={name:'<Друг>',species,species_label:species,hunger:72,thirst:83,enabled:true,expedition_until:null};
     const calls=[];
-    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='pet/prepare')return {token:'owner-token'};
+    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='nora-game/pet/stroke')return {ok:true,message:'Настроение повысилось'};if(path==='pet/prepare')return {token:'owner-token'};
       if(path==='pet/action'){current={...current,expedition_until:'2026-11-03T12:00:00Z'};return {ok:true,message:'В походе'};}
       return {pet:current};};
     const h=await setup(0,60,petApi);await flush();h.frames(1);
@@ -397,6 +397,7 @@ try {
     assert.ok(pet.children[0].count<1500,'bounded voxel model');
     const actions=h.root.querySelector('.nora-pet-actions');assert.equal(actions.hidden,false,'nearby actions');
     h.root.querySelector('.nora-pet-stroke').emit('click');h.frames(1);
+    await flush();assert.equal(calls.filter(([path])=>path==='nora-game/pet/stroke').length,1,'stroke reaches server');
     const hearts=h.scene().getObjectByName('nora-pet-hearts');assert.equal(hearts.visible,true,'petting hearts');
     const alpha=hearts.material.opacity;h.frames(40);assert.ok(hearts.material.opacity<alpha,'hearts fade');
     h.frames(80);assert.equal(hearts.visible,false,'hearts expire');

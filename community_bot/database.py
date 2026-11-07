@@ -2674,6 +2674,7 @@ class Database:
             expedition_until = str(pet.get("expedition_until") or "")
             on_expedition = False
             expedition_due = False
+            until_dt = None
             if expedition_until:
                 try:
                     until_dt = datetime.fromisoformat(expedition_until)
@@ -2683,11 +2684,16 @@ class Database:
                     expedition_due = until_dt <= now_dt
                 except ValueError:
                     expedition_due = True
+            if expedition_due and until_dt is not None:
+                last_tick = max(last_tick, until_dt.astimezone(UTC))
+                hours = max(0, int((now_dt - last_tick).total_seconds() // 3600))
             if hours and not on_expedition:
                 hunger = max(0, int(pet["hunger"]) - hours * 2)
                 thirst = max(0, int(pet["thirst"]) - hours * 3)
                 sleeping = int(hunger == 0 or thirst == 0)
-                mood = max(0, min(100, (hunger + thirst) // 2 - (20 if sleeping else 0)))
+                target = max(0, (hunger + thirst) // 2 - (20 if sleeping else 0))
+                old_mood = int(pet["mood"])
+                mood = min(target, old_mood + hours) if old_mood < target else max(target, old_mood - hours)
                 new_tick = (last_tick + timedelta(hours=hours)).isoformat()
                 await db.execute(
                     """
@@ -2712,9 +2718,11 @@ class Database:
                 await db.execute(
                     """
                     UPDATE pets SET expedition_until = NULL, expedition_reward = ?, expedition_loot = ?,
+                        last_tick_at = ?,
                         expedition_notice_sent = 0, updated_at = ? WHERE user_id = ?
                     """,
-                    (reward, json.dumps(loot_payload, ensure_ascii=False), now, user_id),
+                    (reward, json.dumps(loot_payload, ensure_ascii=False),
+                     (last_tick + timedelta(hours=hours)).isoformat(), now, user_id),
                 )
             await db.commit()
         result = await self.fetchone("SELECT * FROM pets WHERE user_id = ?", (user_id,))
@@ -2870,6 +2878,39 @@ class Database:
             "UPDATE pets SET last_talk_at = ?, mood = MIN(100, mood + 4), updated_at = ? WHERE user_id = ?",
             (now, now, user_id),
         )
+
+    async def stroke_pet(self, user_id: int) -> tuple[bool, str]:
+        await self.settle_pet(user_id)
+        now = datetime.now(UTC)
+        key = f"pet_stroke:{user_id}"
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            row = await (await db.execute(
+                "SELECT expedition_until, mood FROM pets WHERE user_id = ?", (user_id,)
+            )).fetchone()
+            if not row or row["expedition_until"]:
+                await db.rollback()
+                return False, "Питомец сейчас недоступен."
+            if int(row["mood"]) >= 100:
+                await db.rollback()
+                return False, "Настроение питомца уже на максимуме."
+            saved = await (await db.execute("SELECT value FROM bot_state WHERE key = ?", (key,))).fetchone()
+            if saved:
+                try:
+                    next_time = datetime.fromisoformat(saved["value"]) + timedelta(hours=1)
+                    if next_time > now:
+                        minutes = max(1, int((next_time - now).total_seconds() + 59) // 60)
+                        await db.rollback()
+                        return False, f"Погладить для настроения можно через {minutes} мин."
+                except (TypeError, ValueError):
+                    pass
+            stamp = now.isoformat()
+            await db.execute("UPDATE pets SET mood = MIN(100, mood + 50), updated_at = ? WHERE user_id = ?",
+                             (stamp, user_id))
+            await db.execute("INSERT INTO bot_state(key, value) VALUES (?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, stamp))
+            await db.commit()
+        return True, f"Настроение питомца: +{min(50, 100 - int(row['mood']))}."
 
     async def create_party_game(
         self,
@@ -4052,7 +4093,7 @@ class Database:
     async def start_expedition(
         self, user_id: int, timezone: str = "Europe/Moscow", *, intent_id: str | None = None,
     ) -> tuple[bool, str, int]:
-        from community_bot.expedition import expedition_until_iso, remaining_label
+        from community_bot.expedition import expedition_until_iso, remaining_label, roll_expedition_loot
 
         pet = await self.get_pet(user_id)
         if not pet:
@@ -4066,13 +4107,20 @@ class Database:
                 await db.rollback()
                 return False, error, 0
 
+            cursor = await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            if not row or int(row["hunger"]) < 50 or int(row["thirst"]) < 50:
+                await db.rollback()
+                return False, "Для похода сытость и вода должны быть не ниже 50.", 0
+            loot = json.dumps(roll_expedition_loot(int(row["mood"])).to_json(), ensure_ascii=False)
+
             cursor = await db.execute(
                 """
-                UPDATE pets SET expedition_until = ?, expedition_reward = 0, expedition_loot = NULL,
-                    expedition_notice_sent = 1, updated_at = ?
+                UPDATE pets SET expedition_until = ?, expedition_reward = 0, expedition_loot = ?,
+                    expedition_notice_sent = 1, last_tick_at = ?, updated_at = ?
                 WHERE user_id = ? AND (expedition_until IS NULL OR expedition_until <= ?)
                 """,
-                (until, now, user_id, now),
+                (until, loot, now, now, user_id, now),
             )
             if cursor.rowcount != 1:
                 cursor = await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))

@@ -50,7 +50,7 @@ async def test_companion_uses_own_existing_pet_and_expedition(tmp_path):
     returned = content(await nora_game_api.companion(request(db, 1)))['pet']
     assert returned['expedition_until'] is None
     after = (await db.get_user(1))['cookies']
-    assert 1 <= after - before <= 10
+    assert 0 <= after - before <= 10
     await nora_game_api.companion(request(db, 1))
     assert (await db.get_user(1))['cookies'] == after
 

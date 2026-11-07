@@ -404,6 +404,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/nora-game/socket', nora_game_api.lobby_socket)
     app.router.add_get('/api/nora-game', nora_game_api.status)
     app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
+    app.router.add_post('/api/nora-game/pet/stroke', nora_game_api.stroke_companion)
     app.router.add_post('/api/nora-game', nora_game_api.register)
     app.router.add_post('/api/nora-game/wings', nora_game_api.change_wings)
     app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)

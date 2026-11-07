@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 # Duration of one expedition and the cooldown before the next send.
 EXPEDITION_DURATION = timedelta(hours=24)
 
-# Weights are in ten-thousandths: 1 unit = 0.01%. Must sum to 10_000.
-# 10 cookies is exactly 0.01% as required.
+# Base weights for legacy expeditions and for the mood-adjusted distribution.
+# Without mood adjustment, 10 cookies has a 0.01% chance.
 COOKIE_WEIGHTS: dict[int, int] = {
     1: 4000,
     2: 2500,
@@ -50,6 +50,8 @@ class ExpeditionLoot:
         if self.title:
             return self.title
         if self.kind == "cookies":
+            if self.amount == 0:
+                return "ничего не найдено"
             from community_bot.domain import cookies_phrase
 
             return f"{cookies_phrase(self.amount)} 🍪"
@@ -73,10 +75,17 @@ class ExpeditionLoot:
         )
 
 
-def roll_expedition_loot() -> ExpeditionLoot:
-    ticket = secrets.randbelow(WEIGHT_TOTAL)
+def roll_expedition_loot(mood: int | None = None) -> ExpeditionLoot:
+    if mood is None:  # Existing expeditions without a saved result retain the old rules.
+        weights = COOKIE_WEIGHTS
+    else:
+        mood = max(0, min(100, mood))
+        if secrets.randbelow(100) >= 30 + mood * 60 // 100:
+            return ExpeditionLoot(kind="cookies", amount=0)
+        weights = {amount: weight * (100 + mood * (amount - 1)) for amount, weight in COOKIE_WEIGHTS.items()}
+    ticket = secrets.randbelow(sum(weights.values()))
     acc = 0
-    for amount, weight in COOKIE_WEIGHTS.items():
+    for amount, weight in weights.items():
         acc += weight
         if ticket < acc:
             return ExpeditionLoot(kind="cookies", amount=amount)
@@ -130,6 +139,8 @@ def result_text(
     returned = species_words.get("returned") or "вернулся"
     prize = html.escape(loot.label())
     who = f" к {mention}" if mention else ""
+    if loot.kind == "cookies" and loot.amount == 0:
+        return f"🗺 <b>{name}</b> {returned} из экспедиции{who}. На этот раз находок нет."
     return (
         f"🗺 <b>{name}</b> {returned} из экспедиции{who}.\n"
         f"Результат: питомец сыскал награду.\n"

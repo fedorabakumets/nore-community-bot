@@ -71,10 +71,11 @@ def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: st
     if until:
         left = remaining_label(until, timezone)
         return (
-            f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} с находкой — "
+            f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} — "
             "одно сообщение в чат и в личку.\n\n"
         )
-    return "🗺 Можно отправить в экспедицию раз в 24 часа. Находка: 1–10 🍪, крупные награды очень редки.\n\n"
+    return ("🗺 Поход длится 24 часа. Сытость и вода должны быть не ниже 50. "
+            "Настроение влияет на шанс и размер находки; возможна неудача.\n\n")
 
 
 async def _maybe_announce(message: Message, db: Database, settings: Settings, pet: dict[str, object]) -> None:

@@ -74,8 +74,8 @@ window.NoraCompanion = (() => {
     }
     function render(){
       if(!panel.open)return;
-      const p=pet,disabled=!valid||pending||!p?.enabled||!!p?.expedition_until;
-      content.innerHTML=p?`<h2>${esc(p.name)}</h2><p>${esc(p.species_label)}</p><label>Сытость: ${Number(p.hunger)||0} / 100<progress max="100" value="${Number(p.hunger)||0}"></progress></label><label>Вода: ${Number(p.thirst)||0} / 100<progress max="100" value="${Number(p.thirst)||0}"></progress></label><p>${p.expedition_until?'В походе до '+esc(new Date(p.expedition_until).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}))+' МСК':'Поход длится 24 часа. Питомец вернётся с находкой.'}</p>${!p.enabled?'<p>Походы временно отключены.</p>':''}<button type="button" class="nora-pet-expedition" ${disabled?'disabled':''}>${pending?'Отправляем…':p.expedition_until?'Питомец в походе':'Отправить в поход'}</button>`:'<p>Питомец пока не появился. Завести его можно в магазине.</p>';
+      const p=pet,disabled=!valid||pending||!p?.enabled||!!p?.expedition_until||p?.hunger<50||p?.thirst<50;
+      content.innerHTML=p?`<h2>${esc(p.name)}</h2><p>${esc(p.species_label)}</p><label>Сытость: ${Number(p.hunger)||0} / 100<progress max="100" value="${Number(p.hunger)||0}"></progress></label><label>Вода: ${Number(p.thirst)||0} / 100<progress max="100" value="${Number(p.thirst)||0}"></progress></label><label>Настроение: ${Number(p.mood)||0} / 100<progress max="100" value="${Number(p.mood)||0}"></progress></label><p>${p.expedition_until?'В походе до '+esc(new Date(p.expedition_until).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}))+' МСК':'Поход длится 24 часа. Сытость и вода должны быть не ниже 50; находка зависит от настроения.'}</p>${!p.enabled?'<p>Походы временно отключены.</p>':''}<button type="button" class="nora-pet-expedition" ${disabled?'disabled':''}>${pending?'Отправляем…':p.expedition_until?'Питомец в походе':'Отправить в поход'}</button>`:'<p>Питомец пока не появился. Завести его можно в магазине.</p>';
     }
     async function refresh(){
       if(flight)return flight;
@@ -87,7 +87,9 @@ window.NoraCompanion = (() => {
     on(panel.querySelector('.nora-pet-close'),'click',()=>panel.close());
     on(panel,'close',resetInput);
     on(panel,'cancel',e=>e.stopPropagation());
-    on(stroke,'click',()=>{if(near&&model){pettingHold=1.6;wanderTarget=null;model.stroke();stroke.blur();}});
+    on(stroke,'click',async()=>{if(!near||!model||pending)return;pettingHold=1.6;wanderTarget=null;model.stroke();stroke.blur();pending=true;
+      try{const result=await api('nora-game/pet/stroke',{});if(disposed)return;toast(result.message);if(result.ok)await refresh();}
+      catch(error){if(!disposed)toast(error.message);}finally{pending=false;}});
     on(content,'click',async event=>{
       if(!event.target.closest('.nora-pet-expedition')||pending||!valid||!pet?.enabled||pet.expedition_until)return;
       pending=true;message.textContent='';render();

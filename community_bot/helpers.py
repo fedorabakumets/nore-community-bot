@@ -390,7 +390,8 @@ async def pet_guard_reputation(
     today = (action_date or datetime.now(UTC).date()).isoformat()
     if used_on == today:
         return delta, None
-    if secrets.randbelow(100) >= 15:
+    chance = 5 + max(0, min(100, int(pet.get("mood") or 0))) * 25 // 100
+    if secrets.randbelow(100) >= chance:
         return delta, None
     await db.mark_pet_guard(target_id, today)
     name = html.escape(str(pet["name"]))
