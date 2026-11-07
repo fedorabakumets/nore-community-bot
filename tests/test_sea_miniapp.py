@@ -285,15 +285,24 @@ async def test_winner_takes_double_stake_and_finish_reveals_ships(env):
     assert (await env.db.get_user(8))["cookies"] == 90
 
 
-async def test_bot_stake_is_charged_at_create_and_refunded_on_cancel(env):
-    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=25)
-    assert (await env.db.get_user(7))["cookies"] == 75
-    bets = await env.db.fetchall("SELECT amount,kind FROM transactions WHERE user_id=7 ORDER BY id")
-    assert bets[-1]["amount"] == -25 and bets[-1]["kind"] == "sea_bet"
+async def test_bot_stakes_are_rejected_without_charging(env):
+    with pytest.raises(ValueError, match="С ботом.*только бесплатно"):
+        await send(env, 7, "create", vs_bot=True, stake=25)
+    assert (await env.db.get_user(7))["cookies"] == 100
+    assert not await env.db.fetchall("SELECT id FROM transactions WHERE user_id=7 AND kind='sea_bet'")
+    assert not await env.db.fetchall("SELECT id FROM mini_sea_rooms")
+    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=0)
+    assert (await view(env, 7, room))["room"]["stake"] == 0
+
+
+async def test_existing_bot_stake_lobby_can_be_cancelled_for_refund(env):
+    room, _, _ = await send(env, 7, "create", vs_bot=True, stake=0)
+    await env.db.execute("UPDATE mini_sea_rooms SET stake=25 WHERE id=?", (room,))
+    await env.db.execute("UPDATE users SET cookies=cookies-25 WHERE user_id=7")
+    with pytest.raises(ValueError, match="Закрой комнату"):
+        await send(env, 7, "start", room)
     await send(env, 7, "cancel", room)
     assert (await env.db.get_user(7))["cookies"] == 100
-    last = await env.db.fetchone("SELECT amount,kind FROM transactions WHERE user_id=7 ORDER BY id DESC LIMIT 1")
-    assert last["kind"] == "sea_refund" and last["amount"] == 25
 
 
 async def test_invites_require_mutual_friendship_and_block_revokes(env):
@@ -344,7 +353,7 @@ async def test_feature_switch_blocks_creation_but_preserves_exit(env):
 async def test_age_and_miniapp_gate_block_stakes_and_actions(env):
     await env.db.execute("UPDATE users SET age=17 WHERE user_id=9")
     with pytest.raises(ValueError, match="18 лет"):
-        await send(env, 9, "create", vs_bot=True, stake=10)
+        await send(env, 9, "create", vs_bot=False, stake=10)
     await env.db.set_role(10, "member")
     with pytest.raises(ValueError, match="модератора"):
         await send(env, 10, "create", vs_bot=True, stake=0)

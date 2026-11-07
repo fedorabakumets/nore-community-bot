@@ -1,4 +1,4 @@
-"""Морской бой: Mini App-игра с ботом или с другом, бесплатно или на печеньки.
+"""Морской бой: Mini App-игра с ботом бесплатно или с другом на печеньки.
 
 Boards, shots and deadlines live in SQLite. The browser only renders the
 server's view; every shot is validated and resolved in a write transaction.
@@ -79,8 +79,8 @@ RULES = {
         },
         {
             "title": "С ботом и с другом",
-            "text": "Можно сыграть с ботом Норы или пригласить друга. Игра бесплатна, "
-            "либо обе стороны ставят одинаковую ставку печеньками: "
+            "text": "С ботом Норы можно играть бесплатно. С другом можно играть бесплатно "
+            "или поставить одинаковое количество печенек: "
             "победитель забирает удвоенную ставку, при ничьей ставки возвращаются.",
         },
         {
@@ -547,6 +547,8 @@ async def _new_room(conn, uid: int, body: dict, now: float) -> dict:
     stake = body.get("stake", 0)
     if type(stake) is not int or stake not in STAKE_CHOICES:
         raise ValueError("Ставка — одна из: 0, 5, 10, 25, 50, 100 🍪")
+    if vs_bot and stake:
+        raise ValueError("С ботом можно играть только бесплатно")
     user = await _one(conn, "SELECT * FROM users WHERE user_id=?", (uid,))
     flag = await _one(conn, "SELECT enabled FROM feature_flags WHERE key='games'")
     if not flag or not flag["enabled"]:
@@ -779,6 +781,8 @@ async def _start(conn, db, settings, room, uid: int, now: float) -> str:
         raise ValueError("Начать может только создатель комнаты")
     players = _active(room)
     if room["bot"]:
+        if room["stake"]:
+            raise ValueError("Игра с ботом на печеньки недоступна. Закрой комнату, чтобы вернуть ставку")
         if len(players) != 2:
             raise Conflict("Бот уже ждёт в комнате. Начинай, когда готов")
     else:

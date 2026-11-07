@@ -99,15 +99,15 @@ window.NoraSea = (() => {
     return (
       backBtn() +
       invites() +
-      `<div class="play-title-row"><div><p class="eyebrow">С ботом или с другом · бесплатно или на 🍪</p><h1>Морской<br><em>бой</em></h1></div>` +
+      `<div class="play-title-row"><div><p class="eyebrow">С ботом бесплатно · с другом бесплатно или на 🍪</p><h1>Морской<br><em>бой</em></h1></div>` +
       `<span class="rocket-balance"><small>В кошельке</small><b>${number(s?.balance ?? data.user.cookies)} 🍪</b></span></div>` +
       `<p class="sub">Попал — стреляй ещё. Промах — ход переходит. Потопи весь флот.</p>` +
       errorBox() +
       (s && !s.enabled ? '<p class="game-restricted">Новые игры временно выключены администрацией.</p>' : "") +
       `<section class="card mafia-create"><span class="eyebrow">Соперник и режим</span><h2>Начнём бой.</h2>` +
       `<label for="sea-title">Название комнаты</label><input id="sea-title" maxlength="60" placeholder="Морской бой" value="${esc(draft.title)}"><label for="sea-password">Пароль комнаты (необязательно)</label><input id="sea-password" type="password" maxlength="64" autocomplete="new-password" placeholder="От 4 символов" value="${esc(draft.password)}"><p class="sub">Пароль нужен для входа из списка. Личное приглашение другу действует без пароля.</p>` +
-      `<div class="stake-chips" role="group" aria-label="Ставка">${stakeChips()}</div>` +
-      `<div class="pet-action-row"><button class="primary" id="sea-create-bot" ${pending || !s || !s.enabled ? "disabled" : ""}>Играть с ботом</button>` +
+      `<label>Ставка для игры с другом</label><div class="stake-chips" role="group" aria-label="Ставка для игры с другом">${stakeChips()}</div>` +
+      `<div class="pet-action-row"><button class="primary" id="sea-create-bot" ${pending || !s || !s.enabled ? "disabled" : ""}>С ботом бесплатно</button>` +
       `<button class="secondary" id="sea-create-friend" ${pending || !s || !s.enabled ? "disabled" : ""}>Комната для друга</button></div>` +
       `<p class="sub">${stakeNote}</p></section>` +
       rules() +
@@ -332,7 +332,7 @@ window.NoraSea = (() => {
       return;
     }
     if (b.id === "sea-create-bot") {
-      perform({ action: "create", vs_bot: true, stake: Number(draft.stake) });
+      perform({ action: "create", vs_bot: true, stake: 0 });
       return;
     }
     if (b.id === "sea-create-friend") {
