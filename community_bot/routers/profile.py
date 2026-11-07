@@ -43,7 +43,7 @@ async def send_profile_card(
 ) -> Message | None:
     user_id = int(user["user_id"])
     markup = (
-        profile_keyboard(user_id, bool(user.get("profile_private")))
+        profile_keyboard(user_id, bool(user.get("profile_private")), back_to_menu=message.chat.type == "private")
         if editable
         else public_profile_keyboard(user_id)
     )
@@ -51,7 +51,7 @@ async def send_profile_card(
     if replace:
         sent = await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
         if db and message.from_user:
-            await bind_ui_owner(db, sent or message, message.from_user.id, "profile")
+            await bind_ui_owner(db, sent or message, user_id if editable else message.from_user.id, "profile")
         return sent
     if user.get("avatar_file_id"):
         try:
@@ -72,7 +72,7 @@ async def send_profile_card(
         except TelegramBadRequest:
             sent = None
     if sent is None:
-        cover = cover_file("profile")
+        cover = cover_file("profile") if message.chat.type != "private" else None
         if cover:
             try:
                 sent = await message.answer_photo(cover, caption=text, parse_mode="HTML", reply_markup=markup)
@@ -81,12 +81,12 @@ async def send_profile_card(
     if sent is None:
         sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     if db and message.from_user:
-        await bind_ui_owner(db, sent, message.from_user.id, "profile")
+        await bind_ui_owner(db, sent, user_id if editable else message.from_user.id, "profile")
     return sent
 
 
 @router.message(command_or_alias("profile"))
-@router.message(F.text == "👤 Мой профиль")
+@router.message(F.chat.type == "private", F.text == "👤 Мой профиль")
 async def show_profile(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -100,7 +100,7 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
     if not await can_view_profile(db, settings, message.from_user.id, target):
         await message.answer("🔒 Этот профиль скрыт.")
         return
-    text = await render_profile(db, settings, target)
+    text = await render_profile(db, settings, target, compact=message.chat.type == "private")
     await send_profile_card(message, target, settings, editable=editable, text=text, db=db)
 
 
@@ -118,7 +118,7 @@ async def edit_profile(callback: CallbackQuery, state: FSMContext, db: Database)
         await callback.answer("Можно редактировать только свой профиль.", show_alert=True)
         return
     if field == "public":
-        await db.update_profile(user_id, "profile_private", 0)
+        await db.set_profile_privacy(user_id, False)
         await callback.answer("Профиль снова открыт.")
         user = await db.get_user(user_id)
         if user and callback.message:
@@ -217,7 +217,7 @@ async def menu_verify(callback: CallbackQuery, db: Database, settings: Settings)
     if not callback.message:
         return
     user = await register_telegram_user(db, callback.from_user)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=callback.message.chat.type == "private")
     await callback.answer()
     await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 

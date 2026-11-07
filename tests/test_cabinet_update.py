@@ -47,9 +47,9 @@ def test_shop_buttons_always_show_cookie_price_and_confirm() -> None:
     markup = shop_category_keyboard("reputation", prices)
     labels = [button.text for row in markup.inline_keyboard for button in row]
     assert any("🍪" in text and "12" in text for text in labels)
-    confirm = shop_confirm_keyboard("rep_shield", 12)
+    confirm = shop_confirm_keyboard("single-use-confirmation", 12)
     data = [button.callback_data for row in confirm.inline_keyboard for button in row]
-    assert "shop:ok:rep_shield" in data
+    assert "shop:pay:single-use-confirmation" in data
     assert any("12 🍪" in button.text for row in confirm.inline_keyboard for button in row)
 
 
@@ -107,7 +107,7 @@ async def test_already_gold_is_not_cut_down(tmp_path) -> None:
     assert nxt == 95
 
 
-async def test_wallet_table_lists_cookies_and_fee() -> None:
+async def test_compact_wallet_lists_balance_debt_and_fee() -> None:
     from community_bot.routers.wallet import wallet_text
 
     user = {
@@ -128,12 +128,11 @@ async def test_wallet_table_lists_cookies_and_fee() -> None:
             return []
 
     text = await wallet_text(DummyDb(), SimpleNamespace(restricted_reputation_threshold=0), user)
-    assert "<pre>" in text
-    assert "Печеньки" in text
-    assert "40" in text
-    assert "Долг" in text
-    assert "Итого" in text
-    assert "Комиссия" in text
+    assert "<pre>" not in text
+    assert "<b>40 🍪</b>" in text
+    assert "Просроченный долг: <b>5 🍪</b>" in text
+    assert "35 🍪" in text
+    assert "комиссия переводов <b>20%</b>" in text
 
 
 def test_private_copy_describes_blocks_not_button_colors() -> None:

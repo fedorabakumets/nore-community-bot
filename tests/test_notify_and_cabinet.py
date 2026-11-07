@@ -10,9 +10,10 @@ def test_menu_has_unread_badge_and_no_duplicates() -> None:
     assert "menu:pet" in data
     assert "menu:notices" in data
     assert any("Уведомления (2)" in text for text in labels)
-    assert "menu:shop" not in data
-    assert "menu:wallet" not in data
-    assert "menu:question" not in data
+    assert "menu:shop" in data
+    assert "menu:wallet" in data
+    assert "menu:question" in data
+    assert len(data) == len(set(data))
     assert "menu:verify" not in data
 
 

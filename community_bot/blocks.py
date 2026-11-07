@@ -6,8 +6,24 @@ from typing import Any
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
+from community_bot.menu_art import menu_cover
+
 COVERS = Path(__file__).resolve().parent.parent / "assets" / "covers"
 CAPTION_LIMIT = 1024
+
+
+def _private_rich(message: Message) -> bool:
+    from community_bot.private_rich import PrivateRichMiddleware
+
+    bot = getattr(message, "bot", None)
+    session = getattr(bot, "session", None)
+    return (getattr(getattr(message, "chat", None), "type", None) == "private" and session is not None
+            and any(isinstance(item, PrivateRichMiddleware) for item in session.middleware))
+
+
+def fits_caption(text: str) -> bool:
+    # Conservative for HTML: count markup too, and never slice a finished tag/entity.
+    return len(text.encode("utf-16-le")) // 2 <= CAPTION_LIMIT
 
 BLOCK_FILES = {
     "commands": "commands.jpg",
@@ -45,6 +61,9 @@ BLOCK_FILES = {
 
 
 def cover_path(block: str) -> Path | None:
+    modern = menu_cover(block)
+    if modern:
+        return modern
     name = BLOCK_FILES.get(block)
     if not name:
         return None
@@ -65,10 +84,15 @@ async def answer_block(
     cover_caption: str | None = None,
     **kwargs: Any,
 ) -> Message:
+    if _private_rich(message):
+        return await message.answer(text, **kwargs)
     path = cover_path(block)
     if path:
         try:
-            split = cover_caption is not None or len(text) > CAPTION_LIMIT
+            if _private_rich(message):
+                # Rich blocks have no legacy photo-caption split; keep the complete body once.
+                return await message.answer_photo(FSInputFile(path), caption=text, **kwargs)
+            split = cover_caption is not None or not fits_caption(text)
             if split:
                 photo_kwargs = {key: value for key, value in kwargs.items() if key != "reply_markup"}
                 caption = (cover_caption or text.split("\n", 1)[0])[:CAPTION_LIMIT]
@@ -81,27 +105,36 @@ async def answer_block(
 
 
 async def edit_block(message: Message, text: str, **kwargs: Any) -> Message | None:
-    caption = text[:CAPTION_LIMIT]
     try:
         if message.photo or message.caption is not None:
-            return await message.edit_caption(caption=caption, **kwargs)
-    except TelegramBadRequest:
-        pass
+            if not fits_caption(text):
+                await message.edit_reply_markup(reply_markup=None)
+                return await message.answer(text, **kwargs)
+            return await message.edit_caption(caption=text, **kwargs)
+    except TelegramBadRequest as error:
+        if "message is not modified" in str(error).casefold():
+            return None
     try:
         return await message.edit_text(text, **kwargs)
-    except TelegramBadRequest:
+    except TelegramBadRequest as error:
+        if "message is not modified" in str(error).casefold():
+            return None
         return await message.answer(text, **kwargs)
 
 
 async def replace_block(message: Message, block: str, text: str, **kwargs: Any) -> Message | None:
+    if _private_rich(message):
+        return await message.edit_text(text, **kwargs)
     path = cover_path(block)
-    caption = text[:CAPTION_LIMIT]
     markup = kwargs.get("reply_markup")
     parse_mode = kwargs.get("parse_mode")
-    if path:
+    if path and (fits_caption(text) or _private_rich(message)):
         try:
-            media = InputMediaPhoto(media=FSInputFile(path), caption=caption, parse_mode=parse_mode)
+            media = InputMediaPhoto(media=FSInputFile(path), caption=text, parse_mode=parse_mode)
             return await message.edit_media(media=media, reply_markup=markup)
-        except (TelegramBadRequest, OSError):
+        except TelegramBadRequest as error:
+            if "message is not modified" in str(error).casefold():
+                return None
+        except OSError:
             pass
     return await edit_block(message, text, **kwargs)

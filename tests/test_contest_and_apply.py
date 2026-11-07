@@ -16,9 +16,9 @@ def test_apply_hidden_when_requested() -> None:
     ]
     assert "menu:apply" not in shown
     assert "menu:apply" not in hidden
-    assert "menu:question" not in hidden
-    assert "menu:shop" not in shown
-    assert "menu:wallet" not in shown
+    assert "menu:question" in hidden
+    assert "menu:shop" in shown
+    assert "menu:wallet" in shown
     assert "menu:verify" not in shown
     assert "menu:profile" in shown
     assert "menu:pet" in shown

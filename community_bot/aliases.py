@@ -36,7 +36,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "bunker": ("бункер",),
     "purge": ("чистить", "очистить", "пурж"),
     "botsweep": ("чиститьбота", "убратьбота"),
-    "transfer": ("трансфер",),
+    "transfer": ("трансфер", "перевести", "передать"),
     "balance": ("баланс", "кошелек", "кошелёк"),
     "updates": ("обновления", "обновление"),
     "freebie": ("халява",),
@@ -44,6 +44,9 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "card": ("карточка",),
     "gift": ("подарить",),
     "report": ("репорт", "жалоба"),
+    "bug": ("баг",),
+    "participants": ("участники",),
+    "stickers": ("стикеры", "стикерпак"),
     "mail": ("почта", "письмо"),
     "board": ("доска", "таблица"),
     "lottery": ("розыгрыш", "лотерея"),
@@ -56,13 +59,13 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "ban": ("бан", "забанить"),
     "unban": ("разбан",),
     "role": ("роль",),
-    "setstatus": ("сетстатус",),
     "givecookies": ("выдатьпеченьки",),
     "setcookies": ("сетпеченьки",),
 }
 
 MULTIWORD_ALIASES: dict[str, str] = {
     "купить печеньки": "buycookies",
+    "выдать печеньки": "givecookies",
     "задать вопрос": "question",
     "заполнить анкету": "apply",
     "отменить игру": "gamecancel",
@@ -86,7 +89,12 @@ def canonical_command(token: str) -> str | None:
     cleaned = _PUNCT.sub("", token).casefold()
     if not cleaned:
         return None
-    return _ALIAS_TO_COMMAND.get(cleaned)
+    from community_bot.command_registry import resolve_alias
+
+    resolved = resolve_alias(cleaned)
+    if resolved:
+        return resolved
+    return None
 
 
 # Bare aliases that must match the whole message, not the first word.
@@ -111,6 +119,8 @@ _EXACT_TEXT_COMMANDS = {
     "mail",
     "pet",
     "pogoda",
+    "participants",
+    "stickers",
     "profile",
     "question",
     "reputation",
@@ -121,17 +131,25 @@ _EXACT_TEXT_COMMANDS = {
     "updates",
 }
 
-# These only do something in a private chat. Do not delete them from the group:
-# a sentence or a lone «вопрос» is not a reason to erase the message.
-_PRIVATE_CHAT_COMMANDS = frozenset({"apply", "close", "question", "start"})
-
-
 def parse_trigger(text: str) -> tuple[str, str] | None:
     """Return (canonical_command, args) if the message starts with a command or alias."""
     raw = (text or "").strip()
+    addressed = strip_command_address(raw)
+    if addressed is not None:
+        raw = addressed
     if not raw:
         return None
     folded = raw.casefold()
+    from community_bot.command_registry import is_exact_slug, phrase_command
+
+    phrase = phrase_command(folded)
+    if phrase:
+        command, alias = phrase
+        if folded == alias:
+            return command, ""
+        if command in _EXACT_TEXT_COMMANDS or is_exact_slug(command):
+            return None
+        return command, raw[len(alias) :].strip()
     for alias, command in sorted(MULTIWORD_ALIASES.items(), key=lambda item: -len(item[0])):
         if folded == alias:
             return command, ""
@@ -147,9 +165,17 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     command = canonical_command(token)
     if not command:
         return None
-    if command in _EXACT_TEXT_COMMANDS and not slash:
+    if (command in _EXACT_TEXT_COMMANDS or is_exact_slug(command)) and not slash:
         body = _PUNCT.sub("", raw).casefold()
-        allowed = {command, *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ()))}
+        from community_bot.command_registry import get_command
+
+        view = get_command(command)
+        live_aliases = view.aliases if view else ()
+        allowed = {
+            command,
+            *(alias.casefold() for alias in COMMAND_ALIASES.get(command, ())),
+            *(alias.casefold() for alias in live_aliases),
+        }
         if body not in allowed:
             return None
         return command, ""
@@ -196,6 +222,19 @@ def message_has_media_payload(message: Message) -> bool:
     )
 
 
+def strip_command_address(text: str) -> str | None:
+    match = re.match(r"^нора(?:,\s*|\s+)(.*)$", text.strip(), re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
+def message_trigger(message: Message) -> tuple[str, str] | None:
+    source = message.text or message.caption or ""
+    chat_type = getattr(getattr(message, "chat", None), "type", "")
+    if chat_type in {"group", "supergroup"} and strip_command_address(source) is None:
+        return None
+    return parse_trigger(source)
+
+
 def is_group_command_to_sweep(message: Message) -> bool:
     """Delete only real commands. Media, stickers, voice and circles are never swept as commands."""
     caption = (message.caption or "").strip()
@@ -206,12 +245,7 @@ def is_group_command_to_sweep(message: Message) -> bool:
         source = text or caption
     if not source:
         return False
-    parsed = parse_trigger(source)
-    if source[:1] in {"/", "／"}:
-        return not (parsed and parsed[0] in _PRIVATE_CHAT_COMMANDS)
-    if not parsed:
-        return False
-    return parsed[0] not in _PRIVATE_CHAT_COMMANDS
+    return strip_command_address(source) is not None
 
 
 class CommandOrAlias(Filter):
@@ -222,11 +256,20 @@ class CommandOrAlias(Filter):
 
     async def __call__(self, message: Message, **kwargs: Any) -> bool | dict[str, Any]:
         del kwargs
-        parsed = parse_trigger(message.text or message.caption or "")
+        parsed = message_trigger(message)
         if not parsed:
             return False
         name, args = parsed
         if name not in self.commands:
+            return False
+        from community_bot.command_registry import get_command
+
+        view = get_command(name)
+        chat = getattr(message, "chat", None)
+        chat_type = str(getattr(chat, "type", "") or "")
+        if view is not None and not view.enabled:
+            return False
+        if view is not None and chat_type and not view.allows(chat_type):
             return False
         return {
             "command": CommandObject(

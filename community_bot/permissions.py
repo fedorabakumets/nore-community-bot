@@ -19,6 +19,7 @@ PERM_CHAT_LOCK = "chat.lock"
 PERM_BROADCAST = "chat.broadcast"
 PERM_MENTION = "chat.mention"
 PERM_POST = "chat.post"
+PERM_EVENT_PARTICIPANTS = "events.participants"
 PERM_FEATURES = "features"
 PERM_AUTOMESSAGES = "automessages"
 PERM_AUDIT = "audit"
@@ -26,6 +27,7 @@ PERM_GAMES = "games.admin"
 PERM_SEE_PRIVATE = "profile.see_private"
 PERM_PURGE = "mod.purge"
 PERM_CONTEST = "contest.cookies"
+PERM_COMMANDS = "commands.studio"
 
 PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_ADMIN_PANEL, "Админ-панель"),
@@ -44,6 +46,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_BROADCAST, "Рассылка в ЛС"),
     (PERM_MENTION, "Упомянуть всех"),
     (PERM_POST, "Пост в сообщество"),
+    (PERM_EVENT_PARTICIPANTS, "Мероприятия: участники и журнал оплат"),
     (PERM_FEATURES, "Функции и флаги"),
     (PERM_AUTOMESSAGES, "Автосообщения"),
     (PERM_AUDIT, "Журнал"),
@@ -51,6 +54,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     (PERM_SEE_PRIVATE, "Видеть скрытые профили"),
     (PERM_PURGE, "Чистить сообщения чата"),
     (PERM_CONTEST, "Конкурс на печеньки"),
+    (PERM_COMMANDS, "Команды бота"),
 )
 
 PERMISSION_KEYS = [key for key, _ in PERMISSIONS]

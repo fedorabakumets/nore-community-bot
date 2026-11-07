@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
-    return await db.ensure_user(user.id, user.username, user.full_name)
+    row = await db.ensure_user(user.id, user.username, user.full_name)
+    if user.is_bot:
+        await db.set_bot_state(f"telegram_is_bot:{user.id}", "1")
+    return row
 
 
 def lobby_count_ok(count: int, minimum: int, maximum: int, staff: bool) -> bool:
@@ -268,16 +271,11 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
         f"👤 <b>{user_link(int(user['user_id']), str(name))}</b>",
         f"{role_icons.get(role, '💠')} <b>{html.escape(str(label))}</b>",
     ]
-    if user["custom_status"]:
-        lines.append(f"💬 <i>«{html.escape(str(user['custom_status']))}»</i>")
     bio = str(user.get("profile_bio") or "").strip()
     if bio:
         lines.append(f"📝 {html.escape(bio)}")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
-    title = str(user.get("profile_title") or "").strip()
-    if title:
-        lines.append(f"🏷 {html.escape(title)}")
     lines.extend(
         [
             f"🔗 {html.escape(username)}",
@@ -310,12 +308,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     progress = "◆" * filled + "◇" * (10 - filled)
     jewels = {"owner": "👑", "admin": "🛡", "moderator": "⚔️", "member": "🌙"}
     jewel = jewels.get(role, "💠")
-    status = (
-        f"\n     <i>❝ {html.escape(str(user['custom_status']))} ❞</i>\n" if user.get("custom_status") else "\n"
-    )
     lock = "  🔒 скрыт от чужих глаз\n" if user.get("profile_private") else ""
-    title = str(user.get("profile_title") or "").strip()
-    title_line = f"  🏷  {html.escape(title)}\n" if title else ""
     bio = str(user.get("profile_bio") or "").strip()
     bio_line = f"  📝  {html.escape(bio)}\n" if bio else ""
     return (
@@ -324,10 +317,8 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         "╭─━━━━━━━━━━━━━━━━━─╮\n"
         f"   {jewel}  {user_link(int(user['user_id']), name)}\n"
         f"   ✦ {html.escape(str(label))} ✦\n"
-        f"{status}"
         "╰─━━━━━━━━━━━━━━━━━─╯\n"
         f"{lock}"
-        f"{title_line}"
         f"{bio_line}"
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"
@@ -344,11 +335,32 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     )
 
 
-async def render_profile(db: Database, settings: Settings, user: dict[str, Any]) -> str:
+def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: str) -> str:
+    name = str(user.get("profile_name") or user.get("telegram_name") or f"ID {user['user_id']}")
+    tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
+    identity = f" · @{html.escape(str(user['username']))}" if user.get("username") else ""
+    lines = [
+        f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
+        f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {user.get('age') or '—'}",
+    ]
+    if user.get("profile_private"):
+        lines.append("🔒 Закрытый профиль")
+    if user.get("profile_bio"):
+        lines.append(html.escape(str(user["profile_bio"])))
+    if user.get("hobbies"):
+        lines.append(f"Увлечения: {html.escape(str(user['hobbies']))}")
+    lines.extend([
+        f"Репутация: {int(user['reputation'])}/100 · {tier.label} · скидка {tier.discount}%",
+        f"🍪 {user['cookies']} · Профиль: {profile_fill_percent(user)}% · Варны: {user['warnings']}",
+    ])
+    return "\n".join(lines)
+
+
+async def render_profile(db: Database, settings: Settings, user: dict[str, Any], *, compact: bool = False) -> str:
     from community_bot.life import achievement_lines
 
     title = await role_title(db, str(user["role"]))
-    text = profile_text(user, settings, title)
+    text = compact_profile_text(user, settings, title) if compact else profile_text(user, settings, title)
     extra = achievement_lines(await db.list_achievements(int(user["user_id"])))
     if extra:
         return f"{text}\n{extra}"

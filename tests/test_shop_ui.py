@@ -19,14 +19,15 @@ def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
     assert "pet_meal" in SHOP_CATEGORIES["pets"]["items"]
     assert "forgive" in SHOP_CATEGORIES["reputation"]["items"]
     assert "rep_shield" in SHOP_CATEGORIES["reputation"]["items"]
-    assert "title_owl" in SHOP_CATEGORIES["profile"]["items"]
+    assert "title_owl" not in SHOP_CATEGORIES["profile"]["items"]
     assert set(IMMUNITY_HOURS) <= set(SHOP_CATEGORIES["reputation"]["items"])
     assert IMMUNITY_HOURS["immunity_24h"] == 24
 
 
 def test_shop_home_has_red_close_and_green_cookies() -> None:
     rows = shop_home_keyboard().inline_keyboard
-    close = rows[-1][0]
+    close = rows[-1][-1]
+    assert rows[-1][0].callback_data == "menu:home"
     cookies = rows[-2][0]
     assert close.style == STYLE_CLOSE
     assert FLOW_CANCEL.split()[0] in close.text or "Закрыть" in close.text
