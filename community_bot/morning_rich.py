@@ -87,14 +87,15 @@ def weather_block(brief: MorningBrief) -> InputRichBlockDetails | InputRichBlock
         return InputRichBlockParagraph(text="🌤 Погоду сейчас получить не удалось.")
     emoji = {"clear": "☀️", "cloudy": "☁️", "rain": "🌧", "snow": "❄️", "fog": "🌫", "storm": "⛈"}
     summary = f"{emoji[weather.kind]} Петербург · {format_temp(weather.temperature)} · {weather_label(weather.code)}"
-    details = [
-        InputRichBlockParagraph(text=f"Ощущается как {format_temp(weather.feels_like)}"),
-        InputRichBlockParagraph(text=f"💨 Ветер {round(weather.wind_kmh / 3.6)} м/с"),
-        InputRichBlockParagraph(text=f"👕 {clothing_advice(weather)}"),
-    ]
     if brief.weather_card:
         photo = BufferedInputFile(brief.weather_card, filename="weather.png")
-        details.insert(0, InputRichBlockPhoto(photo=InputMediaPhoto(media=photo)))
+        details = [InputRichBlockPhoto(photo=InputMediaPhoto(media=photo))]
+    else:
+        details = [
+            InputRichBlockParagraph(text=f"Ощущается как {format_temp(weather.feels_like)}"),
+            InputRichBlockParagraph(text=f"💨 Ветер {round(weather.wind_kmh / 3.6)} м/с"),
+        ]
+    details.append(InputRichBlockParagraph(text=f"👕 {clothing_advice(weather)}"))
     return InputRichBlockDetails(summary=summary, blocks=details)
 
 

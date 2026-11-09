@@ -101,7 +101,9 @@ async def test_trial_serializes_card_and_does_not_retry_after_lost_response(tmp_
         files = {}
         data = transport.session.prepare_value(rich_message, bot=transport, files=files)
         assert "Latest <&>" in data and "https://tvrain.tv/news/old" not in data
-        assert rich_message.blocks[1].blocks[0].type == "photo"
+        weather_blocks = rich_message.blocks[1].blocks
+        assert [block.type for block in weather_blocks] == ["photo", "paragraph"]
+        assert weather_blocks[1].text.startswith("👕 ")
         assert len(files) == 1 and next(iter(files.values())).data.startswith(b"\x89PNG\r\n")
         raise TimeoutError
 
