@@ -36,6 +36,13 @@ WEATHER_URL = (
     "&timezone=Europe%2FMoscow&forecast_days=2"
 )
 TRAFFIC_URL = "https://export.yandex.ru/bar/reginfo.xml?region=2"
+TVRAIN_FEEDS = ("https://tvrain.ru/export/rss/all.xml", "https://tvrain.tv/export/rss/all.xml")
+TVRAIN_SOURCE = "Телеканал «Дождь»"
+TVRAIN_SKIP_RE = re.compile(
+    r"\b(?:реклама|advertisement|sponsored|промо|анонс|гороскоп|прямой эфир|трансляция)\b|"
+    r"на правах рекламы|смотрите (?:сегодня|в эфире|в прямом эфире)|партн[её]рский материал",
+    re.IGNORECASE,
+)
 NEWS_URL = "https://www.fontanka.ru/rss-feeds/zen-news.xml"
 NEWS_FEEDS = (
     ("Фонтанка", NEWS_URL),
@@ -155,6 +162,7 @@ class MorningBrief:
     news_available: bool = True
     metro_available: bool = True
     history: DayEvent | None = None
+    weather_card: bytes | None = None
 
     @property
     def photo(self) -> Path | None:
@@ -312,6 +320,10 @@ def parse_rss(xml_text: str, source: str = "") -> list[NewsItem]:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return []
+    return _rss_items(root, source)
+
+
+def _rss_items(root: ET.Element, source: str) -> list[NewsItem]:
     items: list[NewsItem] = []
     for node in root.findall(".//item"):
         title = re.sub(r"\s+", " ", (node.findtext("title") or "")).strip()
@@ -846,23 +858,85 @@ async def collect_news(session: aiohttp.ClientSession) -> tuple[list[NewsItem], 
     return items, available
 
 
+def parse_tvrain_rss(raw: bytes | bytearray) -> list[NewsItem]:
+    # The official feeds use UTF-8. Reject DTDs before passing Unicode to ElementTree.
+    xml = raw.decode("utf-8-sig")
+    if "\x00" in xml:
+        raise ValueError("Expected UTF-8 RSS")
+    if re.search(r"<!DOCTYPE", xml, re.IGNORECASE):
+        raise ValueError("DTD in RSS")
+    root = ET.fromstring(xml)
+    if root.tag != "rss" or root.find("channel") is None:
+        raise ValueError("Expected RSS channel")
+    items = []
+    for item in _rss_items(root, TVRAIN_SOURCE):
+        link = urlsplit(item.link)
+        if link.hostname not in {"tvrain.ru", "tvrain.tv", "www.tvrain.ru", "www.tvrain.tv"}:
+            continue
+        # The feed includes full episodes under /teleshow/ alongside /news/.
+        if not link.path.startswith("/news/"):
+            continue
+        item.title = re.sub(r"\s+", " ", html.unescape(item.title)).strip()
+        if item.title and not TVRAIN_SKIP_RE.search(" ".join((item.title, *item.categories))):
+            items.append(item)
+    return items
+
+
+def select_tvrain_news(
+    items: list[NewsItem], now: datetime, *, exclude: list[NewsItem], limit: int = 2,
+) -> list[NewsItem]:
+    moment = now.astimezone(UTC)
+    start = moment - timedelta(hours=24)
+    selected: list[NewsItem] = []
+    for item in sorted(items, key=lambda item: item.published, reverse=True):
+        if start <= item.published <= moment and not any(_same_story(item, old) for old in (*exclude, *selected)):
+            selected.append(item)
+            if len(selected) == limit:
+                break
+    return selected
+
+
+async def collect_tvrain(session: aiohttp.ClientSession, now: datetime) -> list[NewsItem]:
+    items: list[NewsItem] = []
+    for url in TVRAIN_FEEDS:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                response.raise_for_status()
+                raw = bytearray()
+                async for chunk in response.content.iter_chunked(65536):
+                    raw.extend(chunk)
+                    if len(raw) > 1024 * 1024:
+                        raise ValueError("RSS exceeds 1 MiB")
+            items.extend(parse_tvrain_rss(raw))
+        except (aiohttp.ClientError, TimeoutError, ET.ParseError, ValueError) as exc:
+            logger.warning("RSS «Дождя» недоступна на %s (%s)", urlsplit(url).hostname, type(exc).__name__)
+            continue
+        if len(select_tvrain_news(items, now, exclude=[])) == 2:
+            break
+    return items
+
+
 async def collect_brief(now: datetime) -> MorningBrief:
     from community_bot.day_note import DayEvent, city_event_for
+    from community_bot.morning_weather import MORNING_WEATHER_URL, render_weather_card
 
     brief = MorningBrief(when=now)
     timeout = aiohttp.ClientTimeout(total=12)
     headers = {"User-Agent": "NoraMorning/1.0"}
     async with aiohttp.ClientSession(timeout=timeout, headers=headers, trust_env=True) as session:
-        weather_raw, traffic_raw, news_raw, metro_raw, history = await asyncio.gather(
-            _get_json(session, WEATHER_URL),
+        weather_raw, traffic_raw, news_raw, tvrain, metro_raw, history = await asyncio.gather(
+            _get_json(session, MORNING_WEATHER_URL),
             _get_text(session, TRAFFIC_URL),
             collect_news(session),
+            collect_tvrain(session, now),
             _get_text(session, METRO_URL),
             city_event_for(now.astimezone(ZoneInfo("Europe/Moscow")).date()),
             return_exceptions=True,
         )
     if isinstance(weather_raw, dict):
         brief.weather = parse_weather(weather_raw)
+        if brief.weather:
+            brief.weather_card = render_weather_card(weather_raw, brief.weather, now)
     else:
         logger.warning("Утренняя погода не ответила")
     if isinstance(traffic_raw, str):
@@ -872,12 +946,19 @@ async def collect_brief(now: datetime) -> MorningBrief:
     if isinstance(news_raw, tuple):
         items, brief.news_available = news_raw
         brief.road_incidents = select_road_incidents(items, now)
-        brief.day_news = select_day_news(
-            [item for item in items if not any(_same_story(item, road) for road in brief.road_incidents)],
-            now, allow_other_regions=True,
-        )
     else:
+        items = []
         brief.news_available = False
+    if isinstance(tvrain, list):
+        brief.day_news = select_tvrain_news(tvrain, now, exclude=brief.road_incidents)
+    missing = 2 - len(brief.day_news)
+    if missing:
+        logger.warning("RSS «Дождя»: подходящих новостей %d из 2; дополняем из прежних лент", 2 - missing)
+        used = [*brief.road_incidents, *brief.day_news]
+        brief.day_news.extend(select_day_news(
+            [item for item in items if not any(_same_story(item, old) for old in used)],
+            now, missing, allow_other_regions=True,
+        ))
     if isinstance(metro_raw, str):
         stations = parse_closed_stations(metro_raw)
         brief.metro_available = stations is not None

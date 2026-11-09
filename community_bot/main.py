@@ -342,6 +342,7 @@ async def daily_chat_job(db: Database, settings: Settings, bot: Bot) -> None:
 async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
     from community_bot.maintenance import apply_requested_morning_rebuild
     from community_bot.morning import due_morning, publish_missed_today, publish_morning_digest, seconds_until_morning
+    from community_bot.morning_tvrain_trial import apply_tvrain_trial
 
     timezone = ZoneInfo(settings.timezone)
     for _ in range(3):
@@ -351,6 +352,7 @@ async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None
         except Exception:
             logger.exception("Не удалось отправить сводку за сегодня")
             await asyncio.sleep(20)
+    await apply_tvrain_trial(bot, settings)
     while True:
         now = datetime.now(timezone)
         try:
