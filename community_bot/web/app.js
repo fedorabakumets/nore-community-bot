@@ -26,7 +26,10 @@ if(tab==='pet')content=window.NoraCabinet?.petScreen()||'';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
-$('#app').innerHTML=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;if(tab==='admin')window.NoraAdmin?.mount();
+const app=$('#app'), html=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;
+if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
+else app.innerHTML=html;
+if(tab==='admin')window.NoraAdmin?.mount();
 const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
 

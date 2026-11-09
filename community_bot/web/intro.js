@@ -6,10 +6,17 @@ window.NoraLogo = (() => {
     + '<path fill="#ff0750" d="M456 559 C411 539 385 502 388 451 C392 370 455 301 542 301 C621 301 679 364 678 438 C678 491 647 536 592 559 C613 530 616 492 607 463 C598 429 574 407 545 406 C513 404 482 423 462 452 C439 485 441 524 456 559 Z"/>'
     + '<path fill="#fff3e2" fill-rule="evenodd" d="M658 529 L688 351 Q700 312 737 312 L822 312 Q883 312 891 366 C898 433 860 486 796 486 L770 486 Q763 486 762 492 L754 533 Q746 559 718 559 L694 559 Q664 559 658 529 Z M779 379 Q772 379 770 387 L765 410 Q762 419 770 419 L786 419 Q808 419 810 395 Q812 379 796 379 Z"/>'
     + '<path fill="#fff3e2" fill-rule="evenodd" d="M839 524 L947 348 Q970 311 1004 311 L1038 311 Q1072 311 1075 351 L1088 516 Q1091 557 1055 559 L1030 559 Q1001 559 1000 521 Q1000 516 995 516 L944 516 Q939 516 937 521 L925 544 Q916 559 896 559 L871 559 Q830 559 839 524 Z M966 440 Q962 450 973 450 L998 450 Q1005 450 1004 442 L1001 400 Q1001 393 996 393 Q990 393 987 399 Z"/>';
-  function markup(loop = false) {
-    return `<svg class="nora-logo${loop ? ' nora-logo-loop home-wordmark' : ''}" viewBox="100 280 1100 450" role="img" aria-label="Нора" xmlns="http://www.w3.org/2000/svg"><g stroke="#050407" stroke-width="12" stroke-linejoin="round"><path class="nora-logo-layer nora-logo-cyan" fill="#00c8ed" d="${outline}"/><path class="nora-logo-layer nora-logo-pink" fill="#ff09ae" d="${outline}"/><path class="nora-logo-layer nora-logo-yellow" fill="#ffd500" d="${outline}"/><path fill="#050407" d="${outline}"/></g><path fill="#050407" d="M820 300 H990 L855 495 H790 Z"/><g class="nora-logo-face" stroke="#050407" stroke-width="20" stroke-linejoin="round" paint-order="stroke fill">${letters}</g></svg>`;
+  function markup(home = false) {
+    return `<svg class="nora-logo${home ? ' nora-logo-home home-wordmark' : ''}" viewBox="100 280 1100 450" role="img" aria-label="Нора" xmlns="http://www.w3.org/2000/svg"><g stroke="#050407" stroke-width="12" stroke-linejoin="round"><path class="nora-logo-layer nora-logo-cyan" fill="#00c8ed" d="${outline}"/><path class="nora-logo-layer nora-logo-pink" fill="#ff09ae" d="${outline}"/><path class="nora-logo-layer nora-logo-yellow" fill="#ffd500" d="${outline}"/><path fill="#050407" d="${outline}"/></g><path fill="#050407" d="M820 300 H990 L855 495 H790 Z"/><g class="nora-logo-face" stroke="#050407" stroke-width="20" stroke-linejoin="round" paint-order="stroke fill">${letters}</g></svg>`;
   }
-  return {markup};
+  function impact(style) {
+    if (document.hidden) return;
+    const telegram = window.Telegram?.WebApp;
+    try {
+      if (telegram?.isVersionAtLeast?.('6.1')) telegram.HapticFeedback?.impactOccurred(style);
+    } catch { /* Haptics are optional on older clients. */ }
+  }
+  return {markup, impact};
 })();
 
 // API loading continues behind the fixed face; the final layer reveals the ready screen.
@@ -59,10 +66,7 @@ window.NoraIntro = (() => {
   function onVisibility() { if (document.hidden) finish(true); }
   function onMotion() { if (reduced.matches) finish(true); }
   root.addEventListener('animationstart', event => {
-    if (finished || document.hidden || !event.target.classList.contains('nora-logo-layer')) return;
-    try {
-      if (telegram?.isVersionAtLeast?.('6.1')) telegram.HapticFeedback?.impactOccurred('medium');
-    } catch { /* Haptics are optional; they must never block opening. */ }
+    if (!finished && event.animationName === 'nora-layer-out') NoraLogo.impact('medium');
   });
   root.addEventListener('animationend', event => {
     if (event.target.classList.contains('nora-logo-cyan')) finish();

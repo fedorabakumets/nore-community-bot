@@ -40,21 +40,22 @@ body.intro-playing{overflow:hidden;background:#050407}
 .nora-intro.intro-leaving{opacity:0;pointer-events:none}
 .nora-logo{display:block;width:100%;height:auto;overflow:visible}
 .nora-intro .nora-logo{width:min(86vw,600px)}
-.nora-logo-yellow{--layer-x:34px;--layer-y:48px;--layer-delay:180ms}
-.nora-logo-pink{--layer-x:57px;--layer-y:92px;--layer-delay:440ms}
-.nora-logo-cyan{--layer-x:80px;--layer-y:135px;--layer-delay:700ms}
+.nora-logo-yellow{--layer-x:34px;--layer-y:48px;--layer-delay:180ms;--layer-return:2120ms}
+.nora-logo-pink{--layer-x:57px;--layer-y:92px;--layer-delay:440ms;--layer-return:1860ms}
+.nora-logo-cyan{--layer-x:80px;--layer-y:135px;--layer-delay:700ms;--layer-return:1600ms}
 .nora-logo-layer{transform:translate(0,0)}
 .intro-running .nora-logo-layer{animation:nora-layer-out 280ms cubic-bezier(.16,1,.3,1) var(--layer-delay) both}
 @keyframes nora-layer-out{from{transform:translate(0,0)}to{transform:translate(var(--layer-x),var(--layer-y))}}
-.nora-logo-loop .nora-logo-layer{animation-duration:4.6s;animation-timing-function:cubic-bezier(.16,1,.3,1);animation-iteration-count:infinite}
-.nora-logo-loop .nora-logo-yellow{animation-name:nora-yellow-loop}
-.nora-logo-loop .nora-logo-pink{animation-name:nora-pink-loop}
-.nora-logo-loop .nora-logo-cyan{animation-name:nora-cyan-loop}
-@keyframes nora-yellow-loop{0%,8%,88%,100%{transform:translate(0,0)}14%,80%{transform:translate(var(--layer-x),var(--layer-y))}}
-@keyframes nora-pink-loop{0%,14%,80%,100%{transform:translate(0,0)}20%,72%{transform:translate(var(--layer-x),var(--layer-y))}}
-@keyframes nora-cyan-loop{0%,20%,72%,100%{transform:translate(0,0)}26%,64%{transform:translate(var(--layer-x),var(--layer-y))}}
-body.intro-playing .nora-logo-loop .nora-logo-layer{animation-play-state:paused}
-@media(prefers-reduced-motion:reduce){.nora-intro{transition:none}.nora-logo-layer,.nora-logo-loop .nora-logo-layer{animation:none;transform:translate(var(--layer-x),var(--layer-y))}}
+/* Play each direction once per visit, with a pause in between. */
+body:not(.intro-playing) .nora-logo-home .nora-logo-layer{
+  animation:nora-layer-out 280ms cubic-bezier(.16,1,.3,1) var(--layer-delay) forwards,
+    nora-layer-in 280ms cubic-bezier(.16,1,.3,1) var(--layer-return) forwards;
+}
+@keyframes nora-layer-in{from{transform:translate(var(--layer-x),var(--layer-y))}to{transform:translate(0,0)}}
+@media(prefers-reduced-motion:reduce){
+  .nora-intro{transition:none}
+  body:not(.intro-playing) .nora-logo-home .nora-logo-layer{animation:none;transform:translate(var(--layer-x),var(--layer-y))}
+}
 
 
 .person-visit{display:flex;align-items:center;gap:12px;background:none;text-align:left;min-width:0;padding:0;flex:1}.person-visit>span:last-child{display:flex;flex-direction:column;min-width:0}.person-visit b{overflow-wrap:anywhere}.person-visit small{display:block;color:var(--muted);font-size:11px;margin-top:4px;overflow-wrap:anywhere}.person-presence{font-size:12px;color:var(--muted)}.person-presence.online{color:#a8cf78}.person-presence.online::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#a8cf78;margin-right:6px}.person-actions{display:grid;gap:6px;margin-top:22px}.person-photo{flex-shrink:0}.person-locked{margin-top:18px}.profile-lookup{margin:15px 0 0;padding:4px 0}.presence-choice{display:flex;align-items:center;justify-content:space-between;gap:14px}.presence-choice input{width:20px;height:20px;accent-color:var(--red)}#transfer-form select{width:100%;max-width:100%;background:#141416;color:var(--white);border:1px solid var(--line);border-radius:10px;padding:13px;font:inherit;font-size:13px}#transfer-form [hidden]{display:none}.friend-person{min-width:0}.friend-row-actions{flex-wrap:wrap}

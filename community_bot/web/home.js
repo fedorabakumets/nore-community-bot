@@ -21,7 +21,31 @@ window.NoraHome=(()=>{
   function event(id){const e=data.events.find(e=>e.id===id);if(!e)return;sheet(`<span class="eyebrow">Встреча Норы</span>${window.NoraEvents?.card(e)||''}`);window.NoraEvents?.mount()}
 
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-home-news'))news();if(b.dataset.homeArticle)article(Number(b.dataset.homeArticle));if(b.hasAttribute('data-home-idea'))idea();if(b.hasAttribute('data-home-send-idea'))telegram('https://t.me/nora_community_bot?start=idea');if(b.hasAttribute('data-home-chat')){if(data.home?.community_url)telegram(data.home.community_url);else sheet('<h2>Чат сообщества</h2><p class="sub">Ссылка на чат сейчас не настроена. Напиши команде Норы — поможем попасть к своим.</p><button class="primary" data-home-idea>Связаться с командой</button>')}if(b.dataset.homeEvent)event(b.dataset.homeEvent);if(b.hasAttribute('data-home-season')){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}$('#sheet').close();tab='shop';NoraShop.tabChanged(tab);render();document.querySelector('.seasonal-drop')?.scrollIntoView({block:'start'})}});
-  return {screen,carouselDots};
+  function render(app, html) {
+    const logo = app.querySelector('.home-wordmark');
+    if (!logo) {
+      app.innerHTML = html;
+      app.querySelector('.home-wordmark')?.addEventListener('animationstart', event => {
+        if (event.animationName === 'nora-layer-out' || event.animationName === 'nora-layer-in') {
+          NoraLogo.impact('light');
+        }
+      });
+      return;
+    }
+    // Keep the logo connected so a data refresh cannot replay the animation.
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const nextHome = template.content.querySelector('.community-home');
+    const nextIntro = nextHome.firstElementChild;
+    const intro = logo.parentElement;
+    for (const child of [...intro.children]) {
+      if (child !== logo) child.remove();
+    }
+    intro.append(...[...nextIntro.children].slice(1));
+    while (intro.nextElementSibling) intro.nextElementSibling.remove();
+    intro.parentElement.append(...[...nextHome.children].slice(1));
+  }
+  return {screen,render,carouselDots};
 })();
 
 function profileWizard(index){
