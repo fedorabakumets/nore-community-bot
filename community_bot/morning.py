@@ -166,8 +166,7 @@ class MorningBrief:
 
     @property
     def photo(self) -> Path | None:
-        kind = self.weather.kind if self.weather else "cloudy"
-        path = PHOTOS / f"{kind}.jpg"
+        path = PHOTOS / "nora-daily.jpg"
         return path if path.is_file() else None
 
 

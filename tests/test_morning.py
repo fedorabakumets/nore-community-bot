@@ -140,7 +140,7 @@ def test_traffic_xml_and_caption_fit_photo() -> None:
     assert "Московском" not in text
     assert "Подходящих новостей" in text
     assert telegram_length(text) <= 1024
-    assert brief.photo is not None and brief.photo.name == "cloudy.jpg"
+    assert brief.photo is not None and brief.photo.name == "nora-daily.jpg"
 
 
 def test_closed_stations_and_day_news_stay_in_one_brief() -> None:
