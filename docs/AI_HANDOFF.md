@@ -2,6 +2,18 @@
 
 > Обновлено 10.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## Фон и безопасная область Mini App — 10 ноября 2026
+
+- Ветка `chatgpt/miniapp-telegram-layout`, база `90e994b`, отдельный worktree
+  `C:/Users/User/Projects/nora-miniapp-telegram-layout`. Исходная копия остаётся на
+  `chatgpt/codex-dev-setup` с локальными правками AGENTS.md и handoff.
+- Заставка, оболочка и панели Telegram используют `--poster-bg`. Отступы
+  учитывают CSS-переменные Telegram для `contentSafeAreaInset` и `safeAreaInset`.
+  Свайпы закрытия и сворачивания отключены через API 7.7+.
+- Chromium с Telegram SDK и имитацией клиента: фон при прокрутке, поворот,
+  модальное окно, вход в игру и старые клиенты. Ruff, pip check и JS syntax
+  прошли, pytest — 875 passed, 1 skipped. Проверку Telegram и Railway проводит владелец.
+
 ## Анимация многослойного логотипа — 10 ноября 2026
 
 - Ветка `chatgpt/layered-logo`, база production `25fd8b0`, отдельный worktree
@@ -17,17 +29,9 @@
   На выходе и втягивании по три light-отклика Telegram. Обновление данных
   сохраняет SVG в DOM, переход в другой раздел прерывает цикл, возврат
   запускает новый. При reduced motion логотип статичен.
-- Уточнение проверено в headless Chromium с заглушкой Telegram: стартовые
-  три medium-вызова, шесть light-вызовов в порядке движения, неподвижная
-  надпись, втягивание, обновление данных, уход, возврат и reduced motion.
-  JS syntax, Ruff, pip check и полный прогон: 875 passed, 1 skipped.
-- Проверены JS syntax, headless Chromium: неподвижность надписи, порядок слоёв
-  и трёх haptic-вызовов, готовность/финальный переход, повторные вызовы,
-  старый/отсутствующий Telegram, ошибка haptics, hidden, reduced motion,
-  зависший API, цикл главной и отсутствие видео/skip. Мобильные кадры просмотрены.
-- Ruff/check_local.py: 875 passed, 1 skipped; pip check и diff --check прошли.
-  Публикация подготовлена в production-ветку; push не доказывает deploy.
-  Реальная вибрация на устройстве и Railway не проверены; проверяет владелец.
+- Chromium с заглушкой Telegram: порядок слоёв и откликов, неподвижность
+  надписи, ошибки API и haptics, reduced motion, вход и возврат на главную.
+  JS syntax, Ruff, pip check и diff --check прошли, pytest — 875 passed, 1 skipped.
 
 ## Компактные профили в чате — 10 ноября 2026
 

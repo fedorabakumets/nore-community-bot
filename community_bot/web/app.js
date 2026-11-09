@@ -1,5 +1,14 @@
 'use strict';
-const tg=window.Telegram?.WebApp; tg?.ready();tg?.expand();tg?.setHeaderColor('#111013');tg?.setBackgroundColor('#111013');
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  const background = getComputedStyle(document.documentElement).getPropertyValue('--poster-bg').trim() || '#111013';
+  if (tg.isVersionAtLeast?.('6.1')) tg.setBackgroundColor?.(background);
+  if (tg.isVersionAtLeast?.('6.9')) tg.setHeaderColor?.(background);
+  if (tg.isVersionAtLeast?.('7.10')) tg.setBottomBarColor?.(background);
+  if (tg.isVersionAtLeast?.('7.7')) tg.disableVerticalSwipes?.();
+  tg.ready();
+  tg.expand();
+}
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));

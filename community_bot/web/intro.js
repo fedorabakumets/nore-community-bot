@@ -28,20 +28,12 @@ window.NoraIntro = (() => {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   let finished = false, started = false, deadline;
   root.insertAdjacentHTML('afterbegin', NoraLogo.markup());
-  function chrome(color) {
-    try {
-      telegram?.setHeaderColor?.(color);
-      telegram?.setBackgroundColor?.(color);
-      if (telegram?.isVersionAtLeast?.('7.10')) telegram.setBottomBarColor?.(color);
-    } catch { /* Older clients can keep their standard chrome. */ }
-  }
   function finish(immediate = false) {
     if (finished) return;
     finished = true;
     clearTimeout(deadline);
     document.removeEventListener('visibilitychange', onVisibility);
     reduced.removeEventListener?.('change', onMotion);
-    chrome('#111013');
     app.classList.add('app-enter');
     const remove = () => {
       root.remove();
@@ -76,6 +68,5 @@ window.NoraIntro = (() => {
   // Never trap the user if API loading or animation events stall.
   deadline = setTimeout(() => finish(true), 6500);
   if (!telegram?.initData || reduced.matches || document.hidden) finish(true);
-  else requestAnimationFrame(() => { if (!finished) chrome('#050407'); });
   return {finish, ready};
 })();
