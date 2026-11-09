@@ -106,6 +106,14 @@ document.addEventListener('change',async e=>{if(e.target.id!=='avatar-file')retu
 async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();window.NoraCabinet?.refreshCurrent()}catch(e){if(e.message.includes('от 30 ранга')){showTesterAccess()}else toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
+// Capture the activation before a button handler replaces its screen.
+document.addEventListener('click', event => {
+  if (!event.isTrusted) return;
+  const button = event.target.closest?.('button');
+  if (!button || button.matches(':disabled, [aria-disabled="true"]') || button.closest('.nora-game-screen')) return;
+  tg?.HapticFeedback?.impactOccurred?.('light');
+}, {capture: true});
+
 function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebrow">Репутация в Норе</span><h2>Твой вклад —<br>твои возможности</h2><p class="sub">Сейчас у тебя ${number(data.user.reputation)} / 100. Поддержка участников даёт +5 репутации, отрицательная оценка — −5. Себе менять репутацию нельзя. Одного человека можно отметить один раз в день.</p>${levels.map(l=>`<section class="rep-level"><h3>${esc(l.label)} · ${esc(l.range)}</h3><p>Скидка ${number(l.discount)}% · ${number(l.daily_actions)} ${plural(l.daily_actions,"действие","действия","действий")} в день.<br>${l.can_minus?'Можно поддерживать и понижать репутацию.':'Можно только поддерживать участников.'}</p></section>`).join('')}<p class="sub">Серебро — от 70, золото — от 90. Чтобы расти выше 69, заполни все пять блоков профиля. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников. Ниже порога ограничений взаимодействия недоступны.</p><h2>Для твоей репутации</h2>${products(data.products.filter(p=>p.category==='reputation'))}`)}
 // Floating scroll toggle: jumps to the very bottom of the page and back to the top.
 (() => {
