@@ -43,9 +43,13 @@ async def send_profile_card(
 ) -> Message | None:
     user_id = int(user["user_id"])
     markup = (
-        profile_keyboard(user_id, bool(user.get("profile_private")), back_to_menu=message.chat.type == "private")
-        if editable
-        else public_profile_keyboard(user_id)
+        InlineKeyboardMarkup(inline_keyboard=[[close_btn()]])
+        if message.chat.type in {"group", "supergroup"}
+        else (
+            profile_keyboard(user_id, bool(user.get("profile_private")), back_to_menu=message.chat.type == "private")
+            if editable
+            else public_profile_keyboard(user_id)
+        )
     )
     sent: Message | None = None
     if replace:
@@ -100,7 +104,7 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
     if not await can_view_profile(db, settings, message.from_user.id, target):
         await message.answer("🔒 Этот профиль скрыт.")
         return
-    text = await render_profile(db, settings, target, compact=message.chat.type == "private")
+    text = await render_profile(db, settings, target, compact=True)
     await send_profile_card(message, target, settings, editable=editable, text=text, db=db)
 
 
