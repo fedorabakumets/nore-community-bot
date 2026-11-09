@@ -34,14 +34,28 @@ header{position:relative;z-index:3;background:transparent;backdrop-filter:none;-
 .seasonal-cover{position:relative;background:#0a090b;line-height:0}.seasonal-cover img{display:block;width:100%;height:auto;max-height:570px;object-fit:contain;aspect-ratio:3/4}.seasonal-copy{padding:25px}.seasonal-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:25px}.seasonal-badges span{font-size:10px;border:1px solid #713344;background:#3a1b25;color:#f3c3cd;border-radius:5px;padding:6px 9px}.seasonal-copy .eyebrow{font-size:9px;letter-spacing:2px}.seasonal-copy h2{font-size:34px;line-height:1.08;letter-spacing:-1.2px;margin:13px 0 18px}.seasonal-copy h2 span{color:var(--red)}.seasonal-intro{font-size:13px;color:#cbc0c5;line-height:1.75}.seasonal-meta{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #ffffff12;border-bottom:1px solid #ffffff12;padding:16px 0;margin:22px 0}.seasonal-meta span{display:flex;flex-direction:column;gap:7px;font-size:10px;color:var(--muted)}.seasonal-meta b{font-size:14px;color:var(--white)}.seasonal-join{background:var(--red);color:white}.seasonal-join:disabled{background:#30252c;color:#c6a8b2;opacity:1}.seasonal-details{border-top:1px solid #ffffff15;margin-top:22px;padding-top:18px;font-size:12px;line-height:1.75;color:#c3b8c0}.seasonal-details summary{cursor:pointer;color:#f0e5eb;font-weight:650}.seasonal-details p{margin-top:16px}.seasonal-author{border-left:2px solid var(--red);padding-left:13px}.seasonal-author a{color:#ff8ea4;overflow-wrap:anywhere;text-underline-offset:4px}.seasonal-admin{margin-top:18px;text-align:left}.seasonal-result{font-size:13px;line-height:1.8}.seasonal-roster{max-height:45vh;overflow:auto;margin:18px 0}.seasonal-roster p{border-bottom:1px solid var(--line);padding-bottom:12px}.seasonal-roster small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
 @media(min-width:700px){.seasonal-drop{display:grid;grid-template-columns:1fr 1fr;align-items:start}.seasonal-cover{position:sticky;top:0}.seasonal-copy{padding:28px}.seasonal-copy h2{font-size:32px}}
 
-/* Full WebView matte; the logo film keeps its original proportions on any screen. */
-body.intro-playing{overflow:hidden;background:#000}
-.nora-intro{position:fixed;inset:0;z-index:100000;width:100%;height:100%;background:#000;display:grid;place-items:center;opacity:1;transition:opacity .18s ease;isolation:isolate;touch-action:none}
-.nora-intro video{display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;object-position:center;background:#000;pointer-events:none}
-.nora-intro.intro-leaving{opacity:0}
-.intro-skip{position:absolute;right:max(24px,env(safe-area-inset-right));bottom:max(24px,env(safe-area-inset-bottom));padding:12px 14px;border:1px solid #ffffff30;border-radius:20px;color:#b8b8bd;background:#111b;font-size:12px;z-index:1;touch-action:manipulation}
-.intro-skip[hidden]{display:none}
-@media(prefers-reduced-motion:reduce){.nora-intro{transition:none}}
+/* Stationary face, three sequential backs. Haptics follow animationstart. */
+body.intro-playing{overflow:hidden;background:#050407}
+.nora-intro{position:fixed;inset:0;z-index:100000;width:100%;height:100%;background:#050407;display:grid;place-items:center;opacity:1;transition:opacity .18s ease;isolation:isolate;touch-action:none}
+.nora-intro.intro-leaving{opacity:0;pointer-events:none}
+.nora-logo{display:block;width:100%;height:auto;overflow:visible}
+.nora-intro .nora-logo{width:min(86vw,600px)}
+.nora-logo-yellow{--layer-x:34px;--layer-y:48px;--layer-delay:180ms}
+.nora-logo-pink{--layer-x:57px;--layer-y:92px;--layer-delay:440ms}
+.nora-logo-cyan{--layer-x:80px;--layer-y:135px;--layer-delay:700ms}
+.nora-logo-layer{transform:translate(0,0)}
+.intro-running .nora-logo-layer{animation:nora-layer-out 280ms cubic-bezier(.16,1,.3,1) var(--layer-delay) both}
+@keyframes nora-layer-out{from{transform:translate(0,0)}to{transform:translate(var(--layer-x),var(--layer-y))}}
+.nora-logo-loop .nora-logo-layer{animation-duration:4.6s;animation-timing-function:cubic-bezier(.16,1,.3,1);animation-iteration-count:infinite}
+.nora-logo-loop .nora-logo-yellow{animation-name:nora-yellow-loop}
+.nora-logo-loop .nora-logo-pink{animation-name:nora-pink-loop}
+.nora-logo-loop .nora-logo-cyan{animation-name:nora-cyan-loop}
+@keyframes nora-yellow-loop{0%,8%,88%,100%{transform:translate(0,0)}14%,80%{transform:translate(var(--layer-x),var(--layer-y))}}
+@keyframes nora-pink-loop{0%,14%,80%,100%{transform:translate(0,0)}20%,72%{transform:translate(var(--layer-x),var(--layer-y))}}
+@keyframes nora-cyan-loop{0%,20%,72%,100%{transform:translate(0,0)}26%,64%{transform:translate(var(--layer-x),var(--layer-y))}}
+body.intro-playing .nora-logo-loop .nora-logo-layer{animation-play-state:paused}
+@media(prefers-reduced-motion:reduce){.nora-intro{transition:none}.nora-logo-layer,.nora-logo-loop .nora-logo-layer{animation:none;transform:translate(var(--layer-x),var(--layer-y))}}
+
 
 .person-visit{display:flex;align-items:center;gap:12px;background:none;text-align:left;min-width:0;padding:0;flex:1}.person-visit>span:last-child{display:flex;flex-direction:column;min-width:0}.person-visit b{overflow-wrap:anywhere}.person-visit small{display:block;color:var(--muted);font-size:11px;margin-top:4px;overflow-wrap:anywhere}.person-presence{font-size:12px;color:var(--muted)}.person-presence.online{color:#a8cf78}.person-presence.online::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#a8cf78;margin-right:6px}.person-actions{display:grid;gap:6px;margin-top:22px}.person-photo{flex-shrink:0}.person-locked{margin-top:18px}.profile-lookup{margin:15px 0 0;padding:4px 0}.presence-choice{display:flex;align-items:center;justify-content:space-between;gap:14px}.presence-choice input{width:20px;height:20px;accent-color:var(--red)}#transfer-form select{width:100%;max-width:100%;background:#141416;color:var(--white);border:1px solid var(--line);border-radius:10px;padding:13px;font:inherit;font-size:13px}#transfer-form [hidden]{display:none}.friend-person{min-width:0}.friend-row-actions{flex-wrap:wrap}
 
@@ -174,7 +188,7 @@ main{padding-top:calc(max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-
 .nav-profile-wrap{position:relative;display:block;width:28px;height:28px;margin:0 auto 3px}.nav-profile-wrap .nav-profile-photo{margin:0}.nav-unread-dot{position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:var(--red);border:2px solid #121214;display:none}.nav-profile-wrap.has-unread .nav-unread-dot{display:block}
 
 
-/* Entrance of the main screen after the intro film: soft fade plus a small rise. */
+/* Entrance of the main screen after the final logo layer: soft fade plus a small rise. */
 #app.app-enter{animation:nora-app-enter .32s cubic-bezier(.22,1,.36,1) both}
 @keyframes nora-app-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#app.app-enter{animation:none}}
@@ -383,7 +397,7 @@ form label{font-size:14px;color:var(--poster-muted)}
 .filters .selected{background:var(--poster-yellow);border-color:var(--poster-black);color:var(--poster-black);font-weight:750}
 /* Brand, rainbow and the home cover are a single composition. */
 .home-intro{position:relative;isolation:isolate;margin:0 -4px 20px;padding:0 4px 4px;overflow:hidden;background:var(--poster-bg)}
-.home-wordmark{display:block;position:relative;z-index:1;width:180px;height:76px;object-fit:cover;object-position:50% 54%;margin:0 auto 8px;mix-blend-mode:lighten}
+.home-wordmark{position:relative;z-index:1;width:180px;height:auto;aspect-ratio:1100/450;margin:0 auto 8px}
 .home-intro .season-label{position:relative;z-index:1;margin:0 auto 12px}
 #app .home-intro h1{position:relative;z-index:1;font-size:clamp(34px,8.5vw,48px);margin:0 0 8px;max-width:90%}
 .home-tagline{position:relative;z-index:1;margin:0;color:var(--poster-muted);font-size:15px;line-height:1.4}
@@ -651,7 +665,7 @@ form label{font-size:14px;color:var(--poster-muted)}
   .sea-lobby-row{align-items:flex-start;flex-wrap:wrap}
 }
 @media(min-width:600px){
-  .home-wordmark{width:240px;height:104px}
+  .home-wordmark{width:240px}
   .home-rainbow{right:-140px}
   .home-meetup{min-height:264px;padding:24px;gap:28px}
   .home-meetup-content>p{font-size:16px}
