@@ -249,9 +249,13 @@ async def wallet_confirm(request):
                 intent_id=token,
             )
             if ok and request.app["bot"]:
-                from community_bot.helpers import safe_send
+                from community_bot.widget_notifications import Sender, send_service_notification
 
-                await safe_send(request.app["bot"], intent["target_id"], f"Тебе перевели {received} 🍪.")
+                await send_service_notification(
+                    request.app["bot"], db, intent["target_id"], Sender(), "Перевод печенек",
+                    f"Тебе перевели {received} 🍪.", "history",
+                    event_key=f"transfer:{intent['payload']['transfer_id']}",
+                )
             return result(ok, f"Перевод выполнен: получателю {received} 🍪" if ok else message)
         if item == "loan":
             ok, message, _ = await db.take_cookie_loan(

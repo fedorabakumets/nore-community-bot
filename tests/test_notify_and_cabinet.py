@@ -41,7 +41,7 @@ def test_cabinet_profile_is_short_and_has_fields() -> None:
     assert not any("Почему предупреждение" in text for text in labels)
 
 
-async def test_notify_default_off_and_digest(tmp_path) -> None:
+async def test_notify_default_off_and_digest(tmp_path, monkeypatch) -> None:
     from pathlib import Path
 
     from community_bot.database import Database
@@ -51,35 +51,33 @@ async def test_notify_default_off_and_digest(tmp_path) -> None:
     await db.ensure_user(1, telegram_name="A")
     await db.ensure_user(2, telegram_name="B")
 
-    class Bot:
-        def __init__(self) -> None:
-            self.sent: list[tuple[int, str]] = []
+    sent_notices = []
 
-        async def send_message(self, user_id: int, text: str, parse_mode: str | None = None):
-            del parse_mode
-            self.sent.append((user_id, text))
+    async def send(bot, db, user_id, sender, title, details, target, *, event_key):
+        sent_notices.append((user_id, title, details))
 
-    bot = Bot()
+    monkeypatch.setattr("community_bot.notify.send_service_notification", send)
+    bot = object()
     assert await db.notify_channel_on(1, "pet") is False
     assert await emit(bot, db, 1, "pet", "голод") is False
-    assert bot.sent == []
+    assert sent_notices == []
     assert await db.notify_unread_count(1) == 0
 
     assert await db.notify_toggle_enabled(1, "pet") is True
     assert await emit(bot, db, 1, "pet", "голод") is True
-    assert bot.sent == [(1, "голод")]
+    assert sent_notices == [(1, CHANNELS["pet"][0], "голод")]
     assert await db.notify_unread_count(1) == 1
 
-    bot.sent.clear()
+    sent_notices.clear()
     assert await db.notify_toggle_digest(1, "games") is True
     assert await db.notify_toggle_enabled(1, "games") is True
     assert await emit(bot, db, 1, "games", "ваш ход") is True
-    assert bot.sent == []
+    assert sent_notices == []
     pending = await db.notify_pending_digest()
     assert any(row["text"] == "ваш ход" for row in pending)
     sent = await deliver_digests(bot, db)
     assert sent == 1
-    assert bot.sent and "Дайджест" in bot.sent[0][1]
+    assert sent_notices == [(1, "Дайджест за день", "• ваш ход")]
     assert await db.notify_pending_digest() == []
 
     await db.notify_toggle_enabled(2, "shop")

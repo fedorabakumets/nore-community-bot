@@ -205,7 +205,17 @@ async def test_workspace_profile_and_role_have_direct_return_paths(env):
     view = await text(env, view, '12')
     assert view['cards'][0]['member']['cookies'] == 12
     assert view['state'] is None
-    assert not env.telegram.calls
+    assert [m.__api_method__ for m in env.telegram.calls] == ['getMe', 'sendWidget']
+    assert env.telegram.calls[-1].chat_id == 8
+    assert '12' in json.loads(env.telegram.calls[-1].chat_data)['p']['details']
+    role = await click(env, view, 'Роль и права')
+    await click(env, role, 'Модератор')
+    assert (await env.db.get_user(8))['role'] == 'moderator'
+    assert sum(m.__api_method__ == 'sendWidget' for m in env.telegram.calls) == 1
+    edited = next(m for m in env.telegram.calls if m.__api_method__ == 'editMessageWidgetData')
+    state = json.loads(edited.chat_data)
+    assert state['n'] == 2 and state['p']['title'] == 'Изменение роли'
+
 
 
 async def test_workspace_directory_identity_and_avatar_metadata_without_file_ids(env):

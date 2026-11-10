@@ -490,6 +490,8 @@ class AdminBridge:
                 outcome = await send_admin_test(self.bot, self.db, session.uid, data['action'])
                 session.notices = [{
                     'sent': 'Тестовый HTML Widget отправлен в личный чат',
+                    'updated': 'Тестовое уведомление добавлено в открытую карточку',
+                    'queued': 'Тестовое уведомление сохранено и ожидает доставки',
                     'suppressed': 'Слишком частый повтор или доставка временно приостановлена',
                     'blocked': 'Telegram запретил отправку. Проверь, открыт ли личный чат с ботом',
                     'unconfirmed': 'Telegram не подтвердил доставку. Проверь личный чат',

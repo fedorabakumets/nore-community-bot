@@ -763,7 +763,7 @@ class Database:
         actor_name: str = "",
         target_name: str = "",
         default_duration: bool = False,
-    ) -> None:
+    ) -> int:
         from community_bot.audit import SYSTEM_ACTOR_ID, classify_status, person_label
 
         if not actor_name:
@@ -785,7 +785,7 @@ class Database:
                 target_name=target_name,
                 default_duration=default_duration,
             )
-        await self.execute(
+        return await self.execute(
             """
             INSERT INTO admin_audit_log(
                 actor_id, action, target, details, reason, status, actor_name, target_name, created_at

@@ -10,6 +10,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError
 from aiogram.types import Chat, Message, Update, User
 
+from community_bot import widget_inbox
 from community_bot import widget_notifications as notices
 from community_bot.cabinet_api import notices_update, widget_notice
 from community_bot.database import Database
@@ -39,7 +40,8 @@ class WidgetSession(BaseSession):
         if name == "getMe":
             return User(id=bot.id, is_bot=True, first_name="Нора", username="nora_test_bot")
         if name == "sendWidget":
-            return Message(message_id=456, chat=Chat(id=method.chat_id, type="private"),
+            number = sum(call.__api_method__ == "sendWidget" for call in self.calls)
+            return Message(message_id=455 + number, chat=Chat(id=method.chat_id, type="private"),
                            date=datetime.now(UTC), widget={"id": "fixture"})
         return True
 
@@ -54,6 +56,7 @@ async def runtime(tmp_path, monkeypatch):
     await db.set_bot_state("private_rich_panel:7", '{"message_id":123,"screen":"home"}')
     clock = SimpleNamespace(now=1_792_000_000)
     monkeypatch.setattr(notices, "time", lambda: clock.now)
+    monkeypatch.setattr(widget_inbox, "time", lambda: clock.now)
     session = WidgetSession()
     bot = Bot("123456:isolated-widget-test", session=session)
     bot.community_db = db
@@ -75,7 +78,7 @@ def api_calls(session):
 
 
 async def test_opt_in_concurrent_delivery_and_caption(runtime):
-    bot, db, session, clock = runtime
+    bot, db, session, _ = runtime
     assert await emit(bot, db) == "suppressed"
     assert not api_calls(session)
     request = Request(db, body={"channel": "widget_reputation", "enabled": True, "digest": False})
@@ -86,18 +89,22 @@ async def test_opt_in_concurrent_delivery_and_caption(runtime):
 
     outcomes = await asyncio.gather(emit(bot, db), emit(bot, db), emit(bot, db))
     assert sorted(outcomes) == ["sent", "suppressed", "suppressed"]
-    assert await emit(bot, db, "rep:101") == "suppressed"
-    clock.now += notices.SEND_INTERVAL + 1
+    assert await emit(bot, db, "rep:101") == "updated"
     assert await emit(bot, db) == "suppressed"
-    (method,) = api_calls(session)
-    assert method.__api_method__ == "sendWidget" and method.chat_id == 7
-    assert method.disable_notification is False and method.allow_queries is True
-    assert method.reply_markup is None and method.height is None and method.width is None
-    assert method.parse_mode == "HTML"
-    assert method.caption.startswith("НОРА | Изменение репутации\nОт кого: @member")
-    row = await db.fetchone("SELECT * FROM widget_notifications")
-    assert row["message_id"] == 456 and row["sender_id"] == 8 and row["details"] == "Полные подробности"
-    assert f"https://t.me/nora_test_bot?startapp=nora_notice_{row['id']}" in method.caption
+    sent, updated, edited = api_calls(session)
+    assert sent.__api_method__ == "sendWidget" and sent.chat_id == 7
+    assert sent.disable_notification is False and sent.allow_queries is True
+    assert sent.reply_markup is None and sent.height is None and sent.width is None
+    assert sent.parse_mode == "HTML"
+    assert "У вас 1 уведомление!" in sent.caption and "репутации" not in sent.caption
+    assert json.loads(sent.chat_data)["p"]["sender"] == "@member"
+    assert (updated.__api_method__, updated.message_id, json.loads(updated.chat_data)["n"]) == (
+        "editMessageWidgetData", 456, 2,
+    )
+    assert edited.__api_method__ == "editMessageCaption" and "У вас 2 уведомления!" in edited.caption
+    row = await db.fetchone("SELECT * FROM widget_notifications WHERE message_id=456")
+    assert row["sender_id"] == 8 and row["details"] == "Полные подробности"
+    assert f"https://t.me/nora_test_bot?startapp=nora_notice_{row['id']}" in sent.caption
     assert await db.get_bot_state("private_rich_panel:7") == '{"message_id":123,"screen":"home"}'
 
 
@@ -112,6 +119,7 @@ def widget_query(**changes):
 async def test_query_authorization_and_restart_with_failed_edit(runtime):
     bot, db, session, clock = runtime
     assert await notices.send_admin_test(bot, db, 7, "admin-action") == "sent"
+    await db.execute("UPDATE widget_notifications SET delivery='sent' WHERE message_id=456")
     dispatcher = Dispatcher()
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     for index, query in enumerate((
@@ -165,10 +173,11 @@ async def test_send_failure_does_not_duplicate_or_spam(runtime, failure, status)
     clock.now += notices.SEND_INTERVAL + 1
     assert await emit(bot, Database(db.path)) == "suppressed"
     if status == "blocked":
-        assert await emit(bot, db, "rep:101") == "suppressed"
+        assert await emit(bot, db, "rep:101") == "blocked"
     assert [m.__api_method__ for m in api_calls(session)] == ["sendWidget"]
-    row = await db.fetchone("SELECT delivery,message_id FROM widget_notifications")
-    assert row == {"delivery": status, "message_id": None}
+    row = await db.fetchone("SELECT delivery,message_id FROM widget_notifications WHERE event_key='rep:100'")
+    expected = "inbox_paused" if status == "blocked" else "inbox_unconfirmed"
+    assert row == {"delivery": expected, "message_id": None}
 
 
 async def test_widget_detail_requires_current_miniapp_access_and_owner(runtime):
@@ -187,19 +196,62 @@ async def test_widget_detail_requires_current_miniapp_access_and_owner(runtime):
     response = await protection(request, widget_notice)
     assert response.status == 200 and response.headers["Cache-Control"] == "no-store"
     content = json.loads(response.body)
-    assert content["target"] == "notices" and content["details"].startswith("Раскрой карточку")
+    assert content["target"] == "notices" and content["details"].startswith("Открой Нору")
     assert "recipient_id" not in content and "message_id" not in content
     await db.set_role(7, "member")
     assert (await protection(request, widget_notice)).status == 403
 
 
-def test_widget_escapes_inputs_and_stays_within_telegram_limits():
+def test_widget_uses_text_nodes_and_stays_within_telegram_limits():
     evil = '</script><img src="https://example.com/injected">'
-    wide = "".join(chr(0x1F300 + n) for n in range(250))
-    source = notices.document(sender=evil, title=evil, preview=wide, details=wide, context=evil,
-                              date="10.11.2026 12:00 UTC", url="https://t.me/nora_test_bot?startapp=nora_notice_test")
-    assert source.count("</script>") == 1 and "<img" not in source
-    assert "&lt;/script&gt;" in source and "…" in source
+    wide = "".join(chr(0x1F300 + n) for n in range(240))
+    source = widget_inbox.widget_html()
+    assert evil not in source and ".textContent = p.details" in source
+    data = {"r": 1, "i": 0, "n": 1, "p": {
+        "title": wide[:52], "sender": wide[:28], "context": wide[:35], "details": wide[:148],
+        "url": "https://t.me/nora_test_bot?startapp=nora_notice_" + "a" * 32,
+    }}
+    assert len(widget_inbox.pack(data).encode()) <= 1024
     raw = source.encode()
     assert len(raw) <= 32768 and len(zlib.compress(raw, 9)) <= 4096
-    assert 1 <= len(notices.READ_REQUEST.encode()) <= 64
+    assert len(("nwi:read:" + "a" * 32).encode()) <= 64
+
+
+async def test_pages_and_close_are_owner_bound_and_do_not_drop_new_events(runtime):
+    bot, db, session, clock = runtime
+    await db.notify_toggle_enabled(7, "widget_reputation")
+    assert await emit(bot, db) == "sent"
+    assert await emit(bot, db, "rep:101") == "updated"
+    dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+
+    async def query(data, **changes):
+        await dispatcher.feed_update(bot, Update(update_id=1, widget_query=widget_query(data=data, **changes)), db=db)
+        return json.loads(next(call.data for call in reversed(session.calls)
+                               if call.__api_method__ == "answerWidgetQuery"))
+
+    assert await query("nwi:page:0", message_id=123) == {}
+    assert await query("nwi:page:0", **{"from": {"id": 8}}) == {}
+    first, second = await query("nwi:page:0"), await query("nwi:page:1")
+    assert (first["n"], first["i"], second["i"]) == (2, 0, 1)
+    assert first["p"]["id"] != second["p"]["id"]
+    await emit(bot, db, "rep:102")
+    stale = await query(f"nwi:close:{first['r']}")
+    assert stale["changed"] is True and stale["n"] == 3
+    remaining = await query(f"nwi:read:{second['p']['id']}")
+    assert remaining["n"] == 2
+    assert not any(call.__api_method__ == "deleteMessage" for call in session.calls)
+
+    session.failures["deleteMessage"] = TelegramNetworkError
+    assert (await query(f"nwi:close:{remaining['r']}"))["closed"]
+    closed = await db.fetchall("SELECT read_at FROM widget_notifications ORDER BY rowid")
+    assert all(row["read_at"] is not None for row in closed)
+    assert await emit(bot, db, "rep:103") == "queued"
+    del session.failures["deleteMessage"]
+    clock.now += 60
+    await widget_inbox.settle_due(bot, Database(db.path))
+    deleted = [call for call in session.calls if call.__api_method__ == "deleteMessage"]
+    assert [(call.chat_id, call.message_id) for call in deleted] == [(7, 456), (7, 456)]
+    last = session.calls[-1]
+    assert last.__api_method__ == "sendWidget" and json.loads(last.chat_data)["n"] == 1
+    assert await db.get_bot_state("private_rich_panel:7") == '{"message_id":123,"screen":"home"}'

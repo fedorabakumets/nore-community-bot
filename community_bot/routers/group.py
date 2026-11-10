@@ -1184,18 +1184,16 @@ async def review_cookie_order(callback: CallbackQuery, db: Database, settings: S
         actor_name=callback.from_user.full_name,
         reason="проверка СБП",
     )
+    from community_bot.widget_notifications import Sender, send_service_notification
+
     if approved:
-        await safe_send(
-            bot,
-            int(order["user_id"]),
-            f"✅ Оплата заказа №{order_id} подтверждена. На баланс начислено {order['amount']} 🍪.",
-        )
+        details = f"Оплата заказа №{order_id} подтверждена. На баланс начислено {order['amount']} 🍪."
     else:
-        await safe_send(
-            bot,
-            int(order["user_id"]),
-            f"❌ Оплата заказа №{order_id} не подтверждена. Напишите боту в личку «вопрос» или нажмите «🎫 Тикет».",
-        )
+        details = f"Оплата заказа №{order_id} не подтверждена. Напишите боту «вопрос» или нажмите «Тикет»."
+    await send_service_notification(
+        bot, db, int(order["user_id"]), Sender(), "Статус оплаты", details, "history",
+        event_key=f"payment:{order_id}",
+    )
 
 
 @router.callback_query(F.data.startswith("shop:"))
@@ -1491,7 +1489,7 @@ async def save_video_avatar(message: Message, state: FSMContext, db: Database) -
 
 
 @router.message(command_or_alias("givecookies"), F.chat.type.in_({"group", "supergroup"}))
-async def admin_give_cookies(message: Message, db: Database, settings: Settings) -> None:
+async def admin_give_cookies(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
@@ -1509,7 +1507,7 @@ async def admin_give_cookies(message: Message, db: Database, settings: Settings)
         await _respond(message, "Количество должно быть от 1 до 1 000 000 🍪.")
         return
     await db.add_cookies(int(target["user_id"]), amount, "admin", f"by:{message.from_user.id}")
-    await db.log_admin_action(
+    audit_id = await db.log_admin_action(
         message.from_user.id,
         "give_cookies",
         str(target["user_id"]),
@@ -1519,10 +1517,16 @@ async def admin_give_cookies(message: Message, db: Database, settings: Settings)
         reason=reason,
     )
     await _respond(message, f"Начислено {amount} 🍪 пользователю {_target_display(target)}.", parse_mode="HTML")
+    from community_bot.widget_notifications import Sender, send_service_notification
+
+    await send_service_notification(
+        bot, db, int(target["user_id"]), Sender(), "Начисление печенек",
+        f"Вам начислено {amount} 🍪.", "history", event_key=f"admin:{audit_id}", context=reason,
+    )
 
 
 @router.message(command_or_alias("setcookies"), F.chat.type.in_({"group", "supergroup"}))
-async def admin_set_cookies(message: Message, db: Database, settings: Settings) -> None:
+async def admin_set_cookies(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
@@ -1544,7 +1548,7 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
         await _respond(message, "Не удалось изменить баланс.")
         return
     sign = "+" if difference >= 0 else ""
-    await db.log_admin_action(
+    audit_id = await db.log_admin_action(
         message.from_user.id,
         "set_cookies",
         str(target["user_id"]),
@@ -1558,6 +1562,14 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings) 
         f"Баланс {_target_display(target)} установлен: {amount} 🍪 ({sign}{difference}).",
         parse_mode="HTML",
     )
+    if difference:
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        await send_service_notification(
+            bot, db, int(target["user_id"]), Sender(), "Изменение баланса",
+            f"Баланс установлен: {amount} 🍪 ({sign}{difference}).", "history",
+            event_key=f"admin:{audit_id}", context=reason,
+        )
 
 
 @router.message(command_or_alias("freebie"), F.chat.type.in_({"group", "supergroup"}))
@@ -1681,10 +1693,11 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(f"✅ Перевод выполнен. Получателю зачислено {received} 🍪.")
     if transfer:
-        await safe_send(
-            bot,
-            int(transfer["receiver_id"]),
-            f"Вам перевели {received} 🍪 после комиссии.",
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        await send_service_notification(
+            bot, db, int(transfer["receiver_id"]), Sender(), "Перевод печенек",
+            f"Вам перевели {received} 🍪 после комиссии.", "history", event_key=f"transfer:{transfer_id}",
         )
 
 

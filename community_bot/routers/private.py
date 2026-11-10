@@ -70,7 +70,6 @@ from community_bot.keyboards import (
     feature_reset_keyboard,
     features_panel_text,
     flow_reply_keyboard,
-    main_private_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
     roles_hub_keyboard,
@@ -1825,13 +1824,13 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
             settings.is_owner(callback.from_user.id),
         ),
     )
-    await safe_send(
-        bot,
-        user_id,
-        f"Ваша роль изменена: <b>{html.escape(label)}</b>.",
-        parse_mode="HTML",
-        reply_markup=main_private_keyboard(),
-    )
+    if target["role"] != new_role:
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        await send_service_notification(
+            bot, db, user_id, Sender(), "Изменение роли", f"Ваша роль изменена: {label}.", "lk",
+            event_key=f"role:{callback.id}",
+        )
 
 
 async def _can_admin_manage(actor_id: int, target_id: int, db: Database, settings: Settings) -> bool:
@@ -2134,9 +2133,17 @@ async def admin_save_user_edit(
         amount = int(message.text)
         await db.add_cookies(user_id, amount, "admin", f"by:{message.from_user.id}")
         result = f"Начислено {amount} 🍪."
-    await db.log_admin_action(message.from_user.id, f"user_{action}", str(user_id), result)
+    audit_id = await db.log_admin_action(message.from_user.id, f"user_{action}", str(user_id), result)
     await state.clear()
     await message.answer(f"✅ {result}")
+    if action in {"cookies", "add_cookies", "rep"}:
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        reputation = action == "rep"
+        await send_service_notification(
+            bot, db, user_id, Sender(), "Изменение репутации" if reputation else "Изменение баланса",
+            result, "reputation" if reputation else "history", event_key=f"admin:{audit_id}",
+        )
 
 
 def _open_chat_permissions() -> ChatPermissions:
