@@ -63,8 +63,8 @@ async def test_request_is_free_and_contains_only_the_current_prompt(db, settings
     chat = openrouter_chat.OpenRouterChat(db, settings)
     assert await chat.answer("Как настроение?", 7) == "Привет, питерские."
     assert "test-key" not in repr(settings)
-    assert factory.call_args.kwargs["timeout"].total == 12
-    assert factory.call_args.kwargs["timeout"].connect == 3
+    assert factory.call_args.kwargs["timeout"].total == 35
+    assert factory.call_args.kwargs["timeout"].connect == 5
     assert post.call_args.args == ("https://openrouter.ai/api/v1/chat/completions",)
     request = post.call_args.kwargs
     assert request["headers"] == {"Authorization": "Bearer test-key"}

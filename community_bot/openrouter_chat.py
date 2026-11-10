@@ -19,7 +19,7 @@ from community_bot.nora import rule_intent, strip_address
 logger = logging.getLogger(__name__)
 
 _URL = "https://openrouter.ai/api/v1/chat/completions"
-_TIMEOUT = aiohttp.ClientTimeout(total=12, connect=3)
+_TIMEOUT = aiohttp.ClientTimeout(total=35, connect=5)
 _QUOTA_KEY = "openrouter_attempts"
 _DAY = 24 * 60 * 60
 _DAILY_LIMIT = 45
