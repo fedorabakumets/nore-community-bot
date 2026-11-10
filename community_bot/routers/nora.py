@@ -4,28 +4,47 @@ import re
 
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from aiogram.filters import Filter
+from aiogram.filters import Filter, StateFilter
 from aiogram.types import LinkPreviewOptions, Message
 
 from community_bot.aliases import message_trigger, parse_trigger
-from community_bot.command_registry import get_command
+from community_bot.command_registry import get_command, nora_enabled
 from community_bot.config import Settings
 from community_bot.ephemeral import delete_user_command, reply_ttl
-from community_bot.nora import reply_for, reply_ttl_seconds, strip_address
+from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_address
+from community_bot.openrouter_chat import OpenRouterChat
 
 router = Router(name="nora")
+assistant_router = Router(name="nora_assistant")
 
 _NORA = re.compile(r"(?i)^\s*нора\b")
 
 
-@router.message(F.text.regexp(_NORA), F.chat.type.in_({"private", "group", "supergroup"}))
-async def nora_address(message: Message, settings: Settings) -> None:
+@assistant_router.message(
+    F.text.regexp(_NORA), F.chat.type.in_({"private", "group", "supergroup"}), StateFilter(None),
+)
+async def nora_address(
+    message: Message, settings: Settings, openrouter_chat: OpenRouterChat | None = None,
+) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
     text = message.text or ""
     if parse_trigger(text):
         raise SkipHandler
-    if strip_address(text) is None:
+    body = strip_address(text)
+    if body is None:
+        return
+    if openrouter_chat is not None and rule_intent(body) is None:
+        prompt = openrouter_chat.prompt_for(message)
+        if prompt and nora_enabled():
+            answer = await openrouter_chat.answer(prompt, message.from_user.id)
+            if answer:
+                await message.reply(
+                    answer,
+                    parse_mode=None,
+                    allow_sending_without_reply=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
         return
     from datetime import datetime
     from zoneinfo import ZoneInfo

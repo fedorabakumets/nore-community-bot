@@ -94,6 +94,8 @@ class CommandView:
 _COMMANDS: dict[str, CommandView] = {}
 _ALIAS: dict[str, str] = {}
 _PHRASES: list[tuple[str, str]] = []
+_ALL_ALIASES: dict[str, str] = {}
+_ALL_PHRASES: list[tuple[str, str]] = []
 _READY = False
 _DEFAULT_TTL = 30.0
 
@@ -147,15 +149,15 @@ def is_exact_slug(slug: str) -> bool:
     return bool(view and view.kind == "custom")
 
 
-def resolve_alias(token: str) -> str:
+def resolve_alias(token: str, *, include_disabled: bool = False) -> str:
     """Slug, or empty string when the registry does not know this word."""
     if not _READY:
         return ""
-    return _ALIAS.get(token, "")
+    return (_ALL_ALIASES if include_disabled else _ALIAS).get(token, "")
 
 
-def phrase_command(folded: str) -> tuple[str, str] | None:
-    for alias, slug in _PHRASES:
+def phrase_command(folded: str, *, include_disabled: bool = False) -> tuple[str, str] | None:
+    for alias, slug in (_ALL_PHRASES if include_disabled else _PHRASES):
         if folded == alias or folded.startswith(f"{alias} "):
             return slug, alias
     return None
@@ -188,19 +190,24 @@ def restore_defaults() -> None:
 def _reindex() -> None:
     _ALIAS.clear()
     _PHRASES.clear()
+    _ALL_ALIASES.clear()
+    _ALL_PHRASES.clear()
     for view in _COMMANDS.values():
-        if not view.enabled:
-            continue
         names = {view.slug, *view.aliases}
         for name in names:
             folded = name.casefold().strip()
             if not folded or folded == "нора":
                 continue
             if " " in folded:
-                _PHRASES.append((folded, view.slug))
+                _ALL_PHRASES.append((folded, view.slug))
+                if view.enabled:
+                    _PHRASES.append((folded, view.slug))
             else:
-                _ALIAS.setdefault(folded, view.slug)
+                _ALL_ALIASES.setdefault(folded, view.slug)
+                if view.enabled:
+                    _ALIAS.setdefault(folded, view.slug)
     _PHRASES.sort(key=lambda item: len(item[0]), reverse=True)
+    _ALL_PHRASES.sort(key=lambda item: len(item[0]), reverse=True)
 
 
 def apply_override_row(row: dict[str, object]) -> None:

@@ -165,7 +165,10 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
     ) -> Any:
         if not isinstance(event, Message) or event.chat.type not in {"group", "supergroup"}:
             return await handler(event, data)
-        is_cmd = is_group_command_to_sweep(event)
+        openrouter_chat = data.get("openrouter_chat")
+        is_cmd = is_group_command_to_sweep(event) and not (
+            openrouter_chat and openrouter_chat.prompt_for(event)
+        )
         bot = data.get("bot")
         deleted = False
         if is_cmd:

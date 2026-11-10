@@ -85,13 +85,13 @@ for _command, _aliases in COMMAND_ALIASES.items():
         _ALIAS_TO_COMMAND[_alias.casefold()] = _command
 
 
-def canonical_command(token: str) -> str | None:
+def canonical_command(token: str, *, include_disabled: bool = False) -> str | None:
     cleaned = _PUNCT.sub("", token).casefold()
     if not cleaned:
         return None
     from community_bot.command_registry import resolve_alias
 
-    resolved = resolve_alias(cleaned)
+    resolved = resolve_alias(cleaned, include_disabled=include_disabled)
     if resolved:
         return resolved
     return None
@@ -131,7 +131,7 @@ _EXACT_TEXT_COMMANDS = {
     "updates",
 }
 
-def parse_trigger(text: str) -> tuple[str, str] | None:
+def parse_trigger(text: str, *, include_disabled: bool = False) -> tuple[str, str] | None:
     """Return (canonical_command, args) if the message starts with a command or alias."""
     raw = (text or "").strip()
     addressed = strip_command_address(raw)
@@ -142,7 +142,7 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     folded = raw.casefold()
     from community_bot.command_registry import is_exact_slug, phrase_command
 
-    phrase = phrase_command(folded)
+    phrase = phrase_command(folded, include_disabled=include_disabled)
     if phrase:
         command, alias = phrase
         if folded == alias:
@@ -162,7 +162,7 @@ def parse_trigger(text: str) -> tuple[str, str] | None:
     slash = token[:1] in _SLASH_PREFIXES
     if slash:
         token = token.lstrip(_SLASH_PREFIXES).split("@", 1)[0]
-    command = canonical_command(token)
+    command = canonical_command(token, include_disabled=include_disabled)
     if not command:
         return None
     if (command in _EXACT_TEXT_COMMANDS or is_exact_slug(command)) and not slash:
@@ -199,13 +199,13 @@ def is_command_trigger(text: str) -> bool:
     return parse_trigger(text) is not None
 
 
-def is_command_message(text: str) -> bool:
+def is_command_message(text: str, *, include_disabled: bool = False) -> bool:
     stripped = (text or "").lstrip()
     if not stripped:
         return False
     if stripped[:1] in _SLASH_PREFIXES:
         return True
-    return is_command_trigger(stripped)
+    return parse_trigger(stripped, include_disabled=include_disabled) is not None
 
 
 def message_has_media_payload(message: Message) -> bool:

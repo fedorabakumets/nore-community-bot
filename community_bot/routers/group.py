@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from aiogram import BaseMiddleware, Bot, F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.fsm.context import FSMContext
@@ -1703,21 +1704,22 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
 
 @router.message(F.reply_to_message, F.text, F.chat.type.in_({"group", "supergroup"}))
 async def group_reply_actions(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.aliases import strip_command_address
+
+    addressed = strip_command_address(message.text or "")
+    amount = transfer_amount(addressed) if addressed is not None else None
+    delta = reputation_delta(message.text or "")
+    if amount is None and delta is None:
+        raise SkipHandler
     if not message.from_user or not message.reply_to_message or not message.reply_to_message.from_user:
         return
     target = await resolve_reply_target(message, db)
     if not target:
         return
-    from community_bot.aliases import strip_command_address
-
-    addressed = strip_command_address(message.text or "")
-    amount = transfer_amount(addressed) if addressed is not None else None
     if amount is not None:
         await _prepare_transfer(message, db, settings, target, amount)
         return
-    delta = reputation_delta(message.text or "")
-    if delta is None:
-        return
+    assert delta is not None
     actor = await register_telegram_user(db, message.from_user)
     if message.reply_to_message.from_user.is_bot:
         await message.reply("Репутация ботов не меняется.")
@@ -1756,8 +1758,3 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
             await message.answer("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
         except TelegramBadRequest:
             pass
-
-
-@router.message(F.chat.type.in_({"group", "supergroup"}))
-async def remember_group_member(message: Message) -> None:
-    return None

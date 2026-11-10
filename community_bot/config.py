@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -48,6 +48,8 @@ class Settings:
     tmdb_api_key: str
     gemini_api_key: str
     groq_api_key: str
+    openrouter_api_key: str = field(default="", repr=False)
+    openrouter_model: str = "openrouter/free"
 
     def is_owner(self, user_id: int) -> bool:
         return user_id in self.owner_ids
@@ -85,6 +87,8 @@ def load_settings() -> Settings:
         tmdb_api_key=os.getenv("TMDB_API_KEY", "").strip(),
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "").strip() or "openrouter/free",
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")

@@ -23,6 +23,7 @@ from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message
 from community_bot.navigation import CabinetNavigationMiddleware
+from community_bot.openrouter_chat import OpenRouterChat
 from community_bot.release_backup import verify_requested_release_backup, verify_widget_notification_backup
 from community_bot.restart import relaunch
 from community_bot.routers import (
@@ -42,6 +43,7 @@ from community_bot.routers import (
     social_games_router,
     wallet_router,
 )
+from community_bot.routers.nora import assistant_router
 from community_bot.telegraph import (
     publish_commands_guide,
     publish_staff_guide,
@@ -390,6 +392,52 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
         await asyncio.sleep(60)
 
 
+def create_dispatcher() -> Dispatcher:
+    from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
+    from community_bot.private_rich import PrivateRichContextMiddleware
+
+    dispatcher = Dispatcher()
+    from community_bot.message_widgets import WidgetUpdateMiddleware
+
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.message.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
+    dispatcher.message.outer_middleware(ProfileAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
+    dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
+    dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
+    from community_bot.birthday import router as birthday_router
+    from community_bot.event_access import router as event_router
+    from community_bot.mafia_notifications import router as mafia_notifications_router
+    from community_bot.sea_notifications import router as sea_notifications_router
+
+    dispatcher.include_router(mafia_notifications_router)
+    dispatcher.include_router(sea_notifications_router)
+    dispatcher.include_router(birthday_router)
+    dispatcher.include_router(event_router)
+    dispatcher.include_router(nora_router)
+    dispatcher.include_router(command_admin_router)
+    dispatcher.include_router(flows_router)
+    dispatcher.include_router(profile_router)
+    dispatcher.include_router(notices_router)
+    dispatcher.include_router(wallet_router)
+    dispatcher.include_router(cookie_games_router)
+    dispatcher.include_router(social_games_router)
+    dispatcher.include_router(games_router)
+    dispatcher.include_router(pets_router)
+    dispatcher.include_router(life_router)
+    dispatcher.include_router(contest_router)
+    dispatcher.include_router(shop_admin_router)
+    dispatcher.include_router(private_router)
+    dispatcher.include_router(group_router)
+    dispatcher.include_router(assistant_router)
+    return dispatcher
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -425,55 +473,17 @@ async def main() -> None:
     from community_bot.profile_maintenance import run_requested_reset
 
     await run_requested_reset(db, settings, bot)
-    from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMiddleware
+    from community_bot.access import OnboardingKeyboardMiddleware
+    from community_bot.private_rich import PrivateRichMiddleware
 
     bot.session.middleware.register(OnboardingKeyboardMiddleware())
-    from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware
-
     bot.session.middleware.register(PrivateRichMiddleware())
     patch_bot_ephemeral(bot)
-    from community_bot.access import ProfileAccessMiddleware
+    dispatcher = create_dispatcher()
+    if settings.openrouter_api_key:
+        dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)
 
-    dispatcher = Dispatcher()
-    from community_bot.message_widgets import WidgetUpdateMiddleware
-
-    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
-    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
-    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
-    dispatcher.message.outer_middleware(PrivateAccessMiddleware())
-    dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
-    dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
-    dispatcher.message.outer_middleware(ProfileAccessMiddleware())
-    dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())
-    dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
-    dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
-    dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     from community_bot.birthday import birthday_job
-    from community_bot.birthday import router as birthday_router
-    from community_bot.event_access import router as event_router
-    from community_bot.mafia_notifications import router as mafia_notifications_router
-    from community_bot.sea_notifications import router as sea_notifications_router
-
-    dispatcher.include_router(mafia_notifications_router)
-    dispatcher.include_router(sea_notifications_router)
-    dispatcher.include_router(birthday_router)
-    dispatcher.include_router(event_router)
-    dispatcher.include_router(nora_router)
-    dispatcher.include_router(command_admin_router)
-    dispatcher.include_router(flows_router)
-    dispatcher.include_router(profile_router)
-    dispatcher.include_router(notices_router)
-    dispatcher.include_router(wallet_router)
-    dispatcher.include_router(cookie_games_router)
-    dispatcher.include_router(social_games_router)
-    dispatcher.include_router(games_router)
-    dispatcher.include_router(pets_router)
-    dispatcher.include_router(life_router)
-    dispatcher.include_router(contest_router)
-    dispatcher.include_router(shop_admin_router)
-    dispatcher.include_router(private_router)
-    dispatcher.include_router(group_router)
-
     from community_bot.command_registry import load_registry
 
     await load_registry(db)
