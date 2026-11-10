@@ -30,6 +30,8 @@ class TelegramSession(BaseSession):
     async def make_request(self, bot, method, timeout=None):  # noqa: ASYNC109 - BaseSession interface
         self.calls.append(method)
         name = method.__api_method__
+        if name == 'getMe':
+            return User(id=bot.id, is_bot=True, first_name='Нора', username='nora_test_bot')
         if name == 'getFile':
             return File(file_id=method.file_id, file_unique_id='fixture', file_size=len(self.media),
                         file_path='photos/local.jpg')
@@ -87,6 +89,25 @@ async def text(env, view, value):
 async def navigate(env, view, section):
     target = next(item for item in view['workspace']['navigation'] if item['id'] == section)
     return await env.bridge.action(env.actor, {'action': target['action'], 'version': view['version']})
+
+
+async def test_widget_test_uses_owner_only_one_use_control_and_sends_to_self(env):
+    await env.db.set_role(8, 'admin')
+    non_owner = await env.bridge.open({'id': 8, 'first_name': 'Администратор'})
+    assert all(t['id'] != 'widget-notification-test' for t in non_owner['workspace']['tools'])
+
+    view = await env.bridge.open(env.actor)
+    tool = next(t for t in view['workspace']['tools'] if t['id'] == 'widget-notification-test')
+    action = {'action': tool['action'], 'version': view['version']}
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action({'id': 8}, action)
+    result = await env.bridge.action(env.actor, action)
+    assert result['workspace']['screen'] == 'admin:panel'
+    assert any('отправлен в личный чат' in n for n in result['notices'])
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action(env.actor, action)
+    (sent,) = [method for method in env.telegram.calls if method.__api_method__ == 'sendWidget']
+    assert sent.chat_id == env.actor['id'] and sent.disable_notification is False
 
 
 async def test_lobby_publication_uses_one_use_admin_controls(env):

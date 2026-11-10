@@ -63,7 +63,7 @@ window.NoraAdmin = (() => {
   }
   function overview(workspace) {
     const queue = workspace.tools.filter(t => t.section === 'queue');
-    return `<div class="adm-overview"><section class="adm-priority"><div class="adm-section-title"><h2>Требуют внимания</h2><span>Сейчас</span></div><p class="adm-muted">Новые обращения и незавершённые задачи сообщества</p><div class="adm-tool-list">${queue.map(t => toolButton(t, workspace.counts[t.id])).join('')}</div></section><section class="adm-section-list"><h2>Рабочие разделы</h2>${workspace.navigation.filter(n => !['overview','queue'].includes(n.id)).map(n => toolButton(n)).join('')}</section></div>`;
+    return `<div class="adm-overview"><section class="adm-priority"><div class="adm-section-title"><h2>Требуют внимания</h2><span>Сейчас</span></div><p class="adm-muted">Новые обращения и незавершённые задачи сообщества</p><div class="adm-tool-list">${queue.map(t => toolButton(t, workspace.counts[t.id])).join('')}</div></section><section class="adm-section-list"><h2>Рабочие разделы</h2>${workspace.navigation.filter(n => !['overview','queue'].includes(n.id)).map(n => toolButton(n)).join('')}${workspace.tools.filter(t => t.section === 'overview').map(t => toolButton(t)).join('')}</section></div>`;
   }
   function searchForm() {
     return `<form id="adm-search" class="adm-search" role="search"><label for="adm-search-query">Найти участника</label><div>${icon('search')}<input id="adm-search-query" type="search" autocomplete="off" placeholder="Имя, @username или ID" value="${esc(directoryQuery)}" ${disabled()}><button type="submit" ${disabled()}>Найти</button></div><small>Поиск по всему сообществу</small></form>`;

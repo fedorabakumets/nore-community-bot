@@ -290,9 +290,24 @@ async def wallet_history(request):
     return web.json_response({"items": items, "offset": offset, "has_more": len(rows) > 20})
 
 
+async def widget_notice(request):
+    from community_bot.widget_notifications import NOTICE_ID, TARGETS
+
+    notice_id = request.match_info["notice_id"]
+    row = await request.app["db"].fetchone(
+        "SELECT sender_label,title,preview,details,context,event_at,target FROM widget_notifications "
+        "WHERE id=? AND recipient_id=?",
+        (notice_id, request["actor"]["id"]),
+    ) if NOTICE_ID.fullmatch(notice_id) else None
+    if row is None:
+        return web.json_response({"error": "Уведомление недоступно"}, status=404)
+    return web.json_response(dict(row, target_label=TARGETS[row["target"]]))
+
+
 async def notices(request):
     from community_bot.birthday import pending_gift
     from community_bot.notify import CHANNELS
+    from community_bot.widget_notifications import CATEGORIES
 
     user, db = await actor(request), request.app["db"]
     rows = await db.fetchall(
@@ -328,6 +343,12 @@ async def notices(request):
                     "digest": bool(prefs.get(key, {}).get("digest")),
                 }
                 for key, value in CHANNELS.items()
+            ] + [
+                {
+                    "id": key, "title": title, "description": "HTML-уведомления в личном чате с Норой",
+                    "enabled": bool(prefs.get(key, {}).get("enabled")), "digest": False, "widget": True,
+                }
+                for key, title in CATEGORIES.items()
             ],
         }
     )
@@ -336,6 +357,7 @@ async def notices(request):
 async def notices_update(request):
     from community_bot.birthday import claim_gift
     from community_bot.notify import CHANNELS
+    from community_bot.widget_notifications import CATEGORIES
 
     user, db = await actor(request), request.app["db"]
     body = await request.json()
@@ -355,7 +377,8 @@ async def notices_update(request):
         await db.execute("UPDATE notify_inbox SET read=1 WHERE user_id=? AND id<=?", (user["user_id"], through))
     else:
         channel, enabled, digest = body.get("channel"), body.get("enabled"), body.get("digest")
-        if channel not in CHANNELS or type(enabled) is not bool or type(digest) is not bool:
+        if (not isinstance(channel, str) or channel not in CHANNELS.keys() | CATEGORIES.keys()
+                or type(enabled) is not bool or type(digest) is not bool or (channel in CATEGORIES and digest)):
             raise ValueError("Проверь настройки канала")
         await db.execute(
             "INSERT INTO notify_prefs(user_id,channel,enabled,digest) VALUES(?,?,?,?) "

@@ -48,6 +48,7 @@ from community_bot.role_prefixes import prefix_for
 ASSETS = Path(__file__).resolve().parent.parent / 'assets'
 ACTIVE: ContextVar[Any] = ContextVar('nora_admin_web_request', default=None)
 MAX_UPLOAD = 20 * 1024 * 1024
+WIDGET_TEST = 'admin:web-widget-notification-test'
 
 
 class SafeHTML(HTMLParser):
@@ -396,6 +397,12 @@ class AdminBridge:
             tools.append({'section': section, 'id': key, 'title': title, 'description': description,
                           'current': callback == session.screen,
                           'action': self.navigation_action(session, callback, section)})
+        if self.settings.is_owner(session.uid):
+            action = secrets.token_urlsafe(18)
+            session.actions[action] = (0, WIDGET_TEST)
+            tools.append({'section': 'overview', 'id': 'widget-notification-test',
+                          'title': 'Отправить себе тестовый HTML Widget',
+                          'description': 'Одно уведомление в личном чате с Норой', 'action': action})
         # Keep role assignment beside the profile it belongs to, including the return path.
         for mid, output in zip(session.visible, cards, strict=True):
             markup = session.cards[mid].get('markup')
@@ -474,8 +481,22 @@ class AdminBridge:
                 raise web.HTTPConflict(text='Кнопка уже использована или устарела')
             # Invalidate all controls before any operation; network retries cannot publish twice.
             session.actions.clear()
-            session.form = ''
             mid, callback = control
+            if callback == WIDGET_TEST:
+                if not self.settings.is_owner(session.uid):
+                    raise web.HTTPForbidden(text='Действие доступно владельцу')
+                from community_bot.widget_notifications import send_admin_test
+
+                outcome = await send_admin_test(self.bot, self.db, session.uid, data['action'])
+                session.notices = [{
+                    'sent': 'Тестовый HTML Widget отправлен в личный чат',
+                    'suppressed': 'Слишком частый повтор или доставка временно приостановлена',
+                    'blocked': 'Telegram запретил отправку. Проверь, открыт ли личный чат с ботом',
+                    'unconfirmed': 'Telegram не подтвердил доставку. Проверь личный чат',
+                    'failed': 'Telegram отклонил отправку HTML Widget',
+                }[outcome]]
+                return await self.snapshot(session)
+            session.form = ''
             section = session.navigation.get(data['action'])
             session.screen = callback
             if section:

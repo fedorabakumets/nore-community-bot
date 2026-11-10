@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+html{color-scheme:light dark}
+body{margin:0;font:14px/1.4 system-ui,sans-serif}
+.card{--bg:#f7f5f5;--text:#20191b;--muted:#65585d;--panel:#fff;--line:#dfd2d5;--red:#b91c1c;
+  box-sizing:border-box;padding:12px;background:var(--bg);color:var(--text);border-radius:12px}
+@media(prefers-color-scheme:dark){
+  .card{--bg:#171518;--text:#fcf6f7;--muted:#c6b7bc;--panel:#242024;--line:#51454b}
+}
+.heading{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.45px}
+#dot{width:8px;height:8px;border-radius:50%;background:var(--red);border:1px solid #df6969}
+h2,p{margin:0;overflow-wrap:anywhere;overflow:hidden}
+h2{margin:5px 0;max-height:61.2px;font:700 17px/1.2 system-ui,sans-serif}
+.meta{font-size:12px;color:var(--muted);max-height:33.6px}
+.date{white-space:nowrap}
+#preview{max-height:98px}
+.body{max-height:196px}
+.details{padding:8px;margin-top:8px;background:var(--panel);border-radius:8px;border:1px solid var(--line)}
+.details p+p{margin-top:5px}
+.controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+button{padding:6px 8px;min-height:32px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel);color:var(--text);font:600 12px/1.2 system-ui,sans-serif}
+button:active{opacity:.75}
+button[disabled]{opacity:.65}
+.primary{background:var(--red);border-color:var(--red);color:#fff}
+.closed,.narrow{display:none}
+@media(max-width:299px){.regular{display:none}.narrow{display:inline}}
+#status{margin-top:5px}
+@keyframes reveal{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:no-preference){.details{animation:reveal .16s ease-out}}
+</style>
+</head>
+<body>
+<section class="card">
+  <div class="heading"><span id="dot" aria-label="Новое"></span>НОРА | Уведомление</div>
+  <p class="meta">От кого: <span class="regular">$sender</span><span class="narrow">$sender_narrow</span></p>
+  <h2><span class="regular">$title</span><span class="narrow">$title_narrow</span></h2>
+  <p id="preview"><span class="regular">$preview</span><span class="narrow">$preview_narrow</span></p>
+  <section class="details closed" id="details">
+    <p class="meta date">$date</p>
+    <p class="meta"><span class="regular">$context</span><span class="narrow">$context_narrow</span></p>
+    <p class="body"><span class="regular">$details</span><span class="narrow">$details_narrow</span></p>
+  </section>
+  <div class="controls">
+    <button id="toggle" aria-expanded="false" aria-controls="details">Подробнее</button>
+    <button class="primary" id="open">Открыть Нору</button>
+    <button class="closed" id="read">Прочитано</button>
+  </div>
+  <p id="status" class="meta closed" role="status"></p>
+</section>
+<script>
+const tw = TelegramWidget;
+const byId = id => document.getElementById(id);
+const toggle = byId('toggle');
+const mark = byId('read');
+const status = byId('status');
+let expanded = false;
+let read = false;
+let pending = false;
+
+function isRead(data) {
+  try { return JSON.parse(data)?.read === true; } catch (_) { return false; }
+}
+function render() {
+  byId('dot').classList.toggle('closed', read);
+  byId('preview').classList.toggle('closed', expanded);
+  byId('details').classList.toggle('closed', !expanded);
+  toggle.textContent = expanded ? 'Свернуть' : 'Подробнее';
+  toggle.setAttribute('aria-expanded', String(expanded));
+  mark.classList.toggle('closed', !expanded);
+  mark.disabled = read || pending;
+  mark.textContent = read ? 'Прочитано ✓' : pending ? 'Сохраняем…' : 'Прочитано';
+}
+function showStatus(text) {
+  status.textContent = text;
+  status.classList.toggle('closed', !text);
+}
+function syncRead() {
+  read = read || isRead(tw.chatData);
+  if (read) showStatus('');
+  render();
+}
+toggle.addEventListener('click', () => {
+  expanded = !expanded;
+  showStatus('');
+  render();
+});
+byId('open').addEventListener('click', () => tw.openTelegramLink($url));
+mark.addEventListener('click', () => {
+  if (read || pending || !expanded) return;
+  pending = true;
+  showStatus('');
+  render();
+  const failed = () => {
+    pending = false;
+    if (!read) showStatus('Не удалось сохранить. Нажми ещё раз.');
+    render();
+  };
+  tw.request($read_request).then(answer => {
+    if (!isRead(answer.result)) { failed(); return; }
+    pending = false;
+    read = true;
+    syncRead();
+  }, failed);
+});
+tw.onEvent('chatDataChanged', syncRead);
+syncRead();
+tw.ready();
+</script>
+</body>
+</html>

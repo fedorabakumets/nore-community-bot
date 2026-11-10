@@ -156,6 +156,35 @@ CREATE TABLE IF NOT EXISTS notify_inbox (
 );
 CREATE INDEX IF NOT EXISTS idx_notify_inbox_user ON notify_inbox(user_id, read, delivered, id);
 
+CREATE TABLE IF NOT EXISTS widget_notifications (
+    id TEXT PRIMARY KEY,
+    recipient_id INTEGER NOT NULL REFERENCES users(user_id),
+    sender_type TEXT NOT NULL,
+    sender_id INTEGER,
+    sender_label TEXT NOT NULL,
+    title TEXT NOT NULL,
+    preview TEXT NOT NULL,
+    details TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target TEXT NOT NULL,
+    context TEXT NOT NULL,
+    event_at TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    delivery TEXT NOT NULL DEFAULT 'unconfirmed',
+    chat_id INTEGER,
+    message_id INTEGER,
+    read_at INTEGER,
+    read_synced INTEGER NOT NULL DEFAULT 0,
+    next_action_at INTEGER,
+    UNIQUE(recipient_id, category, event_key),
+    UNIQUE(chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_widget_notifications_recipient
+    ON widget_notifications(recipient_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_widget_notifications_due
+    ON widget_notifications(next_action_at) WHERE next_action_at IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS cookie_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(user_id),

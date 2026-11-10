@@ -512,7 +512,9 @@ async def main() -> None:
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
     birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
     from community_bot.rsvp import event_counters_job
+    from community_bot.widget_notifications import widget_notification_job
 
+    widget_notification_task = asyncio.create_task(widget_notification_job(bot, db))
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
@@ -537,6 +539,7 @@ async def main() -> None:
             morning_task,
             daily_chat_task,
             birthday_task,
+            widget_notification_task,
             event_counters_task,
             sticker_delivery_task,
             emergency_task,
@@ -554,6 +557,7 @@ async def main() -> None:
                 morning_task,
                 daily_chat_task,
                 birthday_task,
+                widget_notification_task,
                 event_counters_task,
                 sticker_delivery_task,
                 emergency_task,

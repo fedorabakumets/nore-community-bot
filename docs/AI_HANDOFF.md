@@ -2,6 +2,19 @@
 
 > Обновлено 10.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## Уведомления HTML Widgets — 10 ноября 2026
+
+- Worktree C:/Users/User/Projects/nora-widget-notifications, ветка chatgpt/widget-notifications,
+  база GitHub production 6f474d3. В исходной копии остались её локальные правки.
+- Админ-панель отправляет один тестовый Widget самому владельцу. События сообщества
+  пока не подключены. Категории подписок доступны в ЛК, доставка выключена по умолчанию.
+- Личные виджеты, caption, привязка запроса к чату и сообщению, SQLite и фоновое
+  обновление/удаление через 30 с. Прежняя личная панель не менялась.
+- Проверки: 897 passed / 1 skipped, Ruff, pip check, node --check. Telegram Widget
+  Sandbox v0.6.3: 200–600 px, обе темы, максимум 480 px; Chromium: переходы и права.
+- Сценарий живой проверки в docs/INLINE_STYLE.md. Владелец проверит Telegram сам.
+  Production не развёртывать без отдельного разрешения.
+
 ## Лобби htmlbubble — 10 ноября 2026
 
 - Worktree C:/Users/User/Projects/nora-lobby-htmlbubble, ветка chatgpt/lobby-htmlbubble.
@@ -141,14 +154,8 @@
 - `widget_query` проходит штатные права и FSM с проверкой nonce, владельца, сообщения и шага.
 - Документация: `docs/INLINE_STYLE.md`. История реализации и тестов — в Git.
 
-## Правила выпуска
+## Среда
 
-- Завершённые проверенные задачи публиковать по умолчанию; Railway следит
-  за cursor/nora-2-update-d133. Feature-ветка не отслеживает production для push.
-- После публикации дополнительных проверок не выполнять, владелец проверяет сам.
-- Git SHA production-ветки не доказывает успешный Railway deploy.
-- Пользовательские AGENTS.md и docs/AI_HANDOFF.md в исходной копии не коммитить.
-- Тесты — временная SQLite, fake Bot, PYTHON_DOTENV_DISABLED=1.
-- Python окружения исходной копии: C:/Users/User/Projects/nore-community-bot/.venv/Scripts/python.exe.
-- Базовые изменения lazy S3 уже в production-ветке; реальная экономия RAM здесь не проверяется.
-- Исправление beta и запасных кнопок: полный check_local — 859 passed, 1 skipped. После финальной правки активной панели — 65 passed, Ruff и pip check прошли. Живой показ владельцу предстоит проверить после выпуска.
+- Python: C:/Users/User/Projects/nore-community-bot/.venv/Scripts/python.exe.
+- Проверки используют временную SQLite, fake Bot, PYTHON_DOTENV_DISABLED=1.
+- Railway следит за cursor/nora-2-update-d133. SHA ветки не подтверждает деплой.

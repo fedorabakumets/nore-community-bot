@@ -428,6 +428,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/wallet/confirm', cabinet_api.wallet_confirm)
     app.router.add_get('/api/wallet/history', cabinet_api.wallet_history)
     app.router.add_get('/api/notices', cabinet_api.notices)
+    app.router.add_get('/api/notices/widget/{notice_id}', cabinet_api.widget_notice)
     app.router.add_post('/api/notices', cabinet_api.notices_update)
 
     app.router.add_post('/api/shop/video', shop_api.upload_video)

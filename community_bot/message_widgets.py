@@ -52,7 +52,8 @@ class WidgetSession(AiohttpSession):
 
     async def make_request(self, bot, method, timeout=None):  # noqa: ASYNC109
         name = method.__api_method__
-        if name in {"sendWidget", "sendSharedWidget", "answerWidgetQuery", "editSharedWidgetData"}:
+        if name in {"sendWidget", "sendSharedWidget", "answerWidgetQuery", "editSharedWidgetData",
+                    "editMessageWidgetData"}:
             return await self.widget_api.make_request(bot, method, timeout)
         if name == "getUpdates" and time.monotonic() >= self.retry_poll_at:
             try:
@@ -76,6 +77,23 @@ class SendWidget(TelegramMethod[Message]):
     is_shared: bool = False
     public_data: str | None = None
     reply_markup: InlineKeyboardMarkup | None = None
+
+
+class SendNotificationWidget(SendWidget):
+    width: int | None = None
+    height: int | None = None
+    chat_data: str
+    disable_notification: bool = False
+    parse_mode: str = "HTML"
+
+
+class EditMessageWidgetData(TelegramMethod[bool]):
+    __returning__ = bool
+    __api_method__ = "editMessageWidgetData"
+
+    chat_id: int
+    message_id: int
+    chat_data: str
 
 
 class SendSharedWidget(TelegramMethod[Message]):
@@ -198,6 +216,11 @@ class WidgetUpdateMiddleware(BaseMiddleware):
         query = getattr(event, "widget_query", None)
         if hasattr(query, "model_dump"):
             query = query.model_dump(by_alias=True, exclude_none=True)
+        if isinstance(query, dict) and data.get("db") is not None:
+            from community_bot.widget_notifications import handle_widget_query
+
+            if await handle_widget_query(data["bot"], data["db"], query):
+                return
         callback = event.callback_query
         button = callback and (callback.data or "").startswith("nora:")
         if button and isinstance(callback.message, Message):

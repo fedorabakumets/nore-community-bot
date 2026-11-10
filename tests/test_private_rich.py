@@ -852,7 +852,14 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     from aiogram.client.session.aiohttp import AiohttpSession
     from aiogram.methods import ForwardMessage, GetUpdates, SendMessage
 
-    from community_bot.message_widgets import AnswerWidgetQuery, EditSharedWidgetData, SendSharedWidget, WidgetSession
+    from community_bot.message_widgets import (
+        AnswerWidgetQuery,
+        EditMessageWidgetData,
+        EditSharedWidgetData,
+        SendNotificationWidget,
+        SendSharedWidget,
+        WidgetSession,
+    )
 
     session = WidgetSession()
     calls = []
@@ -867,6 +874,9 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     try:
         await session.make_request(None, AnswerWidgetQuery(widget_query_id='x', data='ok'))
         await session.make_request(None, EditSharedWidgetData(widget_id='123', public_data='{}'))
+        await session.make_request(None, EditMessageWidgetData(chat_id=7, message_id=456, chat_data='{}'))
+        await session.make_request(None, SendNotificationWidget(chat_id=7, html='<p>Nora</p>',
+                                                                 caption='Test', chat_data='{}'))
         await session.make_request(None, SendSharedWidget(chat_id=-100123, widget_id='123'))
         await session.make_request(None, ForwardMessage(chat_id=-100123, from_chat_id=7, message_id=1))
         await session.make_request(None, SendMessage(chat_id=1, text='test'))
@@ -876,6 +886,7 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
         await session.close()
     assert [('/beta/' in base, method) for base, method in calls] == [
         (True, 'answerWidgetQuery'), (True, 'editSharedWidgetData'),
+        (True, 'editMessageWidgetData'), (True, 'sendWidget'),
         (True, 'sendSharedWidget'), (False, 'forwardMessage'), (False, 'sendMessage'),
         (True, 'getUpdates'), (False, 'getUpdates'), (False, 'getUpdates'),
     ]
