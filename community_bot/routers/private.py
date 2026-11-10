@@ -265,12 +265,10 @@ async def private_weather(message: Message, settings: Settings) -> None:
 
 
 @router.message(command_or_alias("help", "commands"), F.chat.type == "private")
-async def help_command(message: Message, db: Database) -> None:
-    if not message.from_user:
-        return
+async def help_command(message: Message, bot: Bot) -> None:
     from community_bot.commands_guide import send_commands_card
 
-    await send_commands_card(message, db)
+    await send_commands_card(message, bot)
 
 
 @router.message(command_or_alias("store"))

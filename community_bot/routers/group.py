@@ -373,10 +373,10 @@ async def question_in_group(message: Message) -> None:
 
 
 @router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
-async def group_commands(message: Message, db: Database) -> None:
+async def group_commands(message: Message, bot: Bot) -> None:
     from community_bot.commands_guide import send_commands_card
 
-    await send_commands_card(message, db)
+    await send_commands_card(message, bot)
 
 
 @router.message(command_or_alias("pogoda"), F.chat.type.in_({"group", "supergroup"}))

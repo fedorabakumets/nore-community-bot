@@ -31,7 +31,7 @@ from aiogram.types import (
 from community_bot.access import OnboardingKeyboardMiddleware
 from community_bot.blocks import answer_block, edit_block, replace_block
 from community_bot.database import Database
-from community_bot.ephemeral import patch_bot_ephemeral
+from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.keyboards import YES_NO_KEYBOARD, flow_reply_keyboard, ibtn, main_private_keyboard
 from community_bot.navigation import CabinetNavigationMiddleware
 from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware, button_rows, text_blocks
@@ -890,3 +890,101 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
         (True, 'sendSharedWidget'), (False, 'forwardMessage'), (False, 'sendMessage'),
         (True, 'getUpdates'), (False, 'getUpdates'), (False, 'getUpdates'),
     ]
+
+
+@pytest.mark.parametrize("chat_id,closer", [(7, 7), (-100123, 7), (-100123, 8), (-100123, 9), (-100123, None)])
+async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, chat_id, closer):
+    from community_bot.commands_guide import CLOSE_COMMANDS_CARD, router
+    from community_bot.helpers import delete_later
+    from community_bot.routers import group, private
+
+    db, bot, session, _ = setup
+    await db.ensure_user(8, telegram_name="Модератор")
+    await db.set_role(8, "moderator")
+    lookup = AsyncMock(side_effect=lambda _, uid: SimpleNamespace(
+        status="administrator" if uid == 9 else "member",
+    ))
+    monkeypatch.setattr(bot, "get_chat_member", lookup)
+    group_timer = AsyncMock()
+    monkeypatch.setattr("community_bot.ephemeral.delete_later", group_timer)
+    expire = asyncio.Event()
+    expired = asyncio.Event()
+
+    async def controlled_timer(message, seconds):
+        assert seconds == 60
+        await expire.wait()
+        await delete_later(message, 0)
+        expired.set()
+
+    timer = AsyncMock(side_effect=controlled_timer)
+    monkeypatch.setattr("community_bot.commands_guide.delete_later", timer)
+    dp = Dispatcher()
+    dp.message.outer_middleware(PrivateRichContextMiddleware())
+    dp.message.outer_middleware(GroupHousekeepingMiddleware())
+    dp.callback_query.outer_middleware(PrivateRichContextMiddleware())
+    handlers = Router()
+    handlers.message.handlers.extend(
+        handler for source, target in ((group.router, group.group_commands), (private.router, private.help_command))
+        for handler in source.message.handlers if handler.callback == target
+    )
+    handlers.callback_query.handlers.extend(router.callback_query.handlers)
+    dp.include_router(handlers)
+    context = {"db": db, "settings": bot.community_settings}
+    if chat_id == 7:
+        async def open_panel(event, data):
+            await event.answer("Главное меню")
+
+        await turn(setup, open_panel)
+    saved_panel = await db.get_bot_state("private_rich_panel:7")
+    session.calls.clear()
+    event = incoming(text="команды")
+    if chat_id < 0:
+        event = event.model_copy(update={
+            "chat": Chat(id=chat_id, type="supergroup", is_forum=True),
+            "is_topic_message": True, "message_thread_id": 42, "text": "Нора команды",
+        })
+
+    await dp.feed_update(bot, Update(update_id=1, message=event), **context)
+    card = event.model_copy(update={"message_id": session.next_id - 1})
+    await asyncio.sleep(0)
+    send = session.calls[-1]
+    assert isinstance(send, SendRichMessage)
+    assert send.reply_markup is None
+    assert send.message_thread_id == (42 if chat_id < 0 else None)
+    assert [block["type"] for block in content(send)] == ["photo", "buttons"]
+    assert send.rich_message.blocks[0].photo.media.path.is_file()
+    assert actions(send)[CLOSE_COMMANDS_CARD]["style"] == "danger"
+    assert actions(send)[CLOSE_COMMANDS_CARD]["text"] == "Закрыть"
+    timer.assert_awaited_once()
+    group_timer.assert_not_called()
+
+    async def click(user_id, target):
+        query = CallbackQuery(
+            id="close", chat_instance="commands", data=CLOSE_COMMANDS_CARD,
+            from_user=User(id=user_id, is_bot=False, first_name="Участник"), message=target,
+        )
+        await dp.feed_update(bot, Update(update_id=2, callback_query=query), **context)
+
+    def card_deletes():
+        return [call for call in session.calls
+                if call.__api_method__ == "deleteMessage" and call.message_id == card.message_id]
+
+    if chat_id < 0:
+        await click(10, card)
+        assert session.calls[-1].show_alert
+        await click(7, card.model_copy(update={"message_id": card.message_id + 1}))
+        assert not card_deletes()
+        assert not any(call.__api_method__ == "deleteMessage" and call.message_id == card.message_id + 1
+                       for call in session.calls)
+    if closer is None:
+        expire.set()
+        await asyncio.wait_for(expired.wait(), timeout=1)
+    else:
+        await click(closer, card)
+        await asyncio.sleep(0)
+        expire.set()
+        await asyncio.sleep(0)
+        assert not expired.is_set()
+    assert len(card_deletes()) == 1
+    assert await db.get_bot_state("private_rich_panel:7") == saved_panel
+    await dp.storage.close()

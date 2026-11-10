@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,6 +35,7 @@ from aiogram.types import (
 )
 from aiogram.utils.text_decorations import html_decoration
 
+from community_bot.commands_guide import CLOSE_COMMANDS_CARD
 from community_bot.inline_style import button_style
 
 _MEDIA = {
@@ -75,6 +77,17 @@ class Turn:
 
 
 _TURN: ContextVar[Turn | None] = ContextVar("private_rich_turn", default=None)
+_STANDALONE: ContextVar[bool] = ContextVar("standalone_rich_message", default=False)
+
+
+@contextmanager
+def standalone_rich_message():
+    """Send a Rich message separately from the persistent private panel."""
+    token = _STANDALONE.set(True)
+    try:
+        yield
+    finally:
+        _STANDALONE.reset(token)
 
 
 def reopen_private_panel():
@@ -366,7 +379,7 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                 current = await data["state"].get_state()
                 if not submission(event, json.loads(raw) if raw else {}, current):
                     return "nora_widget_rejected"
-            if isinstance(event, CallbackQuery) and source.message_id > 0:
+            if isinstance(event, CallbackQuery) and event.data != CLOSE_COMMANDS_CARD and source.message_id > 0:
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
                 if saved and json.loads(saved)["message_id"] != source.message_id:
                     await event.answer(
@@ -387,6 +400,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
     async def __call__(self, make_request, bot, method):
         uid, name = getattr(method, "chat_id", None), method.__api_method__
         if not isinstance(uid, int) or uid <= 0 or not getattr(bot, "community_db", None):
+            return await make_request(bot, method)
+        if name == "sendRichMessage" and _STANDALONE.get():
             return await make_request(bot, method)
         if name not in _SEND | _EDIT | {"copyMessage", "deleteMessage"}:
             return await make_request(bot, method)

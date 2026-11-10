@@ -45,7 +45,6 @@ from community_bot.routers import (
 )
 from community_bot.routers.nora import assistant_router
 from community_bot.telegraph import (
-    publish_commands_guide,
     publish_staff_guide,
     repair_member_images,
 )
@@ -440,6 +439,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
     from community_bot.birthday import router as birthday_router
+    from community_bot.commands_guide import router as commands_router
     from community_bot.event_access import router as event_router
     from community_bot.mafia_notifications import router as mafia_notifications_router
     from community_bot.sea_notifications import router as sea_notifications_router
@@ -461,6 +461,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(life_router)
     dispatcher.include_router(contest_router)
     dispatcher.include_router(shop_admin_router)
+    dispatcher.include_router(commands_router)
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
     dispatcher.include_router(assistant_router)
@@ -529,7 +530,6 @@ async def main() -> None:
             await safe_staff_event_notice(bot, staff_id)
         await db.set_bot_state("event_shop_fix_staff_notice_v1", "1")
     await publish_staff_guide(db)
-    await publish_commands_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()
