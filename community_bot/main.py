@@ -23,7 +23,7 @@ from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message
 from community_bot.navigation import CabinetNavigationMiddleware
-from community_bot.release_backup import verify_requested_release_backup
+from community_bot.release_backup import verify_requested_release_backup, verify_widget_notification_backup
 from community_bot.restart import relaunch
 from community_bot.routers import (
     command_admin_router,
@@ -401,6 +401,7 @@ async def main() -> None:
 
     await prepare_reset(db)
     await verify_requested_release_backup(db)
+    await verify_widget_notification_backup(db)
     await db.initialize()
     await apply_reset(db, settings)
     settings = await reset_settings(db, settings)

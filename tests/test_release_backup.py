@@ -5,7 +5,11 @@ import sqlite3
 import pytest
 
 from community_bot.database import Database
-from community_bot.release_backup import REQUEST_VARIABLE, verify_requested_release_backup
+from community_bot.release_backup import (
+    REQUEST_VARIABLE,
+    verify_requested_release_backup,
+    verify_widget_notification_backup,
+)
 
 
 async def database(tmp_path):
@@ -77,3 +81,27 @@ async def test_missing_production_database_blocks_release_instead_of_creating_em
     with pytest.raises(RuntimeError, match="existing database"):
         await verify_requested_release_backup(db)
     assert not db.path.exists()
+
+
+async def test_widget_release_preserves_existing_sqlite_before_adding_table(tmp_path, monkeypatch):
+    monkeypatch.delenv(REQUEST_VARIABLE, raising=False)
+    db = await database(tmp_path)
+    await db.execute("DROP TABLE widget_notifications")
+    assert await verify_widget_notification_backup(db)
+    assert await db.fetchone("SELECT name FROM sqlite_master WHERE name='widget_notifications'") is None
+    backup_dir = tmp_path / ".nora-backups"
+    report = json.loads((backup_dir / "before-widget-notifications-v1.verified.json").read_text())
+    assert report["integrity_ok"] and report["ledger_preserved"]
+    assert not await verify_widget_notification_backup(db)
+    await db.initialize()
+    assert (await db.get_user(7))["cookies"] == 123
+    assert not await verify_widget_notification_backup(db)
+
+
+async def test_widget_release_skips_new_installation(tmp_path):
+    db = Database(tmp_path / "new.sqlite3")
+    assert not await verify_widget_notification_backup(db)
+    assert not db.path.exists()
+    await db.initialize()
+    assert not await verify_widget_notification_backup(db)
+    assert not (tmp_path / ".nora-backups").exists()

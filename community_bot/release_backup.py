@@ -1,4 +1,4 @@
-"""Opt-in SQLite backup/restore gate, run before production schema initialization."""
+"""SQLite backup and restore checks before production schema initialization."""
 from __future__ import annotations
 
 import asyncio
@@ -105,8 +105,8 @@ def _write_marker(marker: Path, backup: Path) -> None:
         os.fsync(report.fileno())
 
 
-async def verify_requested_release_backup(db: Database) -> bool:
-    request = os.getenv(REQUEST_VARIABLE, "").strip()
+async def verify_requested_release_backup(db: Database, *, request: str | None = None) -> bool:
+    request = request if request is not None else os.getenv(REQUEST_VARIABLE, "").strip()
     if not request:
         return False
     if not re.fullmatch(r"[a-z0-9-]{1,80}", request):
@@ -122,3 +122,20 @@ async def verify_requested_release_backup(db: Database) -> bool:
         "Release backup verified: SQLite integrity, restored balances, ledger and purchase replay protection OK",
     )
     return True
+
+
+def _needs_widget_notification_backup(database: Path) -> bool:
+    if not database.is_file():
+        return False
+    with closing(_read_only(database)) as db:
+        tables = {row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users', 'widget_notifications')"
+        )}
+    return tables == {"users"}
+
+
+async def verify_widget_notification_backup(db: Database) -> bool:
+    """Keep a verified recovery point before introducing widgets on an existing database."""
+    if not await asyncio.to_thread(_needs_widget_notification_backup, db.path):
+        return False
+    return await verify_requested_release_backup(db, request="widget-notifications-v1")
