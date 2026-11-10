@@ -22,9 +22,9 @@ _URL = "https://openrouter.ai/api/v1/chat/completions"
 _TIMEOUT = aiohttp.ClientTimeout(total=35, connect=5)
 _QUOTA_KEY = "openrouter_attempts"
 _DAY = 24 * 60 * 60
-_DAILY_LIMIT = 45
+_DAILY_LIMIT = 200
 _GLOBAL_INTERVAL = 5
-_USER_INTERVAL = 30
+_USER_INTERVAL = 0
 _UNAVAILABLE = "Сейчас не получается ответить. Давай чуть позже."
 _LIMIT_REACHED = "Меня засыпали вопросами. Давай чуть позже."
 _PERSONA = (

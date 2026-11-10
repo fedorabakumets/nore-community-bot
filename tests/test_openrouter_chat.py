@@ -107,10 +107,11 @@ async def test_parallel_calls_and_cooldowns(db, settings, clock, monkeypatch):
     assert await chat.answer("параллельно", 8) is None
     finish.set()
     assert await pending == "привет"
-    assert await chat.answer("тот же автор", 7) is None
-    assert await chat.answer("другой автор", 8) == "другой автор"
+    assert await chat.answer("тот же автор", 7) == "тот же автор"
     assert await chat.answer("слишком быстро", 9) is None
-    clock.now += 30
+    clock.now += 5
+    assert await chat.answer("другой автор", 8) == "другой автор"
+    clock.now += 5
     assert await chat.answer("снова", 7) == "снова"
 
 
