@@ -31,6 +31,7 @@ TOOLS = (
     ('queue', 'reports', 'Репорты', 'Сообщения о нарушениях', 'admin:reports', ()),
     ('queue', 'mail', 'Почта', 'Входящие сообщения участников', 'admin:mail', ()),
     ('content', 'post', 'Создать публикацию', 'Текст, медиа, кнопки и опросы', 'admin:post', ('chat.post',)),
+    ('content', 'lobby', 'Лобби NORA', 'Живой виджет игры и закреп в чате', 'admin:lobby', ('chat.post',)),
     ('content', 'broadcast', 'Рассылка в личку', 'Сообщение участникам от Норы', 'admin:broadcast',
      ('chat.broadcast',)),
     ('content', 'auto', 'Автосообщения', 'Расписание и включение сообщений', 'admin:auto:list', ('automessages',)),

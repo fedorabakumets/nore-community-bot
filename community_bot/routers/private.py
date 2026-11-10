@@ -754,6 +754,41 @@ async def admin_chatroom(callback: CallbackQuery, db: Database, settings: Settin
     )
 
 
+@router.callback_query(F.data.in_({"admin:lobby", "admin:lobby:publish"}))
+async def admin_lobby_widget(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await callback.answer()
+    text = (
+        "🎮 <b>Лобби NORA</b>\n\n"
+        "Живой HTML-виджет: игроки онлайн / участники сообщества и вход сразу в игру.\n"
+        "Счётчик обновляется примерно каждые 10 секунд. Нужен Telegram с поддержкой виджетов.\n\n"
+        "Сообщение появится в чате сообщества и будет закреплено. "
+        "Повторное нажатие закрепит тот же виджет. Остальные закрепы сохранятся."
+    )
+    if callback.data == 'admin:lobby:publish':
+        from aiogram.exceptions import TelegramAPIError
+
+        service = getattr(bot, '_nora_lobby_widget', None)
+        if service is None:
+            text = 'Сервис лобби ещё не готов. Попробуй позже.'
+        else:
+            try:
+                text = await service.publish()
+                await db.log_admin_action(callback.from_user.id, 'lobby_widget_publish',
+                                          str(settings.community_chat_id))
+            except TelegramAPIError:
+                text = ('Telegram не подтвердил публикацию или обновление виджета. '
+                        'Проверь сообщение в чате перед повторной попыткой и права Норы. '
+                        'Если виджет уже появился, бот будет пытаться обновлять его автоматически.')
+            except ValueError as error:
+                text = str(error)
+    await callback.message.edit_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Опубликовать и закрепить', callback_data='admin:lobby:publish')],
+        [InlineKeyboardButton(text='← Публикации', callback_data='admin:chatroom')],
+    ]))
+
+
 def _system_text(*, is_owner: bool) -> str:
     text = "🛠 <b>Система</b>\n\nСводка дня, журнал, витрина, залог RSVP, обновления и справка админки."
     if is_owner:

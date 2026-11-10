@@ -52,7 +52,7 @@ class WidgetSession(AiohttpSession):
 
     async def make_request(self, bot, method, timeout=None):  # noqa: ASYNC109
         name = method.__api_method__
-        if name in {"sendWidget", "answerWidgetQuery"}:
+        if name in {"sendWidget", "answerWidgetQuery", "editSharedWidgetData"}:
             return await self.widget_api.make_request(bot, method, timeout)
         if name == "getUpdates" and time.monotonic() >= self.retry_poll_at:
             try:
@@ -74,6 +74,7 @@ class SendWidget(TelegramMethod[Message]):
     height: int = 0
     allow_queries: bool = False
     is_shared: bool = False
+    public_data: str | None = None
     reply_markup: InlineKeyboardMarkup | None = None
 
 
@@ -83,6 +84,15 @@ class AnswerWidgetQuery(TelegramMethod[bool]):
 
     widget_query_id: str
     data: str
+
+
+class EditSharedWidgetData(TelegramMethod[bool]):
+    __returning__ = bool
+    __api_method__ = "editSharedWidgetData"
+
+    widget_id: str
+    public_data: str
+    cache_time: int = 5
 
 
 def document(config: dict[str, Any]) -> str:

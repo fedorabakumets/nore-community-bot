@@ -852,7 +852,7 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     from aiogram.client.session.aiohttp import AiohttpSession
     from aiogram.methods import GetUpdates, SendMessage
 
-    from community_bot.message_widgets import AnswerWidgetQuery, WidgetSession
+    from community_bot.message_widgets import AnswerWidgetQuery, EditSharedWidgetData, WidgetSession
 
     session = WidgetSession()
     calls = []
@@ -866,12 +866,13 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     monkeypatch.setattr(AiohttpSession, 'make_request', record)
     try:
         await session.make_request(None, AnswerWidgetQuery(widget_query_id='x', data='ok'))
+        await session.make_request(None, EditSharedWidgetData(widget_id='123', public_data='{}'))
         await session.make_request(None, SendMessage(chat_id=1, text='test'))
         await session.make_request(None, GetUpdates())
         await session.make_request(None, GetUpdates())
     finally:
         await session.close()
     assert [('/beta/' in base, method) for base, method in calls] == [
-        (True, 'answerWidgetQuery'), (False, 'sendMessage'),
+        (True, 'answerWidgetQuery'), (True, 'editSharedWidgetData'), (False, 'sendMessage'),
         (True, 'getUpdates'), (False, 'getUpdates'), (False, 'getUpdates'),
     ]

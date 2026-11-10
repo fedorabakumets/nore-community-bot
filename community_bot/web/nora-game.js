@@ -398,6 +398,7 @@
     try { await loadGame(); if (version !== active) return; const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const gift=pendingGift;close();open(gift); }; } }
   }
+  window.NoraGame = {open};
   document.addEventListener('click', event => {
     if (event.target.closest('#nora-game-open')) open();
     if (event.target.closest('button[data-record-gift]')) open(true);

@@ -89,6 +89,34 @@ async def navigate(env, view, section):
     return await env.bridge.action(env.actor, {'action': target['action'], 'version': view['version']})
 
 
+async def test_lobby_publication_uses_one_use_admin_controls(env):
+    from unittest.mock import AsyncMock
+
+    env.bot._nora_lobby_widget = SimpleNamespace(publish=AsyncMock(return_value='Лобби закреплено'))
+    root = await env.bridge.open(env.actor)
+    content = await navigate(env, root, 'content')
+    preview = await click(env, content, 'Лобби NORA')
+    env.bot._nora_lobby_widget.publish.assert_not_awaited()
+    action = button(preview, 'Опубликовать и закрепить')
+    await env.bridge.action(env.actor, action)
+    env.bot._nora_lobby_widget.publish.assert_awaited_once()
+    with pytest.raises(web.HTTPConflict):
+        await env.bridge.action(env.actor, action)
+
+
+async def test_lobby_publication_rechecks_permissions(env):
+    from unittest.mock import AsyncMock
+
+    from community_bot.routers.private import admin_lobby_widget
+
+    callback = SimpleNamespace(message=AsyncMock(), answer=AsyncMock(), from_user=SimpleNamespace(id=9),
+                               data='admin:lobby:publish')
+    env.bot._nora_lobby_widget = SimpleNamespace(publish=AsyncMock())
+    await admin_lobby_widget(callback, env.db, env.settings, env.bot)
+    env.bot._nora_lobby_widget.publish.assert_not_awaited()
+    callback.answer.assert_awaited_with('Недостаточно прав.', show_alert=True)
+
+
 async def test_workspace_navigation_invalidates_drafts_and_cannot_replay(env):
     root = await env.bridge.open(env.actor)
     people = await navigate(env, root, 'people')

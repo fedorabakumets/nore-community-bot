@@ -1,0 +1,40 @@
+<!doctype html><html lang="ru"><meta charset="utf-8">
+<style>
+*{box-sizing:border-box}body{margin:0;padding:20px;background:#111013;color:#f4f0f1;font:14px/1.4 system-ui,sans-serif}
+.brand{display:block;width:128px;height:40px;margin-bottom:18px}
+.panel{padding:15px 16px;border:1px solid #343035;border-radius:16px;background:#1d1a1e}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}.title{font-size:19px;font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;background:#89818a}.live{background:#63d497}
+.count{margin-top:8px;font-size:23px;font-weight:600}.muted{color:#aaa2ad;font-size:12px}
+button{cursor:pointer}.info{padding:0;background:transparent;border:0;color:#aaa2ad;font:12px/1.4 system-ui,sans-serif;text-align:left;margin-top:6px}
+#detail{margin-top:9px;color:#c6bec9;font-size:12px}#enter{display:block;width:100%;margin-top:12px;padding:13px 10px;background:#df304c;color:#fff;border:0;border-radius:12px;font:600 14px/1.3 system-ui,sans-serif}
+button:active{transform:scale(.98)}#status{margin-top:9px;color:#aaa2ad;font-size:11px;min-height:16px}
+@media (max-width:240px){body{padding:16px}.panel{padding:13px 12px}.count{font-size:18px}}
+</style>
+<img class="brand" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAAAoCAYAAAA2cfJIAAACAElEQVR42u2asUrDUBSGf0UQ5Oq9kwgqEtBJweKiPoPVqeID+AIKTk66uFp3H0BRESRd7di6aBzchFJQ7KCQYMDVJZVjsfVG0ta2/weBc+HePye5J+fkhACEEEIIIaTn6GuWcOgHT2J4rIzes1x3BWAhGt4qo9d+mldKpTcB7Fu6s+p47p2Fn3FYVUbfWVxPLD9tNJNkoIna48I2MdaNirWNNme45hyNGLT0Mw6DlvOS8rMp9DMJ9jYDLTrPdOgHGTHOKaM/4oqUUmmpMQTgwnLpfCmVnojsN8dz83XmPQK4t9UM/eBLUxmdF2n/z37W0+z0AFiJjiqTv6T3epwJ+8jx3Ixl4BQBLEbDGwBLdabmlNFblu8qjTS/+amMziSgyRJAGACkQ0vAKYCsbAtDP6h2BtfK6N1/cj82Qj+wTbuHAMqR/Z6Q5my3BkBFGV0UtW7OstVrNWPRYUNZXlNCmiwBpDszQC234sl/rUmRqo33oyLS+m9MhX5Qtd+V0Q8JaM62+vrbEgDy827UMxf+yQNxmlAbmIQmSwBhAJAufQeQFACsi/EBgBluTY8EgDL6GcC5qIM73BaWAMIAIAwAwgAgDADS5W1gHLaFPVJKpbOW6y4BnET2C7e9QwPA8dys+MtnC/Z/2y47nlvkdrMEEAYAIYQQQgghhBBCCCGE9BqfZe6T/uwRm0gAAAAASUVORK5CYII=" alt="NORA" width="128" height="40">
+<div class="panel"><div class="row"><span class="title">Лобби</span><span id="dot" class="dot"></span></div>
+<div id="count" class="count">Онлайн — / —</div><div class="muted">участников в сообществе</div>
+<button class="info" id="info">Как считается онлайн? +</button><div id="detail" style="display:none">Слева — игроки в лобби сейчас. Справа — все участники чата. После выхода игрок исчезает со следующими обновлениями.</div></div>
+<button id="enter">ВОЙТИ В НОРУ ↗</button><div id="status">Получаем данные…</div>
+<script>
+const T=window.TelegramWidget,link=/*URL*/"",get=id=>document.getElementById(id);
+let state=null,expanded=false;
+function status(){
+  const live=state&&Date.now()-state.updated<45000&&Date.now()>=state.updated-60000;
+  get('dot').className=live?'dot live':'dot';
+  get('status').textContent=live?'Обновляется автоматически':state?'Данные устарели · ждём обновления':'Ждём данные от Норы';
+}
+function draw(){
+  try{
+    const next=JSON.parse(T.publicData);
+    if(!next||!Number.isInteger(next.online)||next.online<0||!Number.isInteger(next.members)||next.members<0||!Number.isFinite(next.updated)||!Number.isFinite(next.revision))return;
+    if(state&&next.revision<state.revision)return;
+    state=next;get('count').textContent='Онлайн '+state.online+' / '+state.members;
+  }catch(_){}
+  status();
+}
+get('info').onclick=()=>{expanded=!expanded;get('detail').style.display=expanded?'block':'none';get('info').textContent=expanded?'Скрыть пояснение −':'Как считается онлайн? +';};
+get('enter').onclick=()=>{try{if(T&&T.openTelegramLink)T.openTelegramLink(link);else get('status').textContent='Открой игру кнопкой под сообщением';}catch(_){get('status').textContent='Открой игру кнопкой под сообщением';}};
+if(T){T.onEvent('publicDataChanged',draw);T.onEvent('activated',()=>{draw();T.watchPublicData?.();});T.onEvent('deactivated',()=>T.unwatchPublicData?.());T.watchPublicData?.();draw();T.ready();}
+setInterval(status,5000);
+</script></html>

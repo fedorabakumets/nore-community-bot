@@ -390,7 +390,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
-    from community_bot import music_api, nora_game_api
+    from community_bot import lobby_widget, music_api, nora_game_api
 
     app.router.add_get('/api/community/music', music_api.delivery_status)
     app.router.add_post('/api/community/music', music_api.send_track)
@@ -399,6 +399,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app['nora_lobby'] = {}
+    app.cleanup_ctx.append(lobby_widget.lifecycle)
     app.cleanup_ctx.append(nora_game_api.lobby_record_lifecycle)
     app.router.add_post('/api/nora-game/lobby', nora_game_api.lobby)
     app.router.add_get('/nora-game/socket', nora_game_api.lobby_socket)

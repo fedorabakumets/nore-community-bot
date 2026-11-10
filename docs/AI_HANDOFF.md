@@ -2,6 +2,27 @@
 
 > Обновлено 10.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## Лобби htmlbubble — 10 ноября 2026
+
+- Живой HTML-виджет лобби из админ-панели с закрепом и входом в игру.
+- Worktree C:/Users/User/Projects/nora-lobby-htmlbubble, ветка chatgpt/lobby-htmlbubble;
+  база production 7de9e78 (fetch и ls-remote совпали). Исходная копия
+  chatgpt/codex-dev-setup с локальными AGENTS.md/handoff не переносилась.
+- Контракт widget-sandbox profile 1 / SDK v1: sendWidget(is_shared),
+  editSharedWidgetData, watchPublicData; beta транспорт, без сетевых запросов из HTML.
+- Состояние одного сообщения сохраняется в существующем bot_state, без миграций.
+  Онлайн из nora_lobby с TTL 8 с, размер сообщества — Telegram getChatMemberCount.
+- Раздел Публикации → Лобби NORA → Опубликовать и закрепить; chat.post + admin.panel.
+- Состояние отправляется каждые 10 с. Если Telegram не доставляет обновления,
+  через 45 с индикатор сереет. Ссылка startapp=nora_lobby открывает игру на весь экран.
+- Sandbox v0.6.0 (d6f39f3): 2534 байта zlib, обновление 0 → 2, защита от старой
+  ревизии, нажатия кнопки и рендер на ширинах 200–600 px. Headless Chromium:
+  запуск по start_param и query, задержка скрипта игры, обычный вход и отказ в доступе.
+- Проверки: Ruff, node --check, pytest 885 passed / 1 skipped, pip check и diff --check.
+- После выпуска владелец открывает Публикации → Лобби NORA, отправляет виджет
+  и проверяет показ, обновление счётчика, закреп и открытие игры в Telegram.
+- Production-бот/БД и приложения владельца не запускались.
+
 ## Фон и безопасная область Mini App — 10 ноября 2026
 
 - Ветка `chatgpt/miniapp-telegram-layout`, база `90e994b`, отдельный worktree
@@ -110,38 +131,12 @@
 - Серверные правила ранга не менялись. Внешний вид и переход в Telegram владельцу
   следует проверить на устройстве после выпуска; реальный деплой не подтверждён.
 
-## Текущая задача: виджеты сообщений
+## Виджеты в личке
 
-- Worktree: C:/Users/User/Projects/nora-message-widgets, chatgpt/message-widgets.
-- База origin/cursor/nora-2-update-d133: 5d76418; fetch + ls-remote совпали.
-- Исходная копия chatgpt/codex-dev-setup с локальными AGENTS.md/handoff не переносилась.
-- TelegramMessenger/widget-sandbox: profile 1, sendWidget описан для Bot API 10.4 beta.
-- Исправлен транспорт виджетов и getUpdates: официальный /beta для обычных чатов.
-- При отказе возраст/сумму выбирают кнопками Rich Message или вводят вручную.
-- Ветка продолжена от 1773669; Railway подтвердил SUCCESS для предыдущего выпуска.
-- Сделано: возраст анкеты/профиля, произвольная сумма оплаты, карточка перевода.
-- Неизвестный/неподдерживаемый sendWidget возвращает прежнее сообщение; cooldown 10 минут.
-- Внешних runtime-зависимостей sandbox нет: один HTML profile 1, CSS/JS внутри.
-- PrivateRich меняет тип панели через отправку новой/сохранение указателя/удаление старой.
-- Виджет суммы готовит прежний wallet intent, подтверждение списания остаётся отдельным.
-- widget_query входит в штатный access/FSM pipeline; проверка nonce, владельца,
-  актуального сообщения, шага и диапазона выполняется под блокировкой панели.
-- Перевод только визуализирован; прежние inline-кнопки/авторизация/атомарность сохранены.
-- Фоновые уведомления не закрывают активный выбор; текстовый ввод и навигация сохранены.
-- Описание/ограничения: docs/INLINE_STYLE.md. Файлы: message_widgets.py,
-  widgets/number.html, private_rich.py, main.py, routers/group.py, test_private_rich.py.
-- check_local.py: Ruff + 856 passed, 1 skipped (Windows symlink), 68 warnings.
-  Есть прежние aiohttp warnings и warning фонового aiosqlite thread/закрытого loop.
-- После небольших финальных правок и добавления проверки оплаты: 13 widget tests
-  passed; Ruff, pip check и git diff --check прошли. Полный suite повторно не запускался.
-- Sandbox v0.6.0/d6f39f3: QuickJS + validator + renderer; возраст +/сохранить,
-  сумма 100 -> 150/ответ «Готово»; ширины 200/320/430/600, высоты <=434 px.
-  Размеры 2133–2199 байт zlib; overflow/лимитов/unsupported diagnostics нет.
-- Исходники sandbox/его инструменты только во временной папке вне Git.
-- Превью: C:/Users/User/Projects/nora-message-widgets-preview/{age,transfer}.png.
-- Проверенные изменения подготовлены к commit/push в feature и production;
-  итоговый SHA — git log, статус push — результат отправки. Live deploy не проверен.
-- Настоящий бот/production БД не запускались.
+- `chatgpt/message-widgets` (`a4b1913`): возраст, сумма оплаты и карточка перевода.
+- Используется тот же beta транспорт, при отказе доступны кнопки Rich Message и ввод.
+- `widget_query` проходит штатные права и FSM с проверкой nonce, владельца, сообщения и шага.
+- Документация: `docs/INLINE_STYLE.md`. История реализации и тестов — в Git.
 
 ## Правила выпуска
 
