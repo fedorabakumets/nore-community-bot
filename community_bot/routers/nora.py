@@ -39,16 +39,50 @@ async def nora_address(
             settings.owner_ids | settings.moderator_ids
         ):
             return
+        if message.reply_to_message is not None:
+            found = openrouter_chat.continuation_for(message)
+            if found is not None and nora_enabled():
+                prompt, history, conversation_id = found
+                answer = await openrouter_chat.answer_with_history(
+                    history, prompt, message.from_user.id
+                )
+                if answer:
+                    sent = await message.reply(
+                        answer,
+                        parse_mode=None,
+                        allow_sending_without_reply=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    )
+                    sent_id = getattr(sent, "message_id", None)
+                    if isinstance(sent_id, int):
+                        openrouter_chat.remember_dialogue(
+                            chat_id=message.chat.id,
+                            user_id=message.from_user.id,
+                            prompt=prompt,
+                            answer=answer,
+                            message_id=sent_id,
+                            conversation_id=conversation_id,
+                        )
+                return
         prompt = openrouter_chat.prompt_for(message)
         if prompt and nora_enabled():
             answer = await openrouter_chat.answer(prompt, message.from_user.id)
             if answer:
-                await message.reply(
+                sent = await message.reply(
                     answer,
                     parse_mode=None,
                     allow_sending_without_reply=True,
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
+                sent_id = getattr(sent, "message_id", None)
+                if isinstance(sent_id, int):
+                    openrouter_chat.remember_dialogue(
+                        chat_id=message.chat.id,
+                        user_id=message.from_user.id,
+                        prompt=prompt,
+                        answer=answer,
+                        message_id=sent_id,
+                    )
         return
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -64,6 +98,48 @@ async def nora_address(
             )
     if message.chat.type in {"group", "supergroup"}:
         await delete_user_command(message, message.bot)
+
+
+@assistant_router.message(
+    F.reply_to_message,
+    F.text,
+    F.chat.type.in_({"private", "group", "supergroup"}),
+    StateFilter(None),
+)
+async def nora_reply_continuation(
+    message: Message, settings: Settings, openrouter_chat: OpenRouterChat | None = None,
+) -> None:
+    if openrouter_chat is None or not message.from_user or message.from_user.is_bot:
+        return
+    if message.from_user.id not in (settings.owner_ids | settings.moderator_ids):
+        return
+    if not nora_enabled():
+        return
+    if parse_trigger(message.text or ""):
+        raise SkipHandler
+    found = openrouter_chat.continuation_for(message)
+    if found is None:
+        return
+    prompt, history, conversation_id = found
+    answer = await openrouter_chat.answer_with_history(history, prompt, message.from_user.id)
+    if not answer:
+        return
+    sent = await message.reply(
+        answer,
+        parse_mode=None,
+        allow_sending_without_reply=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+    sent_id = getattr(sent, "message_id", None)
+    if isinstance(sent_id, int):
+        openrouter_chat.remember_dialogue(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            prompt=prompt,
+            answer=answer,
+            message_id=sent_id,
+            conversation_id=conversation_id,
+        )
 
 
 class CustomCommand(Filter):

@@ -2,6 +2,16 @@
 
 > Обновлено 10.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## Продолжение диалогов Норы через Reply — 10 ноября 2026
+
+- Ветка chatgpt/nora-reply-continuation от production 94b328b; прежние локальные правки AGENTS.md и handoff сохранены в stash wip-codex-dev-setup-docs и в задачу не переносились.
+- OpenRouterChat (уже подключённый DeepSeek через PositionAPI, без новых ключей и без резервного провайдера): история до 10 сообщений на беседу, TTL 1 час, максимум 200 бесед; реестр ИИ-ответов по (chat_id, message_id), изоляция по чату и автору.
+- Реплай на ИИ-ответ продолжает диалог без «Нора»; реплай «Нора, …» на ИИ-ответ тоже идёт с историей. Реплаи на служебные и чужие сообщения, штатные команды, репутация и переводы диалог не запускают; group_router по-прежнему обрабатывает их раньше assistant_router.
+- Доступ только владельцу и модераторам (owner_ids | moderator_ids). Лимиты сохранены: 200 попыток/сутки, глобальный интервал 5 с, таймаут 35 с, прежний _request не изменён; служебные ответы об ошибках API в историю не записываются.
+- Изменены community_bot/openrouter_chat.py и community_bot/routers/nora.py, добавлен tests/test_nora_reply_continuation.py (6 тестов).
+- Проверки: tools/check_local.py — 918 passed, 1 skipped; pip check и git diff --check чистые. В diff только эти файлы и handoff, секретов, .env и баз нет.
+- Осталось: коммит, push в cursor/nora-2-update-d133 без force push и подтверждение деплоя Railway по факту; до публикации SHA и статус деплоя не записаны.
+
 ## Разговорная Нора через OpenRouter — 10 ноября 2026
 
 - Worktree C:/Users/User/Projects/nora-openrouter, ветка chatgpt/nora-openrouter
