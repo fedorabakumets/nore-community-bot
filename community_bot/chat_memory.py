@@ -12,10 +12,11 @@ SEARCH_LIMIT = 20
 RECENT_LIMIT = 50
 
 MEMORY_NOTICE = (
-    "Нора на 48 часов запоминает текстовые сообщения этого чата, "
-    "чтобы отвечать с учетом недавних обсуждений. Потом записи удаляются. "
-    "Отдельные фрагменты могут попадать в запросы к внешнему ИИ, когда владелец "
-    "или модератор спрашивает Нору о недавней переписке. Личные сообщения не сохраняются."
+    "📌 Память Норы в этом чате. С сегодняшнего дня Нора на 48 часов сохраняет текстовые "
+    "сообщения только этого чата сообщества, чтобы владелец и модераторы могли спросить её "
+    "о недавних обсуждениях. Через 48 часов записи автоматически удаляются. Отдельные фрагменты "
+    "могут отправляться внешнему ИИ (DeepSeek), но только в ответ на такой вопрос владельца "
+    "или модератора. Личные сообщения боту не сохраняются."
 )
 
 MEMORY_SYSTEM_NOTE = (
@@ -87,9 +88,32 @@ def parse_time_window(prompt: str, now: datetime) -> tuple[datetime, datetime] |
         return start, now
     if any(item in low for item in ("последние 24", "за сутки", "за день", "недавно")):
         return now - timedelta(hours=24), now
+    if "прошлой неделе" in low or "неделю назад" in low:
+        current_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        return current_start - timedelta(days=7), current_start
+    if "прошлый месяц" in low or "месяц назад" in low:
+        first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        previous_start = (first - timedelta(days=1)).replace(day=1)
+        return previous_start, first
     if "этой неделе" in low or "на неделе" in low:
         start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         return start, now
+    return None
+
+
+RETENTION_NOTE = (
+    "Доступна только история последних 48 часов: "
+    "более ранние сообщения уже удалены и не сохраняются."
+)
+
+
+def retention_notice(prompt: str, now: datetime) -> str | None:
+    low = (prompt or "").casefold().replace("ё", "е")
+    window = parse_time_window(prompt, now)
+    if window is not None:
+        return RETENTION_NOTE if window[0] < now - timedelta(hours=MEMORY_TTL_HOURS) else None
+    if any(marker in low for marker in ("давно", "раньше", "старые сообщения")):
+        return RETENTION_NOTE
     return None
 
 

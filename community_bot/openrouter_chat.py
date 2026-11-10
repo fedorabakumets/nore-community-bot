@@ -258,14 +258,21 @@ class OpenRouterChat:
     async def memory_prompt(self, prompt: str, message: Message) -> str | None:
         if not is_memory_question(prompt) or message.chat.id != self._community_chat_id:
             return None
-        from datetime import UTC, datetime
+        from datetime import UTC, datetime, timedelta
         from zoneinfo import ZoneInfo
 
         now = datetime.now(ZoneInfo(self._timezone))
         window = parse_time_window(prompt, now)
         thread_id = message.message_thread_id if message.is_topic_message else None
-        since = window[0].astimezone(UTC).isoformat() if window else None
-        until = window[1].astimezone(UTC).isoformat() if window else None
+        since = until = None
+        if window is not None:
+            start_utc = window[0].astimezone(UTC)
+            end_utc = window[1].astimezone(UTC)
+            floor_utc = now.astimezone(UTC) - timedelta(hours=48)
+            if end_utc <= floor_utc:
+                return None
+            since = max(start_utc, floor_utc).isoformat()
+            until = end_utc.isoformat()
         rows: list[dict] = []
         terms = extract_search_terms(prompt)
         if terms:

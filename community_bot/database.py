@@ -2631,6 +2631,7 @@ class Database:
                 (MAX_ARCHIVE_ROWS,),
             )
             deleted += cursor.rowcount or 0
+            await db.execute("INSERT INTO community_messages_fts(community_messages_fts) VALUES ('optimize')")
             await db.commit()
             return deleted
 

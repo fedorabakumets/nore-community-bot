@@ -200,6 +200,11 @@ async def test_middleware_saves_only_community_text(db, settings):
         result = await middleware(handler, event, {'db': db, 'settings': settings, 'bot': None})
         assert result == 'handled'
         return mid
+    await feed('Сообщение до публикации уведомления')
+    since = (recent - timedelta(hours=1)).isoformat()
+    rows = await db.recent_community_messages(-100123, since=since)
+    assert rows == []
+    await db.set_bot_state('nora_memory_notice_v1', '1')
     await feed('Привет, обсуждаем кино')
     since = (recent - timedelta(hours=1)).isoformat()
     rows = await db.recent_community_messages(-100123, since=since)
@@ -224,6 +229,7 @@ async def test_middleware_saves_only_community_text(db, settings):
 
 
 async def test_middleware_updates_edited_message(db, settings):
+    await db.set_bot_state('nora_memory_notice_v1', '1')
     middleware = CommunityMemoryMiddleware()
     async def handler(event, data):
         return 'handled'
@@ -239,6 +245,36 @@ async def test_middleware_updates_edited_message(db, settings):
     await db.delete_community_message(-100123, 701)
     rows = await db.search_community_messages(-100123, 'Исправленная*')
     assert rows == []
+
+
+def test_retention_notice_marks_periods_beyond_48_hours():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 13, 12, 0, tzinfo=ZoneInfo('Europe/Moscow'))
+    assert chat_memory.retention_notice('что вчера обсуждали?', now) is None
+    assert chat_memory.retention_notice('что сегодня обсуждали?', now) is None
+    assert chat_memory.retention_notice('что позавчера обсуждали?', now)
+    assert chat_memory.retention_notice('что на этой неделе обсуждали?', now)
+    assert chat_memory.retention_notice('что на прошлой неделе обсуждали?', now)
+    window = chat_memory.parse_time_window('что на прошлой неделе обсуждали?', now)
+    assert window is not None
+    assert window[0] < window[1] <= now
+
+
+async def test_release_snapshot_contains_no_memory_text(db, tmp_path):
+    from community_bot.release_backup import _snapshot
+
+    marker = 'УникальныйМаркерБэкапа123'
+    sent = datetime.now(UTC).isoformat()
+    assert await db.save_community_message(-100123, 801, 7, 'Анна', f'Обсуждали {marker} подробно', sent)
+    backup = tmp_path / 'backup.sqlite3'
+    _snapshot(db.path, backup)
+    assert marker.encode('utf-8') not in backup.read_bytes()
+    restored = Database(backup)
+    since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    assert await restored.recent_community_messages(-100123, since=since) == []
+    assert await restored.search_community_messages(-100123, 'УникальныйМаркерБэкапа123*') == []
 
 
 async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):

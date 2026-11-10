@@ -8,7 +8,7 @@ from aiogram.filters import Filter, StateFilter
 from aiogram.types import LinkPreviewOptions, Message
 
 from community_bot.aliases import message_trigger, parse_trigger
-from community_bot.chat_memory import is_memory_question
+from community_bot.chat_memory import is_memory_question, retention_notice
 from community_bot.command_registry import get_command, nora_enabled
 from community_bot.config import Settings
 from community_bot.ephemeral import delete_user_command, reply_ttl
@@ -19,6 +19,14 @@ router = Router(name="nora")
 assistant_router = Router(name="nora_assistant")
 
 _NORA = re.compile(r"(?i)^\s*нора\b")
+
+
+def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    note = retention_notice(prompt, datetime.now(ZoneInfo(settings.timezone)))
+    return f"{note}\n\n{answer}" if note else answer
 
 
 @assistant_router.message(
@@ -64,7 +72,7 @@ async def nora_address(
                     )
                 if answer:
                     sent = await message.reply(
-                        answer,
+                        _noted_answer(prompt, answer, settings),
                         parse_mode=None,
                         allow_sending_without_reply=True,
                         link_preview_options=LinkPreviewOptions(is_disabled=True),
@@ -98,7 +106,7 @@ async def nora_address(
                 answer = await openrouter_chat.answer(prompt, message.from_user.id)
             if answer:
                 sent = await message.reply(
-                    answer,
+                    _noted_answer(prompt, answer, settings),
                     parse_mode=None,
                     allow_sending_without_reply=True,
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
@@ -167,7 +175,7 @@ async def nora_reply_continuation(
     if not answer:
         return
     sent = await message.reply(
-        answer,
+        _noted_answer(prompt, answer, settings),
         parse_mode=None,
         allow_sending_without_reply=True,
         link_preview_options=LinkPreviewOptions(is_disabled=True),

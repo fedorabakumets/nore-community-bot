@@ -14,6 +14,7 @@ from community_bot.database import Database
 
 logger = logging.getLogger(__name__)
 _CLEANUP_INTERVAL = 3600.0
+_NOTICE_KEY = "nora_memory_notice_v1"
 
 
 def _eligible(message: Message, settings: Settings) -> bool:
@@ -32,6 +33,7 @@ class CommunityMemoryMiddleware(BaseMiddleware):
 
     def __init__(self) -> None:
         self._last_cleanup = 0.0
+        self._notice_confirmed = False
 
     async def __call__(
         self,
@@ -43,6 +45,10 @@ class CommunityMemoryMiddleware(BaseMiddleware):
         settings = data.get("settings")
         if isinstance(event, Message) and isinstance(db, Database) and isinstance(settings, Settings):
             try:
+                if not self._notice_confirmed:
+                    self._notice_confirmed = await db.get_bot_state(_NOTICE_KEY) == "1"
+                if not self._notice_confirmed:
+                    return await handler(event, data)
                 if getattr(event, "edit_date", None):
                     if settings.community_chat_id and event.chat.id == settings.community_chat_id and event.text:
                         await db.update_community_message(event.chat.id, event.message_id, event.text)

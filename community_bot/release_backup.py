@@ -37,6 +37,7 @@ def _snapshot(source: Path, destination: Path) -> None:
             if has_memory:
                 copy.execute("DELETE FROM community_messages")
                 copy.commit()
+                copy.execute("VACUUM")
         with destination.open("r+b") as result:
             os.fsync(result.fileno())
     except BaseException:
