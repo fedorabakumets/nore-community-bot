@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram import Bot, Dispatcher, Router
 from aiogram.methods import SendMessage
-from aiogram.types import Chat, Message, Update, User
+from aiogram.types import Chat, ChatMemberOwner, Message, Update, User
 from test_nora_commands_release import message
 from test_studio_rsvp import TelegramSession
 
@@ -191,6 +191,11 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         return "Продолжаю: помню контекст."
 
     monkeypatch.setattr(chat, "_request_history", fake_history)
+    owner = ChatMemberOwner(user=User(id=12, first_name="Владелец <чата>", is_bot=False), is_anonymous=False)
+    get_admins = AsyncMock(return_value=[owner])
+    get_chat = AsyncMock(return_value=SimpleNamespace(title="Нора", description="Петербургское сообщество"))
+    monkeypatch.setattr(bot, "get_chat_administrators", get_admins)
+    monkeypatch.setattr(bot, "get_chat", get_chat)
     dispatcher["openrouter_chat"] = chat
 
     async def dispatch(text, *, uid=1, chat_id=-100123, **extra):
@@ -242,6 +247,24 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         )
         assert len(history_calls) == 1
         assert replies() and "Репутация ботов" in replies()[0].text
+
+        # Facts come from Telegram, even while the provider is in a cooldown.
+        chat._blocked_until = clock.now + 60
+        await dispatch("Нора, а кто тут главный?")
+        assert replies()[0].text == "Чатом владеет Владелец <чата>." and replies()[0].parse_mode is None
+        get_admins.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
+        await dispatch("Нора, расскажи о сообществе", uid=7)
+        get_chat.assert_not_awaited()
+        assert not replies()
+        await dispatch("Нора, расскажи о сообществе")
+        assert replies()[0].text == "Это «Нора». Петербургское сообщество"
+        get_chat.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
+        get_admins.return_value = [owner.model_copy(update={"is_anonymous": True})]
+        await dispatch("Нора, кто владелец чата?")
+        assert replies()[0].text == "Владелец чата включил анонимность в Telegram."
+        await dispatch("Отлично, кто я?", reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id))
+        assert replies()[0].text == "В Telegram твоё имя — Участник 1."
+        assert chat._request.await_count == len(history_calls) == 1
     finally:
         restore_defaults()
         await dispatcher.storage.close()
