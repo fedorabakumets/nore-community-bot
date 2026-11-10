@@ -121,7 +121,7 @@ async def test_lobby_admin_delivers_shared_widget_after_direct_rejection(env, mo
     from aiogram.exceptions import TelegramBadRequest
 
     from community_bot.lobby_widget import LobbyWidget
-    from community_bot.message_widgets import ForwardWidget, SendWidget
+    from community_bot.message_widgets import SendSharedWidget, SendWidget
 
     original = env.telegram.make_request
     sent = []
@@ -134,7 +134,7 @@ async def test_lobby_admin_delivers_shared_widget_after_direct_rejection(env, mo
             return 125
         if isinstance(method, SendWidget) and method.chat_id < 0:
             raise TelegramBadRequest(method=method, message='INPUT_MEDIA_WIDGET_NOT_ALLOWED')
-        if isinstance(method, (SendWidget, ForwardWidget)):
+        if isinstance(method, (SendWidget, SendSharedWidget)):
             return Message(message_id=50 if method.chat_id > 0 else 60, date=datetime.now(UTC),
                            chat=Chat(id=method.chat_id, type='private' if method.chat_id > 0 else 'supergroup'),
                            widget={'id': 'shared-id'})
@@ -147,7 +147,7 @@ async def test_lobby_admin_delivers_shared_widget_after_direct_rejection(env, mo
     preview = await click(env, await navigate(env, root, 'content'), 'Лобби NORA')
     result = await click(env, preview, 'Опубликовать и закрепить')
     assert any('опубликовано и закреплено' in c['html'] for c in result['cards'])
-    assert [(m.chat_id, m.from_chat_id) for m in sent if isinstance(m, ForwardWidget)] == [(-100123, 7)]
+    assert [(m.chat_id, m.widget_id) for m in sent if isinstance(m, SendSharedWidget)] == [(-100123, 'shared-id')]
     assert any(m.__api_method__ == 'pinChatMessage' and m.message_id == 60 for m in sent)
 
 

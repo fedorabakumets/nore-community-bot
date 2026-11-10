@@ -10,7 +10,7 @@ from aiogram.methods import PinChatMessage
 
 from community_bot.database import Database
 from community_bot.lobby_widget import LobbyWidget, document, lifecycle
-from community_bot.message_widgets import EditSharedWidgetData, ForwardWidget, SendWidget
+from community_bot.message_widgets import EditSharedWidgetData, SendSharedWidget, SendWidget
 
 
 class Bot:
@@ -132,9 +132,9 @@ def test_html_limits_and_link_validation():
         document('https://evil.example/</script>')
 
 
-async def test_private_relay_survives_forward_failure_and_restart(env):
+async def test_shared_delivery_survives_failure_and_restart(env):
     class RestrictedBot(Bot):
-        fail_forward = True
+        fail_delivery = True
 
         async def __call__(self, method):
             self.calls.append(method)
@@ -142,8 +142,8 @@ async def test_private_relay_survives_forward_failure_and_restart(env):
                 if method.chat_id < 0:
                     raise TelegramBadRequest(method=method, message='INPUT_MEDIA_WIDGET_NOT_ALLOWED')
                 return SimpleNamespace(message_id=50, widget={'id': 'shared-id'})
-            if isinstance(method, ForwardWidget):
-                if self.fail_forward:
+            if isinstance(method, SendSharedWidget):
+                if self.fail_delivery:
                     raise TelegramBadRequest(method=method, message='not enough rights')
                 return SimpleNamespace(message_id=60)
             return True
@@ -153,13 +153,13 @@ async def test_private_relay_survives_forward_failure_and_restart(env):
     with pytest.raises(TelegramBadRequest):
         await service.publish(7)
     saved = json.loads(await env['db'].get_bot_state(service.key))
-    assert saved['source_chat_id'] == 7 and saved['source_message_id'] == 50
-    env['bot'].fail_forward = False
+    assert saved['widget_id'] == 'shared-id' and saved['message_id'] is None
+    env['bot'].fail_delivery = False
     restored = LobbyWidget(env)
     await restored.publish(8)
     assert len([c for c in env['bot'].calls if isinstance(c, SendWidget)]) == 2
-    forward = next(c for c in env['bot'].calls if isinstance(c, ForwardWidget))
-    assert forward.from_chat_id == 7 and forward.chat_id == -100123
+    delivery = next(c for c in env['bot'].calls if isinstance(c, SendSharedWidget))
+    assert delivery.widget_id == 'shared-id' and delivery.chat_id == -100123
     env['bot'].pin_chat_message.assert_awaited_with(-100123, 60, disable_notification=True)
     assert restored.saved['widget_id'] == 'shared-id'
 
@@ -172,6 +172,32 @@ async def test_update_failure_does_not_prevent_pinning(env):
     result = await service.publish(7)
     assert 'закреплён' in result and 'method not supported' in result
     env['bot'].pin_chat_message.assert_awaited_once()
+
+
+async def test_resumes_source_from_failed_forward_without_sending_new_html(env):
+    service = LobbyWidget(env)
+    await env['db'].set_bot_state(service.key, json.dumps({
+        'message_id': None, 'widget_id': 'existing-widget',
+        'source_chat_id': 7, 'source_message_id': 50,
+    }))
+    calls = []
+
+    class SavedSourceBot(Bot):
+        async def __call__(self, method):
+            calls.append(method)
+            assert method.__api_method__ not in {'forwardMessage', 'sendWidget'}
+            if isinstance(method, SendSharedWidget):
+                assert method.widget_id == 'existing-widget'
+                return SimpleNamespace(message_id=60)
+            return True
+
+    env['bot'] = SavedSourceBot()
+    service = LobbyWidget(env)
+    await service.publish(7)
+    await service.publish(7)
+    assert sum(isinstance(method, SendSharedWidget) for method in calls) == 1
+    env['bot'].pin_chat_message.assert_awaited_with(-100123, 60, disable_notification=True)
+    assert json.loads(await env['db'].get_bot_state(service.key))['message_id'] == 60
 
 
 def test_delivery_error_has_stage_and_redacts_secrets():

@@ -13,7 +13,7 @@ from pathlib import Path
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from community_bot.message_widgets import EditSharedWidgetData, ForwardWidget, SendWidget
+from community_bot.message_widgets import EditSharedWidgetData, SendSharedWidget, SendWidget
 from community_bot.nora_game_api import LOBBY_TTL
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def delivery_error(error):
     """Expose Telegram's reason, never its request URL, token or payload."""
     method = getattr(error.method, '__api_method__', '')
     stages = {'getMe': 'получение ссылки на игру', 'getChatMemberCount': 'число участников',
-              'sendWidget': 'отправка виджета', 'forwardMessage': 'доставка в сообщество',
+              'sendWidget': 'отправка виджета', 'sendSharedWidget': 'публикация общего виджета в сообщество',
               'editSharedWidgetData': 'обновление счётчика', 'pinChatMessage': 'закрепление'}
     reason = re.sub(r'\d{5,}:[A-Za-z0-9_-]+', '[скрыто]', error.message)
     reason = re.sub(r'https?://\S+', '[адрес скрыт]', reason)
@@ -92,7 +92,7 @@ class LobbyWidget:
                         InlineKeyboardButton(text='Войти в NORA', url=url),
                     ]]),
                 )
-                source_chat_id = None
+                sent_privately = False
                 try:
                     message = await self.bot(request)
                 except TelegramBadRequest as error:
@@ -100,21 +100,20 @@ class LobbyWidget:
                     # Only retry an explicit rejection, never an ambiguous network failure.
                     if 'input_media_widget_not_allowed' not in error.message.casefold() or not actor_id:
                         raise
-                    source_chat_id = actor_id
+                    sent_privately = True
                     message = await self.bot(request.model_copy(update={'chat_id': actor_id}))
                 widget = getattr(message, 'widget', None)
                 widget_id = widget.get('id') if isinstance(widget, dict) else getattr(widget, 'id', None)
-                self.saved = {'message_id': None if source_chat_id else message.message_id,
+                self.saved = {'message_id': None if sent_privately else message.message_id,
                               'widget_id': str(widget_id) if widget_id is not None else None}
-                if source_chat_id:
-                    self.saved.update(source_chat_id=source_chat_id, source_message_id=message.message_id)
                 await self.db.set_bot_state(self.key, json.dumps(self.saved))
             if not self.saved.get('widget_id'):
                 return 'Telegram отправил сообщение без ID общего виджета. Живое обновление недоступно.'
             if not self.saved.get('message_id'):
-                message = await self.bot(ForwardWidget(
-                    chat_id=self.chat_id, from_chat_id=self.saved['source_chat_id'],
-                    message_id=self.saved['source_message_id'], disable_notification=True,
+                # Reuse the object even if the original private message cannot be forwarded.
+                # This also resumes sources persisted by the previous delivery implementation.
+                message = await self.bot(SendSharedWidget(
+                    chat_id=self.chat_id, widget_id=self.saved['widget_id'],
                 ))
                 self.saved['message_id'] = message.message_id
                 await self.db.set_bot_state(self.key, json.dumps(self.saved))

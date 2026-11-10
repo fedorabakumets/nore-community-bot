@@ -4,31 +4,27 @@
 
 ## Лобби htmlbubble — 10 ноября 2026
 
-- Живой HTML-виджет лобби из админ-панели с закрепом и входом в игру.
-- Worktree C:/Users/User/Projects/nora-lobby-htmlbubble, ветка chatgpt/lobby-htmlbubble;
-  база production 7de9e78 (fetch и ls-remote совпали). Исходная копия
-  chatgpt/codex-dev-setup с локальными AGENTS.md/handoff не переносилась.
-- Контракт widget-sandbox profile 1 / SDK v1: sendWidget(is_shared),
-  editSharedWidgetData, watchPublicData; beta транспорт, без сетевых запросов из HTML.
-- Состояние одного сообщения сохраняется в существующем bot_state, без миграций.
-  Онлайн из nora_lobby с TTL 8 с, размер сообщества — Telegram getChatMemberCount.
-- Раздел Публикации → Лобби NORA → Опубликовать и закрепить; chat.post + admin.panel.
-- Состояние отправляется каждые 10 с. Если Telegram не доставляет обновления,
-  через 45 с индикатор сереет. Ссылка startapp=nora_lobby открывает игру на весь экран.
-- Выпуск 9c040a1 отправлен в production. Владелец сообщил отказ публикации.
-- Скриншот показал общий TelegramAPIError, точный ответ в той версии не сохранялся.
-  Railway connector возвращает 0 проектов, серверные логи недоступны.
-- Исправление: при INPUT_MEDIA_WIDGET_NOT_ALLOWED отправить общий виджет админу
-  и переслать в сообщество через beta API. Указатель источника сохраняется до пересылки.
-  Повторный запрос после ошибки доставки использует тот же источник.
-- Ошибка обновления state больше не мешает закрепу. В панели выводятся этап
-  и очищенная от адресов/токенов причина Telegram, текст экранирован для HTML.
-- Тест с реальным AdminBridge и fake Telegram воспроизводит запрет отправки в группу,
-  получение виджета в личке, пересылку и закреп. Сценарии retry/restart также проверены.
-- Проверки: check_local — 888 passed / 1 skipped; отдельные 3 admin-lobby теста,
-  Ruff, pip check и diff --check прошли. Готовится выпуск исправления.
-- После развёртывания владелец повторяет публикацию. Доставка в живом Telegram
-  и точная причина первоначального отказа пока не подтверждены.
+- Worktree C:/Users/User/Projects/nora-lobby-htmlbubble, ветка chatgpt/lobby-htmlbubble.
+  Перед текущим исправлением HEAD и origin production совпали: 500a956.
+  Исходная копия chatgpt/codex-dev-setup с локальными правками не изменялась.
+- Публикации → Лобби NORA → Опубликовать и закрепить; chat.post + admin.panel.
+  Profile 1 / SDK v1, beta API, Monocraft, ссылка startapp=nora_lobby&mode=fullscreen.
+- Онлайн из nora_lobby (TTL 8 с), размер сообщества — getChatMemberCount.
+  Обновление public_data каждые 10 с, серый индикатор при задержке свыше 45 с.
+  ID виджета и сообщения сохраняются в существующем bot_state, без миграций.
+- Выпуски 9c040a1 и 500a956 опубликованы. Новый скриншот владельца:
+  доставка через forwardMessage отклонена: "the message can't be forwarded".
+- Исправление: вместо пересылки использовать sendSharedWidget(chat_id, widget_id)
+  из официального widget-sandbox docs/tgw-format.md и scripts/bot-demos.ts.
+  При INPUT_MEDIA_WIDGET_NOT_ALLOWED общий виджет создаётся в личке админа;
+  сохранённый объект из 500a956 повторно используется без нового sendWidget.
+- Общий виджет сохраняет обновляемые данные. Ошибка обновления не мешает закрепу;
+  панель показывает этап и очищенную от секретов причину Telegram.
+- Проверки: check_local — 890 passed / 1 skipped, pip check; после последней правки
+  16 целевых тестов прошли. Проверены admin-кнопка, beta-маршрут, retry/restart
+  и восстановление состояния после прежней неудачной пересылки, всё с fake Bot.
+- Исправление подготовлено к публикации. После развёртывания владелец повторяет
+  кнопку. Живая доставка и Railway не проверялись; connector не видит проектов.
 
 ## Фон и безопасная область Mini App — 10 ноября 2026
 
