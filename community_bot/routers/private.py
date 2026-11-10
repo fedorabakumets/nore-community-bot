@@ -774,13 +774,14 @@ async def admin_lobby_widget(callback: CallbackQuery, db: Database, settings: Se
             text = 'Сервис лобби ещё не готов. Попробуй позже.'
         else:
             try:
-                text = await service.publish()
+                text = html.escape(await service.publish(callback.from_user.id))
                 await db.log_admin_action(callback.from_user.id, 'lobby_widget_publish',
                                           str(settings.community_chat_id))
-            except TelegramAPIError:
-                text = ('Telegram не подтвердил публикацию или обновление виджета. '
-                        'Проверь сообщение в чате перед повторной попыткой и права Норы. '
-                        'Если виджет уже появился, бот будет пытаться обновлять его автоматически.')
+            except TelegramAPIError as error:
+                from community_bot.lobby_widget import delivery_error
+
+                text = html.escape(delivery_error(error))
+                logger.warning('Lobby publication rejected: %s', delivery_error(error))
             except ValueError as error:
                 text = str(error)
     await callback.message.edit_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[

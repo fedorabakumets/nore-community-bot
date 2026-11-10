@@ -13,12 +13,24 @@ from pathlib import Path
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from community_bot.message_widgets import EditSharedWidgetData, SendWidget
+from community_bot.message_widgets import EditSharedWidgetData, ForwardWidget, SendWidget
 from community_bot.nora_game_api import LOBBY_TTL
 
 logger = logging.getLogger(__name__)
 TEMPLATE = Path(__file__).with_name('widgets') / 'lobby.html'
 UPDATE_INTERVAL = 10
+
+
+def delivery_error(error):
+    """Expose Telegram's reason, never its request URL, token or payload."""
+    method = getattr(error.method, '__api_method__', '')
+    stages = {'getMe': 'получение ссылки на игру', 'getChatMemberCount': 'число участников',
+              'sendWidget': 'отправка виджета', 'forwardMessage': 'доставка в сообщество',
+              'editSharedWidgetData': 'обновление счётчика', 'pinChatMessage': 'закрепление'}
+    reason = re.sub(r'\d{5,}:[A-Za-z0-9_-]+', '[скрыто]', error.message)
+    reason = re.sub(r'https?://\S+', '[адрес скрыт]', reason)
+    reason = ' '.join(reason.split())[:240]
+    return f"Telegram: {stages.get(method, 'публикация')} — {reason}"
 
 
 def document(url):
@@ -63,7 +75,7 @@ class LobbyWidget:
         return json.dumps({'online': online, 'members': self.members, 'updated': stamp,
                            'revision': self.revision}, separators=(',', ':'))
 
-    async def publish(self):
+    async def publish(self, actor_id=None):
         """Serialized across admins; persist before pinning so pin retries reuse the message."""
         async with self.lock:
             if not self.chat_id:
@@ -72,22 +84,45 @@ class LobbyWidget:
             if not self.saved:
                 me = await self.bot.get_me()
                 url = f'https://t.me/{me.username}?startapp=nora_lobby&mode=fullscreen'
-                message = await self.bot(SendWidget(
+                request = SendWidget(
                     chat_id=self.chat_id, html=document(url), is_shared=True,
                     public_data=await self.snapshot(), width=320, height=320,
                     caption='NORA · Лобби. Живой счётчик доступен внутри виджета.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(text='Войти в NORA', url=url),
                     ]]),
-                ))
+                )
+                source_chat_id = None
+                try:
+                    message = await self.bot(request)
+                except TelegramBadRequest as error:
+                    # Server rollout may still restrict direct widgets to private chats.
+                    # Only retry an explicit rejection, never an ambiguous network failure.
+                    if 'input_media_widget_not_allowed' not in error.message.casefold() or not actor_id:
+                        raise
+                    source_chat_id = actor_id
+                    message = await self.bot(request.model_copy(update={'chat_id': actor_id}))
                 widget = getattr(message, 'widget', None)
                 widget_id = widget.get('id') if isinstance(widget, dict) else getattr(widget, 'id', None)
-                self.saved = {'message_id': message.message_id,
+                self.saved = {'message_id': None if source_chat_id else message.message_id,
                               'widget_id': str(widget_id) if widget_id is not None else None}
+                if source_chat_id:
+                    self.saved.update(source_chat_id=source_chat_id, source_message_id=message.message_id)
                 await self.db.set_bot_state(self.key, json.dumps(self.saved))
             if not self.saved.get('widget_id'):
                 return 'Telegram отправил сообщение без ID общего виджета. Живое обновление недоступно.'
-            await self.update()
+            if not self.saved.get('message_id'):
+                message = await self.bot(ForwardWidget(
+                    chat_id=self.chat_id, from_chat_id=self.saved['source_chat_id'],
+                    message_id=self.saved['source_message_id'], disable_notification=True,
+                ))
+                self.saved['message_id'] = message.message_id
+                await self.db.set_bot_state(self.key, json.dumps(self.saved))
+            update_error = None
+            try:
+                await self.update()
+            except TelegramAPIError as error:
+                update_error = delivery_error(error)
             try:
                 await self.bot.pin_chat_message(self.chat_id, self.saved['message_id'], disable_notification=True)
             except TelegramBadRequest as error:
@@ -95,9 +130,11 @@ class LobbyWidget:
                     self.saved = None
                     await self.db.set_bot_state(self.key, '')
                     return 'Сообщение удалено. Нажми «Опубликовать и закрепить» ещё раз, чтобы создать новое.'
-                return 'Виджет опубликован и обновляется. Для закрепления дай Норе право закреплять сообщения.'
-            except TelegramAPIError:
-                return 'Виджет опубликован и обновляется, но закрепить его не удалось. Повтори действие.'
+                return f'Виджет отправлен. {delivery_error(error)}'
+            except TelegramAPIError as error:
+                return f'Виджет отправлен. {delivery_error(error)}'
+            if update_error:
+                return f'Виджет отправлен и закреплён. {update_error}. Автообновление повторится позже.'
             return 'Лобби NORA опубликовано и закреплено. Счётчик обновляется автоматически.'
 
     async def update(self):

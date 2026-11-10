@@ -117,6 +117,40 @@ async def test_lobby_publication_rechecks_permissions(env):
     callback.answer.assert_awaited_with('Недостаточно прав.', show_alert=True)
 
 
+async def test_lobby_admin_delivers_shared_widget_after_direct_rejection(env, monkeypatch):
+    from aiogram.exceptions import TelegramBadRequest
+
+    from community_bot.lobby_widget import LobbyWidget
+    from community_bot.message_widgets import ForwardWidget, SendWidget
+
+    original = env.telegram.make_request
+    sent = []
+
+    async def transport(bot, method, timeout=None):  # noqa: ASYNC109
+        sent.append(method)
+        if method.__api_method__ == 'getMe':
+            return User(id=bot.id, is_bot=True, first_name='Nora', username='nora_test_bot')
+        if method.__api_method__ == 'getChatMemberCount':
+            return 125
+        if isinstance(method, SendWidget) and method.chat_id < 0:
+            raise TelegramBadRequest(method=method, message='INPUT_MEDIA_WIDGET_NOT_ALLOWED')
+        if isinstance(method, (SendWidget, ForwardWidget)):
+            return Message(message_id=50 if method.chat_id > 0 else 60, date=datetime.now(UTC),
+                           chat=Chat(id=method.chat_id, type='private' if method.chat_id > 0 else 'supergroup'),
+                           widget={'id': 'shared-id'})
+        return await original(bot, method, timeout)
+
+    monkeypatch.setattr(env.telegram, 'make_request', transport)
+    env.bot._nora_lobby_widget = LobbyWidget({'db': env.db, 'bot': env.bot,
+                                            'settings': env.settings, 'nora_lobby': {}})
+    root = await env.bridge.open(env.actor)
+    preview = await click(env, await navigate(env, root, 'content'), 'Лобби NORA')
+    result = await click(env, preview, 'Опубликовать и закрепить')
+    assert any('опубликовано и закреплено' in c['html'] for c in result['cards'])
+    assert [(m.chat_id, m.from_chat_id) for m in sent if isinstance(m, ForwardWidget)] == [(-100123, 7)]
+    assert any(m.__api_method__ == 'pinChatMessage' and m.message_id == 60 for m in sent)
+
+
 async def test_workspace_navigation_invalidates_drafts_and_cannot_replay(env):
     root = await env.bridge.open(env.actor)
     people = await navigate(env, root, 'people')

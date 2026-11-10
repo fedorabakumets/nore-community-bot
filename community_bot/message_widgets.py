@@ -26,6 +26,7 @@ from aiogram.exceptions import (
     TelegramServerError,
     TelegramUnauthorizedError,
 )
+from aiogram.methods import ForwardMessage
 from aiogram.methods.base import TelegramMethod
 from aiogram.types import InlineKeyboardMarkup, Message, Update
 
@@ -52,7 +53,7 @@ class WidgetSession(AiohttpSession):
 
     async def make_request(self, bot, method, timeout=None):  # noqa: ASYNC109
         name = method.__api_method__
-        if name in {"sendWidget", "answerWidgetQuery", "editSharedWidgetData"}:
+        if name in {"sendWidget", "answerWidgetQuery", "editSharedWidgetData"} or isinstance(method, ForwardWidget):
             return await self.widget_api.make_request(bot, method, timeout)
         if name == "getUpdates" and time.monotonic() >= self.retry_poll_at:
             try:
@@ -76,6 +77,10 @@ class SendWidget(TelegramMethod[Message]):
     is_shared: bool = False
     public_data: str | None = None
     reply_markup: InlineKeyboardMarkup | None = None
+
+
+class ForwardWidget(ForwardMessage):
+    """Forward widget media using the same beta API that created it."""
 
 
 class AnswerWidgetQuery(TelegramMethod[bool]):
