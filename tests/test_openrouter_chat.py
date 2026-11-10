@@ -159,7 +159,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
         {"slug": "fact", "kind": "custom", "aliases_json": '["любимый факт"]', "reply_text": "Штатная команда"},
         {"slug": "disabledfact", "kind": "custom", "aliases_json": '["секретный факт"]', "enabled": 0},
     ])
-    for uid in (7, 8, 9):
+    for uid in (7, 8, 9, settings.owner_id):
         await db.ensure_user(uid, telegram_name=f"Участник {uid}")
     await db.execute("UPDATE users SET reputation = 80 WHERE user_id IN (7, 9)")
     await db.execute("UPDATE users SET reputation = 60 WHERE user_id = 8")
@@ -221,6 +221,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
 
         event = await dispatch(
             "нОРа, как настроение?",
+            uid=settings.owner_id,
             reply_to_message=message("чужая цитата", uid=8),
             is_topic_message=True,
             message_thread_id=12,

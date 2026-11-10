@@ -35,6 +35,10 @@ async def nora_address(
     if body is None:
         return
     if openrouter_chat is not None and rule_intent(body) is None:
+        if message.from_user.id not in (
+            settings.owner_ids | settings.moderator_ids
+        ):
+            return
         prompt = openrouter_chat.prompt_for(message)
         if prompt and nora_enabled():
             answer = await openrouter_chat.answer(prompt, message.from_user.id)

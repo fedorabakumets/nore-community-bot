@@ -480,7 +480,7 @@ async def main() -> None:
     bot.session.middleware.register(PrivateRichMiddleware())
     patch_bot_ephemeral(bot)
     dispatcher = create_dispatcher()
-    if settings.openrouter_api_key:
+    if settings.openrouter_api_key or settings.deepseek_api_key:
         dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)
 
     from community_bot.birthday import birthday_job

@@ -40,14 +40,24 @@ _PERSONA = (
 class OpenRouterChat:
     def __init__(self, db: Database, settings: Settings) -> None:
         self._db = db
-        self._api_key = settings.openrouter_api_key
-        self._model = settings.openrouter_model
         self._community_chat_id = settings.community_chat_id
-        self._free_model = self._model == "openrouter/free" or bool(
-            re.fullmatch(r"[\w.-]+/[\w.-]+:free", self._model, re.ASCII)
-        )
-        if not self._free_model:
-            logger.warning("OPENROUTER_MODEL должна быть openrouter/free или моделью с суффиксом :free")
+        self._using_deepseek = bool(settings.deepseek_api_key)
+        self._openrouter_api_key = settings.openrouter_api_key
+        self._openrouter_model = settings.openrouter_model
+
+        if self._using_deepseek:
+            self._api_key = settings.deepseek_api_key
+            self._model = settings.deepseek_model
+            self._url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
+            self._free_model = True
+        else:
+            self._api_key = settings.openrouter_api_key
+            self._model = settings.openrouter_model
+            self._url = _URL
+            self._free_model = self._model == "openrouter/free" or bool(
+                re.fullmatch(r"[\w.-]+/[\w.-]+:free", self._model, re.ASCII)
+            )
+
         self._busy = False
         self._next_request = 0.0
         self._next_user_request: dict[int, float] = {}
@@ -117,7 +127,7 @@ class OpenRouterChat:
 
     async def _request(self, prompt: str) -> str:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session, session.post(
-            _URL,
+            self._url,
             headers={"Authorization": f"Bearer {self._api_key}"},
             json={
                 "model": self._model,
@@ -125,8 +135,18 @@ class OpenRouterChat:
                     {"role": "system", "content": _PERSONA},
                     {"role": "user", "content": prompt[:2000]},
                 ],
-                "max_completion_tokens": 400,
-                "provider": {"max_price": {"prompt": 0, "completion": 0, "request": 0}},
+                "max_tokens": 300,
+                **(
+                    {
+                        "provider": {
+                            "max_price": {
+                                "prompt": 0,
+                                "completion": 0,
+                                "request": 0,
+                            }
+                        }
+                    } if not self._using_deepseek else {}
+                ),
             },
             allow_redirects=False,
         ) as response:

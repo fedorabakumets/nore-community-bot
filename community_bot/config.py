@@ -50,6 +50,9 @@ class Settings:
     groq_api_key: str
     openrouter_api_key: str = field(default="", repr=False)
     openrouter_model: str = "openrouter/free"
+    deepseek_api_key: str = field(default="", repr=False)
+    deepseek_base_url: str = "https://positionapi.top/v1"
+    deepseek_model: str = "deepseek-v4-flash"
 
     def is_owner(self, user_id: int) -> bool:
         return user_id in self.owner_ids
@@ -89,6 +92,9 @@ def load_settings() -> Settings:
         groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "").strip() or "openrouter/free",
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", "").strip(),
+        deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "").strip() or "https://positionapi.top/v1",
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "").strip() or "deepseek-v4-flash",
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")
