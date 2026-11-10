@@ -30,6 +30,13 @@ def _snapshot(source: Path, destination: Path) -> None:
     try:
         with closing(_read_only(source)) as live, closing(sqlite3.connect(destination)) as backup:
             live.backup(backup, pages=256, sleep=0.01)
+        with closing(sqlite3.connect(destination)) as copy:
+            has_memory = copy.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_messages'"
+            ).fetchone()
+            if has_memory:
+                copy.execute("DELETE FROM community_messages")
+                copy.commit()
         with destination.open("r+b") as result:
             os.fsync(result.fileno())
     except BaseException:

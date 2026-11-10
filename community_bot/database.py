@@ -550,6 +550,44 @@ SCHEMA += """
 CREATE TABLE IF NOT EXISTS profile_completion_rewards (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id), awarded_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS community_messages (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    author_name TEXT NOT NULL DEFAULT '',
+    thread_id INTEGER,
+    text TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    edited_at TEXT,
+    PRIMARY KEY (chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_community_messages_chat_time
+    ON community_messages(chat_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_community_messages_chat_thread_time
+    ON community_messages(chat_id, thread_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_community_messages_chat_user_time
+    ON community_messages(chat_id, user_id, sent_at DESC);
+CREATE VIRTUAL TABLE IF NOT EXISTS community_messages_fts USING fts5(
+    text, author_name,
+    content='community_messages',
+    content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS community_messages_ai AFTER INSERT ON community_messages BEGIN
+    INSERT INTO community_messages_fts(rowid, text, author_name)
+    VALUES (new.rowid, new.text, new.author_name);
+END;
+CREATE TRIGGER IF NOT EXISTS community_messages_ad AFTER DELETE ON community_messages BEGIN
+    INSERT INTO community_messages_fts(community_messages_fts, rowid, text, author_name)
+    VALUES ('delete', old.rowid, old.text, old.author_name);
+END;
+CREATE TRIGGER IF NOT EXISTS community_messages_au AFTER UPDATE ON community_messages BEGIN
+    INSERT INTO community_messages_fts(community_messages_fts, rowid, text, author_name)
+    VALUES ('delete', old.rowid, old.text, old.author_name);
+    INSERT INTO community_messages_fts(rowid, text, author_name)
+    VALUES (new.rowid, new.text, new.author_name);
+END;
 """
 
 
@@ -2530,6 +2568,119 @@ class Database:
             result = dict(game)
             result.update({"winner_id": winner_id, "loser_id": loser_id, "payout": 0})
             return True, "ok", result
+
+    async def save_community_message(
+        self, chat_id: int, message_id: int, user_id: int, author_name: str,
+        text: str, sent_at: str, thread_id: int | None = None,
+    ) -> bool:
+        from community_bot.chat_memory import MAX_AUTHOR_CHARS, clean_stored_text
+
+        cleaned = clean_stored_text(text)
+        if not cleaned or not chat_id or not message_id:
+            return False
+        cutoff = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
+        if sent_at < cutoff:
+            return False
+        async with self.connect() as db:
+            await db.execute(
+                """
+                INSERT INTO community_messages(chat_id, message_id, user_id, author_name, thread_id, text, sent_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    user_id=excluded.user_id, author_name=excluded.author_name,
+                    thread_id=excluded.thread_id, text=excluded.text, sent_at=excluded.sent_at
+                """,
+                (chat_id, message_id, user_id, (author_name or "")[:MAX_AUTHOR_CHARS], thread_id, cleaned, sent_at),
+            )
+            await db.execute(
+                "DELETE FROM community_messages WHERE chat_id = ? AND sent_at < ?", (chat_id, cutoff),
+            )
+            await db.commit()
+        return True
+
+    async def update_community_message(self, chat_id: int, message_id: int, text: str) -> None:
+        from community_bot.chat_memory import clean_stored_text
+
+        cleaned = clean_stored_text(text)
+        if cleaned is None:
+            await self.delete_community_message(chat_id, message_id)
+            return
+        await self.execute(
+            "UPDATE community_messages SET text = ?, edited_at = ? WHERE chat_id = ? AND message_id = ?",
+            (cleaned, utcnow(), chat_id, message_id),
+        )
+
+    async def delete_community_message(self, chat_id: int, message_id: int) -> None:
+        await self.execute(
+            "DELETE FROM community_messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id),
+        )
+
+    async def cleanup_community_messages(self, *, now: datetime | None = None) -> int:
+        from community_bot.chat_memory import MAX_ARCHIVE_ROWS, MEMORY_TTL_HOURS
+
+        moment = now or datetime.now(UTC)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        cutoff = (moment - timedelta(hours=MEMORY_TTL_HOURS)).isoformat()
+        async with self.connect() as db:
+            cursor = await db.execute("DELETE FROM community_messages WHERE sent_at < ?", (cutoff,))
+            deleted = cursor.rowcount or 0
+            cursor = await db.execute(
+                "DELETE FROM community_messages WHERE rowid IN "
+                "(SELECT rowid FROM community_messages ORDER BY sent_at DESC, message_id DESC LIMIT -1 OFFSET ?)",
+                (MAX_ARCHIVE_ROWS,),
+            )
+            deleted += cursor.rowcount or 0
+            await db.commit()
+            return deleted
+
+    async def search_community_messages(
+        self, chat_id: int, match: str, *, since: str | None = None, until: str | None = None,
+        thread_id: int | None = None, limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not match.strip():
+            return []
+        sql = (
+            "SELECT m.chat_id, m.message_id, m.user_id, m.author_name, m.thread_id, m.text, m.sent_at "
+            "FROM community_messages_fts AS f JOIN community_messages AS m ON m.rowid = f.rowid "
+            "WHERE f.community_messages_fts MATCH ? AND m.chat_id = ?"
+        )
+        params: list[Any] = [match, chat_id]
+        if since:
+            sql += " AND m.sent_at >= ?"
+            params.append(since)
+        if until:
+            sql += " AND m.sent_at < ?"
+            params.append(until)
+        if thread_id is not None:
+            sql += " AND m.thread_id IS ?"
+            params.append(thread_id)
+        sql += " ORDER BY bm25(f.community_messages_fts), m.sent_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 50)))
+        rows = await self.fetchall(sql, tuple(params))
+        rows.reverse()
+        return rows
+
+    async def recent_community_messages(
+        self, chat_id: int, *, since: str, until: str | None = None,
+        thread_id: int | None = None, limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT chat_id, message_id, user_id, author_name, thread_id, text, sent_at "
+            "FROM community_messages WHERE chat_id = ? AND sent_at >= ?"
+        )
+        params: list[Any] = [chat_id, since]
+        if until:
+            sql += " AND sent_at < ?"
+            params.append(until)
+        if thread_id is not None:
+            sql += " AND thread_id IS ?"
+            params.append(thread_id)
+        sql += " ORDER BY sent_at DESC, message_id DESC LIMIT ?"
+        params.append(max(1, min(limit, 100)))
+        rows = await self.fetchall(sql, tuple(params))
+        rows.reverse()
+        return rows
 
     async def remember_bot_message(self, chat_id: int, message_id: int) -> None:
         await self.execute(

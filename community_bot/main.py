@@ -179,6 +179,21 @@ async def log_community_permissions(bot: Bot, settings: Settings) -> None:
         logger.exception("Не удалось проверить права бота в чате сообщества")
 
 
+async def send_memory_notice_once(bot: Bot, db: Database, settings: Settings) -> None:
+    from community_bot.chat_memory import MEMORY_NOTICE
+
+    if not settings.community_chat_id:
+        return
+    if await db.get_bot_state("nora_memory_notice_v1") == "1":
+        return
+    try:
+        await bot.send_message(settings.community_chat_id, MEMORY_NOTICE)
+    except Exception:
+        logger.warning("Не удалось отправить уведомление о памяти сообщества")
+        return
+    await db.set_bot_state("nora_memory_notice_v1", "1")
+
+
 async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> None:
     timezone = ZoneInfo(settings.timezone)
     while True:
@@ -392,6 +407,15 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
         await asyncio.sleep(60)
 
 
+async def memory_cleanup_job(db: Database) -> None:
+    while True:
+        try:
+            await db.cleanup_community_messages()
+        except Exception:
+            logger.exception("Ошибка очистки памяти сообщества")
+        await asyncio.sleep(3600)
+
+
 def create_dispatcher() -> Dispatcher:
     from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
     from community_bot.private_rich import PrivateRichContextMiddleware
@@ -400,6 +424,11 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.message_widgets import WidgetUpdateMiddleware
 
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    from community_bot.memory_capture import CommunityMemoryMiddleware
+
+    memory_middleware = CommunityMemoryMiddleware()
+    dispatcher.message.outer_middleware(memory_middleware)
+    dispatcher.edited_message.outer_middleware(memory_middleware)
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
@@ -489,6 +518,7 @@ async def main() -> None:
     await load_registry(db)
     await configure_commands(bot)
     await log_community_permissions(bot, settings)
+    await send_memory_notice_once(bot, db, settings)
     from community_bot.stickers import sticker_delivery_job, verify_sticker_pack
 
     await verify_sticker_pack(bot)
@@ -522,6 +552,7 @@ async def main() -> None:
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
     birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
+    memory_task = asyncio.create_task(memory_cleanup_job(db))
     from community_bot.rsvp import event_counters_job
     from community_bot.widget_notifications import widget_notification_job
 
@@ -550,6 +581,7 @@ async def main() -> None:
             morning_task,
             daily_chat_task,
             birthday_task,
+            memory_task,
             widget_notification_task,
             event_counters_task,
             sticker_delivery_task,
@@ -568,6 +600,7 @@ async def main() -> None:
                 morning_task,
                 daily_chat_task,
                 birthday_task,
+                memory_task,
                 widget_notification_task,
                 event_counters_task,
                 sticker_delivery_task,

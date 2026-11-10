@@ -8,6 +8,7 @@ from aiogram.filters import Filter, StateFilter
 from aiogram.types import LinkPreviewOptions, Message
 
 from community_bot.aliases import message_trigger, parse_trigger
+from community_bot.chat_memory import is_memory_question
 from community_bot.command_registry import get_command, nora_enabled
 from community_bot.config import Settings
 from community_bot.ephemeral import delete_user_command, reply_ttl
@@ -34,7 +35,7 @@ async def nora_address(
     body = strip_address(text)
     if body is None:
         return
-    if openrouter_chat is not None and rule_intent(body) is None:
+    if openrouter_chat is not None and (rule_intent(body) is None or is_memory_question(body)):
         if message.from_user.id not in (
             settings.owner_ids | settings.moderator_ids
         ):
@@ -43,9 +44,24 @@ async def nora_address(
             found = openrouter_chat.continuation_for(message)
             if found is not None and nora_enabled():
                 prompt, history, conversation_id = found
-                answer = await openrouter_chat.answer_with_history(
-                    history, prompt, message.from_user.id
-                )
+                if is_memory_question(prompt):
+                    memory_prompt = await openrouter_chat.memory_prompt(prompt, message)
+                    if memory_prompt is None:
+                        await message.reply(
+                            "По этому периоду ничего не нашла в недавней переписке. "
+                            "Память хранит сообщения только 48 часов.",
+                            parse_mode=None,
+                            allow_sending_without_reply=True,
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        )
+                        return
+                    answer = await openrouter_chat.answer_with_history(
+                        history, memory_prompt, message.from_user.id
+                    )
+                else:
+                    answer = await openrouter_chat.answer_with_history(
+                        history, prompt, message.from_user.id
+                    )
                 if answer:
                     sent = await message.reply(
                         answer,
@@ -66,7 +82,20 @@ async def nora_address(
                 return
         prompt = openrouter_chat.prompt_for(message)
         if prompt and nora_enabled():
-            answer = await openrouter_chat.answer(prompt, message.from_user.id)
+            if is_memory_question(prompt):
+                memory_prompt = await openrouter_chat.memory_prompt(prompt, message)
+                if memory_prompt is None:
+                    await message.reply(
+                        "По этому периоду ничего не нашла в недавней переписке. "
+                        "Память хранит сообщения только 48 часов.",
+                        parse_mode=None,
+                        allow_sending_without_reply=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    )
+                    return
+                answer = await openrouter_chat.answer(memory_prompt, message.from_user.id)
+            else:
+                answer = await openrouter_chat.answer(prompt, message.from_user.id)
             if answer:
                 sent = await message.reply(
                     answer,
@@ -121,7 +150,20 @@ async def nora_reply_continuation(
     if found is None:
         return
     prompt, history, conversation_id = found
-    answer = await openrouter_chat.answer_with_history(history, prompt, message.from_user.id)
+    model_prompt = prompt
+    if is_memory_question(prompt):
+        memory_prompt = await openrouter_chat.memory_prompt(prompt, message)
+        if memory_prompt is None:
+            await message.reply(
+                "По этому периоду ничего не нашла в недавней переписке. "
+                "Память хранит сообщения только 48 часов.",
+                parse_mode=None,
+                allow_sending_without_reply=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+            return
+        model_prompt = memory_prompt
+    answer = await openrouter_chat.answer_with_history(history, model_prompt, message.from_user.id)
     if not answer:
         return
     sent = await message.reply(

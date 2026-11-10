@@ -2,6 +2,17 @@
 
 > Обновлено 10.11.2026. При расхождении доверять Git; секреты не записывать.
 
+## NORA Memory v1 — 10 ноября 2026
+
+- Ветка chatgpt/nora-memory-v1 от production c87aab7; не опубликовано, ждёт проверки владельца, особенно хранения данных.
+- community_messages + внешний FTS5 (триггеры insert/update/delete): chat/message/user, имя, thread_id, текст до 1000 символов, sent_at; только основной чат, не боты/пересылки/каналы, сообщения с похожими на секреты паттернами не сохраняются, текст в логи не пишется.
+- TTL 48 часов: очистка при сохранении, ежечасно в middleware и фоновой задачей main; кап архива 20 000 строк; release_backup очищает community_messages в копии (FTS очищается триггером).
+- Поиск только владелец/модераторы в существующем доступе Норы: FTS5 по теме/периоду (вчера/позавчера/сегодня/сутки/неделя), изоляция по чату и теме, контекст DeepSeek ≤2000 символов, без данных — честный ответ без вызова API; один вопрос — один обычный запрос, при сохранении DeepSeek не вызывается, сводок нет.
+- Middleware сохраняет и edited_message; удаление сообщений Telegram боту не доставляет — такие записи живут до TTL. Продолжение через Reply сохранено и тоже умеет вопросы о памяти.
+- Уведомление участникам о 48 часах и внешнем ИИ — один раз при старте (bot_state nora_memory_notice_v1), не в обработчике сообщений.
+- Файлы: chat_memory.py, memory_capture.py, database.py, openrouter_chat.py, routers/nora.py, main.py, release_backup.py, tests/test_nora_memory.py (10 тестов).
+- Проверки: Ruff чисто; tools/check_local.py — 928 passed, 1 skipped; pip check чисто. Production, Railway и рабочая БД не затрагивались.
+
 ## Продолжение диалогов Норы через Reply — 10 ноября 2026
 
 - Ветка chatgpt/nora-reply-continuation от production 94b328b; прежние локальные правки AGENTS.md и handoff сохранены в stash wip-codex-dev-setup-docs и в задачу не переносились.
