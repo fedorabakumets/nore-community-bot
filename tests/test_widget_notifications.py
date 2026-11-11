@@ -10,8 +10,10 @@ from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError
 from aiogram.types import Chat, Message, Update, User
 
+from community_bot import profile_access_rollout as rollout
 from community_bot import widget_inbox
 from community_bot import widget_notifications as notices
+from community_bot.cabinet_api import notices as list_notices
 from community_bot.cabinet_api import notices_update, widget_notice
 from community_bot.database import Database
 from community_bot.message_widgets import WidgetUpdateMiddleware
@@ -257,3 +259,81 @@ async def test_pages_and_close_are_owner_bound_and_do_not_drop_new_events(runtim
     last = session.calls[-1]
     assert last.__api_method__ == "sendWidget" and json.loads(last.chat_data)["n"] == 1
     assert await db.get_bot_state("private_rich_panel:7") == '{"message_id":123,"screen":"home"}'
+
+
+async def queue_profile_invite(db, clock, monkeypatch):
+    monkeypatch.setattr(rollout, "time", lambda: clock.now)
+    await db.notify_inbox_add(7, rollout.REQUEST, rollout.NOTICE)
+    await rollout.queue_notices(db)
+    return await db.fetchone("SELECT id FROM widget_notifications WHERE event_key=?", (rollout.REQUEST,))
+
+
+@pytest.mark.parametrize("with_other_notice", [False, True])
+async def test_profile_completion_removes_only_its_invite(runtime, monkeypatch, with_other_notice):
+    bot, db, session, clock = runtime
+    # The reminder must still disappear for a profile that already earned its bonus before the reset.
+    await db.execute("INSERT INTO profile_completion_rewards(user_id,awarded_at) VALUES(7,'previous')")
+    await db.execute(
+        "UPDATE users SET profile_name='Имя',profile_bio='Описание',hobbies='Кино',"
+        "avatar_file_id='photo' WHERE user_id=7"
+    )
+    row = await queue_profile_invite(db, clock, monkeypatch)
+    await widget_inbox.settle_due(bot, db)
+    sent = api_calls(session)[0]
+    assert sent.__api_method__ == "sendWidget"
+    assert "Прочитать и закрыть" in sent.html
+    assert json.loads(sent.chat_data)["p"]["id"] == row["id"]
+    if with_other_notice:
+        await db.notify_toggle_enabled(7, "widget_reputation")
+        assert await emit(bot, db) == "updated"
+
+    await db.update_profile(7, "birth_date", "2000-01-01")
+    # Scheduled cleanup survives a restart.
+    db = Database(db.path)
+    await widget_inbox.settle_due(bot, db)
+    request = Request(db)
+    request.match_info = {"notice_id": row["id"]}
+    assert (await widget_notice(request)).status == 404
+    assert json.loads((await list_notices(request)).body)["items"] == []
+    assert (await db.get_user(7))["cookies"] == 0
+    if with_other_notice:
+        assert not any(call.__api_method__ == "deleteMessage" for call in api_calls(session))
+        data_edit = [call for call in api_calls(session) if call.__api_method__ == "editMessageWidgetData"][-1]
+        assert json.loads(data_edit.chat_data)["n"] == 1
+        assert json.loads(data_edit.chat_data)["p"]["title"] == "Изменение репутации"
+    else:
+        assert api_calls(session)[-1].__api_method__ == "deleteMessage"
+        assert api_calls(session)[-1].message_id == 456
+
+
+@pytest.mark.parametrize("surface", ["miniapp", "widget"])
+async def test_profile_invite_can_be_closed_manually(runtime, monkeypatch, surface):
+    bot, db, session, clock = runtime
+    row = await queue_profile_invite(db, clock, monkeypatch)
+    await widget_inbox.settle_due(bot, db)
+    if surface == "miniapp":
+        request = Request(db, body={"action": "dismiss_profile_invite"})
+        assert json.loads((await list_notices(request)).body)["items"][0]["profile_invite"]
+        assert (await notices_update(request)).status == 200
+        await widget_inbox.settle_due(bot, db)
+    else:
+        state = json.loads(api_calls(session)[0].chat_data)
+        assert await widget_inbox.handle_query(bot, db, widget_query(data=f"nwi:close:{state['r']}"))
+    assert not await db.fetchone("SELECT id FROM notify_inbox WHERE channel=?", (rollout.REQUEST,))
+    assert (await db.fetchone("SELECT delivery FROM widget_notifications WHERE id=?", (row["id"],))) == {
+        "delivery": "inbox_closed",
+    }
+    assert api_calls(session)[-1].__api_method__ == "deleteMessage"
+
+
+async def test_profile_invite_closed_before_delivery_is_never_sent(runtime, monkeypatch):
+    bot, db, session, clock = runtime
+    row = await queue_profile_invite(db, clock, monkeypatch)
+    request = Request(db, body={"action": "dismiss_profile_invite"})
+    assert (await notices_update(request)).status == 200
+    await rollout.queue_notices(db)
+    await widget_inbox.settle_due(bot, db)
+    assert not api_calls(session)
+    assert (await db.fetchone("SELECT delivery FROM widget_notifications WHERE id=?", (row["id"],))) == {
+        "delivery": "inbox_read",
+    }

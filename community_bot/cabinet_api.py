@@ -295,13 +295,14 @@ async def wallet_history(request):
 
 
 async def widget_notice(request):
+    from community_bot.profile_access_rollout import REQUEST
     from community_bot.widget_notifications import NOTICE_ID, TARGETS
 
     notice_id = request.match_info["notice_id"]
     row = await request.app["db"].fetchone(
         "SELECT sender_label,title,preview,details,context,event_at,target FROM widget_notifications "
-        "WHERE id=? AND recipient_id=?",
-        (notice_id, request["actor"]["id"]),
+        "WHERE id=? AND recipient_id=? AND (event_key<>? OR read_at IS NULL)",
+        (notice_id, request["actor"]["id"], REQUEST),
     ) if NOTICE_ID.fullmatch(notice_id) else None
     if row is None:
         return web.json_response({"error": "Уведомление недоступно"}, status=404)
@@ -311,6 +312,7 @@ async def widget_notice(request):
 async def notices(request):
     from community_bot.birthday import pending_gift
     from community_bot.notify import CHANNELS
+    from community_bot.profile_access_rollout import REQUEST
     from community_bot.widget_notifications import CATEGORIES
 
     user, db = await actor(request), request.app["db"]
@@ -331,7 +333,9 @@ async def notices(request):
     prefs = await db.notify_prefs_map(user["user_id"])
     return web.json_response(
         {
-            "items": [dict(row, text=plain_shop_text(row["text"])) for row in rows],
+            "items": [
+                dict(row, text=plain_shop_text(row["text"]), profile_invite=row["channel"] == REQUEST) for row in rows
+            ],
             "mafia_invites": [item for key, item in invitations.items()
                               if not any(row.get("mafia_invite") == item for row in rows)],
             "sea_invites": [item for key, item in sea_invitations.items()
@@ -361,12 +365,16 @@ async def notices(request):
 async def notices_update(request):
     from community_bot.birthday import claim_gift
     from community_bot.notify import CHANNELS
+    from community_bot.profile_access_rollout import dismiss_profile_notice
     from community_bot.widget_notifications import CATEGORIES
 
     user, db = await actor(request), request.app["db"]
     body = await request.json()
     if not isinstance(body, dict):
         raise ValueError("Проверь настройки уведомлений")
+    if body.get("action") == "dismiss_profile_invite":
+        await dismiss_profile_notice(db, user["user_id"])
+        return result(True, "Уведомление закрыто")
     if body.get("action") == "claim_birthday":
         day = body.get("day")
         if not isinstance(day, str):

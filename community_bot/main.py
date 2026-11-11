@@ -490,6 +490,7 @@ async def main() -> None:
         await asyncio.Event().wait()
         return
     settings = await profile_access_rollout.apply(db, settings)
+    await profile_access_rollout.queue_notices(db)
     for owner_id in settings.owner_ids:
         if not await db.get_user(owner_id):
             await db.ensure_user(owner_id, telegram_name="Владелец")
@@ -507,7 +508,7 @@ async def main() -> None:
     from community_bot.profile_maintenance import run_requested_reset
 
     await run_requested_reset(db, settings, bot)
-    from community_bot.access import OnboardingKeyboardMiddleware
+    from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
     from community_bot.private_rich import PrivateRichMiddleware
 
     bot.session.middleware.register(OnboardingKeyboardMiddleware())
@@ -543,7 +544,7 @@ async def main() -> None:
 
         web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
         logger.info("Nora Mini App HTTP server started")
-    profile_access_task = asyncio.create_task(profile_access_rollout.refresh_private_access(bot, db, settings))
+    profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))

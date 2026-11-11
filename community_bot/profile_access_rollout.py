@@ -1,20 +1,15 @@
 """One-time profile and role reset for the opening of the Mini App."""
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from dataclasses import replace
-from urllib.parse import urldefrag
+from time import time
 
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
-from aiogram.methods import SendMessage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-
-from community_bot.access import configure_private_menus
 from community_bot.community_reset import RETAINED_OWNER_ID
 from community_bot.database import utcnow
+from community_bot.profile_fill import profile_is_complete
 from community_bot.release_backup import verify_requested_release_backup
+from community_bot.rsvp import event_lock
 
 logger = logging.getLogger(__name__)
 REQUEST = "profile-access-20261111"
@@ -66,43 +61,63 @@ async def apply(db, settings):
     return restricted
 
 
-async def deliver_notices(bot, db):
-    url = os.getenv("MINIAPP_URL", "").strip()
-    markup = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть Нору", web_app=WebAppInfo(url=urldefrag(url).url + "#lk")),
-    ]]) if url.startswith("https://") else None
-    delivered = unavailable = pending = after = 0
-    while rows := await db.fetchall(
-        "SELECT id,user_id,text FROM notify_inbox WHERE channel=? AND delivered=0 AND id>? ORDER BY id LIMIT 100",
-        (REQUEST, after),
-    ):
-        for row in rows:
-            after = row["id"]
-            # Send a separate message so the private Rich panel stays usable.
-            method = SendMessage(chat_id=row["user_id"], text=row["text"], reply_markup=markup)
-            for attempt in range(3):
-                try:
-                    await bot.session.make_request(bot, method, timeout=10)
-                except TelegramRetryAfter as error:
-                    await asyncio.sleep(error.retry_after + 0.1)
-                    continue
-                except (TelegramForbiddenError, TelegramBadRequest):
-                    unavailable += 1
-                    break  # The notice remains in the Mini App.
-                except TelegramAPIError:
-                    if attempt < 2:
-                        await asyncio.sleep(2 ** attempt)
-                    continue
-                else:
-                    await db.notify_mark_delivered(row["id"])
-                    delivered += 1
-                    break
-            else:
-                pending += 1
-            await asyncio.sleep(0.075)
-    logger.info("Profile access notifications: sent=%d unavailable=%d pending=%d", delivered, unavailable, pending)
+async def dismiss_profile_notice(db, uid):
+    from community_bot.widget_inbox import UNREAD, schedule_after_read
+
+    async with event_lock(db, f"widget-inbox:{uid}"):
+        async with db.connect() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            await conn.execute("DELETE FROM notify_inbox WHERE user_id=? AND channel=?", (uid, REQUEST))
+            now = int(time())
+            read = await conn.execute(
+                "UPDATE widget_notifications SET read_at=?,next_action_at=NULL,"
+                "delivery=CASE WHEN delivery='inbox_open' THEN delivery ELSE 'inbox_read' END "
+                f"WHERE recipient_id=? AND category='widget_personal' AND event_key=? AND ({UNREAD}"
+                " OR (delivery='inbox_unconfirmed' AND read_at IS NULL))",
+                (now, uid, REQUEST),
+            )
+            if read.rowcount:
+                anchor = await (await conn.execute(
+                    "SELECT id FROM widget_notifications WHERE recipient_id=? AND delivery='inbox_open'", (uid,),
+                )).fetchone()
+                if anchor:
+                    await schedule_after_read(conn, uid, anchor["id"], now, delay=0)
+            await conn.commit()
 
 
-async def refresh_private_access(bot, db, settings):
-    await deliver_notices(bot, db)
-    await configure_private_menus(bot, db, settings)
+async def clear_profile_notice_if_read(conn, uid):
+    await conn.execute(
+        "DELETE FROM notify_inbox WHERE user_id=? AND channel=? AND EXISTS ("
+        "SELECT 1 FROM widget_notifications WHERE recipient_id=? AND category='widget_personal' "
+        "AND event_key=? AND read_at IS NOT NULL)",
+        (uid, REQUEST, uid, REQUEST),
+    )
+
+
+async def queue_notices(db):
+    rows = await db.fetchall(
+        "SELECT users.* FROM notify_inbox JOIN users USING(user_id) WHERE notify_inbox.channel=?", (REQUEST,),
+    )
+    if not rows:
+        return
+    await verify_requested_release_backup(db, request="profile-notice-widget-20261111")
+    for user in rows:
+        if profile_is_complete(user):
+            await dismiss_profile_notice(db, user["user_id"])
+
+    now = int(time())
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        # Upgrade only messages not already delivered by the previous release.
+        await conn.execute(
+            """INSERT INTO widget_notifications(
+                   id,recipient_id,sender_type,sender_label,title,preview,details,
+                   category,target,context,event_at,event_key,created_at,delivery,next_action_at)
+               SELECT lower(hex(randomblob(16))),user_id,'nora','Нора','Вам открыт доступ к Норе',
+                      text,text,'widget_personal','lk','',created_at,channel,?,'inbox_queued',?
+               FROM notify_inbox WHERE channel=? AND delivered=0
+               ON CONFLICT(recipient_id,category,event_key) DO NOTHING""",
+            (now, now, REQUEST),
+        )
+        await conn.execute("UPDATE notify_inbox SET delivered=1 WHERE channel=? AND delivered=0", (REQUEST,))
+        await conn.commit()

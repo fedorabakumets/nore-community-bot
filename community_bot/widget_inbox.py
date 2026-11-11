@@ -290,6 +290,20 @@ async def enqueue(bot, db, uid, sender, title, preview, details, target, categor
         return await flush(bot, db, uid) if row else "suppressed"
 
 
+async def schedule_after_read(conn, uid, anchor_id, now, *, delay):
+    remaining = await (await conn.execute(
+        f"SELECT 1 FROM widget_notifications WHERE recipient_id=? AND {UNREAD} LIMIT 1", (uid,),
+    )).fetchone()
+    if remaining:
+        await conn.execute("UPDATE widget_notifications SET next_action_at=? WHERE id=?", (now, anchor_id))
+    else:
+        await conn.execute(
+            "UPDATE widget_notifications SET delivery='inbox_closing',next_action_at=? WHERE id=?",
+            (now + delay, anchor_id),
+        )
+    return bool(remaining)
+
+
 async def handle_query(bot, db, query) -> bool:
     data = query.get("data")
     match = QUERY.fullmatch(data) if isinstance(data, str) else None
@@ -338,18 +352,12 @@ async def handle_query(bot, db, query) -> bool:
                 + (" AND id=?" if action == "read" else ""),
                 (now, uid, argument) if action == "read" else (now, uid),
             )
-            remaining = await (await connection.execute(
-                f"SELECT 1 FROM widget_notifications WHERE recipient_id=? AND {UNREAD} LIMIT 1", (uid,),
-            )).fetchone()
-            if not remaining:
-                await connection.execute(
-                    "UPDATE widget_notifications SET delivery='inbox_closing',next_action_at=? WHERE id=?",
-                    (now if action == "close" else now + DELETE_DELAY, anchor["id"]),
-                )
-            else:
-                await connection.execute(
-                    "UPDATE widget_notifications SET next_action_at=? WHERE id=?", (now, anchor["id"]),
-                )
+            from community_bot.profile_access_rollout import clear_profile_notice_if_read
+
+            await clear_profile_notice_if_read(connection, uid)
+            remaining = await schedule_after_read(
+                connection, uid, anchor["id"], now, delay=0 if action == "close" else DELETE_DELAY,
+            )
             await connection.commit()
         state = await snapshot(db, uid, me.username)
         if not remaining:

@@ -1575,6 +1575,7 @@ class Database:
         return True
 
     async def reward_complete_profile(self, user_id: int) -> bool:
+        from community_bot.profile_access_rollout import REQUEST, dismiss_profile_notice
         from community_bot.profile_fill import profile_is_complete
 
         async with self.connect() as connection:
@@ -1587,18 +1588,22 @@ class Database:
             inserted = await connection.execute(
                 "INSERT OR IGNORE INTO profile_completion_rewards(user_id, awarded_at) VALUES (?, ?)", (user_id, now),
             )
-            if inserted.rowcount != 1:
-                await connection.rollback()
-                return False
-            await connection.execute(
-                "UPDATE users SET cookies=cookies+10, updated_at=? WHERE user_id=?", (now, user_id),
-            )
-            await connection.execute(
-                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?,10,?,?,?)",
-                (user_id, "profile_complete", "first_100_percent", now),
-            )
+            awarded = inserted.rowcount == 1
+            if awarded:
+                await connection.execute(
+                    "UPDATE users SET cookies=cookies+10, updated_at=? WHERE user_id=?", (now, user_id),
+                )
+                await connection.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?,10,?,?,?)",
+                    (user_id, "profile_complete", "first_100_percent", now),
+                )
+            notice = await (await connection.execute(
+                "SELECT 1 FROM notify_inbox WHERE user_id=? AND channel=?", (user_id, REQUEST),
+            )).fetchone()
             await connection.commit()
-            return True
+        if notice:
+            await dismiss_profile_notice(self, user_id)
+        return awarded
 
     async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
         if await self.has_approved_application(user_id):

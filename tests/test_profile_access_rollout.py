@@ -2,8 +2,6 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -33,7 +31,7 @@ def test_age_changes_on_birthday_and_accepts_leap_day():
     assert profile_age({"age": 25}) is None
 
 
-async def test_reset_keeps_only_confirmed_owner_and_queues_each_notice_once(tmp_path, monkeypatch):
+async def test_reset_keeps_only_confirmed_owner_and_queues_each_notice_once(tmp_path):
     db = Database(tmp_path / "community.sqlite3")
     await db.initialize()
     for uid, role in ((rollout.RETAINED_OWNER_ID, "owner"), (8, "owner"), (9, "admin"), (10, "member")):
@@ -76,13 +74,14 @@ async def test_reset_keeps_only_confirmed_owner_and_queues_each_notice_once(tmp_
     assert profile_is_complete(await db.get_user(9))
     assert (await db.get_user(9))["cookies"] == before["cookies"]
 
-    monkeypatch.setenv("MINIAPP_URL", "https://example.test")
-    bot = SimpleNamespace(session=SimpleNamespace(make_request=AsyncMock()))
-    await rollout.deliver_notices(bot, db)
-    await rollout.deliver_notices(bot, db)
-    messages = [call.args[1] for call in bot.session.make_request.await_args_list]
-    assert len(messages) == 3
-    assert {message.chat_id for message in messages} == {8, 9, rollout.RETAINED_OWNER_ID}
-    for message in messages:
-        assert "Вам открыт доступ к Норе" in message.text
-        assert message.reply_markup.inline_keyboard[0][0].web_app.url == "https://example.test#lk"
+    # One recipient already received the previous plain message. Do not send a second invitation.
+    await db.execute("UPDATE notify_inbox SET delivered=1 WHERE user_id=8 AND channel=?", (rollout.REQUEST,))
+    await rollout.queue_notices(db)
+    await rollout.queue_notices(db)
+    queued = await db.fetchall("SELECT recipient_id,target,details,delivery FROM widget_notifications")
+    assert queued == [{
+        "recipient_id": rollout.RETAINED_OWNER_ID, "target": "lk", "details": rollout.NOTICE,
+        "delivery": "inbox_queued",
+    }]
+    rows = await db.fetchall("SELECT user_id FROM notify_inbox WHERE channel=?", (rollout.REQUEST,))
+    assert {row["user_id"] for row in rows} == {8, rollout.RETAINED_OWNER_ID}
