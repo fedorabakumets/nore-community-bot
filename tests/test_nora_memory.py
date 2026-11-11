@@ -186,6 +186,36 @@ async def test_memory_prompt_returns_none_without_data(db, settings):
     assert await chat.memory_prompt('что позавчера обсуждали?', event) is None
 
 
+async def test_today_recap_uses_chat_messages_instead_of_matching_itself(db, settings):
+    now = datetime.now(UTC).replace(microsecond=0)
+    body = 'че сегодня интересного в чате было?'
+    event = message(f'Нора, {body}', uid=1, is_topic_message=True, message_thread_id=12)
+    event = event.model_copy(update={'date': now})
+    chat = openrouter_chat.OpenRouterChat(db, settings)
+    await db.set_bot_state('nora_memory_notice_v1', '1')
+
+    async def handler(message, data):
+        return await chat.memory_prompt(body, message)
+
+    data = {'db': db, 'settings': settings}
+    middleware = CommunityMemoryMiddleware()
+    await db.save_community_message(event.chat.id, 9, 1, 'Роман', event.text, now.isoformat(), thread_id=12)
+    assert await middleware(handler, event, data) is None
+    await db.save_community_message(
+        event.chat.id, 10, 7, 'Анна', 'Договорились встретиться у Финляндского вокзала', now.isoformat(), thread_id=12,
+    )
+    await db.save_community_message(
+        event.chat.id, 11, 8, 'Иван', 'В другой теме обсуждали выставку', now.isoformat(), thread_id=99,
+    )
+    prompt = await middleware(handler, event, data)
+    assert prompt is not None
+    context, question = prompt.split('\n\nВопрос: ', 1)
+    assert 'Финляндского вокзала' in context
+    assert 'выставку' not in context
+    assert 'интересного' not in context
+    assert question.startswith(body)
+
+
 async def test_middleware_saves_only_community_text(db, settings):
     middleware = CommunityMemoryMiddleware()
     async def handler(event, data):

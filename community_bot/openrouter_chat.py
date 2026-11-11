@@ -12,6 +12,9 @@ from aiogram.types import Message
 
 from community_bot.aliases import is_command_message, parse_trigger
 from community_bot.chat_memory import (
+    MEMORY_TTL_HOURS,
+    RECENT_LIMIT,
+    SEARCH_LIMIT,
     build_fts_match,
     build_memory_prompt,
     extract_search_terms,
@@ -264,28 +267,39 @@ class OpenRouterChat:
         now = datetime.now(ZoneInfo(self._timezone))
         window = parse_time_window(prompt, now)
         thread_id = message.message_thread_id if message.is_topic_message else None
-        since = until = None
+        floor_utc = now.astimezone(UTC) - timedelta(hours=MEMORY_TTL_HOURS)
+        since = floor_utc.isoformat()
+        until = None
         if window is not None:
             start_utc = window[0].astimezone(UTC)
             end_utc = window[1].astimezone(UTC)
-            floor_utc = now.astimezone(UTC) - timedelta(hours=48)
             if end_utc <= floor_utc:
                 return None
             since = max(start_utc, floor_utc).isoformat()
             until = end_utc.isoformat()
-        rows: list[dict] = []
+
+        def context_for(rows: list[dict]) -> str:
+            # Capture runs before the assistant, so archive results may include the current question.
+            return format_context([
+                row for row in rows
+                if row["message_id"] != message.message_id
+                and not is_memory_question(strip_address(row["text"]) or "")
+            ])
+
+        context = ""
         terms = extract_search_terms(prompt)
         if terms:
             rows = await self._db.search_community_messages(
                 self._community_chat_id, build_fts_match(terms),
-                since=since, until=until, thread_id=thread_id, limit=20,
+                since=since, until=until, thread_id=thread_id, limit=SEARCH_LIMIT,
             )
-        if not rows and window is not None:
+            context = context_for(rows)
+        if not context and window is not None:
             rows = await self._db.recent_community_messages(
-                self._community_chat_id, since=since or now.astimezone(UTC).isoformat(),
-                until=until, thread_id=thread_id, limit=50,
+                self._community_chat_id, since=since,
+                until=until, thread_id=thread_id, limit=RECENT_LIMIT,
             )
-        context = format_context(rows)
+            context = context_for(rows)
         return build_memory_prompt(prompt, context) if context else None
 
     async def _request(self, prompt: str) -> str:
