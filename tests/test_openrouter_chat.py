@@ -209,7 +209,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
         state = dispatcher.fsm.get_context(bot=bot, chat_id=7, user_id=7)
         await state.set_state(ApplicationForm.name)
         await dispatch("Нора, как настроение?", chat_id=7)
-        assert await state.get_state() == ApplicationForm.age.state
+        assert await state.get_state() == ApplicationForm.birth_date.state
         assert (await state.get_data())["name"] == "Нора, как настроение?"
 
         for text in [

@@ -315,12 +315,9 @@ async def test_invites_require_current_mutual_friendship_and_blocks_revoke_pendi
     with pytest.raises(mafia.Conflict):
         await send(env, 9, "respond", room, accept=True)
     await env.db.set_role(10, "member")
-    with pytest.raises(ValueError):
-        await send(env, 7, "invite", room, user_id=10)
-    await send(env, 7, "invite", room, user_id=11)
-    await env.db.set_role(11, "member")
-    with pytest.raises(ValueError):
-        await send(env, 11, "respond", room, accept=True)
+    await send(env, 7, "invite", room, user_id=10)
+    await send(env, 10, "respond", room, accept=True)
+    assert (await view(env, 10))["room"]["id"] == room
 
 
 async def test_invitation_decline_commits_without_requiring_room_membership(env, monkeypatch):
@@ -422,6 +419,10 @@ async def test_invite_notices_have_actor_bound_buttons_and_do_not_survive_respon
     await respond(callback, env.db, env.settings)
     assert (await view(env, 9))["room"] is None
     callback.from_user.id = 8
+    await respond(callback, env.db, env.settings)
+    assert (await view(env, 8))["room"] is None
+    await env.db.execute("UPDATE users SET birth_date='2000-01-01',profile_name='Анна',hobbies='Кино',"
+                         "profile_bio='Описание',avatar_file_id='photo' WHERE user_id=8")
     await respond(callback, env.db, env.settings)
     assert (await view(env, 8))["room"]["id"] == room
     await respond(callback, env.db, env.settings)  # replay remains harmless

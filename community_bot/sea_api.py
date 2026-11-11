@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
+from community_bot.profile_fields import profile_age
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_sea_rooms (
     id TEXT PRIMARY KEY, host_id INTEGER NOT NULL REFERENCES users(user_id),
@@ -394,7 +396,7 @@ def _set_turn(room, uid, now: float) -> None:
 def _eligible_reason(conn, user) -> str:
     if not user:
         return "Сначала открой личный кабинет Норы"
-    if int(user.get("age") or 0) < 18:
+    if (profile_age(user) or 0) < 18:
         return "Ставки в Морском бою доступны с 18 лет. Без ставки можно играть свободно"
     if int(user.get("cookie_debt") or 0) > 0:
         return "Сначала верни просроченный долг по печенькам"
@@ -726,7 +728,7 @@ async def _respond(conn, db, settings, room, uid: int, body: dict, now: float) -
     if not sender or sender["left"] or not await accepted_in_connection(conn, uid, invite["sender_id"]):
         raise Conflict("Приглашение больше не действует. Приглашать могут только друзья из этой партии")
     if not await miniapp_allowed(db, settings, uid):
-        raise ValueError("Миниапка пока доступна от роли модератора")
+        raise ValueError("Миниапка доступна участникам Норы")
     await _join_room(conn, room, uid, now)
     await conn.execute("UPDATE mini_sea_invites SET status='accepted' WHERE room_id=? AND user_id=?", (room["id"], uid))
     _log(room, f"{_players(room)[str(uid)]['name']} принял приглашение. Создатель может начинать.", now)
@@ -1004,7 +1006,7 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
         from community_bot.access import miniapp_allowed
 
         if not await miniapp_allowed(db, settings, uid):
-            raise ValueError("Миниапка пока доступна от роли модератора")
+            raise ValueError("Миниапка доступна участникам Норы")
         if not await _one(conn, "SELECT user_id FROM users WHERE user_id=?", (uid,)):
             raise ValueError("Сначала открой личный кабинет Норы")
         if action_name in {"create", "start"}:

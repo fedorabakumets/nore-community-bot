@@ -9,7 +9,7 @@ import re
 import sqlite3
 from contextlib import closing
 
-from community_bot.access import miniapp_allowed, private_allowed, sync_menu
+from community_bot.access import private_allowed, sync_menu
 from community_bot.audit import SYSTEM_ACTOR_ID
 from community_bot.database import utcnow
 from community_bot.profile_fill import profile_fill_percent
@@ -18,7 +18,7 @@ from community_bot.release_backup import _snapshot
 logger = logging.getLogger(__name__)
 REQUEST_VARIABLE = 'NORA_RESET_PROFILE_ONCE'
 DEFAULTS = {
-    'profile_name': None, 'age': None, 'hobbies': None, 'profile_bio': '',
+    'profile_name': None, 'age': None, 'birth_date': None, 'hobbies': None, 'profile_bio': '',
     'avatar_file_id': None, 'avatar_media_type': 'photo', 'role': 'member',
     'custom_status': None, 'reputation': 69, 'warnings': 0, 'hate_immunity_until': None,
     'profile_private': 0, 'profile_ornate': 0, 'profile_title': '', 'hate_shields': 0,
@@ -117,7 +117,7 @@ async def reset_profile(db, settings, bot, raw):
         if balances != (after['cookies'], after['cookie_debt']):
             raise ValueError('Profile reset must not change balances')
         await conn.commit()
-    if await private_allowed(db, settings, uid) or await miniapp_allowed(db, settings, uid):
+    if await private_allowed(db, settings, uid):
         raise ValueError('Profile reset access verification failed')
     if profile_fill_percent(await db.get_user(uid)) != 0:
         raise ValueError('Profile reset fill verification failed')

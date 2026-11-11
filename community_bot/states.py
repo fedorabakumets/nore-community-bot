@@ -3,7 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ApplicationForm(StatesGroup):
     name = State()
-    age = State()
+    birth_date = State()
     referral = State()
     expectations = State()
     bio = State()
@@ -21,7 +21,7 @@ class ModeratorReply(StatesGroup):
 
 class ProfileEdit(StatesGroup):
     name = State()
-    age = State()
+    birth_date = State()
     hobbies = State()
     bio = State()
     avatar = State()

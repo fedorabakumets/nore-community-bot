@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
     telegram_name TEXT NOT NULL DEFAULT '',
     profile_name TEXT,
     age INTEGER,
+    birth_date TEXT,
     hobbies TEXT,
     avatar_file_id TEXT,
     avatar_media_type TEXT NOT NULL DEFAULT 'photo',
@@ -633,6 +634,8 @@ class Database:
                 if name not in event_columns:
                     await db.execute(f'ALTER TABLE studio_events ADD COLUMN {name} {definition}')
             columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
+            if "birth_date" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN birth_date TEXT")
             if "avatar_media_type" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN avatar_media_type TEXT NOT NULL DEFAULT 'photo'")
             pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
@@ -927,7 +930,6 @@ class Database:
                 WHERE reputation > ?
                   AND (
                     TRIM(COALESCE(profile_name, '')) = ''
-                    OR age IS NULL OR age < 14 OR age > 120
                     OR TRIM(COALESCE(hobbies, '')) = ''
                     OR TRIM(COALESCE(profile_bio, '')) = ''
                     OR TRIM(COALESCE(avatar_file_id, '')) = ''
@@ -1509,7 +1511,7 @@ class Database:
     async def update_profile(self, user_id: int, field: str, value: Any) -> None:
         allowed = {
             "profile_name",
-            "age",
+            "birth_date",
             "hobbies",
             "avatar_file_id",
             "avatar_media_type",
@@ -1520,11 +1522,15 @@ class Database:
         }
         if field not in allowed:
             raise ValueError("Недопустимое поле профиля")
+        if field == "birth_date":
+            from community_bot.profile_fields import validate_birth_date
+
+            value = validate_birth_date(value)
         await self.execute(
             f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?",
             (value, utcnow(), user_id),
         )
-        if field in {"profile_bio", "profile_name", "age", "hobbies", "avatar_file_id"}:
+        if field in {"profile_bio", "profile_name", "birth_date", "hobbies", "avatar_file_id"}:
             if field == "profile_bio":
                 await self.sync_bio_auto_warn(user_id)
             user = await self.get_user(user_id)

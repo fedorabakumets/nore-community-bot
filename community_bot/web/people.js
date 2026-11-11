@@ -13,7 +13,7 @@ window.NoraPeople = (() => {
     return 'Был(а) давно';
   }
   function beat(active) {
-    if(!started||!auth)return;
+    if(!started||!auth||data?.profile.fill_percent!==100)return;
     fetch('/api/presence',{method:'POST',keepalive:!active,headers:{Authorization:'tma '+auth,'Content-Type':'application/json'},
       body:JSON.stringify({session,seq:++seq,active})}).catch(()=>{});
   }

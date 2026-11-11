@@ -292,8 +292,8 @@ async def test_wing_purchase_and_lobby_bonus_use_persisted_equipment(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('authorized', [True, False])
-async def test_lobby_socket_checks_access_and_caches_profile(monkeypatch, authorized):
+@pytest.mark.parametrize(('authorized', 'complete'), [(True, True), (True, False), (False, True)])
+async def test_lobby_socket_checks_access_and_caches_profile(monkeypatch, authorized, complete):
     from community_bot import access, miniapp
 
     now = 100.
@@ -338,13 +338,16 @@ async def test_lobby_socket_checks_access_and_caches_profile(monkeypatch, author
 
     socket = Socket()
     monkeypatch.setattr(nora_game_api.web, 'WebSocketResponse', lambda **kwargs: socket)
-    req = SimpleNamespace(app={'nora_lobby': presence, 'db': object(), 'settings': SimpleNamespace(bot_token='test')})
+    user = {'birth_date': '2000-01-01', 'profile_name': 'Alice', 'hobbies': 'Игры',
+            'profile_bio': 'Привет', 'avatar_file_id': 'photo'}
+    db = SimpleNamespace(get_user=AsyncMock(return_value=user if complete else user | {'birth_date': None}))
+    req = SimpleNamespace(app={'nora_lobby': presence, 'db': db, 'settings': SimpleNamespace(bot_token='test')})
     assert await nora_game_api.lobby_socket(req) is socket
-    assert len(socket.replies) == (20 if authorized else 0)
-    assert read_profile.await_count == (2 if authorized else 0)
+    assert len(socket.replies) == (20 if authorized and complete else 0)
+    assert read_profile.await_count == (2 if authorized and complete else 0)
     assert allowed.await_count == 1
     assert presence == {}
-    if authorized:
+    if authorized and complete:
         departed.assert_awaited_once_with(req.app['db'], 1, session)
     else:
         assert 1008 in socket.codes

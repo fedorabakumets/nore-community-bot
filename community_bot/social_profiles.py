@@ -11,6 +11,7 @@ from aiohttp import web
 
 from community_bot.friends_api import _recipient, accepted
 from community_bot.helpers import can_view_profile, effective_role, role_title
+from community_bot.profile_fields import profile_age
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -166,7 +167,7 @@ async def profile(request):
     result.update(
         hidden=False,
         private=bool(target["profile_private"]),
-        age=target["age"],
+        age=profile_age(target),
         role=await role_title(db, await effective_role(db, settings, target["user_id"])),
         has_avatar=bool(target["avatar_file_id"] and target["avatar_media_type"] == "photo"),
         presence=presence,

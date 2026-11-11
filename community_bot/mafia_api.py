@@ -538,7 +538,7 @@ async def _respond(conn, db, settings, room, uid, body, now):
     if not sender or sender["left"] or not await accepted_in_connection(conn, uid, invite["sender_id"]):
         raise Conflict("Приглашение больше не действует. Приглашать могут только друзья из этой комнаты")
     if not await miniapp_allowed(db, settings, uid):
-        raise ValueError("Миниапка пока доступна от роли модератора")
+        raise ValueError("Миниапка доступна участникам Норы")
     member = await _one(conn, "SELECT room_id FROM mini_mafia_members WHERE user_id=? AND active=1", (uid,))
     if member:
         raise Conflict("Сначала выйди из текущей комнаты")
@@ -712,7 +712,7 @@ async def apply_action(db, settings, uid, body, now=None):
         from community_bot.access import miniapp_allowed
 
         if not await miniapp_allowed(db, settings, uid):
-            raise ValueError("Миниапка пока доступна от роли модератора")
+            raise ValueError("Миниапка доступна участникам Норы")
         if not await _one(conn, "SELECT user_id FROM users WHERE user_id=?", (uid,)):
             raise ValueError("Сначала открой личный кабинет Норы")
         previous = await _one(

@@ -34,29 +34,34 @@ class Request(dict):
         self.headers = {'Authorization': 'tma ' + signed(date=int(time.time()))} if authorized else {}
 
 
+async def complete_profile(db):
+    await db.execute("UPDATE users SET birth_date='2000-01-01',profile_name='Анна',hobbies='Кино',"
+                     "profile_bio='Петербург',avatar_file_id='photo' WHERE user_id=7")
+
+
 @pytest.mark.parametrize('path', [
     '/api/presence', '/api/people', '/api/people/8', '/api/people/8/avatar',
     '/api/friends', '/api/friends/action', '/api/mafia', '/api/mafia/action',
     '/api/rocket', '/api/rocket/prepare', '/api/rocket/launch', '/api/rocket/cashout',
 ])
-async def test_every_interactive_api_keeps_telegram_and_current_staff_gate(env, path):
+async def test_every_interactive_api_requires_signed_complete_profile(env, path):
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
     assert (await protection(Request(env, path, False), handler)).status == 401
     assert (await protection(Request(env, path, True), handler)).status == 403
     handler.assert_not_awaited()
-    await env.db.set_role(7, 'moderator')
+    await complete_profile(env.db)
     response = await protection(Request(env, path, True), handler)
     assert response.status == 200
     assert response.headers['Cache-Control'] == 'no-store'
     handler.reset_mock()
-    await env.db.set_role(7, 'member')
+    await env.db.execute('UPDATE users SET birth_date=NULL WHERE user_id=7')
     assert (await protection(Request(env, path, True), handler)).status == 403
     handler.assert_not_awaited()
     assert (await env.db.get_user(7))['cookies'] == 30
 
 
 async def test_interactive_errors_reach_client_without_profile_error_replacement(env):
-    await env.db.set_role(7, 'moderator')
+    await complete_profile(env.db)
     for path in ('/api/friends/action', '/api/mafia/action', '/api/rocket/launch'):
         response = await protection(Request(env, path, True), AsyncMock(side_effect=ValueError('Комната уже закрыта')))
         assert response.status == 400

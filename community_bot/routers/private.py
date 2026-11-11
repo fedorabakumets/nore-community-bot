@@ -96,6 +96,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     slugify_role,
 )
+from community_bot.profile_fields import parse_birth_date, profile_age
 from community_bot.restart import play_countdown, try_begin
 from community_bot.routers.flows import restore_private_menu
 from community_bot.staff_guide import staff_guide_text
@@ -1234,15 +1235,18 @@ async def application_name(message: Message, state: FSMContext) -> None:
     if (text := await _validate_text(message, maximum=50)) is None:
         return
     await state.update_data(name=text)
-    await state.set_state(ApplicationForm.age)
-    await message.answer(APPLICATION_QUESTIONS["age"], reply_markup=flow_reply_keyboard())
+    await state.set_state(ApplicationForm.birth_date)
+    await message.answer(APPLICATION_QUESTIONS["birth_date"], reply_markup=flow_reply_keyboard())
 
 
-@router.message(ApplicationForm.age)
-async def application_age(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message, maximum=50)) is None:
+@router.message(ApplicationForm.birth_date)
+async def application_birth_date(message: Message, state: FSMContext) -> None:
+    try:
+        value = parse_birth_date(message.text or "")
+    except ValueError as error:
+        await message.answer(str(error))
         return
-    await state.update_data(age=text)
+    await state.update_data(age=str(profile_age({"birth_date": value})))
     await state.set_state(ApplicationForm.referral)
     await message.answer(APPLICATION_QUESTIONS["referral"], reply_markup=flow_reply_keyboard())
 
@@ -1874,7 +1878,7 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
         f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
         f"Репутация: <b>{user['reputation']}</b> · щиты {int(user.get('hate_shields') or 0)}\n"
-        f"Возраст: {user['age'] or 'не указан'}\n"
+        f"Возраст: {profile_age(user) or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Предупреждения: <b>{user['warnings']}</b>\n"
         f"Заметка: {html.escape(note)}\n\n"
@@ -1907,7 +1911,7 @@ async def admin_begin_user_edit(
         "clear_bio": "Описание будет полностью очищено. Магазин и события станут недоступны до заполнения. "
                      "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
         "name": "Введите новое имя (до 50 символов).",
-        "age": "Введите новый возраст числом от 14 до 120.",
+        "age": "Введите дату рождения в формате ДД.ММ.ГГГГ.",
         "avatar": "Отправьте новую фотографию или видео профиля.",
         "warnings": "Введите точное количество предупреждений, 0 или больше.",
         "rep": "Введите новую репутацию числом от -20 до 100.",
@@ -2084,11 +2088,12 @@ async def admin_save_user_edit(
         await db.update_profile(user_id, "profile_name", value)
         result = "Имя обновлено."
     elif action == "age":
-        if not message.text or not message.text.isdigit() or not 14 <= int(message.text) <= 120:
-            await message.answer("Возраст должен быть числом от 14 до 120.")
+        try:
+            await db.update_profile(user_id, "birth_date", parse_birth_date(message.text or ""))
+        except ValueError as error:
+            await message.answer(str(error))
             return
-        await db.update_profile(user_id, "age", int(message.text))
-        result = "Возраст обновлён."
+        result = "Дата рождения сохранена."
     elif action == "warnings":
         if not message.text or not message.text.isdigit():
             await message.answer("Введите целое число 0 или больше.")

@@ -38,15 +38,15 @@ async def env(tmp_path, monkeypatch):
     return SimpleNamespace(db=db, settings=Settings())
 
 
-async def test_access_threshold_current_future_and_revocation(env):
+async def test_miniapp_access_survives_rank_changes(env):
     db, settings = env.db, env.settings
     for rank in (29, 30, 31, 40):
         slug = f'future_{rank}'
         await db.create_staff_role(slug, slug, rank)
         await db.set_role(4, slug)
-        assert await miniapp_allowed(db, settings, 4) == (rank >= 30)
+        assert await miniapp_allowed(db, settings, 4)
     await db.update_staff_role('future_40', rank=29)
-    assert not await miniapp_allowed(db, settings, 4)
+    assert await miniapp_allowed(db, settings, 4)
 
 
 async def test_prefix_survives_initialization_and_updates_all_views(env):
@@ -163,7 +163,7 @@ async def test_reset_is_backed_up_atomic_once_and_removes_configured_overrides(e
         user = await db.get_user(uid)
         assert user['cookies'] == 0
         assert user['role'] == ('owner' if uid == 1 else 'member')
-        assert await miniapp_allowed(db, restricted, uid) == (uid == 1)
+        assert await miniapp_allowed(db, restricted, uid)
     assert not await db.list_pets()
     assert await db.has_approved_application(4)
     assert (await db.get_party_game(game))['status'] == 'cancelled'
@@ -209,7 +209,7 @@ async def test_reset_prevents_old_games_and_quotes_restoring_balances(env):
     from community_bot import sea_api as sea
 
     db = env.db
-    await db.execute("UPDATE users SET profile_name='Player',age=25,hobbies='Games',profile_bio='Hi',"
+    await db.execute("UPDATE users SET profile_name='Player',birth_date='2000-01-01',hobbies='Games',profile_bio='Hi',"
                      "avatar_file_id='photo',role='moderator'")
     room, _, _ = await sea.apply_action(db, env.settings, 4, {
         'action': 'create', 'vs_bot': False, 'stake': 10}, now=1000)

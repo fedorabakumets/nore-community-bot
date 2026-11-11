@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from community_bot.access import miniapp_allowed
 from community_bot.mafia_api import apply_action
+from community_bot.profile_fill import profile_is_complete
 
 router = Router(name="mini_mafia_invitations")
 
@@ -31,11 +32,14 @@ async def respond(callback: CallbackQuery, db, settings):
         await callback.answer("Ответь на приглашение в личном чате с Норой", show_alert=True)
         return
     if not await miniapp_allowed(db, settings, callback.from_user.id):
-        await callback.answer("Сейчас миниапка доступна от роли модератора", show_alert=True)
+        await callback.answer("Миниапка доступна участникам Норы", show_alert=True)
         return
     parts = (callback.data or "").split(":", 2)
     if len(parts) != 3 or parts[1] not in {"y", "n"}:
         await callback.answer("Некорректное приглашение", show_alert=True)
+        return
+    if parts[1] == "y" and not profile_is_complete(await db.get_user(callback.from_user.id) or {}):
+        await callback.answer("Заполни профиль на 100%, чтобы принять приглашение", show_alert=True)
         return
     try:
         _, message, _ = await apply_action(

@@ -199,6 +199,8 @@ async def test_widget_detail_requires_current_miniapp_access_and_owner(runtime):
     assert content["target"] == "notices" and content["details"].startswith("Открой Нору")
     assert "recipient_id" not in content and "message_id" not in content
     await db.set_role(7, "member")
+    assert (await protection(request, widget_notice)).status == 200
+    request.headers["Authorization"] = "tma " + signed(uid=999, date=now)
     assert (await protection(request, widget_notice)).status == 403
 
 

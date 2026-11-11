@@ -489,7 +489,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             low, high = PICKERS[current]
             token = turn.screen[:16]
             number_choice = {"token": token, "min": low, "max": high}
-            presets = (16, 18, 21, 25) if current.endswith(":age") else (100, 500, 1000)
+            presets = (100, 500, 1000)
             body.append({"type": "buttons", "buttons": [
                 {"text": str(value), "callback_data": f"nora:{token}:{value}", "style": "link"}
                 for value in presets

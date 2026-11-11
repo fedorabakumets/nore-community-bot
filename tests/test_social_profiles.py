@@ -22,7 +22,7 @@ async def env(tmp_path):
         await db.ensure_user(uid, f"person{uid}", f"Участник {uid}")
         await db.set_role(uid, "helper45")
         await db.execute(
-            "UPDATE users SET profile_name=?,age=25,hobbies='Город',profile_bio='Био участника',"
+            "UPDATE users SET profile_name=?,birth_date='2000-01-01',hobbies='Город',profile_bio='Био участника',"
             "avatar_file_id='avatar',cookies=100,moderator_note='secret note' WHERE user_id=?",
             (f"Участник {uid}", uid),
         )

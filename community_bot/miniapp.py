@@ -62,15 +62,23 @@ async def protection(request, handler):
                 )
             from community_bot.access import miniapp_allowed
 
-            if not await miniapp_allowed(request.app['db'], request.app['settings'], request['actor']['id']):
-                return web.json_response({'error': 'Миниапка доступна ролям от 30 ранга'},
+            db, settings, uid = request.app['db'], request.app['settings'], request['actor']['id']
+            if not await miniapp_allowed(db, settings, uid):
+                return web.json_response({'error': 'Миниапка доступна участникам Норы'},
                                          status=403, headers={'Cache-Control': 'no-store'})
-            if request.path.startswith('/api/shop/') or request.path == '/api/events/join':
+            path = request.path
+            onboarding = path in {'/api/me', '/api/profile', '/api/profile/avatar', '/api/profile/privacy',
+                                  '/api/notices', '/api/admin'} or path.startswith(('/api/notices/', '/api/admin/'))
+            if not onboarding:
+                from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
 
-                user = await request.app['db'].get_user(request['actor']['id'])
-                if not user or not profile_is_complete(user):
-                    return web.json_response({'error': 'Заполни профиль на 100% в ЛК, чтобы открыть магазин и события'},
+                user = await db.get_user(uid)
+                event_editor = path.startswith('/api/events/') and path != '/api/events/join'
+                if not profile_is_complete(user or {}) and not (
+                    event_editor and await allowed(db, settings, uid)
+                ):
+                    return web.json_response({'error': 'Заполни профиль на 100%, чтобы открыть этот раздел'},
                                              status=403, headers={'Cache-Control': 'no-store'})
         response = await handler(request)
         if (request.path in {'/api/sea', '/api/mafia', '/api/community'}
@@ -137,7 +145,7 @@ async def overview(request):
                            reason='' if events else 'Сейчас нет опубликованного мероприятия')
     from community_bot.domain import reputation_tier
     from community_bot.helpers import effective_role, has_permission, role_title
-    from community_bot.profile_fields import profile_revision
+    from community_bot.profile_fields import profile_age, profile_revision
     from community_bot.profile_fill import profile_block_states, profile_fill_percent, reputation_cap
 
     tier = reputation_tier(int(user['reputation']), settings.restricted_reputation_threshold)
@@ -170,13 +178,13 @@ async def overview(request):
              'details': list(item.details) if not item.sections else []}
             for item in reversed(UPDATES[-5:])]
     community_url = str(getattr(settings, 'community_invite_url', '') or '').strip()
-    if not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
+    if stats['fill_percent'] < 100 or not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
         community_url = ''
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
                                         'cookies', 'cookie_debt', 'reputation', 'profile_bio',
-                                        'age', 'hobbies', 'warnings', 'profile_private',
-                                        'hate_shields', 'hate_immunity_until')},
+                                        'birth_date', 'hobbies', 'warnings', 'profile_private',
+                                        'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
         'admin_available': await has_permission(
             db, settings, user['user_id'], 'admin.panel',
         ),

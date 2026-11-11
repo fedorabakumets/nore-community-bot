@@ -43,6 +43,7 @@ from community_bot.access import miniapp_allowed
 from community_bot.admin_workspace import SECTIONS, TOOLS, button_meta, permitted
 from community_bot.helpers import has_permission, role_title, user_permissions
 from community_bot.permissions import PERM_ADMIN_PANEL
+from community_bot.profile_fields import profile_age
 from community_bot.role_prefixes import prefix_for
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets'
@@ -419,7 +420,8 @@ class AdminBridge:
                         'role': await role_title(self.db, str(member['role'])),
                         'prefix': await prefix_for(self.db, self.settings, uid),
                         'has_avatar': bool(member.get('avatar_file_id') and member.get('avatar_media_type') == 'photo'),
-                        **{key: member.get(key) for key in ('username', 'age', 'cookies', 'reputation', 'hate_shields',
+                        'age': profile_age(member),
+                        **{key: member.get(key) for key in ('username', 'cookies', 'reputation', 'hate_shields',
                                                          'warnings', 'moderator_note')},
                     }
                 callback = f'admin:user:{uid}' if edit else f'admin:manage:{uid}'

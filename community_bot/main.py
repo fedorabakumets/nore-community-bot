@@ -475,8 +475,10 @@ async def main() -> None:
     )
     settings = load_settings()
     db = Database(settings.database_path)
+    from community_bot import profile_access_rollout
     from community_bot.community_reset import apply_reset, prepare_reset, reset_settings
 
+    await profile_access_rollout.prepare(db)
     await prepare_reset(db)
     await verify_requested_release_backup(db)
     await verify_widget_notification_backup(db)
@@ -487,8 +489,10 @@ async def main() -> None:
         logger.critical("Бот заблокирован аварийным выключателем")
         await asyncio.Event().wait()
         return
+    settings = await profile_access_rollout.apply(db, settings)
     for owner_id in settings.owner_ids:
-        await db.ensure_user(owner_id, telegram_name="Владелец")
+        if not await db.get_user(owner_id):
+            await db.ensure_user(owner_id, telegram_name="Владелец")
         await db.set_role(owner_id, "owner")
     for moderator_id in settings.moderator_ids:
         moderator = await db.ensure_user(moderator_id, telegram_name="Модератор")
@@ -539,10 +543,7 @@ async def main() -> None:
 
         web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
         logger.info("Nora Mini App HTTP server started")
-    from community_bot.access import configure_private_menus
-
-    await configure_private_menus(bot, db, settings)
-    logger.info("Private menus configured: Mini App moderator rank and above")
+    profile_access_task = asyncio.create_task(profile_access_rollout.refresh_private_access(bot, db, settings))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
@@ -572,6 +573,7 @@ async def main() -> None:
         )
     finally:
         for task in (
+            profile_access_task,
             reputation_task,
             scheduled_task,
             pet_task,
@@ -591,6 +593,7 @@ async def main() -> None:
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(
+                profile_access_task,
                 reputation_task,
                 scheduled_task,
                 pet_task,

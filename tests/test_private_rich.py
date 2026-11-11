@@ -403,7 +403,7 @@ async def test_real_application_flow_finishes_in_one_message(setup):
     router = Router()
     router.callback_query.register(private.begin_application_button, F.data == "start:apply")
     router.message.register(private.application_name, ApplicationForm.name)
-    router.message.register(private.application_age, ApplicationForm.age)
+    router.message.register(private.application_birth_date, ApplicationForm.birth_date)
     router.message.register(private.application_referral, ApplicationForm.referral)
     router.message.register(private.application_expectations, ApplicationForm.expectations)
     router.message.register(private.application_bio, ApplicationForm.bio)
@@ -419,7 +419,7 @@ async def test_real_application_flow_finishes_in_one_message(setup):
                                      db=db, settings=bot.community_settings)
 
     await callback("start:apply", 1, first)
-    for idx, text in enumerate(["Рома", "25", "От друзей", "Общение", "Люблю музыку"], 2):
+    for idx, text in enumerate(["Рома", "01.01.2000", "От друзей", "Общение", "Люблю музыку"], 2):
         await dispatcher.feed_update(bot, Update(update_id=idx, message=incoming(uid=8, text=text)),
                                      db=db, settings=bot.community_settings)
     last = Message(message_id=first.message_id, date=datetime.now(UTC), chat=first.chat,
@@ -658,14 +658,13 @@ def test_compact_text_removes_decoration_but_preserves_code_layout():
     assert text_blocks('<pre>a\n\nb</pre>', 'HTML')[0]['text'] == 'a\n\nb'
 
 
-@pytest.mark.parametrize('flow', ['ApplicationForm:age', 'ProfileEdit:age', 'FlexiblePurchase:amount'])
-async def test_number_widget_replaces_panel_and_keeps_navigation(setup, flow):
+async def test_number_widget_replaces_panel_and_keeps_navigation(setup):
     from community_bot.message_widgets import SendWidget
 
     db, bot, session, state = setup
     first = await bot.send_message(7, 'Кабинет')
     session.widgets = True
-    state.get_state.return_value = flow
+    state.get_state.return_value = 'FlexiblePurchase:amount'
 
     async def prompt(message, data):
         await message.answer('Выбери число', reply_markup=flow_reply_keyboard())
@@ -678,7 +677,7 @@ async def test_number_widget_replaces_panel_and_keeps_navigation(setup, flow):
     assert session.calls[-1].__api_method__ == 'deleteMessage'
     assert session.calls[-1].message_id == first.message_id
     page = json.loads(await db.get_bot_state('private_rich_panel:7'))
-    assert page['widget']['min'] == (1 if flow.endswith('amount') else 14)
+    assert page['widget']['min'] == 1
     assert page['message_id'] != first.message_id
     # Notices preserve the picker and its nonce instead of making it stale.
     await bot.send_message(7, 'Уведомление')
@@ -687,7 +686,7 @@ async def test_number_widget_replaces_panel_and_keeps_navigation(setup, flow):
 
 async def test_widget_unknown_method_falls_back_with_capability_cooldown(setup):
     db, bot, session, state = setup
-    state.get_state.return_value = 'ProfileEdit:age'
+    state.get_state.return_value = 'FlexiblePurchase:amount'
 
     async def prompt(message, data):
         await message.answer('Возраст?', reply_markup=flow_reply_keyboard())
@@ -699,52 +698,29 @@ async def test_widget_unknown_method_falls_back_with_capability_cooldown(setup):
     assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
 
 
-@pytest.mark.parametrize('native', [True, False])
-async def test_real_age_widget_update_uses_actor_fsm_and_rejects_replay(setup, native):
-    from community_bot.message_widgets import WidgetUpdateMiddleware
-    from community_bot.routers.profile import edit_profile_age
+async def test_profile_birth_date_accepts_calendar_date_and_rejects_numeric_age(setup):
+    from community_bot.routers.profile import edit_profile_birth_date
     from community_bot.states import ProfileEdit
 
     db, bot, session, _ = setup
-    session.widgets = native
+    session.widgets = True
     dispatcher = Dispatcher()
-    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     router = Router()
 
-    @router.message(F.text == '/age')
+    @router.message(F.text == '/birthdate')
     async def begin(message, state):
-        await state.set_state(ProfileEdit.age)
-        await message.answer('Возраст?', reply_markup=flow_reply_keyboard())
+        await state.set_state(ProfileEdit.birth_date)
+        await message.answer('Дата рождения?', reply_markup=flow_reply_keyboard())
 
-    router.message.register(edit_profile_age, ProfileEdit.age)
+    router.message.register(edit_profile_birth_date, ProfileEdit.birth_date)
     dispatcher.include_router(router)
-    await dispatcher.feed_update(bot, Update(update_id=1, message=incoming(text='/age')),
-                                 db=db, settings=bot.community_settings)
-    page = json.loads(await db.get_bot_state('private_rich_panel:7'))
-    choice = page['widget' if native else 'number_choice']
-    query = {'id': 'query-age', 'from': incoming().from_user.model_dump(),
-             'chat': incoming().chat.model_dump(), 'message_id': page['message_id'],
-             'data': f"nora:{choice['token']}:25"}
-    for update_id in (2, 3):
-        update = Update(update_id=update_id, widget_query=query)
-        if not native:
-            button = CallbackQuery(id='button', from_user=incoming().from_user, chat_instance='private',
-                                   message=incoming().model_copy(update={'message_id': page['message_id']}),
-                                   data=query['data'])
-            update = Update(update_id=update_id, callback_query=button)
-        await dispatcher.feed_update(bot, update,
+    for idx, value in enumerate(('/birthdate', '25', '31.02.2000', '29.02.2000'), 1):
+        await dispatcher.feed_update(bot, Update(update_id=idx, message=incoming(text=value)),
                                      db=db, settings=bot.community_settings)
-        answer = session.calls[-1]
-        if native:
-            assert json.loads(answer.data)['ok'] == (update_id == 2)
-        else:
-            assert answer.__api_method__ == 'answerCallbackQuery'
-            assert (answer.text == 'Готово') == (update_id == 2)
-    assert (await db.get_user(7))['age'] == 25
+        assert (await db.get_user(7))['birth_date'] == ('2000-02-29' if idx == 4 else None)
     assert await dispatcher.fsm.get_context(bot, 7, 7).get_state() is None
-    assert 'widget' not in json.loads(await db.get_bot_state('private_rich_panel:7'))
-    assert sum(c.__api_method__ == 'deleteMessage' for c in session.calls) == int(native)
+    assert not any(call.__api_method__ == 'sendWidget' for call in session.calls)
     await dispatcher.storage.close()
 
 
@@ -793,12 +769,12 @@ async def test_widget_rejects_forged_and_stale_submissions(setup, change):
     from community_bot.message_widgets import submission
 
     _, _, _, _ = setup
-    page = {'message_id': 5, 'flow': 'ProfileEdit:age',
+    page = {'message_id': 5, 'flow': 'FlexiblePurchase:amount',
             'widget': {'token': '0123456789abcdef', 'min': 14, 'max': 120}}
     event = incoming(text='25').model_copy(update={
         'message_id': 5, 'nora_widget': '0123456789abcdef',
     })
-    flow = 'ProfileEdit:age'
+    flow = 'FlexiblePurchase:amount'
     if change == 'nonce':
         event = event.model_copy(update={'nora_widget': 'fedcba9876543210'})
     elif change == 'range':
@@ -808,7 +784,7 @@ async def test_widget_rejects_forged_and_stale_submissions(setup, change):
     elif change == 'message':
         event = event.model_copy(update={'message_id': 4})
     else:
-        flow = 'ApplicationForm:age'
+        flow = 'ApplicationForm:birth_date'
     assert not submission(event, page, flow)
 
 
@@ -816,7 +792,7 @@ async def test_widget_network_error_preserves_current_panel_without_duplicate(se
     db, bot, session, state = setup
     await bot.send_message(7, 'Кабинет')
     page = await db.get_bot_state('private_rich_panel:7')
-    state.get_state.return_value = 'ProfileEdit:age'
+    state.get_state.return_value = 'FlexiblePurchase:amount'
     session.fail = TelegramNetworkError(method=session.calls[0], message='Connection lost')
 
     async def prompt(message, data):

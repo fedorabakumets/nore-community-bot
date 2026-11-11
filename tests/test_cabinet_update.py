@@ -10,7 +10,7 @@ from community_bot.social_data import MAFIA_MIN, deal_mafia_roles, mafia_team
 def test_empty_profile_is_capped_at_silver() -> None:
     user = {
         "profile_name": "",
-        "age": None,
+        "birth_date": None,
         "hobbies": "",
         "profile_bio": "",
         "avatar_file_id": "",
@@ -25,7 +25,7 @@ def test_empty_profile_is_capped_at_silver() -> None:
 def test_full_profile_unlocks_gold_and_shows_blocks() -> None:
     user = {
         "profile_name": "Нора",
-        "age": 22,
+        "birth_date": '2003-01-01',
         "hobbies": "кино",
         "profile_bio": "живу в чате",
         "avatar_file_id": "file",
@@ -84,7 +84,7 @@ async def test_reputation_plus_stops_at_silver_until_profile_complete(tmp_path) 
     gold = await db.get_user(2)
     assert int(gold["bio_auto_warn"]) == 1
     await db.update_profile(2, "profile_name", "Маша")
-    await db.update_profile(2, "age", 20)
+    await db.update_profile(2, "birth_date", "2005-01-01")
     await db.update_profile(2, "hobbies", "игры")
     await db.update_profile(2, "profile_bio", "описание")
     await db.update_profile(2, "avatar_file_id", "photo")

@@ -59,7 +59,7 @@ def test_ornate_profile_uses_frame_and_status() -> None:
         "role": "admin",
         "custom_status": "На стиле",
         "hobbies": "Музыка",
-        "age": 24,
+        "birth_date": '2001-01-01',
         "reputation": 95,
         "cookies": 250,
         "warnings": 0,
@@ -211,7 +211,7 @@ async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
     await db.execute("UPDATE users SET reputation = 60 WHERE user_id = 1")
     for user_id in (2, 3):
         await db.update_profile(user_id, "profile_name", "Имя")
-        await db.update_profile(user_id, "age", 20)
+        await db.update_profile(user_id, "birth_date", "2005-01-01")
         await db.update_profile(user_id, "hobbies", "чат")
         await db.update_profile(user_id, "profile_bio", "описание")
         await db.update_profile(user_id, "avatar_file_id", "file")

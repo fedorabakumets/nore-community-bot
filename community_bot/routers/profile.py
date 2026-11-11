@@ -24,6 +24,7 @@ from community_bot.keyboards import (
     profile_keyboard,
     public_profile_keyboard,
 )
+from community_bot.profile_fields import parse_birth_date
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 from community_bot.ui_owner import bind_ui_owner
@@ -133,7 +134,7 @@ async def edit_profile(callback: CallbackQuery, state: FSMContext, db: Database)
         return
     prompts = {
         "name": (ProfileEdit.name, "Введите имя (до 50 символов)."),
-        "age": (ProfileEdit.age, "Введите возраст числом от 14 до 120."),
+        "age": (ProfileEdit.birth_date, "Введите дату рождения в формате ДД.ММ.ГГГГ."),
         "hobbies": (ProfileEdit.hobbies, "Расскажите об увлечениях (до 500 символов)."),
         "bio": (ProfileEdit.bio, "Напишите описание профиля (до 280 символов). Это блок верификации."),
         "avatar": (ProfileEdit.avatar, "Отправьте фотографию для аватара."),
@@ -161,18 +162,17 @@ async def edit_profile_name(message: Message, state: FSMContext, db: Database, s
         await restore_private_menu(message, db, settings)
 
 
-@router.message(ProfileEdit.age)
-async def edit_profile_age(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not message.from_user or not message.text or not message.text.isdigit():
-        await message.answer("Введите возраст числом от 14 до 120.")
+@router.message(ProfileEdit.birth_date)
+async def edit_profile_birth_date(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not message.from_user:
         return
-    age = int(message.text)
-    if not 14 <= age <= 120:
-        await message.answer("Возраст должен быть от 14 до 120.")
+    try:
+        await db.update_profile(message.from_user.id, "birth_date", parse_birth_date(message.text or ""))
+    except ValueError as error:
+        await message.answer(str(error))
         return
-    await db.update_profile(message.from_user.id, "age", age)
     await state.clear()
-    await message.answer("Возраст обновлён.")
+    await message.answer("Дата рождения сохранена.")
     if message.chat.type == "private":
         await restore_private_menu(message, db, settings)
 
@@ -235,7 +235,7 @@ async def profile_rules(callback: CallbackQuery, db: Database) -> None:
     await replace_block(
         callback.message,
         "profile",
-        "Пять блоков профиля: имя, возраст, увлечения, описание и фото.\n"
+        "Пять блоков профиля: имя, дата рождения, увлечения, описание и фото.\n"
         "Без 100% репутация не выше бронзы. Подробности — /commands.",
         parse_mode="HTML",
         reply_markup=compact_profile_keyboard(user),

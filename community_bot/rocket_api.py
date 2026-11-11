@@ -16,6 +16,7 @@ from typing import Any
 from aiohttp import web
 
 from community_bot.database import Database
+from community_bot.profile_fields import profile_age
 from community_bot.profile_fill import profile_is_complete
 
 SCHEMA = """
@@ -129,7 +130,7 @@ async def _reason(connection, user: dict | None) -> str:
         return "Игры временно выключены администрацией"
     if not profile_is_complete(user):
         return "Заполни профиль на 100% в ЛК, чтобы открыть игру со ставками"
-    if int(user.get("age") or 0) < 18:
+    if (profile_age(user) or 0) < 18:
         return "Ракетка со ставками доступна с 18 лет. Мафия остаётся бесплатной"
     if int(user.get("cookie_debt") or 0) > 0:
         return "Сначала верни просроченный долг по печенькам"

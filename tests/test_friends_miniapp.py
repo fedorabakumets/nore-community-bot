@@ -149,7 +149,7 @@ async def test_remove_friend_works_from_either_side_and_cannot_remove_pending(en
     assert "уже закрыты" in message and not notices
 
 
-async def test_exact_lookup_not_directory_self_unknown_invalid_and_role_gate(env):
+async def test_exact_lookup_allows_members_and_rejects_self_and_unknown(env):
     for value in ["", "person", "@person*", "https://t.me/person2", "2 OR 1=1", None, True]:
         with pytest.raises(ValueError):
             await do(env, 1, "request", recipient=value)
@@ -158,15 +158,10 @@ async def test_exact_lookup_not_directory_self_unknown_invalid_and_role_gate(env
     with pytest.raises(ValueError, match="не найден"):
         await do(env, 1, "request", 999)
     await env.db.set_role(2, "member")
-    with pytest.raises(ValueError, match="нет доступа"):
-        await do(env, 1, "request", 2)
-    await env.db.set_role(2, "moderator")
     await do(env, 1, "request", 2)
     token = (await relation(env, 2, "incoming"))["token"]
-    await env.db.set_role(2, "member")
-    with pytest.raises(ValueError, match="от роли модератора"):
-        await do(env, 2, "accept", 1, token=token)
-    assert not await accepted(env.db, 1, 2)
+    await do(env, 2, "accept", 1, token=token)
+    assert await accepted(env.db, 1, 2)
 
 
 async def test_request_rate_not_reset_by_cancelling_and_expiration(env, monkeypatch):
@@ -232,9 +227,9 @@ async def test_http_handlers_take_actor_only_and_never_client_user_id(env):
     assert not (await snapshot(env.db, env.settings, 3))["outgoing"]
 
 
-async def test_custom_staff_role_and_demoted_friend_availability(env):
+async def test_demoted_friend_keeps_miniapp_access(env):
     await env.db.create_staff_role("helper45", "Помощник", 45, [])
     await env.db.set_role(2, "helper45")
     await befriend(env)
     await env.db.set_role(2, "member")
-    assert (await relation(env, 1, "friends"))["available"] is False
+    assert (await relation(env, 1, "friends"))["available"] is True

@@ -340,6 +340,7 @@ async def lobby_socket(request):
     # initData never appears in a URL, access log or response.
     from community_bot.access import miniapp_allowed
     from community_bot.miniapp import validate_init_data
+    from community_bot.profile_fill import profile_is_complete
 
     socket = web.WebSocketResponse(heartbeat=10, max_msg_size=16384, receive_timeout=10)
     await socket.prepare(request)
@@ -359,8 +360,11 @@ async def lobby_socket(request):
             if now - checked >= 5:
                 # Also enforce initData expiry and role revocation on open sockets.
                 validate_init_data(credentials.get('auth', ''), request.app['settings'].bot_token)
-                if not await miniapp_allowed(request.app['db'], request.app['settings'], user_id):
+                db = request.app['db']
+                if not await miniapp_allowed(db, request.app['settings'], user_id):
                     raise ValueError('Доступ к миниапке закрыт')
+                if not profile_is_complete(await db.get_user(user_id) or {}):
+                    raise ValueError('Заполни профиль на 100%')
                 checked = now
             if now - refreshed >= 1:
                 profile = await _player_profile(request.app['db'], user_id, private=True)

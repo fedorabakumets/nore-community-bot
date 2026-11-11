@@ -82,7 +82,7 @@ async def test_overview_exposes_only_allowlisted_own_fields(db, monkeypatch):
     assert data['home']['news'][0]['details'] == ['Возможности для участников']
 
 
-async def test_role_gate_accepts_staff_and_rejects_signed_member_and_revoked_admin(db):
+async def test_miniapp_gate_accepts_registered_members_and_rejects_unknown_users(db):
     import time
     from unittest.mock import AsyncMock
 
@@ -94,18 +94,13 @@ async def test_role_gate_accepts_staff_and_rejects_signed_member_and_revoked_adm
     req.path = '/api/profile'
     req.headers = {'Authorization': 'tma '+signed(date=int(time.time()))}
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
-    for role in ('member',):
+    for role in ('member', 'admin', 'member'):
         await db.set_role(7, role)
-        assert (await protection(req, handler)).status == 403
-        handler.assert_not_awaited()
-    await db.set_role(7, 'moderator')
-    assert (await protection(req, handler)).status == 200
+        assert (await protection(req, handler)).status == 200
     handler.reset_mock()
-    await db.set_role(7, 'admin')
-    assert (await protection(req, handler)).status == 200
-    handler.reset_mock()
-    await db.set_role(7, 'member')
+    req.headers = {'Authorization': 'tma '+signed(uid=23, date=int(time.time()))}
     assert (await protection(req, handler)).status == 403
+    assert await db.get_user(23) is None
     handler.assert_not_awaited()
     req.headers = {}
     assert (await protection(req, handler)).status == 401
@@ -121,6 +116,8 @@ async def test_current_role_badges_enrich_game_views_without_changing_seasonal_c
     from community_bot.miniapp import protection
 
     await db.set_role(7, 'moderator')
+    await db.execute("UPDATE users SET profile_name='Имя',birth_date='2000-01-01',"
+                     "hobbies='Кино',profile_bio='Петербург',avatar_file_id='photo' WHERE user_id=7")
     await db.create_staff_role('styled', 'Team', 30, prefix_color='blue', prefix_emoji='⭐')
     await db.set_role(8, 'styled')
     req = Request(db)
@@ -141,22 +138,23 @@ async def test_profile_save_is_atomic_validated_and_protects_bot_edits(db):
     from community_bot.profile_fields import profile_revision
 
     revision = profile_revision(await db.get_user(7))
-    fields = {'profile_name': 'Мария', 'age': 25, 'hobbies': 'Музыка', 'profile_bio': 'Петербург'}
+    fields = {'profile_name': 'Мария', 'birth_date': '2000-01-01', 'hobbies': 'Музыка', 'profile_bio': 'Петербург'}
     response = await save_profile(Request(db, body={'fields': fields, 'revision': revision}))
     assert response.status == 200
     user = await db.get_user(7)
     assert all(user[k] == v for k, v in fields.items())
     assert user['bio_auto_warn'] == 2
     assert not user['warnings']
-    assert (await db.get_user(8))['age'] is None
+    assert (await db.get_user(8))['birth_date'] is None
     current = profile_revision(user)
     await db.update_profile(7, 'profile_name', 'Изменено в боте')
     assert (await save_profile(Request(db, body={'fields': fields, 'revision': current}))).status == 409
     assert (await db.get_user(7))['profile_name'] == 'Изменено в боте'
     assert (await save_profile(Request(db, body={'fields': fields, 'revision': revision}))).status == 409
-    for wrong in [{'age': 13}, {'age': True}, {'profile_bio': 'x'*281}, {'cookies': 10000},
+    for wrong in [{'age': 25}, {'birth_date': True}, {'birth_date': '2000-02-31'},
+                  {'profile_bio': 'x'*281}, {'cookies': 10000},
                   {'reputation': 100}, {'user_id': 8}, {'role': 'owner'}, {'profile_private': 1},
-                  {'profile_name': 'Хак', 'age': 121}, {'hobbies': ' '}]:
+                  {'profile_name': 'Хак', 'birth_date': '2099-01-01'}, {'hobbies': ' '}]:
         with pytest.raises(ValueError):
             await save_profile(Request(db, body={'fields': wrong, 'revision': current}))
     assert (await db.get_user(7))['cookies'] == 100

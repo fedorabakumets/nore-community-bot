@@ -19,6 +19,7 @@ from community_bot.permissions import (
     parse_permissions,
     role_has_permission,
 )
+from community_bot.profile_fields import profile_age
 from community_bot.profile_fill import profile_fill_percent
 
 BOT_REPLY_TTL = 30.0
@@ -261,7 +262,7 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
     role_icons = {"owner": "👑", "admin": "🛡", "moderator": "🔨", "member": "👤"}
     label = role_display_name(role, role_name)
     hobbies = user["hobbies"] or "не указаны"
-    age = user["age"] or "не указан"
+    age = profile_age(user) or "не указан"
     reputation = int(user["reputation"])
     filled = round(max(0, min(100, reputation)) / 10)
     progress = "█" * filled + "░" * (10 - filled)
@@ -302,7 +303,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     role = str(user["role"])
     label = role_display_name(role, role_name)
     hobbies = html.escape(str(user["hobbies"] or "пока тайна"))
-    age = user["age"] or "—"
+    age = profile_age(user) or "—"
     reputation = int(user["reputation"])
     filled = round(max(0, min(100, reputation)) / 10)
     progress = "◆" * filled + "◇" * (10 - filled)
@@ -341,7 +342,7 @@ def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: st
     identity = f" · @{html.escape(str(user['username']))}" if user.get("username") else ""
     lines = [
         f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
-        f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {user.get('age') or '—'}",
+        f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {profile_age(user) or '—'}",
     ]
     if user.get("profile_private"):
         lines.append("🔒 Закрытый профиль")

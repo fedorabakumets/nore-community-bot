@@ -17,7 +17,7 @@ async def env(tmp_path, monkeypatch):
     await db.initialize()
     for uid in (1, 2, 3):
         await db.ensure_user(uid, f'person{uid}', f'Друг {uid}')
-        await db.execute("UPDATE users SET cookies=100,reputation=100,profile_name='Имя',age=25,"
+        await db.execute("UPDATE users SET cookies=100,reputation=100,profile_name='Имя',birth_date='2000-01-01',"
                          "hobbies='Город',profile_bio='Описание',avatar_file_id='photo' WHERE user_id=?", (uid,))
     bot = SimpleNamespace(**{method: AsyncMock(return_value=SimpleNamespace(message_id=123)) for method in (
         'send_message', 'send_photo', 'send_video', 'send_poll', 'pin_chat_message', 'unpin_chat_message',

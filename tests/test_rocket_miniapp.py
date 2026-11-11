@@ -28,7 +28,7 @@ async def db(tmp_path):
     for uid in (7, 8):
         await db.ensure_user(uid, username=f'player{uid}', telegram_name=f'Игрок {uid}')
         await db.execute(
-            "UPDATE users SET profile_name=?,age=25,hobbies='Космос',profile_bio='Люблю гулять',"
+            "UPDATE users SET profile_name=?,birth_date='2000-01-01',hobbies='Космос',profile_bio='Люблю гулять',"
             "avatar_file_id='isolated-avatar',role='moderator' WHERE user_id=?", (f'Игрок {uid}', uid),
         )
         await db.add_cookies(uid, 1000, 'fixture')
@@ -159,7 +159,8 @@ async def test_maximum_multiplier_finishes_with_capped_payout_even_after_restart
 
 async def test_started_round_pays_even_after_access_profile_feature_age_or_debt_changes(db, monkeypatch):
     _, flight = await start(db, monkeypatch, point=500, bet=100, auto=2)
-    await db.execute("UPDATE users SET role='member',age=15,profile_bio='',cookie_debt=70 WHERE user_id=7")
+    await db.execute("UPDATE users SET role='member',birth_date='2011-01-01',"
+                     "profile_bio='',cookie_debt=70 WHERE user_id=7")
     await db.execute("UPDATE feature_flags SET enabled=0 WHERE key='games'")
     assert await rocket.tick(db, now=at(flight, 200)) == 1
     status = await rocket.get_status(db, 7, now=at(flight, 200))
@@ -216,7 +217,7 @@ async def test_autocashout_rejects_nonfinite_invalid_precision_and_bounds(db, au
 
 
 @pytest.mark.parametrize('change,reason', [
-    ("UPDATE users SET age=17 WHERE user_id=7", '18 лет'),
+    ("UPDATE users SET birth_date='2009-01-01' WHERE user_id=7", '18 лет'),
     ("UPDATE users SET profile_bio='' WHERE user_id=7", '100%'),
     ("UPDATE users SET cookie_debt=1 WHERE user_id=7", 'долг'),
     ("UPDATE feature_flags SET enabled=0 WHERE key='games'", 'выключены'),

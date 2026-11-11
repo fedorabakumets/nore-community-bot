@@ -23,7 +23,7 @@ async def db(tmp_path):
 
 
 async def fill(db):
-    for field, value in {'profile_name':'Анна','age':25,'hobbies':'Музыка','profile_bio':'Петербург',
+    for field, value in {'profile_name':'Анна','birth_date': '2000-01-01','hobbies':'Музыка','profile_bio':'Петербург',
                          'avatar_file_id':'photo'}.items():
         await db.update_profile(7, field, value)
 
@@ -46,15 +46,15 @@ async def test_reward_once_across_concurrent_edits_and_database_restart(db):
 async def test_first_completion_through_atomic_miniapp_editor(db):
     await db.update_profile(7, 'avatar_file_id', 'photo')
     revision = profile_revision(await db.get_user(7))
-    assert await db.save_self_profile(7, {'profile_name':'Анна','age':25,'hobbies':'Музыка',
+    assert await db.save_self_profile(7, {'profile_name':'Анна','birth_date': '2000-01-01','hobbies':'Музыка',
                                         'profile_bio':'Описание'}, revision)
     assert (await db.get_user(7))['cookies'] == 10
-    assert not await db.save_self_profile(7, {'age':26}, revision)
+    assert not await db.save_self_profile(7, {'birth_date': '1999-01-01'}, revision)
     assert (await db.get_user(7))['cookies'] == 10
 
 
 async def test_existing_full_profile_rewarded_only_when_user_returns(db):
-    await db.execute("UPDATE users SET profile_name='Анна', age=25, hobbies='Музыка', "
+    await db.execute("UPDATE users SET profile_name='Анна', birth_date='2000-01-01', hobbies='Музыка', "
                      "profile_bio='Описание', avatar_file_id='photo' WHERE user_id=7")
     await db.initialize()
     assert (await db.get_user(7))['cookies'] == 0
@@ -78,12 +78,20 @@ async def test_api_gate_denies_old_confirmations_until_complete(db):
     request.app = {'db':db, 'settings':SimpleNamespace(bot_token='test-only',is_owner=lambda _:True)}
     request.headers = {'Authorization':'tma '+urlencode(payload)}
     handler = AsyncMock(return_value=web.json_response({'ok':True}))
-    for path in ('/api/shop/prepare','/api/shop/confirm','/api/events/join'):
+    locked = ('/api/shop/prepare', '/api/shop/confirm', '/api/events/join', '/api/community',
+              '/api/community/people', '/api/community/music', '/api/friends', '/api/nora-game/lobby',
+              '/api/mafia/action', '/api/sea/action', '/api/rocket/prepare', '/api/pet/action', '/api/wallet/prepare')
+    for path in locked:
         request.path = path
-        assert (await protection(request,handler)).status == 403
+        assert (await protection(request, handler)).status == 403
     handler.assert_not_awaited()
+    for path in ('/api/me', '/api/profile', '/api/profile/avatar', '/api/notices'):
+        request.path = path
+        assert (await protection(request, handler)).status == 200
     await fill(db)
-    assert (await protection(request,handler)).status == 200
+    for path in locked:
+        request.path = path
+        assert (await protection(request, handler)).status == 200
     await db.update_profile(7,'profile_bio','')
     assert (await protection(request,handler)).status == 403
 

@@ -86,14 +86,14 @@ async def test_guest_cannot_bypass_gate_with_commands_and_old_inline_buttons(set
     handler.assert_awaited_once()
 
 
-async def test_moderator_and_above_receive_miniapp_menu_and_revocation_clears_it(setup, monkeypatch):
+async def test_members_receive_miniapp_menu_and_unknown_users_do_not(setup, monkeypatch):
     db, settings, bot = setup
     monkeypatch.setenv('MINIAPP_URL', 'https://example.test')
     await db.ensure_user(99, telegram_name='Owner')
     await configure_private_menus(bot, db, settings)
     calls = bot.set_chat_menu_button.call_args_list
     assert calls[0].kwargs['menu_button'].type == 'commands'
-    assert next(c.kwargs['menu_button'] for c in calls if c.kwargs.get('chat_id') == 7).type == 'commands'
+    assert next(c.kwargs['menu_button'] for c in calls if c.kwargs.get('chat_id') == 7).type == 'web_app'
     assert next(c.kwargs['menu_button'] for c in calls if c.kwargs.get('chat_id') == 99).type == 'web_app'
     await db.set_role(7, 'moderator')
     await sync_menu(bot, db, settings, 7)
@@ -103,4 +103,6 @@ async def test_moderator_and_above_receive_miniapp_menu_and_revocation_clears_it
     assert bot.set_chat_menu_button.call_args.kwargs['menu_button'].type == 'web_app'
     await db.set_role(7, 'member')
     await sync_menu(bot, db, settings, 7)
+    assert bot._nora_menu_access[7][0] is True
+    await sync_menu(bot, db, settings, 8)
     assert bot.set_chat_menu_button.call_args.kwargs['menu_button'].type == 'commands'

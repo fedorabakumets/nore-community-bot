@@ -472,6 +472,7 @@ form label{font-size:14px;color:var(--poster-muted)}
 #nav{isolation:isolate;left:calc(8px + var(--safe-left));right:calc(8px + var(--safe-right));bottom:calc(10px + var(--safe-bottom));width:auto;max-width:656px;margin-inline:auto;border:var(--poster-edge);border-radius:28px;background:var(--poster-bg);gap:0;padding:10px 4px 12px}
 #nav button{position:relative;z-index:1;isolation:isolate;min-width:0;max-width:none;min-height:60px;padding:4px 0;color:var(--poster-ink);font-size:clamp(9px,2.55vw,12px);white-space:nowrap;font-weight:600;line-height:1.3;border-radius:18px;transition:color .55s cubic-bezier(.22,1,.36,1)}
 #nav .nav-drop{position:absolute;left:0;top:0;z-index:0;display:block;margin:0;background:var(--poster-red);border-radius:18px;pointer-events:none;transform-origin:center;will-change:transform,opacity}
+#nav button[aria-disabled="true"]{opacity:.58}
 #nav button.active{color:var(--poster-black)}
 #nav button.active[data-tab="lk"]{color:var(--poster-red)}
 #nav button>svg{height:26px;width:26px;margin:0 auto 8px;stroke-width:4;transition:color .55s cubic-bezier(.22,1,.36,1)}
@@ -514,6 +515,7 @@ form label{font-size:14px;color:var(--poster-muted)}
 .lk-photo-wrap .profile-photo{border:2px solid var(--poster-ink);border-radius:18px;background:var(--poster-raised);color:var(--poster-ink)}
 .lk-photo-wrap #change-avatar{background:var(--poster-yellow);color:var(--poster-black);border:2px solid var(--poster-black);width:36px;height:36px}
 #app .lk-identity-copy h2{font-size:23px;letter-spacing:-.025em;line-height:1.25}
+.lk-birth-date{opacity:.68;font-variant-numeric:tabular-nums}
 .lk-person-meta,.lk-bio{color:var(--poster-muted);font-size:13px}
 .lk-role{background:var(--poster-red);color:var(--poster-black);border:0;border-radius:20px;padding:4px 10px;font-weight:750;font-size:11px}
 .lk-hobbies>span,.lk-hobbies>button,.lk-privacy-pill{background:var(--poster-raised);border-color:var(--poster-rule);color:var(--poster-muted);font-size:11px}

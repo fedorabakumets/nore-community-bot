@@ -71,7 +71,7 @@ async def test_restore_rep_adds_ten_not_full(tmp_path: Path) -> None:
     await db.initialize()
     await db.ensure_user(1, telegram_name="One")
     await db.update_profile(1, "profile_name", "Имя")
-    await db.update_profile(1, "age", 20)
+    await db.update_profile(1, "birth_date", "2005-01-01")
     await db.update_profile(1, "hobbies", "чат")
     await db.update_profile(1, "profile_bio", "описание")
     await db.update_profile(1, "avatar_file_id", "file")

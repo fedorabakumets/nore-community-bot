@@ -427,7 +427,7 @@ def admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 ibtn("✏️ Имя", f"admin:edit:name:{user_id}"),
-                ibtn("🎂 Возраст", f"admin:edit:age:{user_id}"),
+                ibtn("🎂 Дата рождения", f"admin:edit:age:{user_id}"),
             ],
             [
                 ibtn("🖼 Аватар", f"admin:edit:avatar:{user_id}"),
@@ -484,7 +484,7 @@ def profile_keyboard(
     rows = [
         [
             ibtn("Имя", f"profile:name:{user_id}"),
-            ibtn("Возраст", f"profile:age:{user_id}"),
+            ibtn("Дата рождения", f"profile:age:{user_id}"),
         ],
         [
             ibtn("Увлечения", f"profile:hobbies:{user_id}"),
@@ -512,7 +512,7 @@ def compact_profile_keyboard(user: dict[str, object]) -> InlineKeyboardMarkup:
     rows = [
         [
             mark("Имя", "profile_name", f"profile:name:{user_id}"),
-            mark("Возраст", "age", f"profile:age:{user_id}"),
+            mark("Дата рождения", "birth_date", f"profile:age:{user_id}"),
         ],
         [
             mark("Увлечения", "hobbies", f"profile:hobbies:{user_id}"),

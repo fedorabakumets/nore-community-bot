@@ -32,8 +32,7 @@ from aiogram.types import InlineKeyboardMarkup, Message, Update
 logger = logging.getLogger(__name__)
 
 TEMPLATE = Path(__file__).with_name("widgets") / "number.html"
-PICKERS = {"ApplicationForm:age": (14, 120), "ProfileEdit:age": (14, 120),
-           "FlexiblePurchase:amount": (1, 1_000_000)}
+PICKERS = {"FlexiblePurchase:amount": (1, 1_000_000)}
 
 
 class WidgetSession(AiohttpSession):
@@ -159,15 +158,12 @@ async def picker(make_request, bot, uid, current, footer):
     if current not in PICKERS:
         return None
     low, high = PICKERS[current]
-    age = current.endswith(":age")
-    user = await bot.community_db.get_user(uid)
-    initial = int((user or {}).get("age") or 18) if age else 100
     token = uuid4().hex[:16]
-    config = {"title": "Твой возраст" if age else "Сумма оплаты", "unit": "лет" if age else "печенек",
-              "value": max(low, min(high, initial)), "min": low, "max": high,
-              "step": 1 if age else 50, "presets": [16, 18, 21, 25] if age else [100, 500, 1000],
-              "token": token, "submit": "Сохранить" if age else "Продолжить",
-              "note": "Можно также отправить число в чат" if age else "Списание — после отдельного подтверждения"}
+    config = {"title": "Сумма оплаты", "unit": "печенек",
+              "value": max(low, min(high, 100)), "min": low, "max": high,
+              "step": 50, "presets": [100, 500, 1000],
+              "token": token, "submit": "Продолжить",
+              "note": "Списание — после отдельного подтверждения"}
     rows = [[{k: b[k] for k in ("text", "callback_data") if k in b}
              for b in block["buttons"] if isinstance(b.get("text"), str) and b.get("callback_data")]
             for block in footer]

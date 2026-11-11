@@ -39,7 +39,7 @@ async def env(tmp_path):
         await db.ensure_user(uid, username=f"user_{uid}", telegram_name=f"Имя {uid}")
         for key, value in {
             "profile_name": f"Имя {uid}",
-            "age": 25,
+            "birth_date": '2000-01-01',
             "hobbies": "Питер",
             "profile_bio": "Люблю Петербург и прогулки",
             "avatar_file_id": "photo",
@@ -75,9 +75,9 @@ async def do_pet(env, token, uid=7, **extra):
 
 async def test_staff_access_includes_moderator_and_custom_rank_without_granting_panel_permissions(env):
     assert await miniapp_allowed(env.db, env.settings, 7)
-    for role, expected in [("member", False), ("moderator", True), ("admin", True)]:
+    for role in ("member", "moderator", "admin"):
         await env.db.set_role(8, role)
-        assert await miniapp_allowed(env.db, env.settings, 8) is expected
+        assert await miniapp_allowed(env.db, env.settings, 8)
     await env.db.create_staff_role("event_helper", "Ивент", 45, [])
     await env.db.set_role(8, "event_helper")
     assert await miniapp_allowed(env.db, env.settings, 8)
@@ -85,7 +85,7 @@ async def test_staff_access_includes_moderator_and_custom_rank_without_granting_
 
     assert not await has_permission(env.db, env.settings, 8, "admin.panel")
     await env.db.set_role(8, "member")
-    assert not await miniapp_allowed(env.db, env.settings, 8)
+    assert await miniapp_allowed(env.db, env.settings, 8)
 
 
 async def test_starter_pack_shares_loan_rules_and_is_actor_bound_once_and_repayable_early(env):

@@ -32,7 +32,7 @@ async def env(tmp_path):
     await db.initialize()
     for uid in (7, 8):
         await db.ensure_user(uid, username='anna_nora' if uid == 7 else 'boris_nora', telegram_name=f'Участник {uid}')
-        for key, value in {'profile_name': f'Имя {uid}', 'age': 25, 'hobbies': 'Питер',
+        for key, value in {'profile_name': f'Имя {uid}', 'birth_date': '2000-01-01', 'hobbies': 'Питер',
                            'profile_bio': 'Достаточно длинное описание', 'avatar_file_id': 'test-photo'}.items():
             await db.update_profile(uid, key, value)
         await db.set_cookies(uid, 1000, 7)

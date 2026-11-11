@@ -1,11 +1,13 @@
-"""Private onboarding gate and staff Mini App visibility (rank 30 and above)."""
+"""Private onboarding gate and Mini App access for registered participants."""
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 
 from aiogram import BaseMiddleware
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
@@ -19,13 +21,15 @@ from aiogram.types import (
 from community_bot.helpers import rank_of_user
 from community_bot.keyboards import STYLE_CLOSE, ibtn, kbtn, main_private_keyboard
 
+logger = logging.getLogger(__name__)
+
 
 def guest_keyboard():
     return ReplyKeyboardMarkup(keyboard=[[kbtn('Помощь', STYLE_CLOSE)]], resize_keyboard=True, is_persistent=True)
 
 
 async def miniapp_allowed(db, settings, uid):
-    return await rank_of_user(db, settings, uid) >= 30
+    return uid > 0 and (settings.is_owner(uid) or await db.get_user(uid) is not None)
 
 
 async def private_allowed(db, settings, uid):
@@ -55,9 +59,23 @@ async def sync_menu(bot, db, settings, uid):
 
 
 async def configure_private_menus(bot, db, settings):
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except TelegramAPIError as error:
+        logger.warning("Default private menu refresh failed (%s)", type(error).__name__)
     for user in await db.list_all_users():
-        await sync_menu(bot, db, settings, int(user['user_id']))
+        uid = int(user['user_id'])
+        if uid <= 0:
+            continue
+        try:
+            try:
+                await sync_menu(bot, db, settings, uid)
+            except TelegramRetryAfter as error:
+                await asyncio.sleep(error.retry_after + 0.1)
+                await sync_menu(bot, db, settings, uid)
+        except TelegramAPIError as error:
+            logger.warning("Participant private menu refresh failed (%s)", type(error).__name__)
+        await asyncio.sleep(0.05)
 
 
 class OnboardingKeyboardMiddleware(BaseRequestMiddleware):
@@ -154,7 +172,7 @@ class ProfileAccessMiddleware(BaseMiddleware):
         if gated:
             user = await data['db'].get_user(event.from_user.id)
             if not user or not profile_is_complete(user):
-                text = ('Заполни профиль на 100%: имя, возраст, увлечения, описание и фото. '
+                text = ('Заполни профиль на 100%: имя, дата рождения, увлечения, описание и фото. '
                         'Затем откроются магазин и события.')
                 if isinstance(event, CallbackQuery):
                     await event.answer(text, show_alert=True)

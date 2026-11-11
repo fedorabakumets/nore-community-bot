@@ -29,7 +29,7 @@ async def env(tmp_path):
     for uid in (7, 8, 9):
         await db.ensure_user(uid, f"user_{uid}", f"Друг {uid}")
         await db.execute(
-            "UPDATE users SET age=25,profile_name=?,hobbies='Город',profile_bio='Люблю Нору',"
+            "UPDATE users SET birth_date='2000-01-01',profile_name=?,hobbies='Город',profile_bio='Люблю Нору',"
             "avatar_file_id='fake',cookies=100 WHERE user_id=?",
             (f"Друг {uid}", uid),
         )

@@ -617,7 +617,7 @@ async def test_seasonal_raffle_management_is_reachable_from_contest_panel(env):
 async def test_clear_profile_field_requires_confirmation_and_no_repeat_bonus(env, label, field):
     from community_bot.profile_fill import profile_fill_percent
 
-    await env.db.execute("UPDATE users SET profile_name='Имя',age=25,hobbies='Кино',"
+    await env.db.execute("UPDATE users SET profile_name='Имя',birth_date='2000-01-01',hobbies='Кино',"
                          "profile_bio='Описание',avatar_file_id='avatar',reputation=95 WHERE user_id=8")
     await env.db.reward_complete_profile(8)
     before = await env.db.get_user(8)

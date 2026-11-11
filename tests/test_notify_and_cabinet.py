@@ -22,7 +22,7 @@ def test_cabinet_profile_is_short_and_has_fields() -> None:
         "user_id": 5,
         "profile_name": "Нора",
         "telegram_name": "Nora",
-        "age": 22,
+        "birth_date": '2003-01-01',
         "hobbies": "",
         "profile_bio": "",
         "avatar_file_id": "",
@@ -36,7 +36,7 @@ def test_cabinet_profile_is_short_and_has_fields() -> None:
     markup = compact_profile_keyboard(user)
     labels = [button.text for row in markup.inline_keyboard for button in row]
     assert any(text.startswith("Имя") and "✓" in text for text in labels)
-    assert any("Возраст" in text and "✓" in text for text in labels)
+    assert any("Дата рождения" in text and "✓" in text for text in labels)
     assert any("Варны" in text for text in labels)
     assert not any("Почему предупреждение" in text for text in labels)
 

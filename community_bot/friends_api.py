@@ -255,7 +255,7 @@ async def mutate(db, settings, uid: int, body: dict) -> tuple[str, list[tuple[in
     async with db.connect() as connection:
         await connection.execute("BEGIN IMMEDIATE")
         if not await eligible(db, settings, uid):
-            raise ValueError("Миниапка пока доступна от роли модератора")
+            raise ValueError("Миниапка доступна участникам Норы")
         relation = await _one(
             connection, "SELECT * FROM mini_friendships WHERE low_id=? AND high_id=?", _pair(uid, other)
         )
@@ -291,7 +291,7 @@ async def mutate(db, settings, uid: int, body: dict) -> tuple[str, list[tuple[in
             raise ValueError("Запросы и приглашения этому участнику недоступны")
         elif command == "request":
             if not await eligible(db, settings, other):
-                raise ValueError("У участника пока нет доступа к миниапке: она открыта от роли модератора")
+                raise ValueError("У участника нет доступа к миниапке Норы")
             if relation and relation["status"] == "accepted":
                 return "Вы уже друзья", []
             if relation and relation["status"] == "pending" and relation["expires_at"] > now:

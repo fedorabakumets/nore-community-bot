@@ -11,10 +11,14 @@ if (tg) {
 }
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function profileTabLocked(target) {
+  return data.profile.fill_percent < 100 && !['home','lk','notices','admin','reputation'].includes(target)
+    && !(target==='events'&&data.events_admin);
+}
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 async function api(path,body,signal){const r=await fetch('/api/'+path,{signal,method:body?'POST':'GET',headers:{Authorization:'tma '+auth,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let j;try{j=await r.json()}catch{throw Error('Сервис пока недоступен. Попробуй ещё раз')}if(!r.ok)throw Error(j.error||j.message||'Не удалось выполнить действие');return j}
-function showTesterAccess(){data=null;$('#nav').innerHTML='';$('#app').innerHTML='<section class="tester-access"><img src="/home-art/tester-recruitment.jpg" alt="Открыт набор к бета-тестированию приложения Нора"><h1>Стань тестировщиком Норы</h1><p>Сейчас доступ к приложению открыт только тестировщикам. Хочешь вступить в команду? Открой тикет и расскажи нам об этом.</p><button type="button" class="primary" id="tester-ticket">Вступить в команду</button></section>';$('#tester-ticket').onclick=()=>{const url='https://t.me/nora_community_bot?start=idea';if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank','noopener,noreferrer')}}
+function showTesterAccess(){data=null;$('#nav').innerHTML='';$('#app').innerHTML='<section class="tester-access"><img src="/home-art/tester-recruitment.jpg" alt="Открыт набор к бета-тестированию приложения Нора"><h1>Нора для участников</h1><p>Если ты уже в сообществе и Нора не открывается, напиши в поддержку.</p><button type="button" class="primary" id="tester-ticket">Написать в поддержку</button></section>';$('#tester-ticket').onclick=()=>{const url='https://t.me/nora_community_bot?start=idea';if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank','noopener,noreferrer')}}
 function toast(s){$('#toast').textContent=s;$('#toast').style.display='block';clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('#toast').style.display='none',4000)}
 function products(list){return window.NoraShop?NoraShop.cards(list):''}
 function eventCard(e){return `<article class="card event"><span class="eyebrow"><i class="dot"></i>Собираемся вместе</span><h2>${esc(e.title)}</h2>${e.starts_at?`<p>📅 ${esc(new Date(e.starts_at).toLocaleString('ru-RU',{timeZone:data.profile.timezone}))}</p>`:''}${e.description?`<p>${esc(e.description)}</p>`:''}<p>${number(e.count)} в списке участников</p><div class="price">${e.price?number(e.price)+' 🍪':'Бесплатно'}</div><button class="primary" data-event="${esc(e.id)}" ${e.paid||(!e.price&&e.joined)?'disabled':''}>${e.paid?'Билет оплачен':!e.price&&e.joined?'Ты в списке ✓':e.price?'Купить билет':'Я буду'}</button></article>`}
@@ -23,7 +27,7 @@ const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
 const labels={loan:'НОРА — СТАРТЕР-ПАК',loan_repay:'Возврат стартер-пака',sbp_payment:'Пополнение СБП',pet_shop:'Припасы питомцу',pet_expedition:'Находка из похода',transfer:'Перевод',profile_complete:'Бонус за заполнение профиля',shop:'Покупка в магазине',seasonal_purchase:'Сезонный предмет',rsvp:'Участие в мероприятии',rsvp_refund:'Возврат залога',transfer_in:'Входящий перевод',transfer_out:'Перевод',bonus:'Бонус',daily_leader:'Бонус за активность',admin:'Начисление',debt_repay:'Возврат долга'};
 function transactions(){return data.history.length?data.history.map(t=>`<div class="transaction"><span class="tx-icon">${t.amount>0?'↙':'↗'}</span><div class="tx-info"><b>${esc(labels[t.kind]||'Операция с печеньками')}</b><span>${esc(new Date(t.date).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</span></div><strong class="${t.amount>0?'positive':''}">${t.amount>0?'+':''}${number(t.amount)} 🍪</strong></div>`).join(''):'<div class="empty">Пока без операций.<br>Твоя история появится здесь.</div>'}
-function render(){window.NoraShop?.preloadSeasonal();const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
+function render(){if(profileTabLocked(tab))tab='lk';if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=window.NoraHome?.screen()||'';
 if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
@@ -74,6 +78,7 @@ function renderNav(selected,name){
   for(const button of nav.querySelectorAll('button')){
     const active=button.dataset.tab===selected;
     button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false');
+    button.setAttribute('aria-disabled',String(profileTabLocked(button.dataset.tab)));
   }
   if(navSelection!==selected){positionNavDrop(!!navSelection);navSelection=selected;}
 }
@@ -92,7 +97,7 @@ async function perform(path,payload){
   }catch(e){toast(e.message);if(b)b.disabled=false}
   finally{busy=false}
 }
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&['shop','events'].includes(b.dataset.tab)&&data.profile.fill_percent<100&&!(b.dataset.tab==='events'&&data.events_admin)){toast('Заполни профиль на 100% в ЛК, чтобы открыть магазин и события');return}if(b.dataset.tab){tab=b.dataset.tab;window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event){const event=data.events.find(x=>x.id===b.dataset.event);if(demo){toast('Это демонстрация. Запись доступна при входе через Telegram');return}sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);$('#pay').onclick=()=>perform('events/join',{event_id:event.id,price:event.price})}if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.tab){tab=b.dataset.tab;window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event){const event=data.events.find(x=>x.id===b.dataset.event);if(demo){toast('Это демонстрация. Запись доступна при входе через Telegram');return}sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);$('#pay').onclick=()=>perform('events/join',{event_id:event.id,price:event.price})}if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
 $('#sheet').addEventListener('close',()=>{if(!$('#sheet').open)$('#sheet-content').replaceChildren()});
 $('#dismiss').onclick=()=>$('#sheet').close();$('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet')){const r=e.target.getBoundingClientRect();if(e.clientY<r.top||e.clientY>r.bottom||e.clientX<r.left||e.clientX>r.right)e.target.close()}});
 function telegramStartParam() {
@@ -101,6 +106,7 @@ function telegramStartParam() {
 
 function openLobbyFromLink() {
   if (telegramStartParam() !== 'nora_lobby') return;
+  if (profileTabLocked('community')) {toast('Заполни профиль на 100%, чтобы открыть лобби');return}
   window.NoraIntro?.finish(true);
   // The game script is deferred and may still be loading when /api/me returns.
   if (window.NoraGame) window.NoraGame.open();
@@ -114,8 +120,7 @@ async function openWidgetNoticeFromLink() {
   try {
     const notice = await api('notices/widget/' + match[1]);
     const target = notice.target;
-    const blocked = ['shop', 'events'].includes(target) && data.profile.fill_percent < 100 &&
-      !(target === 'events' && data.events_admin);
+    const blocked = profileTabLocked(target);
     if (!blocked) {
       tab = target === 'reputation' ? 'lk' : target;
       window.NoraShop?.tabChanged(tab);
@@ -138,10 +143,10 @@ async function openWidgetNoticeFromLink() {
   }
 }
 
-(async()=>{try{if(!auth){$('#app').innerHTML='<div class="empty"><h1>Для команды<br>Норы.</h1><p>Открой миниапку из меню Норы в Telegram. Доступ открыт от роли модератора.</p></div>';return}data=await api('me');window.NoraPeople?.start();const view=window.NoraShop?.route()?.view||'home';if(view==='admin'&&data.admin_available)tab='admin';else if(['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view))tab=view;else if(view==='shop'&&data.profile.fill_percent===100){tab='shop';window.NoraShop?.resume()}render();loadAvatar();openLobbyFromLink();void openWidgetNoticeFromLink()}catch(e){window.NoraIntro?.finish(true);if(e.message.includes('от 30 ранга')){showTesterAccess();return}$('#app').innerHTML=`<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;$('#retry').onclick=()=>location.reload()}finally{window.NoraIntro?.ready()}})();
+(async()=>{try{if(!auth){$('#app').innerHTML='<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';return}data=await api('me');const view=window.NoraShop?.route()?.view||'home';if(view==='admin'&&data.admin_available)tab='admin';else if(['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view))tab=view;else if(view==='shop'&&data.profile.fill_percent===100){tab='shop';window.NoraShop?.resume()}render();loadAvatar();openLobbyFromLink();void openWidgetNoticeFromLink()}catch(e){window.NoraIntro?.finish(true);if(e.message.includes('Миниапка доступна участникам Норы')){showTesterAccess();return}$('#app').innerHTML=`<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;$('#retry').onclick=()=>location.reload()}finally{window.NoraIntro?.ready()}})();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
-function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Возраст<input name="age" type="number" inputmode="numeric" min="14" max="120" required value="${esc(u.age||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));fields.age=Number(fields.age);perform('profile',{fields,revision})}}
+function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
 let avatarURL=null,avatarKey='',avatarLoading=false;
 function paintOwnAvatar(){if(!avatarURL)return;document.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="Фото профиля">`})}
 async function loadAvatar(){
@@ -158,7 +163,7 @@ async function loadAvatar(){
   finally{avatarLoading=false;if(data?.has_avatar&&!data.avatar_video&&data.revision!==key)queueMicrotask(loadAvatar)}
 }
 document.addEventListener('change',async e=>{if(e.target.id!=='avatar-file')return;const file=e.target.files?.[0];if(!file||busy)return;if(file.size>5*1024*1024){toast('Фото должно быть не больше 5 МБ');e.target.value='';return}if(!['image/jpeg','image/png','image/webp'].includes(file.type)){toast('Выбери JPG, PNG или WebP');return}busy=true;const b=$('#change-avatar');if(b){b.disabled=true;b.textContent='Загружаем фото…'}try{const r=await fetch('/api/profile/avatar',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type,'X-Profile-Revision':data.revision},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить фото');toast(j.message);data=await api('me');render()}catch(err){toast(err.message);if(b){b.disabled=false;b.textContent='Повторить загрузку фото'}}finally{busy=false}});
-async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();window.NoraCabinet?.refreshCurrent()}catch(e){if(e.message.includes('от 30 ранга')){showTesterAccess()}else toast(e.message)}}
+async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();window.NoraCabinet?.refreshCurrent()}catch(e){if(e.message.includes('Миниапка доступна участникам Норы')){showTesterAccess()}else toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.

@@ -54,8 +54,8 @@ async def env(tmp_path):
     for uid in range(7, 11):
         await db.ensure_user(uid, username=f"user_{uid}", telegram_name=f"Игрок {uid}")
         await db.execute(
-            "UPDATE users SET profile_name=?,age=25,hobbies='Космос',profile_bio='Люблю гулять',role='moderator' "
-            "WHERE user_id=?",
+            "UPDATE users SET profile_name=?,birth_date='2000-01-01',hobbies='Космос',"
+            "profile_bio='Люблю гулять',role='moderator' WHERE user_id=?",
             (f"Игрок {uid}", uid),
         )
         await db.add_cookies(uid, 100, "fixture")
@@ -350,19 +350,20 @@ async def test_feature_switch_blocks_creation_but_preserves_exit(env):
     assert (await view(env, 7, room))["room"]["status"] == "cancelled"
 
 
-async def test_age_and_miniapp_gate_block_stakes_and_actions(env):
-    await env.db.execute("UPDATE users SET age=17 WHERE user_id=9")
+async def test_age_gate_blocks_minor_stakes_and_members_can_play(env):
+    await env.db.execute("UPDATE users SET birth_date='2009-01-01' WHERE user_id=9")
     with pytest.raises(ValueError, match="18 лет"):
         await send(env, 9, "create", vs_bot=False, stake=10)
     await env.db.set_role(10, "member")
-    with pytest.raises(ValueError, match="модератора"):
-        await send(env, 10, "create", vs_bot=True, stake=0)
+    room, _, _ = await send(env, 10, "create", vs_bot=True, stake=0)
+    assert (await view(env, 10, room))["room"]["id"] == room
 
 
 async def test_sea_invitation_buttons_accept_via_telegram(env, monkeypatch):
     from community_bot.sea_notifications import invitation_keyboard, respond
 
     monkeypatch.setattr(sea.time, "time", lambda: env.now)
+    await env.db.execute("UPDATE users SET avatar_file_id='photo' WHERE user_id=8")
     room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10)
     _, _, notice = await send(env, 7, "invite", room, user_id=8)
     assert notice["room_id"] == room
@@ -385,6 +386,7 @@ async def test_notices_expose_sea_invite_for_inbox_acceptance(env, monkeypatch):
     from community_bot.cabinet_api import notices
 
     monkeypatch.setattr(sea.time, "time", lambda: env.now)
+    await env.db.execute("UPDATE users SET avatar_file_id='photo' WHERE user_id=8")
     room, _, _ = await send(env, 7, "create", vs_bot=False, stake=10)
     _, _, notice = await send(env, 7, "invite", room, user_id=8)
 

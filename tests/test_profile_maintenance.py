@@ -45,7 +45,7 @@ async def test_one_profile_reset_restores_onboarding_and_preserves_finances_hist
     user = await db.get_user(7)
     assert user['role'] == 'member' and profile_fill_percent(user) == 0
     assert not await private_allowed(db, env.settings, 7)
-    assert not await miniapp_allowed(db, env.settings, 7)
+    assert await miniapp_allowed(db, env.settings, 7)
     assert not await db.has_approved_application(7) and not await db.has_pending_application(7)
     assert (user['cookies'], user['cookie_debt']) == (123, 4)
     assert await db.fetchall('SELECT * FROM transactions ORDER BY id') == ledger
