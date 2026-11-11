@@ -140,6 +140,9 @@ def parse_trigger(text: str, *, include_disabled: bool = False) -> tuple[str, st
     if not raw:
         return None
     folded = raw.casefold()
+    profile_mention = re.fullmatch(r"([^\s]+)\s+(@[A-Za-z0-9_]{1,32})", raw)
+    if profile_mention and canonical_command(profile_mention.group(1), include_disabled=include_disabled) == "profile":
+        return "profile", profile_mention.group(2)
     from community_bot.command_registry import is_exact_slug, phrase_command
 
     phrase = phrase_command(folded, include_disabled=include_disabled)
@@ -232,7 +235,19 @@ def message_trigger(message: Message) -> tuple[str, str] | None:
     chat_type = getattr(getattr(message, "chat", None), "type", "")
     if chat_type in {"group", "supergroup"} and strip_command_address(source) is None:
         return None
-    return parse_trigger(source)
+    parsed = parse_trigger(source)
+    if parsed is not None:
+        return parsed
+    if chat_type in {"group", "supergroup"}:
+        for entity in (message.entities if message.text else message.caption_entities) or []:
+            if entity.type != "text_mention" or not entity.user:
+                continue
+            raw = source.encode("utf-16-le")
+            before = raw[:entity.offset * 2].decode("utf-16-le").strip()
+            after = raw[(entity.offset + entity.length) * 2:].decode("utf-16-le").strip()
+            if not after and parse_trigger(before) == ("profile", ""):
+                return "profile", entity.extract_from(source)
+    return None
 
 
 def is_group_command_to_sweep(message: Message) -> bool:

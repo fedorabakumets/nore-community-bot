@@ -5,7 +5,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
-from community_bot.aliases import command_or_alias
+from community_bot.aliases import command_or_alias, message_trigger
 from community_bot.blocks import cover_file, replace_block
 from community_bot.config import Settings
 from community_bot.database import Database
@@ -98,9 +98,27 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
     actor = await register_telegram_user(db, message.from_user)
     target = actor
     if message.chat.type in {"group", "supergroup"}:
-        replied = await resolve_reply_target(message, db)
-        if replied:
-            target = replied
+        has_text = getattr(message, "text", None) or getattr(message, "caption", None)
+        parsed = message_trigger(message) if has_text else None
+        argument = parsed[1] if parsed else ""
+        if argument:
+            entities = (message.entities if message.text else message.caption_entities) or []
+            mentioned = next((entity.user for entity in entities
+                              if entity.type == "text_mention" and entity.user), None)
+            if mentioned:
+                target = await register_telegram_user(db, mentioned)
+            else:
+                matches = await db.fetchall(
+                    "SELECT * FROM users WHERE username = ? COLLATE NOCASE LIMIT 2", (argument[1:],)
+                )
+                if len(matches) != 1:
+                    await message.answer("Не нашла профиль этого участника. Попробуй ответить на его сообщение.")
+                    return
+                target = matches[0]
+        else:
+            replied = await resolve_reply_target(message, db)
+            if replied:
+                target = replied
     editable = int(target["user_id"]) == message.from_user.id
     if not await can_view_profile(db, settings, message.from_user.id, target):
         await message.answer("🔒 Этот профиль скрыт.")
