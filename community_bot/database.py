@@ -2661,6 +2661,7 @@ class Database:
     async def search_community_messages(
         self, chat_id: int, match: str, *, since: str | None = None, until: str | None = None,
         thread_id: int | None = None, limit: int = 20,
+        same_thread: bool = False, before_message_id: int | None = None,
     ) -> list[dict[str, Any]]:
         if not match.strip():
             return []
@@ -2676,9 +2677,12 @@ class Database:
         if until:
             sql += " AND m.sent_at < ?"
             params.append(until)
-        if thread_id is not None:
+        if thread_id is not None or same_thread:
             sql += " AND m.thread_id IS ?"
             params.append(thread_id)
+        if before_message_id is not None:
+            sql += " AND m.message_id < ?"
+            params.append(before_message_id)
         sql += " ORDER BY bm25(f.community_messages_fts), m.sent_at DESC LIMIT ?"
         params.append(max(1, min(limit, 50)))
         rows = await self.fetchall(sql, tuple(params))
@@ -2687,7 +2691,8 @@ class Database:
 
     async def recent_community_messages(
         self, chat_id: int, *, since: str, until: str | None = None,
-        thread_id: int | None = None, limit: int = 50,
+        thread_id: int | None = None, limit: int = 50, same_thread: bool = False,
+        before_message_id: int | None = None, near_message_id: int | None = None,
     ) -> list[dict[str, Any]]:
         sql = (
             "SELECT chat_id, message_id, user_id, author_name, thread_id, text, sent_at "
@@ -2697,9 +2702,16 @@ class Database:
         if until:
             sql += " AND sent_at < ?"
             params.append(until)
-        if thread_id is not None:
+        if thread_id is not None or same_thread:
             sql += " AND thread_id IS ?"
             params.append(thread_id)
+        if before_message_id is not None:
+            sql += " AND message_id < ?"
+            params.append(before_message_id)
+        if near_message_id is not None:
+            sql += " ORDER BY ABS(message_id - ?), message_id DESC LIMIT ?"
+            params.extend((near_message_id, max(1, min(limit, 100))))
+            return await self.fetchall(sql, tuple(params))
         sql += " ORDER BY sent_at DESC, message_id DESC LIMIT ?"
         params.append(max(1, min(limit, 100)))
         rows = await self.fetchall(sql, tuple(params))

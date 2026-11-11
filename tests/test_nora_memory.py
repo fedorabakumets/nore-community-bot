@@ -187,6 +187,17 @@ async def test_memory_prompt_returns_none_without_data(db, settings):
     assert await chat.memory_prompt('что позавчера обсуждали?', event) is None
 
 
+async def test_contextual_memory_in_general_chat_excludes_forum_topics(db, settings):
+    sent_at = await seed_yesterday(db)
+    chat = openrouter_chat.OpenRouterChat(db, settings)
+    event = message('Нора, а чем всё закончилось?', uid=1).model_copy(update={'message_id': 300})
+    assert await chat.memory_prompt('а чем всё закончилось?', event, search_query='кино вчера') is None
+    await db.save_community_message(-100123, 205, 7, 'Анна', 'Собираемся в кино вечером', sent_at)
+    prompt = await chat.memory_prompt('а чем всё закончилось?', event, search_query='кино вчера')
+    assert prompt and 'Собираемся в кино вечером' in prompt
+    assert 'кино про Петербург' not in prompt
+
+
 async def test_today_recap_uses_chat_messages_instead_of_matching_itself(db, settings):
     now = datetime.now(UTC).replace(microsecond=0)
     body = 'че сегодня интересного в чате было?'
@@ -335,7 +346,7 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
     dispatcher['openrouter_chat'] = chat
     async def dispatch(text, uid=1, chat_id=-100123, **extra):
         event = message(text, uid=uid, chat_id=chat_id, **extra)
-        event = event.model_copy(update={'message_id': len(session.calls) + 51})
+        event = event.model_copy(update={'message_id': len(session.calls) + 1001})
         session.calls.clear()
         await dispatcher.feed_update(bot, Update(update_id=event.message_id, message=event), db=db, settings=settings)
         return event
@@ -374,15 +385,28 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         dispatcher['openrouter_chat'] = deepseek
         completion = AsyncMock(side_effect=['[[ПАМЯТЬ_ЧАТА]]\nкино вчера', 'Выбрали комедию.', 'Привет!'])
         monkeypatch.setattr(deepseek, '_request_history', completion)
-        body = 'освежи мне итоги'
+        body = 'а чем всё закончилось?'
         assert not chat_memory.is_memory_question(body)
-        await dispatch(f'Нора, {body}', uid=1)
+        earlier = yesterday_noon_utc()
+        await db.save_community_message(
+            -100123, 205, 7, 'Анна', 'В итоге берём билеты на субботу', earlier.isoformat(), thread_id=12,
+        )
+        await db.save_community_message(
+            -100123, 1500, 7, 'Анна', 'Более поздняя реплика', earlier.isoformat(), thread_id=12,
+        )
+        original = message('Вчера обсуждали кино', uid=7).model_copy(update={'message_id': 201, 'date': earlier})
+        await dispatch(
+            f'Нора, {body}', uid=1, is_topic_message=True, message_thread_id=12, reply_to_message=original,
+        )
         assert replies()[0].text == 'Выбрали комедию.'
         first, second = completion.await_args_list
         assert first.args == ([], body)
         assert '[[ПАМЯТЬ_ЧАТА]]' in first.kwargs['system']
         assert 'кино про Петербург' in second.args[1]
+        assert 'берём билеты на субботу' in second.args[1]
         assert 'другом чате' not in second.args[1]
+        assert 'другой теме' not in second.args[1]
+        assert 'Более поздняя реплика' not in second.args[1]
         clock.now += 6
         await dispatch('Нора, привет', uid=1)
         assert replies()[0].text == 'Привет!'

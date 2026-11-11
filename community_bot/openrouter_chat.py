@@ -6,12 +6,16 @@ import re
 import sqlite3
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from aiogram.types import Message
 
 from community_bot.aliases import is_command_message, parse_trigger
 from community_bot.chat_memory import (
+    MAX_CONTEXT_CHARS,
+    MAX_MESSAGE_CHARS,
     MEMORY_TTL_HOURS,
     RECENT_LIMIT,
     SEARCH_LIMIT,
@@ -56,9 +60,11 @@ _PERSONA = (
 _MEMORY_ROUTING = (
     f"{_PERSONA}\n"
     "Реши по смыслу последней реплики и контексту диалога, нужен ли поиск по переписке этого сообщества. "
-    "Для вопросов о недавних обсуждениях, сводке или о том, что конкретно писали в чате, "
+    "Для вопросов о недавних обсуждениях, сводке и неясных отсылок к разговору вроде "
+    "«а чем всё закончилось?» или «что в итоге решили?» "
     f"выведи только {_MEMORY_MARKER} на первой строке. На второй строке укажи тему и период, "
-    "если их можно понять из диалога. Для общей сводки без темы укажи только период. "
+    "если их можно понять из диалога. Добавь синонимы и вероятные слова из обсуждения, "
+    "даже если их нет в вопросе. Для общей сводки без темы укажи только период. "
     "Если переписка для ответа не нужна, отвечай пользователю как обычно."
 )
 
@@ -284,9 +290,6 @@ class OpenRouterChat:
     ) -> str | None:
         if message.chat.id != self._community_chat_id or (search_query is None and not is_memory_question(prompt)):
             return None
-        from datetime import UTC, datetime, timedelta
-        from zoneinfo import ZoneInfo
-
         now = datetime.now(ZoneInfo(self._timezone))
         window = parse_time_window(prompt, now) or parse_time_window(search_query or "", now)
         thread_id = message.message_thread_id if message.is_topic_message else None
@@ -301,6 +304,10 @@ class OpenRouterChat:
             since = max(start_utc, floor_utc).isoformat()
             until = end_utc.isoformat()
 
+        if search_query is not None:
+            context = await self._contextual_archive(message, prompt, search_query, since, until)
+            return build_memory_prompt(prompt[:MAX_MESSAGE_CHARS], context) if context else None
+
         def context_for(rows: list[dict]) -> str:
             # Capture runs before the assistant, so archive results may include the current question.
             return format_context([
@@ -310,20 +317,65 @@ class OpenRouterChat:
             ])
 
         context = ""
-        terms = extract_search_terms(prompt if search_query is None else search_query)
+        terms = extract_search_terms(prompt)
         if terms:
             rows = await self._db.search_community_messages(
                 self._community_chat_id, build_fts_match(terms),
                 since=since, until=until, thread_id=thread_id, limit=SEARCH_LIMIT,
             )
             context = context_for(rows)
-        if not context and (window is not None or search_query is not None):
+        if not context and window is not None:
             rows = await self._db.recent_community_messages(
                 self._community_chat_id, since=since,
                 until=until, thread_id=thread_id, limit=RECENT_LIMIT,
             )
             context = context_for(rows)
         return build_memory_prompt(prompt, context) if context else None
+
+    async def _contextual_archive(
+        self, message: Message, prompt: str, query: str, since: str, until: str | None,
+    ) -> str:
+        chat_id = message.chat.id
+        thread_id = message.message_thread_id if message.is_topic_message else None
+        bounds = {
+            "thread_id": thread_id,
+            "same_thread": True,
+            "before_message_id": message.message_id,
+        }
+        candidates: dict[int, dict] = {}
+
+        def add(rows: list[dict]) -> None:
+            for row in rows:
+                if not is_memory_question(strip_address(row["text"]) or ""):
+                    candidates.setdefault(row["message_id"], row)
+
+        async def around(anchor: int, date: datetime) -> list[dict]:
+            start = max(since, (date.astimezone(UTC) - timedelta(minutes=15)).isoformat())
+            end = (date.astimezone(UTC) + timedelta(minutes=15)).isoformat()
+            return await self._db.recent_community_messages(
+                chat_id, since=start, until=min(until, end) if until else end,
+                near_message_id=anchor, limit=4, **bounds,
+            )
+
+        reply = message.reply_to_message
+        if reply:
+            add(await around(reply.message_id, reply.date))
+
+        terms = extract_search_terms(query)
+        if terms:
+            hits = await self._db.search_community_messages(
+                chat_id, build_fts_match(terms), since=since, until=until, limit=3, **bounds,
+            )
+            for hit in reversed(hits):
+                add([hit])
+                add(await around(hit["message_id"], datetime.fromisoformat(hit["sent_at"])))
+
+        recent = await self._db.recent_community_messages(
+            chat_id, since=since, until=until, limit=10, **bounds,
+        )
+        add(list(reversed(recent)))
+        budget = MAX_CONTEXT_CHARS - len(prompt[:MAX_MESSAGE_CHARS]) - 220
+        return format_context(list(candidates.values()), max_chars=budget, chronological=True)
 
     async def _request(self, prompt: str) -> str:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session, session.post(
