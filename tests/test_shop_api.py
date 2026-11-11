@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
+from community_bot.config import COOKIE_PAYMENT_URL
 from community_bot.database import Database
 from community_bot.miniapp import confirm, overview, prepare
 from community_bot.shop_api import product_image, topup_prepare, topup_receipt, upload_video
@@ -41,7 +42,7 @@ async def env(tmp_path):
     await db.upsert_shop_item('support', category_slug='reputation', title='Поддержка', enabled=1)
     settings = SimpleNamespace(restricted_reputation_threshold=0, timezone='Europe/Moscow',
                                is_owner=lambda uid: uid == 7, owner_ids={7}, moderator_ids=set(),
-                               reviewers={7}, community_chat_id=-100123, sbp_payment_url='https://example.test/sbp')
+                               reviewers={7}, community_chat_id=-100123)
     return SimpleNamespace(db=db, settings=settings, bot=None)
 
 
@@ -186,6 +187,7 @@ async def test_topup_receipt_uses_existing_review_queue_and_replay_protection(en
         photo=[SimpleNamespace(file_id='receipt-photo')],
     )))
     q = json.loads((await topup_prepare(Request(env, {'amount': 50}))).body)
+    assert q['payment_url'] == COOKIE_PAYMENT_URL
     assert q['rubles'] == 50
     output = BytesIO()
     Image.new('RGB', (50, 50), 'red').save(output, 'PNG')

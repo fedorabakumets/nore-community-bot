@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile
 from aiohttp import web
 
+from community_bot.config import COOKIE_PAYMENT_URL
 from community_bot.domain import discounted_price, reputation_tier
 from community_bot.pets_talk import SPECIES
 from community_bot.rsvp import event_lock
@@ -292,13 +293,10 @@ async def topup_prepare(request):
     config = await db.cookie_shop()
     if not config['enabled'] or type(amount) is not int or amount not in config['packs']:
         raise ValueError('Этот пакет сейчас недоступен')
-    payment_url = getattr(request.app['settings'], 'sbp_payment_url', '')
-    if urlparse(payment_url).scheme != 'https':
-        raise ValueError('Ссылка на оплату пока не настроена')
     rubles = amount * config['rate_rub']
     token = await db.create_wallet_intent(user['user_id'], 'cookie_topup', rubles,
                                          payload={'amount': amount, 'rate': config['rate_rub']})
-    return web.json_response({'token': token, 'amount': amount, 'rubles': rubles, 'payment_url': payment_url})
+    return web.json_response({'token': token, 'amount': amount, 'rubles': rubles, 'payment_url': COOKIE_PAYMENT_URL})
 
 
 async def topup_receipt(request):

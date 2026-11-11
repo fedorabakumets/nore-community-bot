@@ -19,6 +19,7 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     ChatPermissions,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LinkPreviewOptions,
@@ -35,7 +36,7 @@ from community_bot.audit import (
     person_label,
 )
 from community_bot.blocks import answer_block, edit_block
-from community_bot.config import Settings
+from community_bot.config import COOKIE_PAYMENT_QR, COOKIE_PAYMENT_URL, Settings
 from community_bot.database import Database
 from community_bot.domain import (
     cookies_phrase,
@@ -1089,7 +1090,7 @@ async def buycookies_command(message: Message, db: Database) -> None:
 
 
 @router.callback_query(F.data.startswith("cookies:sbp:"))
-async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
     if not callback.data or not callback.message:
         return
     shop = await db.cookie_shop()
@@ -1101,19 +1102,20 @@ async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, db: Dat
     if amount not in packs:
         await callback.answer("Некорректный пакет.", show_alert=True)
         return
-    if not settings.sbp_payment_url:
-        await callback.answer("Оплата СБП ещё не настроена владельцем.", show_alert=True)
-        return
     rubles = amount * int(shop["rate_rub"])
     await state.set_state(CookiePurchase.receipt)
     await state.set_data({"amount": amount, "rubles": rubles})
     await callback.answer()
-    await callback.message.answer(
-        f"Вы выбрали <b>{cookies_phrase(amount, case='acc')}</b> ({amount} 🍪). "
-        f"К оплате: <b>{format_rub(rubles)}</b>.\n\n"
-        "Переведите точную сумму по ссылке СБП, затем следующим сообщением отправьте скриншот оплаты.",
+    await callback.message.answer_photo(
+        photo=FSInputFile(COOKIE_PAYMENT_QR),
+        caption=(
+            f"Вы выбрали <b>{cookies_phrase(amount, case='acc')}</b> ({amount} 🍪). "
+            f"К оплате: <b>{format_rub(rubles)}</b>.\n\n"
+            "Откройте СБП кнопкой или отсканируйте QR-код. Укажите точную сумму и выберите свой банк. "
+            "После перевода отправьте чек следующим сообщением."
+        ),
         parse_mode="HTML",
-        reply_markup=sbp_payment_keyboard(settings.sbp_payment_url),
+        reply_markup=sbp_payment_keyboard(COOKIE_PAYMENT_URL),
     )
     if callback.message.chat.type == "private":
         await callback.message.answer(

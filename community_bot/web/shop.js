@@ -41,7 +41,48 @@ window.NoraShop=(()=>{
     $('#shop-product-form').onsubmit=async e=>{e.preventDefault();if(busy)return;const form=e.target,body={sku};for(const [k,v] of new FormData(form))if(k!=='video')body[k]=k==='amount'?Number(v):v;const file=form.querySelector('[name="video"]')?.files?.[0];if(file&&(file.size>20*1024*1024||file.type!=='video/mp4')){toast('Выбери видео MP4 до 20 МБ');return}busy=true;$('#shop-next').disabled=true;$('#shop-next').textContent='Проверяем…';try{const q=await api('shop/prepare',body);if(file)await upload('shop/video',q.token,file);if(seq===sequence&&$('#sheet').open)renderQuote(q)}catch(err){toast(err.message);if($('#shop-next')){$('#shop-next').disabled=false;$('#shop-next').textContent='Повторить'}}finally{busy=false}}}
   async function upload(path,token,file){const r=await fetch('/api/'+path,{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type||'application/octet-stream',...(token?{'X-Shop-Token':token}:{})},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить файл');return j}
   async function loadImage(sku,seq){let url;try{const r=await fetch('/api/shop/media/'+encodeURIComponent(sku),{headers:{Authorization:'tma '+auth}});if(!r.ok)return;url=URL.createObjectURL(await r.blob());if(seq!==sequence||!$('#sheet').open){URL.revokeObjectURL(url);return}const holder=$('[data-shop-image]');if(holder){const img=document.createElement('img');img.src=url;img.alt='Изображение товара';holder.replaceChildren(img);img.onload=()=>URL.revokeObjectURL(url)}}catch{if(url)URL.revokeObjectURL(url)}}
-  async function topup(amount){if(busy)return;busy=true;try{const q=await api('shop/topup/prepare',{amount});sheet(`<span class="eyebrow">Пополнить кошелёк</span><h2>${number(q.amount)} ${plural(q.amount,'печенька','печеньки','печенек')}</h2><div class="amount">${number(q.rubles)} ₽</div><p class="sub">Переведи точную сумму по СБП. Затем прикрепи квитанцию — администратор проверит оплату и начислит печеньки.</p><button class="primary" id="sbp-link">Открыть СБП ${arrow()}</button><form id="receipt-form"><label>Квитанция<input id="shop-receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></label><p class="sub">Фото или PDF, до 5 МБ.</p><button class="secondary" type="submit" id="receipt-send">Отправить на проверку</button></form>`);$('#sbp-link').onclick=()=>tg?.openLink?tg.openLink(q.payment_url):window.open(q.payment_url,'_blank','noopener');$('#receipt-form').onsubmit=async e=>{e.preventDefault();if(busy)return;const file=$('#shop-receipt').files?.[0];if(!file)return;if(file.size>5*1024*1024){toast('Квитанция должна быть не больше 5 МБ');return}busy=true;$('#receipt-send').disabled=true;try{const j=await upload('shop/topup/receipt',q.token,file);$('#sheet').close();toast(j.message);await refresh()}catch(err){toast(err.message);if($('#receipt-send'))$('#receipt-send').disabled=false}finally{busy=false}}}catch(err){toast(err.message)}finally{busy=false}}
+  async function topup(amount){
+    if(busy)return;
+    busy=true;
+    try{
+      const q=await api('shop/topup/prepare',{amount});
+      sheet(`
+        <span class="eyebrow">Пополнить кошелёк</span>
+        <h2>${number(q.amount)} ${plural(q.amount,'печенька','печеньки','печенек')}</h2>
+        <div class="amount">${number(q.rubles)} ₽</div>
+        <p class="sub">Укажи точную сумму и выбери свой банк. После перевода прикрепи квитанцию для проверки.</p>
+        <button class="primary" id="sbp-link" type="button">Оплатить через СБП ${arrow()}</button>
+        <details class="shop-sbp-qr">
+          <summary>Показать QR-код</summary>
+          <img src="/shop/ozon-sbp.jpg" alt="QR-код Ozon Банка для перевода по СБП" width="600" height="600" loading="lazy">
+        </details>
+        <form id="receipt-form">
+          <label>Квитанция<input id="shop-receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></label>
+          <p class="sub">Фото или PDF, до 5 МБ.</p>
+          <button class="secondary" type="submit" id="receipt-send">Отправить на проверку</button>
+        </form>
+      `);
+      $('#sbp-link').onclick=()=>tg?.openLink?tg.openLink(q.payment_url):window.open(q.payment_url,'_blank','noopener');
+      $('#receipt-form').onsubmit=async e=>{
+        e.preventDefault();
+        if(busy)return;
+        const file=$('#shop-receipt').files?.[0];
+        if(!file)return;
+        if(file.size>5*1024*1024){toast('Квитанция должна быть не больше 5 МБ');return}
+        busy=true;
+        $('#receipt-send').disabled=true;
+        try{
+          const j=await upload('shop/topup/receipt',q.token,file);
+          $('#sheet').close();
+          toast(j.message);
+          await refresh();
+        }catch(err){
+          toast(err.message);
+          if($('#receipt-send'))$('#receipt-send').disabled=false;
+        }finally{busy=false}
+      };
+    }catch(err){toast(err.message)}finally{busy=false}
+  }
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.shopCategory!==undefined)navigate(b.dataset.shopCategory);if(b.hasAttribute('data-shop-root'))navigate(null);if(b.dataset.topup)topup(Number(b.dataset.topup));if(b.dataset.tab)queueMicrotask(syncBack)});
   window.addEventListener('popstate',()=>{if(!data)return;const next=route();if(next.view==='shop'&&data.profile.fill_percent===100){resume();tab='shop';render()}else if(tab==='shop'){category=null;tab=['home','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','mafia','rocket','sea'].includes(next.view)?next.view:'home';render()}syncBack()});
   tg?.BackButton?.onClick?.(()=>{const parent=(window.NoraInteractive?.parent(tab)||(tab==='sea'?'games':null)||window.NoraCabinet?.parent(tab));if(parent){tab=parent;tabChanged(tab);render();window.scrollTo(0,0)}else navigate(null)});

@@ -23,7 +23,7 @@ Production не изменялся. Push, deploy и запуск настоящ�
 |---|---|---|
 | Высокий | Нет видимых backups Railway | Согласовать backup и restore test |
 | Высокий | Автодеплой Cursor-ветки без ожидания CI | Подготовить release-процесс |
-| Высокий | Прежняя СБП-ссылка как fallback | config.py; подтвердить получателя и убрать чужой fallback отдельным патчем |
+| Закрыто | Прежняя СБП-ссылка как fallback | Бот и Mini App используют согласованную ссылку Ozon Банка и её QR-код |
 | Высокий при переносе | Сохранённая owner-роль переживает удаление ID из env | helpers.effective_role/user_permissions; проверить users/staff_roles на копии |
 | Средний | TLS verification отключается после ошибки сертификата | morning._get_text, ssl=False для metro.spb.ru; подготовить безопасный fallback |
 | Средний | Прежнее приватное приглашение как default | config.py; подтвердить чат и владельца |

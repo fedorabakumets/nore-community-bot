@@ -6,7 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-DEFAULT_SBP_PAYMENT_URL = "https://www.sberbank.com/sms/pbpn?requisiteNumber=79533571508"
+COOKIE_PAYMENT_URL = "https://finance.ozon.ru/apps/sbp/ozonbankpay/01a1cadc-413b-7ee6-9ba7-78da15aa5d4c"
+COOKIE_PAYMENT_QR = Path(__file__).resolve().parent.parent / "assets" / "payments" / "ozon-sbp.jpg"
 
 
 def _as_int(name: str, default: int = 0) -> int:
@@ -41,7 +42,6 @@ class Settings:
     restricted_reputation_threshold: int
     timezone: str
     cookie_price_rub: int
-    sbp_payment_url: str
     freebie_channel_id: int
     freebie_channel_url: str
     community_invite_url: str
@@ -80,7 +80,6 @@ def load_settings() -> Settings:
         restricted_reputation_threshold=_as_int("RESTRICTED_REPUTATION_THRESHOLD"),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip(),
         cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 1)),
-        sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip() or DEFAULT_SBP_PAYMENT_URL,
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),
         community_invite_url=os.getenv(

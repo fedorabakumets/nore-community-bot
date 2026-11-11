@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BufferedInputFile
 from aiohttp import web
 
+from community_bot.config import COOKIE_PAYMENT_QR
 from community_bot.database import Database
 
 ROOT = Path(__file__).parent / 'web'
@@ -442,6 +443,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     app.router.add_post('/api/shop/video', shop_api.upload_video)
     app.router.add_get('/api/shop/media/{sku}', shop_api.product_image)
+    app.router.add_get('/shop/ozon-sbp.jpg', lambda _: web.FileResponse(COOKIE_PAYMENT_QR))
     app.router.add_post('/api/shop/topup/prepare', shop_api.topup_prepare)
     app.router.add_post('/api/shop/topup/receipt', shop_api.topup_receipt)
     app.router.add_post('/api/shop/prepare', prepare)

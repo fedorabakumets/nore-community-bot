@@ -8,7 +8,7 @@
 | Railway | nora-community-bot, workspace My Projects | Owner/admin, billing, GitHub integration identity |
 | Telegram | @nora_community_bot, long polling | BotFather ownership и владелец сообщества |
 | SQLite | Роли, балансы, заявки, Telegraph token | Backup, restore, аудит старых staff-ролей |
-| СБП | Ручные заявки и прежний fallback в config | Получатель, права владельца, новые реквизиты |
+| СБП | Ручные заявки, ссылка Ozon Банка и QR-код | При смене владельца обновить ссылку и QR-код вместе |
 | Приглашение | Старая ссылка в config | Принадлежность чата, актуальная ссылка |
 | Telegraph | Token в bot_state | Доступ к страницам и защищённый backup |
 | Gemini/Groq/TMDB | Необязательные ключи поддерживаются | Использование, владельцы аккаунтов и биллинг |
@@ -28,7 +28,7 @@
 7. Проверить users.role и staff_roles на копии. Удаление ID из OWNER_IDS
    не снимает сохранённый owner: нужен отдельный согласованный отзыв роли,
    проверка admin/moderator/custom permissions.
-8. Подтвердить и заменить СБП-ссылку, приглашение и внешние API-ключи.
+8. Подтвердить и заменить СБП-ссылку вместе с QR-кодом, приглашение и внешние API-ключи.
    Реальные реквизиты менять только после подтверждения получателя.
 9. Согласовать переключение: один production poller, DATABASE_PATH на volume,
    резервная копия, проверки данных и rollback.

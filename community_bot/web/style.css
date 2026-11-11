@@ -659,6 +659,10 @@ form label{font-size:14px;color:var(--poster-muted)}
 #sheet,#sheet:not(:has(.lk-sheet)),#sheet:has(.lk-sheet){background:var(--poster-panel);color:var(--poster-ink);border:var(--poster-edge);border-radius:26px;width:calc(var(--safe-width) - 24px);max-width:520px;padding:20px;left:var(--safe-left);right:var(--safe-right);bottom:calc(12px + var(--safe-bottom));max-height:min(88dvh,calc(100dvh - var(--safe-top) - var(--safe-bottom) - 24px));box-shadow:5px 6px 0 var(--poster-red)}
 #sheet::backdrop{background:#08060cbb}
 #sheet h2{font-family:Rubik,sans-serif;font-size:28px;line-height:1.2;letter-spacing:-.03em;font-weight:800}
+.shop-sbp-qr{margin:12px 0 16px}
+.shop-sbp-qr summary{cursor:pointer;padding:8px 0}
+.shop-sbp-qr img{display:block;width:min(100%,240px);height:auto;margin:8px auto 0}
+
 .lk-sheet-handle{background:var(--poster-ink);height:4px;margin-bottom:20px}
 .lk-sheet-heading button{width:40px;height:40px;background:var(--poster-raised);border:1px solid var(--poster-ink)}
 #toast{background:var(--poster-ink);color:var(--poster-black);border:2px solid var(--poster-black);border-radius:16px;box-shadow:3px 4px 0 var(--poster-yellow);font-size:14px;bottom:calc(112px + var(--safe-bottom));left:calc(50% + (var(--safe-left) - var(--safe-right)) / 2);max-width:min(90%,calc(var(--safe-width) - 20px))}
