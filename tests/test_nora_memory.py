@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -367,6 +368,25 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         assert 'ничего не нашла' in replies()[0].text
         assert request.await_count == 1
         assert len(history_calls) == 1
+
+        # DeepSeek can infer an archive query even when the wording has no history keywords.
+        deepseek = openrouter_chat.OpenRouterChat(db, replace(settings, deepseek_api_key='test-deepseek-key'))
+        dispatcher['openrouter_chat'] = deepseek
+        completion = AsyncMock(side_effect=['[[ПАМЯТЬ_ЧАТА]]\nкино вчера', 'Выбрали комедию.', 'Привет!'])
+        monkeypatch.setattr(deepseek, '_request_history', completion)
+        body = 'освежи мне итоги'
+        assert not chat_memory.is_memory_question(body)
+        await dispatch(f'Нора, {body}', uid=1)
+        assert replies()[0].text == 'Выбрали комедию.'
+        first, second = completion.await_args_list
+        assert first.args == ([], body)
+        assert '[[ПАМЯТЬ_ЧАТА]]' in first.kwargs['system']
+        assert 'кино про Петербург' in second.args[1]
+        assert 'другом чате' not in second.args[1]
+        clock.now += 6
+        await dispatch('Нора, привет', uid=1)
+        assert replies()[0].text == 'Привет!'
+        assert completion.await_count == 3
     finally:
         restore_defaults()
         await dispatcher.storage.close()

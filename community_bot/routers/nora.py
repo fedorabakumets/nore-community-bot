@@ -14,7 +14,7 @@ from community_bot.community_facts import community_fact
 from community_bot.config import Settings
 from community_bot.ephemeral import delete_user_command, reply_ttl
 from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_address
-from community_bot.openrouter_chat import OpenRouterChat
+from community_bot.openrouter_chat import NO_MEMORY_REPLY, OpenRouterChat
 
 router = Router(name="nora")
 assistant_router = Router(name="nora_assistant")
@@ -45,11 +45,11 @@ async def _respond_to_prompt(
         await message.reply(fact, parse_mode=None, allow_sending_without_reply=True, link_preview_options=reply_options)
         return
     model_prompt = prompt
-    if is_memory_question(prompt):
+    if not chat.uses_contextual_memory(message) and is_memory_question(prompt):
         memory_prompt = await chat.memory_prompt(prompt, message)
         if memory_prompt is None:
             await message.reply(
-                "По этому периоду ничего не нашла в недавней переписке. Память хранит сообщения только 48 часов.",
+                NO_MEMORY_REPLY,
                 parse_mode=None,
                 allow_sending_without_reply=True,
                 link_preview_options=reply_options,
@@ -57,9 +57,9 @@ async def _respond_to_prompt(
             return
         model_prompt = memory_prompt
     if history is None:
-        answer = await chat.answer(model_prompt, message.from_user.id)
+        answer = await chat.answer(model_prompt, message.from_user.id, message=message)
     else:
-        answer = await chat.answer_with_history(history, model_prompt, message.from_user.id)
+        answer = await chat.answer_with_history(history, model_prompt, message.from_user.id, message=message)
     if not answer:
         return
     sent = await message.reply(
