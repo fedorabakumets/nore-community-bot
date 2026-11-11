@@ -15,7 +15,7 @@ import cv2
 from PIL import Image,ImageDraw,ImageFont,ImageFilter
 
 HERE=Path(__file__).resolve().parent
-OUT=HERE.parent
+OUT=HERE.parent.parent.parent if HERE.parent.name == 'tools' else HERE.parent
 W0,H0=(1280,720)
 BG='#101011'; PANEL='#1b1b1e'; LINE='#303034'; MUTED='#a1a1aa'; RED='#f32843'; WHITE='#f7f5f1'
 def find_font(candidates):
