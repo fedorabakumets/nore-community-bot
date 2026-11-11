@@ -193,7 +193,7 @@ def test_member_announcement_omits_staff() -> None:
     assert "Групповые команды" in staff
 
 
-async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
+async def test_reputation_bronze_and_repeated_target(tmp_path) -> None:
     from datetime import date
     from pathlib import Path
 
@@ -229,11 +229,38 @@ async def test_reputation_bronze_and_once_per_target(tmp_path) -> None:
     actor = await db.get_user(1)
     other = await db.get_user(3)
     ok, msg, _, _ = await change_community_reputation(db, settings, actor, target, 5, today)
-    assert ok is False
-    assert "сегодня" in msg.casefold()
+    assert ok is True
     ok, _, new_value, _ = await change_community_reputation(db, settings, actor, other, 5, today)
     assert ok is True
     assert new_value == 74
+
+
+async def test_reputation_target_limit_is_ten(tmp_path, monkeypatch) -> None:
+    from datetime import date, timedelta
+
+    from community_bot.database import Database
+    from community_bot.reputation import change_community_reputation
+
+    db = Database(tmp_path / "rep-limit.db")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Actor")
+    await db.ensure_user(2, telegram_name="Target")
+    settings = SimpleNamespace(restricted_reputation_threshold=0)
+    monkeypatch.setattr(
+        "community_bot.reputation.reputation_tier",
+        lambda *_: SimpleNamespace(daily_actions=20, can_minus=True),
+    )
+    today = date(2026, 9, 11)
+    actor = await db.get_user(1)
+    target = await db.get_user(2)
+    for _ in range(10):
+        ok, _, _, _ = await change_community_reputation(db, settings, actor, target, 5, today)
+        assert ok
+    ok, message, _, _ = await change_community_reputation(db, settings, actor, target, 5, today)
+    assert not ok
+    assert "10" in message
+    ok, _, _, _ = await change_community_reputation(db, settings, actor, target, 5, today + timedelta(days=1))
+    assert ok
 
 
 async def test_hate_shield_absorbs_one_minus(tmp_path) -> None:

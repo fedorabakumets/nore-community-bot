@@ -1,5 +1,10 @@
 # AI_HANDOFF — NORA
 
+## Лимит отметок репутации — 11 ноября 2026
+
+- Ветка `chatgpt/interaction-daily-limit` от production `e2e40da`: одного участника можно отметить до 10 раз в день; общий лимит уровня репутации (1/3/5) сохранён.
+- Проверки: 942 passed, 1 skipped, Ruff, pip check, node --check и git diff --check. Работу в Telegram и развёртывание проверяет владелец.
+
 ## Оплата печенек через Ozon Банк — 11 ноября 2026
 
 - Ветка `chatgpt/cookie-ozon-sbp` от production `b5f302b` в отдельном worktree. Чат и Mini App используют одну ссылку Ozon Банка. Прежняя переменная `SBP_PAYMENT_URL` больше не может подменить получателя.

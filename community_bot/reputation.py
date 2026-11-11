@@ -30,8 +30,8 @@ async def change_community_reputation(
     used = await db.reputation_actions_today(actor_id, local_date)
     if used >= tier.daily_actions:
         return False, f"Дневной лимит исчерпан: {tier.daily_actions} действий.", None, None
-    if await db.reputation_action_today_for_target(actor_id, target_id, local_date):
-        return False, "Этого человека сегодня уже отмечали. Завтра можно снова.", None, None
+    if await db.reputation_actions_today_for_target(actor_id, target_id, local_date) >= 10:
+        return False, "Этого человека можно отметить не более 10 раз в день.", None, None
     if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
         return False, "У пользователя действует иммунитет от понижения репутации.", None, None
     applied = delta

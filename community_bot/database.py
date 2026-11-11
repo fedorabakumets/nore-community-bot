@@ -1723,16 +1723,15 @@ class Database:
         )
         return int(row["count"]) if row else 0
 
-    async def reputation_action_today_for_target(self, actor_id: int, target_id: int, action_date: date) -> bool:
+    async def reputation_actions_today_for_target(self, actor_id: int, target_id: int, action_date: date) -> int:
         row = await self.fetchone(
             """
-            SELECT 1 AS ok FROM reputation_actions
+            SELECT COUNT(*) AS count FROM reputation_actions
             WHERE actor_id = ? AND target_id = ? AND action_date = ?
-            LIMIT 1
             """,
             (actor_id, target_id, action_date.isoformat()),
         )
-        return bool(row)
+        return int(row["count"]) if row else 0
 
     async def consume_hate_shield(self, user_id: int) -> bool:
         now = utcnow()
