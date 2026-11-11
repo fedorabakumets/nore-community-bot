@@ -18,6 +18,8 @@ from aiogram.types import (
 
 from community_bot.morning import (
     MONTHS,
+    TVRAIN_NOTICE,
+    TVRAIN_SOURCE,
     WEEKDAYS,
     MorningBrief,
     NewsItem,
@@ -102,10 +104,13 @@ def weather_block(brief: MorningBrief) -> InputRichBlockDetails | InputRichBlock
 def news_block(item: NewsItem) -> InputRichBlockDetails:
     # The Bot API treats strings in structured blocks as plain text.
     details = []
+    if item.source == TVRAIN_SOURCE:
+        details.append(InputRichBlockParagraph(text=TVRAIN_NOTICE))
     if item.body != item.title:
         details.append(InputRichBlockParagraph(text=item.body))
     if link := clean_link(item.link):
         details.append(InputRichBlockParagraph(text=RichTextUrl(text=item.source or "Источник", url=link)))
     if not details:
         details.append(InputRichBlockParagraph(text="Подробности недоступны."))
-    return InputRichBlockDetails(summary=item.title, blocks=details)
+    summary = f"{item.title} · Дождь — иноагент" if item.source == TVRAIN_SOURCE else item.title
+    return InputRichBlockDetails(summary=summary, blocks=details)

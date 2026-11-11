@@ -38,6 +38,7 @@ WEATHER_URL = (
 TRAFFIC_URL = "https://export.yandex.ru/bar/reginfo.xml?region=2"
 TVRAIN_FEEDS = ("https://tvrain.ru/export/rss/all.xml", "https://tvrain.tv/export/rss/all.xml")
 TVRAIN_SOURCE = "Телеканал «Дождь»"
+TVRAIN_NOTICE = "Материал телеканала «Дождь», признанного в РФ иностранным агентом"
 TVRAIN_SKIP_RE = re.compile(
     r"\b(?:реклама|advertisement|sponsored|промо|анонс|гороскоп|прямой эфир|трансляция)\b|"
     r"на правах рекламы|смотрите (?:сегодня|в эфире|в прямом эфире)|партн[её]рский материал",
@@ -654,7 +655,8 @@ def render_news_line(item: NewsItem) -> str:
     link = clean_link(item.link)
     source = html.escape(item.source or "Источник")
     citation = f'<a href="{html.escape(link, quote=True)}">{source}</a>' if link else ""
-    return "\n".join(part for part in (f"<b>{title}</b>", body, citation) if part)
+    notice = html.escape(TVRAIN_NOTICE) if item.source == TVRAIN_SOURCE else ""
+    return "\n".join(part for part in (f"<b>{title}</b>", notice, body, citation) if part)
 
 
 def upcoming_lines(payload: dict[str, object], now: datetime, count: int = 4) -> list[str]:
@@ -798,6 +800,7 @@ def _render_compact_brief(brief: MorningBrief, detail_limit: int) -> str:
             body = _short(item.body, detail_limit) if item.body != item.title else ""
             parts.append(_quote([
                 "<b>" + html.escape(_short(item.title, 72)) + "</b>",
+                html.escape(TVRAIN_NOTICE) if item.source == TVRAIN_SOURCE else "",
                 html.escape(body), citation,
             ]))
     elif not brief.news_available:

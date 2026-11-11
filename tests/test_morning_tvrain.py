@@ -6,8 +6,21 @@ import pytest
 from aiogram import Bot
 
 from community_bot import morning, morning_tvrain_trial
+from community_bot.morning_rich import news_block
 
 NOW = datetime(2026, 11, 9, 9, tzinfo=ZoneInfo("Europe/Moscow"))
+
+
+def test_rain_notice_in_rich_and_fallback_only_for_rain():
+    rain = morning.NewsItem("Заголовок", NOW, source=morning.TVRAIN_SOURCE, link="https://tvrain.tv/news/one")
+    local = morning.NewsItem("Другая новость", NOW, source="Фонтанка", link="https://example.org/news")
+    block = news_block(rain)
+    assert "Дождь — иноагент" in block.summary
+    assert block.blocks[0].text == morning.TVRAIN_NOTICE
+    assert morning.TVRAIN_NOTICE in morning.render_news_line(rain)
+    assert morning.TVRAIN_NOTICE in morning.render_brief(morning.MorningBrief(NOW, day_news=[rain, local]))
+    assert "иноагент" not in news_block(local).summary
+    assert morning.TVRAIN_NOTICE not in morning.render_news_line(local)
 
 
 def rss_item(title, path, date, extra=""):
