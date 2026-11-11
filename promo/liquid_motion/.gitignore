@@ -1,0 +1,6 @@
+*.mp4
+*.png
+*.jpg
+segments.txt
+__pycache__/
+validation.json

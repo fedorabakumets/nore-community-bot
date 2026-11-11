@@ -1,0 +1,4 @@
+Pillow>=11,<12
+numpy==2.5.4
+skia-python==144.1
+imageio-ffmpeg==0.8.1
