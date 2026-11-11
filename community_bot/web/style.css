@@ -539,12 +539,25 @@ form label{font-size:14px;color:var(--poster-muted)}
 .balance{padding:20px;border:var(--poster-edge);border-radius:22px;background:var(--poster-yellow);color:var(--poster-black);box-shadow:5px 6px 0 var(--poster-pink);margin:0 6px 28px 0}
 .balance strong{font-size:clamp(36px,10vw,52px);font-weight:850;line-height:1.2}
 .balance small,.balance .sub{color:#51422f}
-.wallet-actions{display:grid;gap:4px;margin-block:20px 28px}
+.wallet-actions,.wallet-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-block:16px}
+.wallet-actions button,.wallet-filters button{margin:0}
+.wallet-actions svg,.wallet-recent svg{width:18px;height:18px;vertical-align:middle}
+.wallet-filters [aria-pressed="true"]{background:var(--poster-yellow);color:var(--poster-black);border-color:var(--poster-black)}
+.wallet-recent{margin-block:24px}
+.wallet-recent h2{margin-bottom:8px}
+.wallet-recent button,.wallet-more{margin-top:16px}
+.wallet-date{margin:16px 0 0;color:var(--muted);font-size:13px}
 .transaction{padding:16px 0;border-color:var(--poster-rule)}
 .tx-icon{background:var(--poster-raised);border:1px solid var(--poster-rule);border-radius:12px;color:var(--poster-yellow)}
 .tx-info{min-width:0}
 .tx-info b{font-size:14px;overflow-wrap:anywhere}
 .transaction strong{font-size:14px}
+.wallet-transaction .tx-icon{flex:none}
+.wallet-transaction .tx-info .wallet-source{color:var(--white);overflow-wrap:anywhere}
+.wallet-transaction time{display:block;color:var(--muted);font-size:12px}
+.wallet-transaction strong{text-align:right;overflow-wrap:anywhere;max-width:38%;font-variant-numeric:tabular-nums}
+.wallet-transaction .wallet-incoming{color:var(--poster-yellow)}
+@media(max-width:340px){.wallet-transaction .tx-icon{display:none}}
 .pet-identity{gap:12px}
 .pet-species{background:#f8d5e6;border-radius:18px;padding:12px}
 .pet-meter{margin-block:16px}

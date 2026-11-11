@@ -1865,10 +1865,23 @@ class Database:
             await db.commit()
             return True, "ok", receiver_amount
 
-    async def list_transactions(self, user_id: int, limit: int = 12, *, offset: int = 0) -> list[dict[str, Any]]:
+    async def list_transactions(
+        self, user_id: int, limit: int = 12, *, offset: int = 0, direction: str = "all", before: int | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions = ["user_id = ?"]
+        params = [user_id]
+        if direction == "incoming":
+            conditions.append("amount > 0")
+        elif direction == "outgoing":
+            conditions.append("amount < 0")
+        elif direction == "transfers":
+            conditions.append("kind = 'transfer'")
+        if before is not None:
+            conditions.append("id < ?")
+            params.append(before)
         return await self.fetchall(
-            "SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
-            (user_id, limit, max(0, offset)),
+            "SELECT * FROM transactions WHERE " + " AND ".join(conditions) + " ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*params, limit, max(0, offset)),
         )
 
     async def create_wallet_intent(

@@ -12,8 +12,10 @@ from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import reputation_tier, transfer_commission_percent
 from community_bot.economy import (
+    HISTORY_FILTERS,
     LOAN_DAYS,
     LOAN_PRINCIPAL,
+    describe_transactions,
     loan_interest_percent,
     loan_repay_amount,
     transaction_line,
@@ -116,28 +118,33 @@ async def wallet_home(callback: CallbackQuery, db: Database, settings: Settings)
 async def wallet_history(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message:
         return
-    raw_offset = (callback.data or "").removeprefix("wallet:history:")
-    offset = int(raw_offset) if raw_offset.isdigit() else 0
-    rows = await db.list_transactions(callback.from_user.id, 6, offset=offset)
-    page = rows[:5]
+    _, _, *parts = (callback.data or "").split(":")
+    first = parts[0] if parts else ""
+    direction = first if first in HISTORY_FILTERS else "all"
+    raw_offset = parts[1] if len(parts) > 1 else first
+    offset = int(raw_offset) if raw_offset.isascii() and raw_offset.isdecimal() and len(raw_offset) <= 7 else 0
+    rows = await db.list_transactions(callback.from_user.id, 6, offset=offset, direction=direction)
+    page = await describe_transactions(db, rows[:5])
     await callback.answer()
     if not rows:
-        text = "📜 Пока нет движений по кошельку."
+        text = f"📜 <b>История операций · {HISTORY_FILTERS[direction]}</b>\n\nЗдесь пока нет операций."
     else:
-        text = "📜 <b>История операций</b>\n\n" + "\n\n".join(
+        text = f"📜 <b>История операций · {HISTORY_FILTERS[direction]}</b>\n\n" + "\n\n".join(
             transaction_line(row, settings.timezone) for row in page
         )
     nav = []
+    page_prefix = "wallet:history:" if direction == "all" else f"wallet:history:{direction}:"
     if offset:
-        nav.append(ibtn("← Новее", f"wallet:history:{max(0, offset - 5)}"))
+        nav.append(ibtn("← Новее", f"{page_prefix}{max(0, offset - 5)}"))
     if len(rows) > 5:
-        nav.append(ibtn("Старее →", f"wallet:history:{offset + 5}"))
+        nav.append(ibtn("Старее →", f"{page_prefix}{offset + 5}"))
+    filters = [ibtn(label, f"wallet:history:{key}") for key, label in HISTORY_FILTERS.items() if key != direction]
     await edit_block(
         callback.message,
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=([nav] if nav else []) + [[back_btn("wallet:home"), close_btn("ui:close")]],
+            inline_keyboard=[filters] + ([nav] if nav else []) + [[back_btn("wallet:home"), close_btn("ui:close")]],
         ),
     )
 

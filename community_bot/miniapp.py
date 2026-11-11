@@ -167,7 +167,8 @@ async def overview(request):
     levels = [{'label': label, 'range': span, 'discount': tier_for(value).discount,
                'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus}
               for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
-    history = await db.list_transactions(user['user_id'], 20)
+    history = await db.list_transactions(user['user_id'], 4)
+    from community_bot.economy import describe_transactions
     from community_bot.updates import UPDATES
 
     # Only member-facing articles: staff_details and operational notes are never exposed here.
@@ -196,7 +197,7 @@ async def overview(request):
         'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
         'events_admin': await allowed(db, settings, user['user_id']),
         'home': {'community_url': community_url, 'news': news},
-        'history': [{'amount': t['amount'], 'kind': t['kind'], 'date': t['created_at']} for t in history],
+        'history': await describe_transactions(db, history),
     })
 
 

@@ -8,9 +8,10 @@ from aiohttp import web
 
 from community_bot.domain import transfer_commission_percent
 from community_bot.economy import (
+    HISTORY_FILTERS,
     LOAN_DAYS,
     LOAN_PRINCIPAL,
-    TRANSACTION_LABELS,
+    describe_transactions,
     loan_interest_percent,
     loan_repay_amount,
 )
@@ -18,7 +19,6 @@ from community_bot.miniapp import actor
 from community_bot.pets_talk import SPECIES
 from community_bot.rsvp import event_lock
 from community_bot.shop_api import recipient
-from community_bot.shop_catalog import ITEM_LABELS
 from community_bot.shop_text import plain_shop_text
 
 
@@ -273,25 +273,24 @@ async def wallet_confirm(request):
 async def wallet_history(request):
     user, db = await actor(request), request.app["db"]
     raw = request.query.get("offset", "0")
-    if not raw.isdigit() or len(raw) > 8:
+    before = request.query.get("before")
+    direction = request.query.get("direction", "all")
+    if (
+        not raw.isascii() or not raw.isdecimal() or len(raw) > 8
+        or direction not in HISTORY_FILTERS
+        or (before is not None and (not before.isascii() or not before.isdecimal() or len(before) > 18))
+    ):
         raise ValueError("Некорректная страница истории")
     offset = min(int(raw), 1_000_000)
-    rows = await db.list_transactions(user["user_id"], 21, offset=offset)
-    items = []
-    for row in rows[:20]:
-        kind, details = row["kind"], row["details"]
-        label = TRANSACTION_LABELS.get(kind, "Операция с печеньками")
-        if kind in {"shop", "pet_shop"}:
-            sku, _, target = details.partition("->")
-            label = ITEM_LABELS.get(sku, label) + (" · подарок" if target else "")
-        elif kind == "seasonal_purchase" and details:
-            label = "Сезонный предмет: " + details
-        elif kind == "transfer":
-            label = "Перевод отправлен" if row["amount"] < 0 else "Перевод получен"
-        items.append(
-            {"id": row["id"], "amount": row["amount"], "kind": kind, "label": label, "date": row["created_at"]}
-        )
-    return web.json_response({"items": items, "offset": offset, "has_more": len(rows) > 20})
+    rows = await db.list_transactions(
+        user["user_id"], 21, offset=offset, direction=direction, before=int(before) if before else None,
+    )
+    return web.json_response({
+        "items": await describe_transactions(db, rows[:20]),
+        "offset": offset,
+        "has_more": len(rows) > 20,
+        "next_before": str(rows[19]["id"]) if len(rows) > 20 else None,
+    })
 
 
 async def widget_notice(request):

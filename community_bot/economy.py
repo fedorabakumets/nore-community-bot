@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -11,8 +12,13 @@ LOAN_DAYS = 7
 
 TRANSACTION_LABELS = {
     "birthday_gift": "Подарок НОРЫ ко дню рождения",
+    "profile_complete": "Бонус за заполнение профиля",
+    "daily_chat": "Награда за активность в чате",
     "transfer": "Перевод",
-    "admin_set": "Админ: баланс",
+    "admin": "Начисление администратора",
+    "admin_set": "Корректировка баланса",
+    "wallet_reset": "Сброс баланса",
+    "community_reset": "Сброс баланса сообщества",
     "shop": "Магазин",
     "seasonal_purchase": "Сезонный предмет",
     "sbp_payment": "Пополнение СБП",
@@ -29,6 +35,9 @@ TRANSACTION_LABELS = {
     "cookie_game_restake": "Пересчёт ставки",
     "rocket_bet": "Ракетка · ставка",
     "rocket_payout": "Ракетка · выплата",
+    "sea_bet": "Морской бой · ставка",
+    "sea_win": "Морской бой · выигрыш",
+    "sea_refund": "Морской бой · возврат ставки",
     "loan": "НОРА — СТАРТЕР-ПАК",
     "loan_repay": "Возврат стартер-пака",
     "debt_repay": "Погашение просроченного долга",
@@ -36,6 +45,42 @@ TRANSACTION_LABELS = {
     "lottery": "Розыгрыш",
     "lottery_win": "Выигрыш розыгрыша",
     "contest_win": "Приз конкурса",
+}
+
+HISTORY_FILTERS = {"all": "Все", "incoming": "Поступления", "outgoing": "Списания", "transfers": "Переводы"}
+
+TRANSACTION_SOURCES = {
+    "birthday_gift": "Нора",
+    "profile_complete": "Нора · профиль",
+    "daily_chat": "Нора · активность сообщества",
+    "wallet_reset": "Нора · сброс кошельков",
+    "community_reset": "Нора · перезапуск сообщества",
+    "shop": "Магазин Норы",
+    "pet_shop": "Магазин питомцев",
+    "seasonal_purchase": "Сезонный магазин",
+    "sbp_payment": "СБП",
+    "subscription_freebie": "Нора · подписка на канал",
+    "pet_farm": "Твой питомец",
+    "pet_expedition": "Твой питомец",
+    "rsvp": "Мероприятия Норы",
+    "rsvp_refund": "Мероприятия Норы",
+    "cookie_game_stake": "Игры Норы",
+    "cookie_game_win": "Игры Норы",
+    "cookie_game_refund": "Игры Норы",
+    "cookie_game_restake": "Игры Норы",
+    "roulette": "Рулетка",
+    "rocket_bet": "Ракетка",
+    "rocket_payout": "Ракетка",
+    "sea_bet": "Морской бой",
+    "sea_win": "Морской бой",
+    "sea_refund": "Морской бой",
+    "loan": "Кошелёк Норы",
+    "loan_repay": "Кошелёк Норы",
+    "debt_repay": "Кошелёк Норы",
+    "debt": "Кошелёк Норы",
+    "lottery": "Розыгрыш Норы",
+    "lottery_win": "Розыгрыш Норы",
+    "contest_win": "Конкурс Норы",
 }
 
 
@@ -73,13 +118,53 @@ def pet_farm_rate_line(pet: dict[str, object] | None, equipped: list[str] | tupl
     return pet_status_line(pet)
 
 
-def transaction_line(row: dict[str, object], timezone: str = "Europe/Moscow") -> str:
+def _transaction_reference(details: str, prefix: str) -> int | None:
+    match = re.fullmatch(re.escape(prefix) + r"([1-9][0-9]{0,18})", details)
+    if match and (value := int(match[1])) <= 2**63 - 1:
+        return value
+    return None
+
+
+def _transaction_party(row: dict) -> tuple[str, int | None]:
+    kind, details = row["kind"], row.get("details") or ""
+    if kind == "transfer":
+        if row["amount"] < 0:
+            return "Кому", _transaction_reference(details, "to:")
+        return "От кого", _transaction_reference(details, "from:")
+    if kind in {"admin", "admin_set"}:
+        return "Администратор", _transaction_reference(details, "by:")
+    if kind in {"shop", "pet_shop"} and "->" in details:
+        return "Кому подарок", _transaction_reference(details.partition("->")[2], "")
+    return "", None
+
+
+async def describe_transactions(db, rows: list[dict]) -> list[dict]:
+    parties = [_transaction_party(row) for row in rows]
+    user_ids = sorted({user_id for _, user_id in parties if user_id is not None})
+    names = {}
+    if user_ids:
+        placeholders = ",".join("?" for _ in user_ids)
+        people = await db.fetchall(
+            "SELECT user_id, profile_name, telegram_name, username FROM users "
+            f"WHERE user_id IN ({placeholders})",
+            tuple(user_ids),
+        )
+        for person in people:
+            name = (person["profile_name"] or person["telegram_name"] or "").strip()[:120]
+            handle = f"@{person['username']}" if person["username"] else f"ID {person['user_id']}"
+            names[person["user_id"]] = f"{name} ({handle})" if name and name.casefold() != handle.casefold() else handle
+    return [
+        transaction_item(row, (role, names.get(user_id) or (f"ID {user_id}" if user_id else "нет данных")))
+        for row, (role, user_id) in zip(rows, parties, strict=True)
+    ]
+
+
+def transaction_item(row: dict, party: tuple[str, str] | None = None) -> dict:
     from community_bot.shop_catalog import ITEM_LABELS
 
     kind = str(row["kind"])
     label = TRANSACTION_LABELS.get(kind, "Другая операция")
     amount = int(row["amount"])
-    sign = f"+{amount}" if amount > 0 else str(amount)
     details = str(row.get("details") or "")
     if kind in {"shop", "pet_shop"}:
         sku, _, target = details.partition("->")
@@ -91,15 +176,35 @@ def transaction_line(row: dict[str, object], timezone: str = "Europe/Moscow") ->
         label = "Сезонный предмет: " + details
     elif kind == "transfer":
         label = "Перевод отправлен" if amount < 0 else "Перевод получен"
+    elif kind == "wallet_reset" and amount > 0:
+        label = "Восстановление бонуса профиля при сбросе"
     elif kind == "loan_repay" and ";debt:" in details:
         debt = details.rsplit(";debt:", 1)[1]
-        if debt.isdigit() and int(debt):
+        if re.fullmatch(r"[1-9][0-9]{0,18}", debt):
             label += f" · в долг перешло {debt} 🍪"
+    date = str(row["created_at"])
     try:
-        when_dt = datetime.fromisoformat(str(row["created_at"]))
-        if when_dt.tzinfo is None:
-            when_dt = when_dt.replace(tzinfo=UTC)
-        when = when_dt.astimezone(ZoneInfo(timezone)).strftime("%d.%m.%Y, %H:%M")
+        stamp = datetime.fromisoformat(date)
+        date = (stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)).isoformat()
     except ValueError:
-        when = str(row["created_at"])[:16].replace("T", " ")
-    return f"<b>{sign} 🍪</b> · {html.escape(label)}\n<i>{html.escape(when)}</i>"
+        pass
+    if party is None:
+        role, user_id = _transaction_party(row)
+        party = role, f"ID {user_id}" if user_id else "нет данных"
+    role, name = party
+    source = f"{role}: {name}" if role else TRANSACTION_SOURCES.get(kind, "Источник не указан")
+    return {"id": row.get("id"), "kind": kind, "amount": amount, "label": label[:160], "source": source, "date": date}
+
+
+def transaction_line(row: dict, timezone: str = "Europe/Moscow") -> str:
+    item = row if "source" in row else transaction_item(row)
+    amount = item["amount"]
+    sign = f"+{amount}" if amount > 0 else str(amount)
+    try:
+        when = datetime.fromisoformat(item["date"]).astimezone(ZoneInfo(timezone)).strftime("%d.%m.%Y, %H:%M")
+    except ValueError:
+        when = item["date"][:16].replace("T", " ")
+    return (
+        f"<b>{sign} 🍪</b> · {html.escape(item['label'])}\n"
+        f"{html.escape(item['source'])}\n<i>{html.escape(when)}</i>"
+    )

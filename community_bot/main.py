@@ -477,6 +477,7 @@ async def main() -> None:
     db = Database(settings.database_path)
     from community_bot import profile_access_rollout
     from community_bot.community_reset import apply_reset, prepare_reset, reset_settings
+    from community_bot.wallet_reset import apply_wallet_reset_release
 
     await profile_access_rollout.prepare(db)
     await prepare_reset(db)
@@ -484,6 +485,7 @@ async def main() -> None:
     await verify_widget_notification_backup(db)
     await db.initialize()
     await apply_reset(db, settings)
+    await apply_wallet_reset_release(db)
     settings = await reset_settings(db, settings)
     if await db.get_bot_state("emergency_disabled") == "1":
         logger.critical("Бот заблокирован аварийным выключателем")

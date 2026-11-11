@@ -1,6 +1,6 @@
 'use strict';
 window.NoraCabinet=(()=>{
-  let historyPage=null,historyOffset=0,historyLoading=false,noticeData=null,noticeLoading=false,pending=false;
+  let history=null,noticeData=null,noticeLoading=false,pending=false;
   const help={
     fill:['Заполнение профиля','Пять блоков: имя, дата рождения, увлечения, описание и фото. Все заполнены — 100%. За первое полное заполнение начисляется 10 🍪 один раз; после этого открываются Комьюнити, магазин, события и игры.'],
     cap:['Потолок репутации','Пока профиль не заполнен полностью, репутация ограничена бронзой — 69. При 100% заполнении доступен полный диапазон до 100. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников.'],
@@ -39,9 +39,117 @@ window.NoraCabinet=(()=>{
   function reputationSheet(){const u=data.user,p=data.profile;sheet(`${sheetHeading('Репутация и лимиты')}<section class="lk-reputation"><div class="lk-rep-overview"><span class="lk-medal" aria-hidden="true">${medal()}</span><div><b class="lk-tier">${esc(p.tier)}</b><strong>${number(u.reputation)} / 100</strong><small>Скидка в магазине ${number(p.discount)}%</small></div><progress max="100" value="${Math.min(100,Math.max(0,Number(u.reputation)))}" aria-label="Репутация"></progress></div><div class="lk-limit-list">${statRow('Действий осталось сегодня',number(p.actions_left)+' / '+number(p.daily_actions),'daily')}${statRow('Потолок репутации',number(p.reputation_cap),'cap')}${statRow('Предупреждения',number(u.warnings),'warnings')}${statRow('Щиты от −реп',number(u.hate_shields),'shields')}${statRow('Можно ставить −реп',p.can_minus?'Да':'Нет','minus')}${u.hate_immunity_until?statRow('Иммунитет до',esc(new Date(u.hate_immunity_until).toLocaleString('ru-RU',{timeZone:p.timezone})),'immunity'):''}</div><div class="lk-fill"><div><b>Заполнение профиля ${q('fill')}</b><strong>${number(p.fill_percent)}%</strong></div><div class="lk-fill-checks">${p.blocks.map(x=>`<span class="${x.filled?'filled':''}"><i>${x.filled?'✓':'○'}</i> ${esc(x.title)}</span>`).join('')}</div>${p.fill_percent<100?'<button class="lk-edit" id="edit-profile">Заполнить профиль</button>':''}</div><button class="text-btn lk-levels" data-lk-levels>Все уровни и возможности ›</button><p class="footer-note lk-reset">↻ Обновление лимитов · ${esc(p.timezone==='Europe/Moscow'?'Москва':p.timezone)}</p></section>`)}
   function settingsSheet(){sheet(`${sheetHeading('Настройки профиля')}<div class="lk-settings-actions"><button class="secondary" id="edit-profile">Редактировать профиль</button><button class="secondary" data-lk-avatar>${data.has_avatar?'Заменить':'Установить'} фото</button><button class="secondary" data-presence-settings>Приватность и активность</button><button class="secondary" data-lk-notices>Уведомления</button></div><p class="footer-note">Фото до 5 МБ · JPG, PNG или WebP.<br>Профиль общий с ботом.</p>`)}
   function petScreen(){const p=data.pet;if(!p)return `<p class="eyebrow">Твой маленький спутник</p><h1><em>Питомец</em></h1><section class="card pet-empty"><div class="pet-empty-icon">${NoraShop.svg('pets')}</div><h2>Здесь будет<br>жить твой питомец.</h2><p class="sub">Выбери его в магазине, придумай имя и отправляйтесь за находками.</p><button class="primary" data-open-pet-shop>Выбрать питомца</button></section>`;const away=!!p.expedition_until;const age=Math.max(0,Math.floor((Date.now()-new Date(p.created_at))/86400000));return `<p class="eyebrow">${esc(p.species_label)} · ${age} дн. вместе</p><h1>Твой<br><em>питомец</em></h1><section class="card pet-identity"><span class="pet-species" aria-hidden="true">${esc(p.emoji)}</span><div><h2>${NoraPrefix(p.prefix)}${esc(p.name)}</h2><p class="sub">${away?'Ищет приключения':p.sleeping?'Спит — пора подкрепиться':'Бодрствует и ждёт тебя'}</p></div><button class="text-btn" id="rename-pet">Имя</button></section>${!p.enabled?'<p class="sub">Действия питомца временно выключены администрацией.</p>':''}<section class="card pet-stats"><h2>Как дела ${q('petMood')}</h2>${[['Сытость',p.hunger],['Вода',p.thirst],['Настроение',p.mood]].map(([label,n])=>`<div class="pet-meter"><span>${label}<b>${number(n)} / 100</b></span><progress max="100" value="${n}"></progress></div>`).join('')}</section><section class="card pet-supplies"><div class="row"><h2>Забота ${q('food')}</h2><button class="text-btn" data-open-pet-shop>В магазин</button></div><p class="sub">В запасе ${number(p.food_units)} порций еды · ${number(p.water_units)} порций воды.</p><div class="pet-action-row"><button class="secondary" data-pet-action="food" ${!p.enabled||!p.food_units||p.hunger>=100?'disabled':''}>Покормить · +20</button><button class="secondary" data-pet-action="water" ${!p.enabled||!p.water_units||p.thirst>=100?'disabled':''}>Напоить · +20</button></div></section><section class="card pet-trip"><h2>За приключениями ${q('expedition')}</h2><p class="sub">${away?'Возвращение: '+esc(new Date(p.expedition_until).toLocaleString('ru-RU')):'Поход на 24 часа. Нужны сытость и вода от 50.'}</p>${p.last_find?`<p class="pet-find">Последняя находка: <b>${esc(p.last_find)}</b></p>`:''}<button class="primary" data-pet-action="expedition" ${away||!p.enabled||p.hunger<50||p.thirst<50?'disabled':''}>${away?'Питомец в походе':'Отправить в поход'}</button></section>`}
-  function walletScreen(){const w=data.wallet,u=data.user;return `<p class="eyebrow">Печеньки на хорошие вещи</p><h1><em>Кошелёк</em></h1><div class="balance"><small>Доступно сейчас</small><strong>${number(u.cookies)} 🍪</strong>${u.cookie_debt?`<p class="sub">К возврату просрочено: ${number(u.cookie_debt)} 🍪</p>`:''}</div><div class="wallet-actions"><button class="primary" id="wallet-topup">Пополнить баланс</button><button class="secondary" id="wallet-transfer">Перевести участнику ${icon('send')}</button><button class="secondary" data-tab="history">История операций ${icon('history')}</button></div><section class="card starter-card"><span class="eyebrow">На развитие для старта</span><h2>НОРА —<br>СТАРТЕР-ПАК ${q('starter')}</h2><p class="sub">100 печенек, которые нужно вернуть.</p>${w.active?`<p>К возврату <b>${number(w.active.due_amount)} 🍪</b></p><p class="sub">До ${esc(new Date(w.active.due_at).toLocaleString('ru-RU'))}</p><button class="primary" id="wallet-repay">Вернуть стартер-пак</button>`:u.cookie_debt?'<p class="sub">Новый пак откроется после погашения долга.</p><button class="primary" id="wallet-repay">Погасить долг</button>':`<p class="sub">На ${number(w.days)} ${plural(w.days,'день','дня','дней')} · комиссия ${number(w.interest_percent)}%<br>Всего к возврату: <b>${number(w.repay_amount)} 🍪</b>.</p><button class="primary" id="wallet-starter">Получить 100 🍪 с возвратом</button>`}</section><button class="secondary" data-tab="lk">В личный кабинет</button><p class="footer-note">Общий баланс с ботом. Условия показываем до подтверждения.</p>`}
-  function historyScreen(){if(!historyPage&&!historyLoading)queueMicrotask(()=>loadHistory(0));return `<button class="text-btn" data-tab="wallet">← Кошелёк</button><p class="eyebrow">Движение печенек</p><h1><em>История</em></h1>${historyLoading?'<p class="sub">Загружаем операции…</p>':historyPage?.items?.length?historyPage.items.map(t=>`<div class="transaction"><span class="tx-icon">${t.amount>0?'+':'−'}</span><div class="tx-info"><b>${esc(t.label)}</b><span>${esc(new Date(t.date).toLocaleString('ru-RU'))}</span></div><strong>${t.amount>0?'+':''}${number(t.amount)} 🍪</strong></div>`).join(''):'<div class="empty">Здесь появятся твои покупки, переводы и находки.</div>'}<div class="pet-action-row">${historyOffset?'<button class="secondary" id="history-newer">← Новее</button>':''}${historyPage?.has_more?'<button class="secondary" id="history-older">Старее →</button>':''}</div>`}
-  async function loadHistory(offset){if(historyLoading)return;historyLoading=true;historyOffset=offset;try{historyPage=await api('wallet/history?offset='+offset)}catch(e){toast(e.message);historyPage={items:[]}}finally{historyLoading=false;if(tab==='history')render()}}
+  function walletScreen() {
+    const w = data.wallet, u = data.user;
+    return `<button class="text-btn" data-tab="lk">← Личный кабинет</button>
+      <h1><em>Кошелёк</em></h1>
+      <div class="balance"><small>Доступно</small><strong>${number(u.cookies)} 🍪</strong>
+        ${u.cookie_debt ? `<p class="sub">Просроченный долг · ${number(u.cookie_debt)} 🍪</p>` : ''}
+      </div>
+      <div class="wallet-actions">
+        <button class="primary" id="wallet-topup">Пополнить</button>
+        <button class="secondary" id="wallet-transfer">Перевести ${icon('send')}</button>
+      </div>
+      <section class="wallet-recent" aria-labelledby="wallet-recent-title">
+        <h2 id="wallet-recent-title">Последние операции</h2>
+        ${data.history.length ? transactionList(data.history) : '<p class="sub">Операций пока нет.</p>'}
+        <button class="secondary" data-tab="history">Вся история ${icon('history')}</button>
+      </section>
+      <section class="card starter-card">
+        <h2>Стартер-пак ${q('starter')}</h2>
+        ${w.active ? `<p>К возврату <b>${number(w.active.due_amount)} 🍪</b></p>
+          <p class="sub">До ${esc(new Date(w.active.due_at).toLocaleString('ru-RU'))}</p>
+          <button class="primary" id="wallet-repay">Вернуть стартер-пак</button>`
+          : u.cookie_debt ? '<button class="primary" id="wallet-repay">Погасить долг</button>'
+          : `<p class="sub">${number(w.principal)} 🍪 на ${number(w.days)} ${plural(w.days,'день','дня','дней')} · комиссия ${number(w.interest_percent)}%<br>
+            К возврату <b>${number(w.repay_amount)} 🍪</b></p>
+            <button class="secondary" id="wallet-starter">Получить с возвратом</button>`}
+      </section>`;
+  }
+  const historyFilters = {all:'Все', incoming:'Поступления', outgoing:'Списания', transfers:'Переводы'};
+
+  function transactionList(items) {
+    const options = {timeZone: data.profile.timezone};
+    const dayFormat = new Intl.DateTimeFormat('ru-RU', {...options, day:'numeric', month:'long', year:'numeric'});
+    const timeFormat = new Intl.DateTimeFormat('ru-RU', {...options, hour:'2-digit', minute:'2-digit'});
+    let previousDay;
+    return items.map(item => {
+      const stamp = new Date(item.date);
+      const validDate = Number.isFinite(stamp.getTime());
+      const day = validDate ? dayFormat.format(stamp) : 'Дата неизвестна';
+      const heading = day === previousDay ? '' : `<h3 class="wallet-date">${esc(day)}</h3>`;
+      previousDay = day;
+      const sign = item.amount > 0 ? '+' : item.amount < 0 ? '−' : '';
+      return `${heading}<div class="transaction wallet-transaction">
+        <span class="tx-icon" aria-hidden="true">${item.amount > 0 ? '↙' : item.amount < 0 ? '↗' : '·'}</span>
+        <div class="tx-info">
+          <b>${esc(item.label)}</b>
+          <span class="wallet-source">${esc(item.source)}</span>
+          ${validDate ? `<time datetime="${esc(item.date)}">${esc(timeFormat.format(stamp))}</time>` : ''}
+        </div>
+        <strong class="${item.amount > 0 ? 'wallet-incoming' : ''}">${sign}${number(Math.abs(item.amount))} 🍪</strong>
+      </div>`;
+    }).join('');
+  }
+
+  function newHistory(direction) {
+    const state = {direction, items:[], next:null, loading:true, error:''};
+    history = state;
+    queueMicrotask(() => loadHistory(state));
+  }
+
+  function historyScreen() {
+    if (!history) newHistory('all');
+    const {direction, items, next, loading, error} = history;
+    return `<button class="text-btn" data-tab="wallet">← Кошелёк</button>
+      <h1><em>История операций</em></h1>
+      <div class="wallet-filters" role="group" aria-label="Фильтр операций">
+        ${Object.entries(historyFilters).map(([key,label]) => `
+          <button class="secondary" data-history-filter="${key}" aria-pressed="${key === direction}">${label}</button>
+        `).join('')}
+      </div>
+      <section aria-busy="${loading}" aria-label="Операции кошелька">
+        ${items.length ? transactionList(items) : !loading && !error ? '<p class="empty">В этой категории пока нет операций.</p>' : ''}
+      </section>
+      ${loading ? '<p class="sub" role="status">Загружаем операции…</p>' : ''}
+      ${error ? `<p class="sub" role="alert">${esc(error)}</p>` : ''}
+      ${next || error ? `<button class="secondary wallet-more" id="history-more" ${loading ? 'disabled' : ''}>${error ? 'Повторить' : 'Показать ещё'}</button>` : ''}`;
+  }
+
+  async function loadHistory(state) {
+    if (history !== state || tab !== 'history') return;
+    const query = new URLSearchParams({direction:state.direction});
+    if (state.next) query.set('before', state.next);
+    try {
+      const page = await api('wallet/history?' + query);
+      state.items.push(...page.items);
+      state.next = page.next_before;
+    } catch (error) {
+      state.error = error.message || 'История пока недоступна.';
+    } finally {
+      state.loading = false;
+      if (tab === 'history' && history === state) render();
+    }
+  }
+
+  function syncHistory() {
+    if (tab !== 'history') history = null;
+  }
+
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (tab !== 'history' || !button || !history) return;
+    const direction = button.dataset.historyFilter;
+    if (direction && direction !== history.direction) {
+      newHistory(direction);
+      render();
+    } else if (button.id === 'history-more' && !history.loading) {
+      history.loading = true;
+      history.error = '';
+      render();
+      void loadHistory(history);
+    }
+  });
   function noticesScreen(){if(!noticeData&&!noticeLoading)queueMicrotask(loadNotices);const items=(noticeData?.items||[]).filter(n=>!n.profile_invite||data.profile.fill_percent<100);return `<p class="eyebrow">Ничего лишнего</p><h1><em>Уведомления</em></h1>${noticeLoading?'<p class="sub">Проверяем новости…</p>':''}${noticeData?.birthday_gift_day?`<article class="card notice-item unread"><small>🎁 Подарок от НОРЫ</small><h2>500 🍪 ждут тебя!</h2><p>Один подарок, общий для бота и мини-приложения.</p><button class="primary" data-birthday-claim="${esc(noticeData.birthday_gift_day)}">Получить подарок</button></article>`:''}${(noticeData?.mafia_invites||[]).map(i=>NoraInteractive.invitationCard(i)).join('')}${(noticeData?.sea_invites||[]).map(i=>NoraSea.inviteCard(i)).join('')}<div class="notice-list">${items.length?items.map(n=>`<article class="card notice-item ${n.read?'':'unread'}"><small>${esc(new Date(n.created_at).toLocaleString('ru-RU'))}${n.read?'':' · новое'}</small><p>${esc(n.text)}</p>${n.profile_invite?`<div class="pet-action-row"><button class="primary" data-tab="lk">Открыть профиль</button><button class="secondary" data-dismiss-profile-invite>Закрыть</button></div>`:''}${n.mafia_invite?NoraInteractive.invitationCard(n.mafia_invite):''}${n.sea_invite?NoraSea.inviteCard(n.sea_invite):''}</article>`).join(''):'<p class="sub">Пока тихо. Выбери ниже, что тебе интересно.</p>'}</div><h2>Что присылать</h2>${(noticeData?.channels||[]).map(c=>`<section class="card notice-channel"><h3>${esc(c.title)}</h3><p class="sub">${esc(c.description)}</p><label><span>Получать уведомления</span><input type="checkbox" data-notice-channel="${esc(c.id)}" data-notice-field="enabled" ${c.enabled?'checked':''}></label>${c.widget?'':`<label><span>Собирать в дайджест</span><input type="checkbox" data-notice-channel="${esc(c.id)}" data-notice-field="digest" ${c.digest?'checked':''}></label>`}</section>`).join('')}<p class="footer-note">Настройки общие с ботом. Служебные сообщения модерации и решения по оплатам приходят отдельно.</p>`}
   async function loadNotices(){if(noticeLoading)return;noticeLoading=true;try{noticeData=await api('notices');data.unread_notices=noticeData.unread;if(noticeData.unread){noticeData.items.forEach(n=>n.read=true);noticeData.unread=0;data.unread_notices=0;api('notices',{action:'read',through_id:Math.max(0,...noticeData.items.map(n=>n.id))}).catch(()=>{})}}catch(e){toast(e.message);noticeData={items:[],channels:[]}}finally{noticeLoading=false;if(tab==='notices')render()}}
   async function petAction(action,name){if(busy||pending)return;pending=true;const buttons=[...document.querySelectorAll('[data-pet-action],#pet-name-form button')].map(el=>[el,el.disabled]);buttons.forEach(([el])=>el.disabled=true);try{const q=await api('pet/prepare',{action,...(name?{name}:{})});await perform('pet/action',{token:q.token})}catch(e){toast(e.message)}finally{pending=false;buttons.forEach(([el,disabled])=>{if(el.isConnected)el.disabled=disabled})}}
@@ -51,7 +159,7 @@ window.NoraCabinet=(()=>{
   function rename(){sheet(`<h2>Как зовут питомца?</h2><form id="pet-name-form"><label>Имя<input name="name" value="${esc(data.pet.name)}" maxlength="24" required></label><button class="primary" type="submit">Сохранить имя</button></form>`);$('#pet-name-form').onsubmit=e=>{e.preventDefault();petAction('rename',new FormData(e.target).get('name'))}}
   function showHelp(key){const item=help[key],back=!!document.querySelector('.lk-reputation');if(item)sheet(`<span class="eyebrow">Подсказка Норы</span><h2>${esc(item[0])}</h2><p class="sub">${esc(item[1])}</p>${back?'<button class="secondary" data-lk-reputation>← Репутация и лимиты</button>':''}`)}
   function parent(t){return window.NoraInteractive?.parent(t)||{lk:'home',wallet:'lk',history:'wallet',notices:'lk',admin:'lk'}[t]||null}
-  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.help)showHelp(b.dataset.help);if(b.hasAttribute('data-lk-reputation'))reputationSheet();if(b.hasAttribute('data-lk-settings'))settingsSheet();if(b.hasAttribute('data-lk-close'))$('#sheet').close();if(b.hasAttribute('data-lk-levels'))showReputation();if(b.hasAttribute('data-lk-avatar')){$('#sheet').close();$('#avatar-file')?.click()}if(b.hasAttribute('data-lk-notices')){$('#sheet').close();tab='notices';render();loadNotices()}if(b.hasAttribute('data-lk-hobbies'))sheet(`${sheetHeading('Увлечения')}<p class="lk-all-hobbies">${esc(data.user.hobbies)}</p>`);if(b.hasAttribute('data-open-pet-shop')){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}NoraShop.openCategory('pets')}if(b.dataset.petAction)petAction(b.dataset.petAction);if(b.id==='rename-pet')rename();if(b.id==='wallet-topup'){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}NoraShop.openCategory('__cookies')}if(b.id==='wallet-transfer')transferForm();if(b.dataset.friendTransfer)transferForm({id:Number(b.dataset.friendTransfer),name:b.dataset.friendName});if(b.id==='wallet-starter')prepareWallet('starter_pack');if(b.id==='wallet-repay')prepareWallet('repay');if(b.id==='history-newer')loadHistory(Math.max(0,historyOffset-20));if(b.id==='history-older')loadHistory(historyOffset+20);if(b.dataset.tab==='history'){historyPage=null;loadHistory(0)}if(b.dataset.tab==='notices'){noticeData=null;loadNotices()}});
+  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.help)showHelp(b.dataset.help);if(b.hasAttribute('data-lk-reputation'))reputationSheet();if(b.hasAttribute('data-lk-settings'))settingsSheet();if(b.hasAttribute('data-lk-close'))$('#sheet').close();if(b.hasAttribute('data-lk-levels'))showReputation();if(b.hasAttribute('data-lk-avatar')){$('#sheet').close();$('#avatar-file')?.click()}if(b.hasAttribute('data-lk-notices')){$('#sheet').close();tab='notices';render();loadNotices()}if(b.hasAttribute('data-lk-hobbies'))sheet(`${sheetHeading('Увлечения')}<p class="lk-all-hobbies">${esc(data.user.hobbies)}</p>`);if(b.hasAttribute('data-open-pet-shop')){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}NoraShop.openCategory('pets')}if(b.dataset.petAction)petAction(b.dataset.petAction);if(b.id==='rename-pet')rename();if(b.id==='wallet-topup'){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}NoraShop.openCategory('__cookies')}if(b.id==='wallet-transfer')transferForm();if(b.dataset.friendTransfer)transferForm({id:Number(b.dataset.friendTransfer),name:b.dataset.friendName});if(b.id==='wallet-starter')prepareWallet('starter_pack');if(b.id==='wallet-repay')prepareWallet('repay');if(b.dataset.tab==='notices'){noticeData=null;loadNotices()}});
   document.addEventListener('change',async e=>{const el=e.target;if(!el.dataset.noticeChannel)return;if(pending)return;const c=noticeData.channels.find(c=>c.id===el.dataset.noticeChannel);if(!c)return;pending=true;el.disabled=true;try{await api('notices',{channel:c.id,enabled:el.dataset.noticeField==='enabled'?el.checked:c.enabled,digest:el.dataset.noticeField==='digest'?el.checked:c.digest});await loadNotices()}catch(err){toast(err.message);el.checked=!el.checked}finally{pending=false;el.disabled=false}});
   document.addEventListener('click',async e=>{const button=e.target.closest('[data-birthday-claim]');if(!button||pending)return;pending=true;button.disabled=true;try{const result=await api('notices',{action:'claim_birthday',day:button.dataset.birthdayClaim});toast(result.message);noticeData=null;await loadNotices();data=await api('me');render()}catch(err){toast(err.message);button.disabled=false}finally{pending=false}});
   document.addEventListener('click',async e=>{
@@ -63,6 +171,6 @@ window.NoraCabinet=(()=>{
     finally{pending=false}
   });
   window.addEventListener('popstate',()=>{const next=window.NoraShop?.route().view;if(data&&['lk','pet','wallet','history','notices','admin'].includes(next)){tab=next;render();NoraShop.syncBack()}});
-  function refreshCurrent(){if(tab==='history')loadHistory(historyOffset);if(tab==='notices')loadNotices()}
-  return {profileScreen,transferForm,reloadNotices:loadNotices,refreshCurrent,header,petScreen,walletScreen,historyScreen,noticesScreen,parent,showHelp};
+  function refreshCurrent(){if(tab==='notices')loadNotices()}
+  return {profileScreen,transferForm,reloadNotices:loadNotices,refreshCurrent,syncHistory,header,petScreen,walletScreen,historyScreen,noticesScreen,parent,showHelp};
 })();

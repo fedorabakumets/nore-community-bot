@@ -220,6 +220,43 @@ async def test_wallet_history_paginates_own_ledger(env):
     assert first["has_more"] and second["has_more"]
     assert {i["id"] for i in first["items"]}.isdisjoint(i["id"] for i in second["items"])
     assert all(i["amount"] == 1 for i in first["items"] + second["items"])
+    await env.db.add_cookies(7, 10, "profile_complete")
+    request.query = {"before": first["next_before"]}
+    after_insert = json.loads((await wallet_history(request)).body)
+    assert after_insert["items"] == second["items"]
+
+
+async def test_wallet_history_names_the_counterparty_and_filters_the_ledger(env):
+    transfer = await env.db.create_transfer(7, 8, 100)
+    ok, _, received = await env.db.complete_transfer(transfer, 7)
+    assert ok and 0 < received < 100
+
+    sender_request = Request(env)
+    sender_request["actor"]["username"] = "user_7"
+    sender_request.query = {"direction": "outgoing"}
+    sender = json.loads((await wallet_history(sender_request)).body)["items"]
+    assert [(item["label"], item["source"], item["amount"]) for item in sender] == [
+        ("Перевод отправлен", "Кому: Имя 8 (@user_8)", -100),
+    ]
+
+    receiver_request = Request(env, uid=8)
+    receiver_request["actor"]["username"] = "user_8"
+    receiver_request.query = {"direction": "transfers"}
+    receiver = json.loads((await wallet_history(receiver_request)).body)["items"]
+    assert [(item["label"], item["source"], item["amount"]) for item in receiver] == [
+        ("Перевод получен", "От кого: Имя 7 (@user_7)", received),
+    ]
+
+    await env.db.add_cookies(8, 5, "admin", "by:7")
+    await env.db.add_cookies(8, 6, "transfer", "from:987654")
+    await env.db.add_cookies(8, 7, "transfer", "legacy")
+    receiver_request.query = {"direction": "incoming"}
+    items = json.loads((await wallet_history(receiver_request)).body)["items"]
+    assert [item["source"] for item in items[:3]] == [
+        "От кого: нет данных", "От кого: ID 987654", "Администратор: Имя 7 (@user_7)",
+    ]
+    assert all(item["amount"] > 0 for item in items)
+    assert "details" not in items[0]
 
 
 async def test_event_cancellation_is_atomic_preserves_history_and_blocks_stale_buttons(env):
