@@ -651,6 +651,17 @@ async def _leave(conn, room, own, now):
         _log(room, f"Новый хозяин комнаты — {present[0]['name']}.", now)
 
 
+async def leave_on_account_reset(conn, uid, now):
+    member = await _one(conn, "SELECT room_id FROM mini_mafia_members WHERE user_id=? AND active=1", (uid,))
+    if member:
+        room = await _load(conn, member["room_id"])
+        await _leave(conn, room, _players(room)[str(uid)], now)
+        await _save(conn, room, now)
+    await conn.execute(
+        "UPDATE mini_mafia_invites SET status='revoked' WHERE ? IN (user_id, sender_id) AND status='pending'", (uid,),
+    )
+
+
 def _chat(room, own, body, now):
     channel = body.get("channel", "public")
     text = body.get("text")

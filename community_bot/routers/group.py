@@ -27,6 +27,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from community_bot.access import needs_reapplication
 from community_bot.aliases import command_or_alias, is_command_message, remainder_args
 from community_bot.audit import (
     SYSTEM_ACTOR_ID,
@@ -115,6 +116,32 @@ async def remember_managed_channel(event: ChatMemberUpdated, db: Database) -> No
         await db.set_bot_state("freebie_channel_id", str(event.chat.id))
 
 
+@router.chat_member()
+async def community_membership_changed(event: ChatMemberUpdated, db: Database, settings: Settings, bot: Bot) -> None:
+    if event.chat.id != settings.community_chat_id:
+        return
+    member = event.new_chat_member
+    uid = member.user.id
+    if member.user.is_bot:
+        return
+    if not event.from_user.is_bot:
+        if member.status == ChatMemberStatus.KICKED:
+            until = member.until_date.timestamp()
+            await db.reset_banned_user(uid, until or None)
+            return
+        if event.old_chat_member.status == ChatMemberStatus.KICKED:
+            await db.release_ban_reset(uid)
+    joined = member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR} or (
+        member.status == ChatMemberStatus.RESTRICTED and member.is_member
+    )
+    if joined and await needs_reapplication(db, uid):
+        if db.ban_is_active(await db.ban_reset_state(uid)):
+            return
+        with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
+            await bot.ban_chat_member(event.chat.id, uid, until_date=datetime.now(UTC) + timedelta(minutes=1))
+            await bot.unban_chat_member(event.chat.id, uid, only_if_banned=True)
+
+
 class DeleteGroupCommandMiddleware(BaseMiddleware):
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque[float]] = defaultdict(deque)
@@ -144,6 +171,14 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
         settings = data.get("settings")
         bot = data.get("bot")
         if isinstance(db, Database) and event.from_user:
+            if (
+                isinstance(settings, Settings)
+                and event.chat.id == settings.community_chat_id
+                and await needs_reapplication(db, event.from_user.id)
+            ):
+                with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
+                    await event.delete()
+                return None
             await register_telegram_user(db, event.from_user)
             if (
                 isinstance(settings, Settings)
@@ -707,11 +742,16 @@ async def ban_member(message: Message, db: Database, settings: Settings, bot: Bo
     kwargs: dict[str, Any] = {}
     if not is_permanent_duration(duration):
         kwargs["until_date"] = datetime.now(UTC) + duration
+    target_id = int(target["user_id"])
     try:
-        await bot.ban_chat_member(message.chat.id, int(target["user_id"]), **kwargs)
+        await bot.ban_chat_member(message.chat.id, target_id, **kwargs)
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         await _respond(message, f"Telegram отказал в бане: {exc}")
         return
+    resets_account = message.chat.id == settings.community_chat_id or not settings.community_chat_id
+    if resets_account:
+        until = kwargs["until_date"].timestamp() if "until_date" in kwargs else None
+        await db.reset_banned_user(target_id, until)
     await db.log_admin_action(
         message.from_user.id,
         "ban",
@@ -724,7 +764,8 @@ async def ban_member(message: Message, db: Database, settings: Settings, bot: Bo
     )
     await _respond(
         message,
-        f"⛔ {_target_display(target)} заблокирован на {label} · {html.escape(reason)}.",
+        f"⛔ {_target_display(target)} заблокирован на {label} · {html.escape(reason)}."
+        + (" Профиль и прогресс сброшены." if resets_account else ""),
         parse_mode="HTML",
     )
 
@@ -760,6 +801,8 @@ async def unban_member(message: Message, db: Database, settings: Settings, bot: 
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         await _respond(message, f"Telegram отказал: {exc}")
         return
+    if message.chat.id == settings.community_chat_id or not settings.community_chat_id:
+        await db.release_ban_reset(target_id)
     await db.log_admin_action(
         message.from_user.id,
         "unban",

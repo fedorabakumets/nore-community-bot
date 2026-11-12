@@ -429,6 +429,9 @@ async def test_real_application_flow_finishes_in_one_message(setup):
     assert sum(isinstance(call, SendRichMessage) for call in panels) == 1
     assert all(getattr(call, "message_id", first.message_id) == first.message_id for call in panels)
     assert await db.has_pending_application(8)
+    profile = await db.get_user(8)
+    assert (profile["profile_name"], profile["birth_date"], profile["age"]) == ("Рома", "2000-01-01", None)
+    assert profile["profile_bio"] == ""
     assert "отправлена на проверку" in panels[-1].rich_message.model_dump_json()
     assert set(actions(panels[-1])) == {"menu:question"}
     await dispatcher.storage.close()

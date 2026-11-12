@@ -216,6 +216,8 @@ async def has_permission(db: Database, settings: Settings, user_id: int, permiss
 
 
 async def application_block_reason(db: Database, user_id: int) -> str | None:
+    if db.ban_is_active(await db.ban_reset_state(user_id)):
+        return "Анкету можно заполнить после разбана."
     if await db.has_approved_application(user_id):
         return "Ты уже проходил анкету — повторно заполнять её нельзя."
     if await db.has_pending_application(user_id):

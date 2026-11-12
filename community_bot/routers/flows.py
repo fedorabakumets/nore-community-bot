@@ -59,7 +59,8 @@ async def restart_application(message: Message, state: FSMContext, db: Database,
         await message.answer(reason)
         return
     await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
+    ban = await db.ban_reset_state(user_id)
+    await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
     await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
 
 

@@ -1198,7 +1198,8 @@ async def _start_application(message: Message, state: FSMContext, db: Database, 
         return False
     await register_telegram_user(db, user)
     await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
+    ban = await db.ban_reset_state(user.id)
+    await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
     await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
     return True
 
@@ -1246,7 +1247,7 @@ async def application_birth_date(message: Message, state: FSMContext) -> None:
     except ValueError as error:
         await message.answer(str(error))
         return
-    await state.update_data(age=str(profile_age({"birth_date": value})))
+    await state.update_data(birth_date=value)
     await state.set_state(ApplicationForm.referral)
     await message.answer(APPLICATION_QUESTIONS["referral"], reply_markup=flow_reply_keyboard())
 
@@ -1280,11 +1281,16 @@ async def application_bio(message: Message, state: FSMContext) -> None:
 
 def _application_text(application_id: int, user_id: int, username: str | None, answers: dict[str, Any]) -> str:
     who = f"@{html.escape(username)}" if username else user_link(user_id, answers["name"])
+    birth = answers.get("birth_date")
+    birth_line = (
+        f"<b>Дата рождения:</b> {'.'.join(reversed(birth.split('-')))}"
+        if birth else f"<b>Возраст:</b> {html.escape(str(answers.get('age', 'не указан')))}"
+    )
     return (
         f"📝 <b>Новая анкета №{application_id}</b>\n"
         f"Пользователь: {who} (<code>{user_id}</code>)\n\n"
         f"<b>Имя:</b> {html.escape(answers['name'])}\n"
-        f"<b>Возраст:</b> {html.escape(answers['age'])}\n"
+        f"{birth_line}\n"
         f"<b>Откуда узнал:</b> {html.escape(answers['referral'])}\n\n"
         f"<b>Ожидания:</b>\n{html.escape(answers['expectations'])}\n\n"
         f"<b>О себе:</b>\n{html.escape(answers['bio'])}\n\n"
@@ -1306,10 +1312,11 @@ async def finish_application(
         await restore_private_menu(callback.message, db, settings)
         return
     answers = await state.get_data()
-    application_id = await db.create_application(callback.from_user.id, answers)
+    ban_version = answers.pop("ban_version", None)
+    application_id = await db.create_application(callback.from_user.id, answers, ban_version=ban_version)
     if not application_id:
         await state.clear()
-        reason = await application_block_reason(db, callback.from_user.id) or "Анкета уже есть."
+        reason = await application_block_reason(db, callback.from_user.id) or "Начни анкету заново."
         await callback.message.answer(reason)
         await restore_private_menu(callback.message, db, settings)
         return

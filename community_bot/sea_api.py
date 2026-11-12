@@ -388,6 +388,30 @@ async def _finish(conn, room, winner, now: float, *, cancelled: bool = False) ->
     )
 
 
+async def _leave(conn, room, own, now):
+    uid = own["id"]
+    own["left"] = True
+    await conn.execute("UPDATE mini_sea_members SET active=0 WHERE room_id=? AND user_id=?", (room["id"], uid))
+    if room["status"] == "lobby":
+        if room["host_id"] == uid:
+            await _finish(conn, room, None, now, cancelled=True)
+        else:
+            del _players(room)[str(uid)]
+    else:
+        await _finish(conn, room, _opponent_id(room, uid), now)
+
+
+async def leave_on_account_reset(conn, uid, now):
+    member = await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,))
+    if member:
+        room = await _load(conn, member["room_id"])
+        await _leave(conn, room, _player(room, uid), now)
+        await _save(conn, room, now)
+    await conn.execute(
+        "UPDATE mini_sea_invites SET status='revoked' WHERE ? IN (user_id, sender_id) AND status='pending'", (uid,),
+    )
+
+
 def _set_turn(room, uid, now: float) -> None:
     room["state"]["turn"] = uid
     room["deadline"] = now + MOVE_SECONDS
@@ -1088,21 +1112,13 @@ async def apply_action(db, settings, uid: int, body, now: float | None = None):
                     focus = None
                     message = "Ты вышел, комната закрыта" + (", ставка возвращена" if room["stake"] else "")
                 elif action_name == "leave":
-                    own["left"] = True
-                    await conn.execute(
-                        "UPDATE mini_sea_members SET active=0 WHERE room_id=? AND user_id=?", (room["id"], uid)
-                    )
-                    if room["status"] == "lobby":
-                        if room["host_id"] == uid:
-                            await _finish(conn, room, None, now, cancelled=True)
-                            focus = None
-                            message = "Ты вышел, комната закрыта" + (", ставка возвращена" if room["stake"] else "")
-                        else:
-                            del _players(room)[str(uid)]
-                            message = "Ты вышел из комнаты"
+                    await _leave(conn, room, own, now)
+                    if room["status"] == "cancelled":
+                        focus = None
+                        message = "Ты вышел, комната закрыта" + (", ставка возвращена" if room["stake"] else "")
+                    elif room["status"] == "lobby":
+                        message = "Ты вышел из комнаты"
                     else:
-                        winner = _opponent_id(room, uid)
-                        await _finish(conn, room, winner, now)
                         focus = None
                         message = "Ты вышел из партии — победа засчитана сопернику"
                 elif action_name == "shoot":

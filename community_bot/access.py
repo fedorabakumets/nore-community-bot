@@ -29,11 +29,19 @@ def guest_keyboard():
 
 
 async def miniapp_allowed(db, settings, uid):
-    return uid > 0 and (settings.is_owner(uid) or await db.get_user(uid) is not None)
+    return uid > 0 and (settings.is_owner(uid) or (
+        await db.get_user(uid) is not None and not await needs_reapplication(db, uid)
+    ))
+
+
+async def needs_reapplication(db, uid):
+    return bool(await db.ban_reset_state(uid)) and not await db.has_approved_application(uid)
 
 
 async def private_allowed(db, settings, uid):
-    return await db.has_approved_application(uid) or await rank_of_user(db, settings, uid) > 0
+    if await db.has_approved_application(uid):
+        return True
+    return not await db.ban_reset_state(uid) and await rank_of_user(db, settings, uid) > 0
 
 
 async def private_keyboard(db, settings, uid):
@@ -96,6 +104,19 @@ class PrivateAccessMiddleware(BaseMiddleware):
         db, settings, state = data['db'], data['settings'], data.get('state')
         uid = event.from_user.id
         await sync_menu(data['bot'], db, settings, uid)
+        ban = await db.ban_reset_state(uid)
+        if db.ban_is_active(ban):
+            if state:
+                await state.clear()
+            text = 'Анкету можно заполнить после разбана.'
+            if isinstance(event, CallbackQuery):
+                await event.answer(text, show_alert=True)
+            else:
+                await message.answer(text, reply_markup=guest_keyboard())
+            return
+        if ban and state and (await state.get_state() or '').startswith('ApplicationForm:'):
+            if (await state.get_data()).get('ban_version') != ban['version']:
+                await state.clear()
         if await private_allowed(db, settings, uid):
             return await handler(event, data)
         current = (await state.get_state() if state else '') or ''
@@ -104,7 +125,7 @@ class PrivateAccessMiddleware(BaseMiddleware):
             allowed = action in {
                 'start:apply', 'menu:apply', 'menu:question', 'flow:cancel', 'flow:restart', 'ui:close',
             }
-            allowed |= action.startswith('birthday:claim:')
+            allowed |= not ban and action.startswith('birthday:claim:')
             allowed |= action.startswith('updates:page:')
             allowed |= current == 'ApplicationForm:interview' and action.startswith('application:interview:')
             if allowed:

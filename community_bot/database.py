@@ -1605,15 +1605,137 @@ class Database:
             await dismiss_profile_notice(self, user_id)
         return awarded
 
-    async def create_application(self, user_id: int, answers: dict[str, Any]) -> int:
-        if await self.has_approved_application(user_id):
-            return 0
-        if await self.has_pending_application(user_id):
-            return 0
-        return await self.execute(
-            "INSERT INTO applications(user_id, answers_json, created_at) VALUES (?, ?, ?)",
-            (user_id, json.dumps(answers, ensure_ascii=False), utcnow()),
+    async def ban_reset_state(self, user_id: int) -> dict[str, Any]:
+        raw = await self.get_bot_state(f"ban_reset:{user_id}")
+        return json.loads(raw) if raw else {}
+
+    @staticmethod
+    def ban_is_active(state: dict[str, Any]) -> bool:
+        until = state.get("until")
+        return bool(state) and (until is None or until > datetime.now(UTC).timestamp())
+
+    async def reset_banned_user(self, user_id: int, until: float | None) -> None:
+        from community_bot import mafia_api, sea_api
+
+        now = utcnow()
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            timestamp = datetime.fromisoformat(now).timestamp()
+            await mafia_api.leave_on_account_reset(db, user_id, timestamp)
+            await sea_api.leave_on_account_reset(db, user_id, timestamp)
+            games = await (await db.execute(
+                """SELECT * FROM party_games g WHERE status IN ('lobby', 'active') AND
+                   (creator_id=? OR EXISTS (
+                       SELECT 1 FROM party_game_players WHERE game_id=g.id AND user_id=?
+                   ))""",
+                (user_id, user_id),
+            )).fetchall()
+            for game in games:
+                await self._cancel_party_game_in_connection(db, game, now)
+            await db.execute(
+                """INSERT INTO transactions(user_id, amount, kind, created_at)
+                   SELECT user_id, -cookies, 'ban_reset', ? FROM users WHERE user_id=? AND cookies>0""",
+                (now, user_id),
+            )
+            await db.execute(
+                """UPDATE users SET profile_name=NULL, age=NULL, birth_date=NULL, hobbies=NULL, profile_bio='',
+                   avatar_file_id=NULL, avatar_media_type='photo', role='member', custom_status=NULL,
+                   cookies=0, cookie_debt=0, reputation=0, warnings=0, hate_immunity_until=NULL,
+                   profile_private=0, profile_ornate=0, profile_title='', hate_shields=0, moderator_note='',
+                   bio_warning=0, bio_auto_warn=0, updated_at=? WHERE user_id=?""",
+                (now, user_id),
+            )
+            await db.execute(
+                "UPDATE applications SET status='reset' WHERE user_id=? AND status IN ('pending','approved')",
+                (user_id,),
+            )
+            for table in (
+                "pets", "achievements", "user_activity", "daily_scores", "weekly_scores",
+                "profile_completion_rewards", "freebie_claims", "notify_prefs", "notify_inbox",
+                "captcha_pending", "mini_presence", "mini_presence_settings", "mini_friend_request_log",
+                "widget_notifications",
+            ):
+                column = "recipient_id" if table == "widget_notifications" else "user_id"
+                await db.execute(f"DELETE FROM {table} WHERE {column}=?", (user_id,))
+            for table in ("nora_game_outfits", "nora_game_players"):
+                await db.execute(f"DELETE FROM {table} WHERE telegram_id=?", (user_id,))
+            for table, key, parent in (
+                ("lottery_entries", "lottery_id", "lotteries"),
+                ("cookie_contest_entries", "contest_id", "cookie_contests"),
+                ("seasonal_entries", "raffle_id", "seasonal_raffles"),
+            ):
+                await db.execute(
+                    f"DELETE FROM {table} WHERE user_id=? AND {key} IN (SELECT id FROM {parent} WHERE status='open')",
+                    (user_id,),
+                )
+            await db.execute(
+                "UPDATE studio_events SET markup_dirty=1 WHERE event_id IN "
+                "(SELECT event_id FROM event_rsvps WHERE user_id=?)", (user_id,),
+            )
+            await db.execute("DELETE FROM event_rsvps WHERE user_id=?", (user_id,))
+            await db.execute("DELETE FROM mini_friendships WHERE ? IN (low_id, high_id)", (user_id,))
+            await db.execute("DELETE FROM mini_friend_blocks WHERE blocker_id=?", (user_id,))
+            await db.execute("DELETE FROM mini_rocket_quotes WHERE user_id=? AND status='pending'", (user_id,))
+            await db.execute("UPDATE mini_rocket_rounds SET status='crashed' WHERE user_id=? AND status='active'",
+                             (user_id,))
+            for table, condition in (
+                ("pending_transfers", "? IN (sender_id, receiver_id)"),
+                ("wallet_intents", "? IN (user_id, target_id)"),
+                ("roulette_games", "? IN (challenger_id, opponent_id)"),
+            ):
+                await db.execute(f"UPDATE {table} SET status='cancelled' WHERE {condition} AND status='pending'",
+                                 (user_id,))
+            await db.execute("UPDATE cookie_loans SET status='cancelled' WHERE user_id=? AND status='active'",
+                             (user_id,))
+            await db.execute("UPDATE tickets SET status='closed', updated_at=? WHERE user_id=? AND status='open'",
+                             (now, user_id))
+            await db.execute(
+                "DELETE FROM bot_state WHERE key IN (?, ?, ?) OR key GLOB ?",
+                (f"birthday_date:{user_id}", f"nora_records:{user_id}", f"nora_lobby_cooldown:{user_id}",
+                 f"birthday_gift:{user_id}:*"),
+            )
+            await db.execute(
+                "INSERT OR REPLACE INTO bot_state(key,value) VALUES (?,?)",
+                (f"ban_reset:{user_id}", json.dumps({"version": now, "until": until})),
+            )
+            await db.commit()
+
+    async def release_ban_reset(self, user_id: int) -> None:
+        await self.execute(
+            "UPDATE bot_state SET value=json_set(value, '$.until', 0) WHERE key=?", (f"ban_reset:{user_id}",),
         )
+
+    async def create_application(
+        self, user_id: int, answers: dict[str, Any], *, ban_version: str | None = None,
+    ) -> int:
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            row = await (await db.execute(
+                "SELECT value FROM bot_state WHERE key=?", (f"ban_reset:{user_id}",),
+            )).fetchone()
+            ban = json.loads(row["value"]) if row else {}
+            if self.ban_is_active(ban) or ban_version != ban.get("version"):
+                return 0
+            existing = await (await db.execute(
+                "SELECT 1 FROM applications WHERE user_id=? AND status IN ('pending','approved')", (user_id,),
+            )).fetchone()
+            if existing:
+                return 0
+            now = utcnow()
+            cursor = await db.execute(
+                "INSERT INTO applications(user_id, answers_json, created_at) VALUES (?, ?, ?)",
+                (user_id, json.dumps(answers, ensure_ascii=False), now),
+            )
+            if "birth_date" in answers:
+                from community_bot.profile_fields import validate_profile_fields
+
+                fields = validate_profile_fields({"profile_name": answers["name"], "birth_date": answers["birth_date"]})
+                await db.execute(
+                    "UPDATE users SET profile_name=?, birth_date=?, age=NULL, updated_at=? WHERE user_id=?",
+                    (fields["profile_name"], fields["birth_date"], now, user_id),
+                )
+            await db.commit()
+            return int(cursor.lastrowid)
 
     async def has_approved_application(self, user_id: int) -> bool:
         row = await self.fetchone(
@@ -3630,25 +3752,30 @@ class Database:
                 # A player must not cancel a losing round after seeing its cards/results.
                 await db.rollback()
                 return False
-            if stake > 0:
-                cursor = await db.execute("SELECT user_id FROM party_game_players WHERE game_id = ?", (game_id,))
-                players = await cursor.fetchall()
-                for player in players:
-                    user_id = int(player["user_id"])
-                    await db.execute(
-                        "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
-                        (stake, now, user_id),
-                    )
-                    await db.execute(
-                        "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                        (user_id, stake, "cookie_game_refund", str(game_id), now),
-                    )
-            await db.execute(
-                "UPDATE party_games SET status = 'cancelled', updated_at = ?, completed_at = ? WHERE id = ?",
-                (now, now, game_id),
-            )
+            await self._cancel_party_game_in_connection(db, game, now)
             await db.commit()
             return True
+
+    @staticmethod
+    async def _cancel_party_game_in_connection(db: aiosqlite.Connection, game: aiosqlite.Row, now: str) -> None:
+        game_id = game["id"]
+        stake = int(json.loads(game["state_json"] or "{}").get("stake") or 0)
+        if stake > 0:
+            cursor = await db.execute("SELECT user_id FROM party_game_players WHERE game_id = ?", (game_id,))
+            for player in await cursor.fetchall():
+                user_id = int(player["user_id"])
+                await db.execute(
+                    "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+                    (stake, now, user_id),
+                )
+                await db.execute(
+                    "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, stake, "cookie_game_refund", str(game_id), now),
+                )
+        await db.execute(
+            "UPDATE party_games SET status = 'cancelled', updated_at = ?, completed_at = ? WHERE id = ?",
+            (now, now, game_id),
+        )
 
     async def restore_daily_reputation(self, local_date: date) -> list[dict[str, Any]]:
         from community_bot.domain import AUTO_REPUTATION_CAP, DAILY_REPUTATION_CAP
@@ -3662,7 +3789,13 @@ class Database:
             if state and state["value"] == local_date.isoformat():
                 await db.rollback()
                 return []
-            cursor = await db.execute("SELECT * FROM users")
+            cursor = await db.execute(
+                """SELECT u.* FROM users u WHERE NOT EXISTS (
+                       SELECT 1 FROM bot_state WHERE key='ban_reset:'||u.user_id
+                   ) OR EXISTS (
+                       SELECT 1 FROM applications WHERE user_id=u.user_id AND status='approved'
+                   )"""
+            )
             changed: list[dict[str, Any]] = []
             now = utcnow()
             for raw in await cursor.fetchall():
