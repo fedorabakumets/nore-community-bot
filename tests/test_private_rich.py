@@ -903,9 +903,12 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     ]
 
 
-@pytest.mark.parametrize("chat_id,closer", [(7, 7), (-100123, 7), (-100123, 8), (-100123, 9), (-100123, None)])
-async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, chat_id, closer):
-    from community_bot.commands_guide import CLOSE_COMMANDS_CARD, router
+@pytest.mark.parametrize("chat_id,closer,from_welcome", [
+    (7, 7, False), (-100123, 7, False), (-100123, 8, False), (-100123, 9, False),
+    (-100123, None, False), (-100123, 7, True),
+])
+async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, chat_id, closer, from_welcome):
+    from community_bot.commands_guide import CLOSE_COMMANDS_CARD, OPEN_COMMANDS_CARD, router
     from community_bot.helpers import delete_later
     from community_bot.routers import group, private
 
@@ -955,12 +958,23 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
             "is_topic_message": True, "message_thread_id": 42, "text": "Нора команды",
         })
 
-    await dp.feed_update(bot, Update(update_id=1, message=event), **context)
+    if from_welcome:
+        query = CallbackQuery(
+            id="open", chat_instance="commands", data=OPEN_COMMANDS_CARD,
+            from_user=event.from_user,
+            message=event.model_copy(update={"from_user": User(id=9, is_bot=True, first_name="Нора")}),
+        )
+        await dp.feed_update(bot, Update(update_id=1, callback_query=query), **context)
+    else:
+        await dp.feed_update(bot, Update(update_id=1, message=event), **context)
     card = event.model_copy(update={"message_id": session.next_id - 1})
     await asyncio.sleep(0)
     send = session.calls[-1]
     assert isinstance(send, SendRichMessage)
     assert send.reply_markup is None
+    assert (send.reply_parameters.message_id if send.reply_parameters else None) == (
+        event.message_id if from_welcome else None
+    )
     assert send.message_thread_id == (42 if chat_id < 0 else None)
     assert [block["type"] for block in content(send)] == ["photo", "buttons"]
     assert send.rich_message.blocks[0].photo.media.path.is_file()

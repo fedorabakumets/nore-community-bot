@@ -14,6 +14,7 @@ from aiogram.types import (
     InputRichBlockPhoto,
     InputRichMessage,
     Message,
+    ReplyParameters,
     RichMessageButton,
 )
 
@@ -26,6 +27,7 @@ from community_bot.helpers import delete_later, rank_of_user
 router = Router(name="commands_guide")
 
 CLOSE_COMMANDS_CARD = "commands:close"
+OPEN_COMMANDS_CARD = "commands:open"
 COMMANDS_ART = Path(__file__).resolve().parent.parent / "assets" / "commands" / "guide.jpg"
 COMMANDS_CARD_TTL = 60
 _pending_cards: dict[tuple[int, int], tuple[int, asyncio.Task[None]]] = {}
@@ -38,9 +40,14 @@ async def _expire_card(message: Message, key: tuple[int, int]) -> None:
         _pending_cards.pop(key, None)
 
 
-async def send_commands_card(message: Message, bot: Bot) -> None:
-    if message.from_user is None:
-        return
+async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | None = None) -> None:
+    reply = None
+    if requester_id is None:
+        if message.from_user is None:
+            return
+        requester_id = message.from_user.id
+    else:
+        reply = ReplyParameters(message_id=message.message_id, allow_sending_without_reply=True)
     from community_bot.private_rich import standalone_rich_message
 
     rich_message = InputRichMessage(blocks=[
@@ -54,9 +61,17 @@ async def send_commands_card(message: Message, bot: Bot) -> None:
             message.chat.id,
             rich_message=rich_message,
             message_thread_id=message.message_thread_id if message.is_topic_message else None,
+            reply_parameters=reply,
         )
     key = (sent.chat.id, sent.message_id)
-    _pending_cards[key] = (message.from_user.id, asyncio.create_task(_expire_card(sent, key)))
+    _pending_cards[key] = (requester_id, asyncio.create_task(_expire_card(sent, key)))
+
+
+@router.callback_query(F.data == OPEN_COMMANDS_CARD)
+async def open_commands_card(callback: CallbackQuery, bot: Bot) -> None:
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await send_commands_card(callback.message, bot, requester_id=callback.from_user.id)
 
 
 async def _can_close(

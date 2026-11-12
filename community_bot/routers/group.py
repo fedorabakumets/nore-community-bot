@@ -140,6 +140,15 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
         with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
             await bot.ban_chat_member(event.chat.id, uid, until_date=datetime.now(UTC) + timedelta(minutes=1))
             await bot.unban_chat_member(event.chat.id, uid, only_if_banned=True)
+        return
+    previous = event.old_chat_member
+    was_outside = previous.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED} or (
+        previous.status == ChatMemberStatus.RESTRICTED and not previous.is_member
+    )
+    if joined and was_outside:
+        from community_bot.welcome import send_member_welcome
+
+        await send_member_welcome(bot, event.chat.id, member.user)
 
 
 class DeleteGroupCommandMiddleware(BaseMiddleware):

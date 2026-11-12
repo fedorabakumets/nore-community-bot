@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from aiogram.types import Chat, ChatMemberBanned, ChatMemberLeft, ChatMemberMember, ChatMemberUpdated, User
 
 from community_bot.access import miniapp_allowed, private_allowed
@@ -163,6 +164,34 @@ async def test_telegram_ban_and_unban_require_reapplication_but_bot_kick_does_no
     bot.ban_chat_member.assert_awaited_once()
     bot.unban_chat_member.assert_awaited_once_with(chat.id, member.id, only_if_banned=True)
     assert not db.ban_is_active(await db.ban_reset_state(7))
+    bot.send_rich_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize("username", ["new_member", None])
+async def test_new_member_gets_one_rich_welcome(tmp_path: Path, username: str | None) -> None:
+    db = Database(tmp_path / "membership.db")
+    await db.initialize()
+    chat = Chat(id=-100123, type="supergroup")
+    settings = SimpleNamespace(community_chat_id=chat.id)
+    member = User(id=7, first_name="Новичок", is_bot=False, username=username)
+    bot = AsyncMock()
+    bot.me.return_value = User(id=9, first_name="Нора", is_bot=True, username="nora_bot")
+    present = ChatMemberMember(user=member)
+    event = ChatMemberUpdated(
+        chat=chat, from_user=member, date=datetime.now(UTC),
+        old_chat_member=ChatMemberLeft(user=member), new_chat_member=present,
+    )
+    await community_membership_changed(event, db, settings, bot)
+    await community_membership_changed(event.model_copy(update={"old_chat_member": present}), db, settings, bot)
+
+    bot.send_rich_message.assert_awaited_once()
+    assert bot.send_rich_message.call_args.args == (chat.id,)
+    greeting, reminder, links, photo = bot.send_rich_message.call_args.kwargs["rich_message"].blocks
+    assert greeting.text[1].text == ("@new_member" if username else "Новичок")
+    assert "прочитать правила ❤️" in reminder.text
+    assert links.text[0].button.callback_data == "commands:open"
+    assert links.text[2].button.url == "https://t.me/nora_bot?startapp"
+    assert photo.photo.media.path.is_file()
 
 
 async def test_cookie_contest_join_count_and_draw(tmp_path: Path) -> None:
