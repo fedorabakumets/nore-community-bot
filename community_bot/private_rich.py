@@ -78,6 +78,7 @@ class Turn:
 
 _TURN: ContextVar[Turn | None] = ContextVar("private_rich_turn", default=None)
 _STANDALONE: ContextVar[bool] = ContextVar("standalone_rich_message", default=False)
+_FRESH_PANEL: ContextVar[int | None] = ContextVar("fresh_private_panel", default=None)
 
 
 @contextmanager
@@ -88,6 +89,16 @@ def standalone_rich_message():
         yield
     finally:
         _STANDALONE.reset(token)
+
+
+@contextmanager
+def fresh_private_panel(user_id: int):
+    """Send a new private panel and retire its predecessor after delivery."""
+    token = _FRESH_PANEL.set(user_id)
+    try:
+        yield
+    finally:
+        _FRESH_PANEL.reset(token)
 
 
 def reopen_private_panel():
@@ -414,6 +425,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         raw = await db.get_bot_state(key)
         page = json.loads(raw) if raw else {}
         message_id = page.get("message_id")
+        fresh = name in _SEND and _FRESH_PANEL.get() == uid
         personal_turn = turn and turn.is_handler and turn.source.chat.id == uid
         current = (await turn.state.get_state()
                    if personal_turn and turn.state and turn.source.message_id > 0 else page.get("flow"))
@@ -421,7 +433,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             if method.message_id == message_id:
                 return True  # Private close actions must keep the navigation surface.
             return await make_request(bot, method)
-        if (page.get("widget") or page.get("number_choice")) and not personal_turn:
+        if (page.get("widget") or page.get("number_choice")) and not personal_turn and not fresh:
             # A background notice must leave the active number picker usable.
             if name in _EDIT:
                 return _message(bot, uid, message_id)
@@ -460,6 +472,7 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         append = bool(turn and turn.is_handler and uid in turn.sent)
         # Background notices must not hide the question the user is currently answering.
         append |= bool(current and not personal_turn)
+        append = append and not fresh
         if name in _SEND | {"copyMessage"} and append:
             # A handler may send a cover, its long body and a keyboard separately.
             # Keep them together, including ticket headers and their copied attachments.
@@ -495,8 +508,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                 for value in presets
             ]})
         rich = InputRichMessage(blocks=body + footer)
-        old_widget_id = message_id if page.get("widget") else None
-        if old_widget_id:
+        replaced_id = message_id if page.get("widget") or fresh else None
+        if replaced_id:
             message_id = None
         if personal_turn and turn.reopen and uid not in turn.sent:
             if message_id:
@@ -554,8 +567,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                                               ensure_ascii=False))
         if turn and turn.is_handler:
             turn.sent.add(uid)
-        if old_widget_id:
-            await self.remove_old(make_request, bot, uid, old_widget_id)
+        if replaced_id:
+            await self.remove_old(make_request, bot, uid, replaced_id)
         return (MessageId(message_id=result.message_id) if isinstance(original, CopyMessage)
                 else _uploaded_media(result, original))
 

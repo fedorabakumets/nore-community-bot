@@ -70,6 +70,7 @@ from community_bot.keyboards import (
     feature_reset_keyboard,
     features_panel_text,
     flow_reply_keyboard,
+    private_menu_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
     roles_hub_keyboard,
@@ -96,6 +97,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     slugify_role,
 )
+from community_bot.private_rich import fresh_private_panel
 from community_bot.profile_fields import parse_birth_date, profile_age
 from community_bot.restart import play_countdown, try_begin
 from community_bot.routers.flows import restore_private_menu
@@ -1320,6 +1322,13 @@ async def finish_application(
         await callback.message.answer(reason)
         await restore_private_menu(callback.message, db, settings)
         return
+    await state.clear()
+    with fresh_private_panel(callback.from_user.id):
+        await safe_send(
+            bot,
+            callback.from_user.id,
+            f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт отдельным сообщением.",
+        )
     text = _application_text(application_id, callback.from_user.id, callback.from_user.username, answers)
     for reviewer_id in settings.reviewers:
         await safe_send(
@@ -1329,12 +1338,6 @@ async def finish_application(
             parse_mode="HTML",
             reply_markup=application_review_keyboard(application_id),
         )
-    await state.clear()
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(
-        f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт сюда.",
-    )
-    await restore_private_menu(callback.message, db, settings)
 
 
 async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -> bool:
@@ -1354,8 +1357,9 @@ async def _notify_application_decision(
     reason: str | None,
 ) -> None:
     application = await db.get_application(application_id)
-    if not application:
+    if not application or application["status"] != status:
         return
+    user_id = int(application["user_id"])
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
@@ -1366,15 +1370,20 @@ async def _notify_application_decision(
             f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
             f"{html.escape(settings.community_invite_url)}</a>"
         )
-    await safe_send(
-        bot,
-        int(application["user_id"]),
-        f"{result}.{reason_text}{invite}",
-        parse_mode="HTML",
-        reply_markup=await _private_keyboard(int(application["user_id"]), db, settings),
-    )
+    if approved:
+        markup = private_menu_keyboard(
+            await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
+            unread=await db.notify_unread_count(user_id),
+        )
+        with fresh_private_panel(user_id):
+            await safe_send(bot, user_id, f"{result}.{reason_text}{invite}", parse_mode="HTML", reply_markup=markup)
+    else:
+        await safe_send(
+            bot, user_id, f"{result}.{reason_text}", parse_mode="HTML",
+            reply_markup=await _private_keyboard(user_id, db, settings),
+        )
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
-    for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
+    for reviewer_id in settings.reviewers - {moderator_id, user_id}:
         await safe_send(bot, reviewer_id, report, parse_mode="HTML")
 
 

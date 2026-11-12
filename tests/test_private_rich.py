@@ -391,12 +391,13 @@ async def test_background_game_updates_respect_the_current_screen(setup, navigat
     assert len(session.calls) == before + (0 if navigate_away else 1)
 
 
-async def test_real_application_flow_finishes_in_one_message(setup):
+async def test_application_replaces_final_question_and_approval_opens_a_new_interactive_menu(setup):
     from community_bot.routers import private
     from community_bot.states import ApplicationForm
 
     db, bot, session, _ = setup
     bot.community_settings.reviewers = frozenset()
+    bot.community_settings.community_invite_url = "https://t.me/+community"
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
@@ -409,12 +410,19 @@ async def test_real_application_flow_finishes_in_one_message(setup):
     router.message.register(private.application_bio, ApplicationForm.bio)
     router.callback_query.register(private.finish_application, ApplicationForm.interview,
                                     F.data.startswith("application:interview:"))
+    router.callback_query.register(private.approve_application, F.data.startswith("application:approve:"))
+    profile_click = AsyncMock()
+
+    @router.callback_query(F.data == "menu:profile")
+    async def open_profile(callback: CallbackQuery):
+        await profile_click(callback.message.message_id)
+
     dispatcher.include_router(router)
     first = await bot.send_message(8, "Добро пожаловать")
     actor = incoming(uid=8).from_user
 
-    async def callback(action, update_id, message):
-        event = CallbackQuery(id=str(update_id), from_user=actor, chat_instance="x", message=message, data=action)
+    async def callback(action, update_id, message, user=actor):
+        event = CallbackQuery(id=str(update_id), from_user=user, chat_instance="x", message=message, data=action)
         await dispatcher.feed_update(bot, Update(update_id=update_id, callback_query=event),
                                      db=db, settings=bot.community_settings)
 
@@ -426,14 +434,38 @@ async def test_real_application_flow_finishes_in_one_message(setup):
                    rich_message={"blocks": content(session.calls[-1])})
     await callback("application:interview:yes", 8, last)
     panels = [call for call in session.calls if isinstance(call, (SendRichMessage, EditMessageText))]
-    assert sum(isinstance(call, SendRichMessage) for call in panels) == 1
+    assert sum(isinstance(call, SendRichMessage) for call in panels) == 2
     assert all(getattr(call, "message_id", first.message_id) == first.message_id for call in panels)
     assert await db.has_pending_application(8)
     profile = await db.get_user(8)
     assert (profile["profile_name"], profile["birth_date"], profile["age"]) == ("Рома", "2000-01-01", None)
     assert profile["profile_bio"] == ""
     assert "отправлена на проверку" in panels[-1].rich_message.model_dump_json()
+    assert "онлайн-интервью" not in panels[-1].rich_message.model_dump_json()
     assert set(actions(panels[-1])) == {"menu:question"}
+    pending_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
+    assert pending_id != first.message_id
+    assert session.calls[-1].__api_method__ == "deleteMessage"
+    assert session.calls[-1].message_id == first.message_id
+
+    review = await bot.send_message(99, "Анкета на проверку")
+    application = (await db.pending_applications())[0]
+    await callback(f"application:approve:{application['id']}", 9, review, incoming(uid=99).from_user)
+    approved = [call for call in session.calls if isinstance(call, SendRichMessage) and call.chat_id == 8][-1]
+    assert "Заявка одобрена" in approved.rich_message.model_dump_json()
+    assert "https://t.me/+community" in approved.rich_message.model_dump_json()
+    assert "отправлена на проверку" not in approved.rich_message.model_dump_json()
+    assert {"menu:profile", "menu:wallet", "menu:shop", "menu:pet", "menu:notices", "menu:question"} == set(
+        actions(approved)
+    )
+    menu_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
+    assert menu_id != pending_id
+    assert session.calls[-1].__api_method__ == "deleteMessage"
+    assert session.calls[-1].message_id == pending_id
+    menu = Message(message_id=menu_id, date=datetime.now(UTC), chat=first.chat,
+                   rich_message={"blocks": content(approved)})
+    await callback("menu:profile", 10, menu)
+    profile_click.assert_awaited_once_with(menu_id)
     await dispatcher.storage.close()
 
 
