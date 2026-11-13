@@ -6,16 +6,17 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup
 
 from community_bot.database import Database
 from community_bot.keyboards import STYLE_FUN, STYLE_GO, back_btn, close_btn, ibtn
+from community_bot.shop_text import plain_shop_text
+from community_bot.widget_notifications import Sender, send_service_notification
 
 logger = logging.getLogger(__name__)
 
 CHANNELS: dict[str, tuple[str, str]] = {
-    "pet": ("🐾 Тамагочи", "Возврат из экспедиции, редкая награда, уникальное достижение. Без спама."),
+    "pet": ("🐾 Питомец", "Возврат из экспедиции, редкая награда, уникальное достижение. Без спама."),
     "games": ("🎮 Игры", "Старт партии, ваш ход, итог. Роли мафии и бункера — всегда."),
     "events": ("🎟 События", "Анонс студии и RSVP с залогом."),
     "shop": ("🛒 Магазин", "Новая витрина и конец тиража."),
@@ -31,12 +32,15 @@ async def emit(bot: Any, db: Database, user_id: int, channel: str, text: str) ->
     if await db.notify_digest_on(user_id, channel):
         return True
     try:
-        await bot.send_message(user_id, text, parse_mode="HTML")
-        await db.notify_mark_delivered(inbox_id)
-    except (TelegramBadRequest, TelegramForbiddenError):
-        logger.info("notify dm skipped user=%s channel=%s", user_id, channel)
-    except Exception:
-        logger.exception("notify dm failed user=%s channel=%s", user_id, channel)
+        content = plain_shop_text(text)
+        if content:
+            await send_service_notification(
+                bot, db, user_id, Sender(), CHANNELS[channel][0], content,
+                channel if channel in {"shop", "events"} else "notices", event_key=f"legacy-inbox:{inbox_id}",
+            )
+            await db.notify_mark_delivered(inbox_id)
+    except Exception as error:
+        logger.warning("Notify inbox enqueue failed (%s)", type(error).__name__)
     return True
 
 
@@ -60,19 +64,18 @@ async def deliver_digests(bot: Any, db: Database) -> int:
         by_user[int(row["user_id"])].append(row)
     sent = 0
     for user_id, items in by_user.items():
-        lines = ["📬 <b>Дайджест за день</b>", ""]
-        for item in items[:20]:
-            lines.append(f"• {item['text']}")
+        lines = [f"• {plain_shop_text(item['text'])}" for item in items[:20]]
         if len(items) > 20:
             lines.append(f"… и ещё {len(items) - 20}")
         try:
-            await bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
+            await send_service_notification(
+                bot, db, user_id, Sender(), "Дайджест за день", "\n".join(lines), "notices",
+                event_key=f"digest:{items[0]['id']}:{items[-1]['id']}",
+            )
             await db.notify_mark_delivered_ids([int(item["id"]) for item in items])
             sent += 1
-        except (TelegramBadRequest, TelegramForbiddenError):
-            logger.info("digest skipped user=%s", user_id)
-        except Exception:
-            logger.exception("digest failed user=%s", user_id)
+        except Exception as error:
+            logger.warning("Notify digest enqueue failed (%s)", type(error).__name__)
         await asyncio.sleep(0.05)
     return sent
 

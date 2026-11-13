@@ -12,7 +12,7 @@ def test_profile_card_keeps_role_and_custom_status_separate() -> None:
         "role": "admin",
         "custom_status": "На стиле",
         "hobbies": "Музыка",
-        "age": 24,
+        "birth_date": '2001-01-01',
         "reputation": 95,
         "cookies": 250,
         "warnings": 0,
@@ -22,7 +22,7 @@ def test_profile_card_keeps_role_and_custom_status_separate() -> None:
 
     assert "NORA COMMUNITY" in text
     assert "Администратор" in text
-    assert "На стиле" in text
+    assert "На стиле" not in text
     assert "95/100" in text
     assert "скидка 10%" in text
     assert "██████████" in text
@@ -37,7 +37,7 @@ def test_profile_reputation_bar_is_clamped() -> None:
         "role": "member",
         "custom_status": None,
         "hobbies": None,
-        "age": None,
+        "birth_date": None,
         "reputation": -5,
         "cookies": 0,
         "warnings": 2,

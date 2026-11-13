@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -21,14 +22,19 @@ from community_bot.covers import cover_path_for
 from community_bot.database import Database
 from community_bot.ephemeral import GroupCallbackEphemeralMiddleware, GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.helpers import send_stored_message
+from community_bot.navigation import CabinetNavigationMiddleware
+from community_bot.openrouter_chat import OpenRouterChat
+from community_bot.release_backup import verify_requested_release_backup, verify_widget_notification_backup
 from community_bot.restart import relaunch
 from community_bot.routers import (
+    command_admin_router,
     contest_router,
     cookie_games_router,
     flows_router,
     games_router,
     group_router,
     life_router,
+    nora_router,
     notices_router,
     pets_router,
     private_router,
@@ -37,7 +43,11 @@ from community_bot.routers import (
     social_games_router,
     wallet_router,
 )
-from community_bot.telegraph import publish_member_update, publish_staff_guide
+from community_bot.routers.nora import assistant_router
+from community_bot.telegraph import (
+    publish_staff_guide,
+    repair_member_images,
+)
 from community_bot.ui_owner import UiOwnerMiddleware
 from community_bot.updates import announcement_key, community_announcement, latest_update
 
@@ -53,59 +63,58 @@ async def configure_commands(bot: Bot) -> None:
             BotCommand(command="profile", description="Мой профиль"),
             BotCommand(command="balance", description="Кошелёк"),
             BotCommand(command="shop", description="Магазин"),
-            BotCommand(command="pet", description="Мой тамагочи"),
+            BotCommand(command="pet", description="Мой питомец"),
             BotCommand(command="buycookies", description="Купить печеньки через СБП"),
             BotCommand(command="mail", description="Анонимное письмо в чат"),
             BotCommand(command="help", description="Помощь"),
             BotCommand(command="pogoda", description="Погода в Петербурге"),
+            BotCommand(command="stickers", description="Стикеры Норы"),
         ],
         scope=BotCommandScopeAllPrivateChats(),
         language_code="ru",
     )
     await bot.set_my_commands(
-        [
-            BotCommand(command="profile", description="Профиль (можно ответом)"),
-            BotCommand(command="balance", description="Кошелёк"),
-            BotCommand(command="commands", description="Команды бота"),
-            BotCommand(command="reputation", description="Система репутации"),
-            BotCommand(command="store", description="Магазин и оплата"),
-            BotCommand(command="shop", description="Магазин"),
-            BotCommand(command="pet", description="Открыть тамагочи"),
-            BotCommand(command="games", description="Мини-игры: рулетка, блэкджек, кубик, рейс, капкан"),
-            BotCommand(command="blackjack", description="Блэкджек: /blackjack 10"),
-            BotCommand(command="dice", description="Кубик 1 на 1: /dice 10"),
-            BotCommand(command="crash", description="Рейс на 🍪: /crash 10"),
-            BotCommand(command="trap", description="Капкан на 🍪: /trap 10"),
-            BotCommand(command="mafia", description="Мафия: роли в личку"),
-            BotCommand(command="bunker", description="Бункер: досье в личку"),
-            BotCommand(command="roulette", description="Рулетка на мут 30 мин"),
-            BotCommand(command="gift", description="Подарить товар ответом"),
-            BotCommand(command="report", description="Репорт ответом на сообщение"),
-            BotCommand(command="board", description="Доска недели"),
-            BotCommand(command="gamecancel", description="Отменить текущую игру"),
-            BotCommand(command="pogoda", description="Погода в Петербурге"),
-        ],
+        [],
         scope=BotCommandScopeAllGroupChats(),
         language_code="ru",
     )
 
 
+def _same_release(last: str | None, number: int) -> bool:
+    if not last:
+        return False
+    return str(last).split(":", 1)[0] == str(number)
+
+
+async def _pin_announcement(bot: Bot, db: Database, settings: Settings, message_id: int) -> None:
+    chat_id = settings.community_chat_id
+    try:
+        await bot.pin_chat_message(chat_id, message_id, disable_notification=True)
+        old_pin = await db.get_bot_state("last_announcement_message_id")
+        if old_pin and int(old_pin) != message_id:
+            with contextlib.suppress(Exception):
+                await bot.unpin_chat_message(chat_id, int(old_pin))
+    except Exception:
+        logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
+
+
 async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> None:
+    from community_bot.stickers import STICKER_PACK_URL, send_context_sticker
+
     item = latest_update()
     last = await db.get_bot_state("last_announced_update")
     if last == announcement_key(item):
+        source = await db.get_bot_state("last_announcement_message_id")
+        if source and settings.community_chat_id:
+            await send_context_sticker(bot, db, settings.community_chat_id, "update", int(source))
         return
     if not settings.community_chat_id:
         return
-    url = await publish_member_update(db, item)
-    if url:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", url=url)]]
-        )
-    else:
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
-        )
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Что изменилось", callback_data="updates:dm")]]
+    )
+    if item.sticker_pack_url:
+        markup.inline_keyboard.append([InlineKeyboardButton(text="😎 Забрать стикеры", url=STICKER_PACK_URL)])
     caption = community_announcement(item)
     cover = cover_path_for(item)
     try:
@@ -127,25 +136,23 @@ async def announce_latest_update(bot: Bot, db: Database, settings: Settings) -> 
     except Exception:
         logger.exception("Не удалось объявить обновление в чате сообщества")
         return
-    try:
-        old_pin = await db.get_bot_state("last_announcement_message_id")
-        if old_pin:
-            with contextlib.suppress(Exception):
-                await bot.unpin_chat_message(settings.community_chat_id, int(old_pin))
-        await bot.pin_chat_message(settings.community_chat_id, sent.message_id, disable_notification=True)
-    except Exception:
-        logger.warning("Не удалось закрепить анонс — сообщение осталось в чате как пост.")
+    await send_context_sticker(bot, db, settings.community_chat_id, "update", sent.message_id)
+    await _pin_announcement(bot, db, settings, sent.message_id)
     await db.set_bot_state("last_announcement_message_id", str(sent.message_id))
     await db.set_bot_state("last_announced_update", announcement_key(item))
+    if _same_release(last, item.number):
+        return
     await notify_staff_update(bot, db, item)
 
 
-async def notify_staff_update(bot: Bot, db: Database, item) -> None:
+async def notify_staff_update(bot: Bot, db: Database, item, staff_url: str | None = None) -> None:
     from community_bot.updates import staff_announcement
 
     text = staff_announcement(item)
     if not text:
         return
+    if staff_url:
+        text = f"{text}\n\n<a href=\"{staff_url}\">Служебная страница</a>"
     for user_id in await db.list_panel_user_ids():
         with contextlib.suppress(Exception):
             await bot.send_message(user_id, text, parse_mode="HTML")
@@ -169,6 +176,21 @@ async def log_community_permissions(bot: Bot, settings: Settings) -> None:
             logger.warning("Чтобы стирать команды, бот должен быть администратором с правом удалять сообщения.")
     except Exception:
         logger.exception("Не удалось проверить права бота в чате сообщества")
+
+
+async def send_memory_notice_once(bot: Bot, db: Database, settings: Settings) -> None:
+    from community_bot.chat_memory import MEMORY_NOTICE
+
+    if not settings.community_chat_id:
+        return
+    if await db.get_bot_state("nora_memory_notice_v1") == "1":
+        return
+    try:
+        await bot.send_message(settings.community_chat_id, MEMORY_NOTICE)
+    except Exception:
+        logger.warning("Не удалось отправить уведомление о памяти сообщества")
+        return
+    await db.set_bot_state("nora_memory_notice_v1", "1")
 
 
 async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> None:
@@ -313,8 +335,30 @@ async def notify_digest_job(db: Database, bot: Bot, settings: Settings) -> None:
             logger.exception("Ошибка дайджеста уведомлений")
 
 
+async def daily_chat_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.daily_chat import due_daily_chat, publish_daily_chat, seconds_until_midnight
+
+    timezone = ZoneInfo(settings.timezone)
+    while True:
+        now = datetime.now(timezone)
+        posted = await db.get_bot_state("daily_chat_marker")
+        day = due_daily_chat(now, posted)
+        if day is not None:
+            try:
+                await publish_daily_chat(bot, db, settings, day)
+            except Exception:
+                logger.exception("Ошибка сводки суток")
+            if await db.get_bot_state(f"daily_chat:{day.isoformat()}"):
+                await db.set_bot_state("daily_chat_marker", day.isoformat())
+            await asyncio.sleep(600)
+            continue
+        await asyncio.sleep(seconds_until_midnight(now))
+
+
 async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None:
+    from community_bot.maintenance import apply_requested_morning_rebuild
     from community_bot.morning import due_morning, publish_missed_today, publish_morning_digest, seconds_until_morning
+    from community_bot.morning_tvrain_trial import apply_tvrain_trial
 
     timezone = ZoneInfo(settings.timezone)
     for _ in range(3):
@@ -324,9 +368,13 @@ async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None
         except Exception:
             logger.exception("Не удалось отправить сводку за сегодня")
             await asyncio.sleep(20)
+    await apply_tvrain_trial(bot, settings)
     while True:
         now = datetime.now(timezone)
         try:
+            if not await apply_requested_morning_rebuild(bot, db, settings):
+                await asyncio.sleep(30)
+                continue
             await publish_morning_digest(bot, db, settings)
         except Exception:
             logger.exception("Ошибка утреннего поста")
@@ -350,7 +398,7 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
                 with contextlib.suppress(Exception):
                     await bot.send_message(
                         user_id,
-                        f"💳 Срок кредита истёк: списано {due_amount} 🍪.{extra}",
+                        f"💳 Срок стартер-пака истёк: списано {due_amount} 🍪.{extra}",
                     )
                 await asyncio.sleep(0.05)
         except Exception:
@@ -358,33 +406,50 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
         await asyncio.sleep(60)
 
 
-async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    settings = load_settings()
-    db = Database(settings.database_path)
-    await db.initialize()
-    if await db.get_bot_state("emergency_disabled") == "1":
-        logger.critical("Бот заблокирован аварийным выключателем")
-        await asyncio.Event().wait()
-        return
-    for owner_id in settings.owner_ids:
-        await db.ensure_user(owner_id, telegram_name="Владелец")
-        await db.set_role(owner_id, "owner")
-    for moderator_id in settings.moderator_ids:
-        moderator = await db.ensure_user(moderator_id, telegram_name="Модератор")
-        if moderator["role"] == "member":
-            await db.set_role(moderator_id, "moderator")
+async def memory_cleanup_job(db: Database) -> None:
+    while True:
+        try:
+            await db.cleanup_community_messages()
+        except Exception:
+            logger.exception("Ошибка очистки памяти сообщества")
+        await asyncio.sleep(3600)
 
-    bot = Bot(settings.bot_token)
-    bot.community_db = db  # type: ignore[attr-defined]
-    patch_bot_ephemeral(bot)
+
+def create_dispatcher() -> Dispatcher:
+    from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
+    from community_bot.private_rich import PrivateRichContextMiddleware
+
     dispatcher = Dispatcher()
+    from community_bot.message_widgets import WidgetUpdateMiddleware
+
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    from community_bot.memory_capture import CommunityMemoryMiddleware
+
+    memory_middleware = CommunityMemoryMiddleware()
+    dispatcher.message.outer_middleware(memory_middleware)
+    dispatcher.edited_message.outer_middleware(memory_middleware)
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.message.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
+    dispatcher.message.outer_middleware(ProfileAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
+    dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
     dispatcher.callback_query.outer_middleware(GroupCallbackEphemeralMiddleware())
+    from community_bot.birthday import router as birthday_router
+    from community_bot.commands_guide import router as commands_router
+    from community_bot.event_access import router as event_router
+    from community_bot.mafia_notifications import router as mafia_notifications_router
+    from community_bot.sea_notifications import router as sea_notifications_router
+
+    dispatcher.include_router(mafia_notifications_router)
+    dispatcher.include_router(sea_notifications_router)
+    dispatcher.include_router(birthday_router)
+    dispatcher.include_router(event_router)
+    dispatcher.include_router(nora_router)
+    dispatcher.include_router(command_admin_router)
     dispatcher.include_router(flows_router)
     dispatcher.include_router(profile_router)
     dispatcher.include_router(notices_router)
@@ -396,16 +461,92 @@ async def main() -> None:
     dispatcher.include_router(life_router)
     dispatcher.include_router(contest_router)
     dispatcher.include_router(shop_admin_router)
+    dispatcher.include_router(commands_router)
     dispatcher.include_router(private_router)
     dispatcher.include_router(group_router)
+    dispatcher.include_router(assistant_router)
+    return dispatcher
 
+
+async def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    settings = load_settings()
+    db = Database(settings.database_path)
+    from community_bot import profile_access_rollout
+    from community_bot.community_reset import apply_reset, prepare_reset, reset_settings
+    from community_bot.wallet_reset import apply_wallet_reset_release
+
+    await profile_access_rollout.prepare(db)
+    await prepare_reset(db)
+    await verify_requested_release_backup(db)
+    await verify_widget_notification_backup(db)
+    await db.initialize()
+    await apply_reset(db, settings)
+    await apply_wallet_reset_release(db)
+    settings = await reset_settings(db, settings)
+    if await db.get_bot_state("emergency_disabled") == "1":
+        logger.critical("Бот заблокирован аварийным выключателем")
+        await asyncio.Event().wait()
+        return
+    settings = await profile_access_rollout.apply(db, settings)
+    await profile_access_rollout.queue_notices(db)
+    for owner_id in settings.owner_ids:
+        if not await db.get_user(owner_id):
+            await db.ensure_user(owner_id, telegram_name="Владелец")
+        await db.set_role(owner_id, "owner")
+    for moderator_id in settings.moderator_ids:
+        moderator = await db.ensure_user(moderator_id, telegram_name="Модератор")
+        if moderator["role"] == "member":
+            await db.set_role(moderator_id, "moderator")
+
+    from community_bot.message_widgets import WidgetSession
+
+    bot = Bot(settings.bot_token, session=WidgetSession())
+    bot.community_db = db  # type: ignore[attr-defined]
+    bot.community_settings = settings  # type: ignore[attr-defined]
+    from community_bot.profile_maintenance import run_requested_reset
+
+    await run_requested_reset(db, settings, bot)
+    from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
+    from community_bot.private_rich import PrivateRichMiddleware
+
+    bot.session.middleware.register(OnboardingKeyboardMiddleware())
+    bot.session.middleware.register(PrivateRichMiddleware())
+    patch_bot_ephemeral(bot)
+    dispatcher = create_dispatcher()
+    if settings.openrouter_api_key or settings.deepseek_api_key:
+        dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)
+
+    from community_bot.birthday import birthday_job
+    from community_bot.command_registry import load_registry
+
+    await load_registry(db)
     await configure_commands(bot)
     await log_community_permissions(bot, settings)
+    await send_memory_notice_once(bot, db, settings)
+    from community_bot.stickers import sticker_delivery_job, verify_sticker_pack
+
+    await verify_sticker_pack(bot)
+    await repair_member_images(db)
     await announce_latest_update(bot, db, settings)
+    if await db.get_bot_state("event_shop_fix_staff_notice_v1") != "1":
+        for staff_id in await db.list_panel_user_ids():
+            await safe_staff_event_notice(bot, staff_id)
+        await db.set_bot_state("event_shop_fix_staff_notice_v1", "1")
     await publish_staff_guide(db)
     await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()
+    web_runner = None
+    if os.getenv("MINIAPP_ENABLED") == "1":
+        from community_bot.miniapp import start_server
+
+        web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
+        logger.info("Nora Mini App HTTP server started")
+    profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
@@ -413,11 +554,21 @@ async def main() -> None:
     loan_task = asyncio.create_task(cookie_loan_job(db, bot))
     board_task = asyncio.create_task(weekly_board_job(db, settings, bot))
     morning_task = asyncio.create_task(morning_digest_job(db, settings, bot))
+    daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
+    birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
+    memory_task = asyncio.create_task(memory_cleanup_job(db))
+    from community_bot.rsvp import event_counters_job
+    from community_bot.widget_notifications import widget_notification_job
+
+    widget_notification_task = asyncio.create_task(widget_notification_job(bot, db))
+    event_counters_task = asyncio.create_task(event_counters_job(bot, db))
+    sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     try:
         await dispatcher.start_polling(
             bot,
+            allowed_updates=[*dispatcher.resolve_used_update_types(), "widget_query"],
             db=db,
             settings=settings,
             emergency_stop=emergency_stop,
@@ -425,6 +576,7 @@ async def main() -> None:
         )
     finally:
         for task in (
+            profile_access_task,
             reputation_task,
             scheduled_task,
             pet_task,
@@ -432,12 +584,19 @@ async def main() -> None:
             loan_task,
             board_task,
             morning_task,
+            daily_chat_task,
+            birthday_task,
+            memory_task,
+            widget_notification_task,
+            event_counters_task,
+            sticker_delivery_task,
             emergency_task,
             restart_task,
         ):
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(
+                profile_access_task,
                 reputation_task,
                 scheduled_task,
                 pet_task,
@@ -445,9 +604,17 @@ async def main() -> None:
                 loan_task,
                 board_task,
                 morning_task,
+                daily_chat_task,
+                birthday_task,
+                memory_task,
+                widget_notification_task,
+                event_counters_task,
+                sticker_delivery_task,
                 emergency_task,
                 restart_task,
             )
+        if web_runner:
+            await web_runner.cleanup()
         await bot.session.close()
     if restart_stop.is_set() and await db.get_bot_state("emergency_disabled") != "1":
         logger.info("owner restart: relaunching in-place, sqlite and settings preserved")
@@ -456,6 +623,16 @@ async def main() -> None:
 
 def run() -> None:
     asyncio.run(main())
+
+
+async def safe_staff_event_notice(bot, user_id):
+    with contextlib.suppress(Exception):
+        await bot.send_message(
+            user_id,
+            "🛠 Исправлены мероприятия в магазине: цена берётся из анонса, без цены — бесплатная запись. "
+            "Команда «участники» и журнал оплат доступны по отдельному праву "
+            "«Мероприятия: участники и журнал оплат» в настройках ролей.",
+        )
 
 
 if __name__ == "__main__":

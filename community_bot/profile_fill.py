@@ -4,10 +4,11 @@ import html
 from typing import Any
 
 from community_bot.domain import AUTO_REPUTATION_CAP
+from community_bot.profile_fields import profile_age
 
 PROFILE_BLOCKS: tuple[tuple[str, str], ...] = (
     ("profile_name", "Имя"),
-    ("age", "Возраст"),
+    ("birth_date", "Дата рождения"),
     ("hobbies", "Увлечения"),
     ("profile_bio", "Описание"),
     ("avatar_file_id", "Аватар"),
@@ -16,11 +17,8 @@ PROFILE_BLOCKS: tuple[tuple[str, str], ...] = (
 
 def _filled(user: dict[str, Any], field: str) -> bool:
     value = user.get(field)
-    if field == "age":
-        try:
-            return 14 <= int(value) <= 120
-        except (TypeError, ValueError):
-            return False
+    if field == "birth_date":
+        return (profile_age(user) or 0) >= 14
     return bool(str(value or "").strip())
 
 

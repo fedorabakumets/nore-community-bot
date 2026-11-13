@@ -36,16 +36,15 @@ async def games_hub(message: Message, db: Database) -> None:
     if not await db.feature_enabled("games"):
         await message.answer("Мини-игры временно выключены администрацией.")
         return
-    with keep_in_chat():
-        sent = await answer_block(
-            message,
-            "games",
-            GAMES_HELP_TEXT,
-            parse_mode="HTML",
-            reply_markup=games_menu_keyboard(),
-        )
-        if message.from_user:
-            await bind_ui_owner(db, sent, message.from_user.id, "games")
+    sent = await answer_block(
+        message,
+        "games",
+        GAMES_HELP_TEXT,
+        parse_mode="HTML",
+        reply_markup=games_menu_keyboard(),
+    )
+    if message.from_user:
+        await bind_ui_owner(db, sent, message.from_user.id, "games")
 
 
 @router.callback_query(F.data == "game:rules:all")

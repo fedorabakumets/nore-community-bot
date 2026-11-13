@@ -36,11 +36,14 @@ def contest_join_keyboard(contest_id: int, count: int = 0) -> InlineKeyboardMark
 
 
 def contest_home_keyboard(*, has_open: bool) -> InlineKeyboardMarkup:
+    from community_bot.seasonal import TITLE
+
     rows = [[ibtn("📝 Новый конкурс", "admin:contest:new", STYLE_GO)]]
     if has_open:
         rows.append([ibtn("🏆 Подвести итог", "admin:contest:draw", STYLE_FUN)])
         rows.append([ibtn("👥 Участники", "admin:contest:list")])
         rows.append([ibtn("✖️ Снять конкурс", "admin:contest:cancel", STYLE_CLOSE)])
+    rows.append([ibtn(f"Сезон 1 · {TITLE}", "admin:season:home")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

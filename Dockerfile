@@ -11,6 +11,7 @@ COPY community_bot ./community_bot
 COPY assets ./assets
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN pip install . \
+    && python -m community_bot.menu_art \
     && useradd --create-home --uid 10001 botuser \
     && mkdir -p /app/data \
     && chmod +x /app/docker-entrypoint.sh \
