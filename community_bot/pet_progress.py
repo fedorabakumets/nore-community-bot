@@ -1,15 +1,12 @@
 """Persistent pet development. Write helpers run inside the caller's SQLite transaction."""
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime, timedelta, timezone
 
 MSK = timezone(timedelta(hours=3), "МСК")
 QUEST_XP = 50
 STAGE_XP = 100
 DAILY_XP = 100
-TEXT_INTERVAL = 5
-TEXT_MIN_LENGTH = 3
 LEVELS = ("Компаньон", "Собеседник", "Помощник")
 AI_STAGE = 5
 VIDEO_STAGE = 10
@@ -194,8 +191,8 @@ async def award(db, user_id, stage, stamp):
         )
 
 
-async def record(db, user_id, event, *, now=None, message=None):
-    """Record a successful action or a moderated Telegram message. No client event input."""
+async def record(db, user_id, event, *, now=None, message=None, alternatives=()):
+    """Record an eligible action or Telegram post. No client event input."""
     now = moscow_now(now)
     stamp = now.astimezone(UTC).isoformat()
     if not await one(db, "SELECT 1 FROM feature_flags WHERE key='tamagotchi' AND enabled=1"):
@@ -205,7 +202,7 @@ async def record(db, user_id, event, *, now=None, message=None):
         return
     day = await ensure_day(db, user_id, now)
     if message:
-        chat_id, message_id, sent_at, text = message
+        chat_id, message_id, sent_at = message
         if sent_at.astimezone(MSK).date() != now.date():
             return
         event_row = await db.execute(
@@ -213,26 +210,18 @@ async def record(db, user_id, event, *, now=None, message=None):
         )
         if not event_row.rowcount:
             return
-        if event == "text":
-            digest = hashlib.sha256(text.encode()).hexdigest()
-            timestamp = int(sent_at.timestamp())
-            if timestamp <= (state["last_text_at"] or 0):
-                return
-            if state["last_text_hash"] == digest or timestamp - (state["last_text_at"] or 0) < TEXT_INTERVAL:
-                return
-            await db.execute(
-                "UPDATE pet_development SET last_text_hash=?, last_text_at=?, messages=messages+1 WHERE user_id=?",
-                (digest, timestamp, user_id),
-            )
+        if "text" in (event, *alternatives):
+            await db.execute("UPDATE pet_development SET messages=messages+1 WHERE user_id=?", (user_id,))
 
     daily = await one(db, "SELECT xp FROM pet_quest_days WHERE user_id=? AND day=?", (user_id, day))
     quests = await (await db.execute(
         "SELECT * FROM pet_quests WHERE user_id=? AND day=? AND progress<target ORDER BY slot", (user_id, day),
     )).fetchall()
-    for quest in quests:
-        if event not in quest["events"].split(","):
+    for candidate in (event, *alternatives):
+        quest = next((q for q in quests if candidate in q["events"].split(",")), None)
+        if quest is None:
             continue
-        progress = quest["progress"] + 1 if event == "text" else quest["target"]
+        progress = quest["progress"] + 1 if candidate == "text" else quest["target"]
         xp = min(QUEST_XP, DAILY_XP - daily["xp"]) if progress == quest["target"] else 0
         if state["stage"] == len(REWARDS):
             xp = 0
@@ -257,31 +246,41 @@ async def record(db, user_id, event, *, now=None, message=None):
 
 
 async def record_message(database, message):
-    from community_bot.aliases import is_command_message
-    from community_bot.nora import strip_address
+    from community_bot.domain import reputation_delta
 
     user = message.from_user
-    if not user or user.is_bot or message.sender_chat or message.via_bot or message.forward_origin:
+    if not user or user.is_bot or message.sender_chat:
         return
-    text = " ".join((message.text or "").casefold().split())
-    if message.text:
-        if (len(text) < TEXT_MIN_LENGTH or text.startswith(("/", "+", "-", "−"))
-                or is_command_message(text, include_disabled=True) or strip_address(text) is not None):
-            return
-        event = "text"
-    else:
-        event = next((kind for kind, value in (
-            ("voice", message.voice), ("circle", message.video_note), ("photo", message.photo),
-            ("video", message.video), ("media", message.document or message.audio or message.animation),
-        ) if value), None)
-        if not event:
-            return
-    # Fast path for participants without a pet.
-    if not await database.get_pet(user.id, settle=False):
+    media = next((kind for kind, value in (
+        ("voice", message.voice), ("circle", message.video_note), ("photo", message.photo),
+        ("video", message.video), ("media", message.document or message.audio or message.animation),
+    ) if value), None)
+    if not (media or (message.text or "").strip() or message.sticker or message.poll
+            or message.contact or message.location or message.venue or message.dice
+            or message.game or message.paid_media or message.story):
+        return
+
+    reply = message.reply_to_message
+    target = reply.from_user if reply and not reply.sender_chat else None
+    delta = reputation_delta(message.text or "")
+    events = []
+    if delta and target and not target.is_bot and target.id != user.id:
+        events.append("plus" if delta > 0 else "minus")
+    if media:
+        events.append(media)
+    events.append("text")
+    await record_telegram_event(
+        database, user.id, events[0], (message.chat.id, message.message_id, message.date),
+        alternatives=events[1:],
+    )
+
+
+async def record_telegram_event(database, user_id, event, message, *, alternatives=()):
+    if not await database.get_pet(user_id, settle=False):
         return
     async with database.connect() as db:
         await db.execute("BEGIN IMMEDIATE")
-        await record(db, user.id, event, message=(message.chat.id, message.message_id, message.date, text))
+        await record(db, user_id, event, message=message, alternatives=alternatives)
         await db.commit()
 
 
@@ -350,7 +349,6 @@ async def dashboard(database, user_id):
         "messages": state["messages"], "milestones": ACTIVITY_MILESTONES,
         "rules": {
             "quest_xp": QUEST_XP, "daily_xp": DAILY_XP, "stage_xp": STAGE_XP,
-            "text_interval": TEXT_INTERVAL, "text_min_length": TEXT_MIN_LENGTH,
             "ai_stage": AI_STAGE, "video_stage": VIDEO_STAGE, "video_daily_limit": VIDEO_DAILY_LIMIT,
             "video_max_mb": VIDEO_MAX_MB, "timezone": MSK.tzname(None), "reset_hour": "00:00",
             "max_stages_per_day": 1, "text_target": TEXT_TARGET,

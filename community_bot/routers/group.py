@@ -604,6 +604,15 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
             parse_mode="HTML",
         )
         return
+    if action not in {"rep_up", "rep_down"}:
+        return
+    if callback.message.chat.id == settings.community_chat_id and not callback.from_user.is_bot:
+        from community_bot.pet_progress import record_telegram_event
+
+        await record_telegram_event(
+            db, callback.from_user.id, "plus" if action == "rep_up" else "minus",
+            (callback.message.chat.id, f"callback:{callback.id}", datetime.now(UTC)),
+        )
     delta = 5 if action == "rep_up" else -5
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()

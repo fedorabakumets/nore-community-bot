@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from aiogram.types import Chat, Message, User
 
 from community_bot import pet_progress
 from community_bot.database import Database
@@ -42,7 +43,7 @@ async def test_nine_days_and_rewards(tmp_path):
                     await pet_progress.record(conn, 1, event, now=now)
             for index in range(10):
                 sent = now + timedelta(seconds=index * 10)
-                message = (-1, index + offset * 10, sent, f"hello {index}")
+                message = (-1, index + offset * 10, sent)
                 await pet_progress.record(conn, 1, "text", now=sent, message=message)
                 await pet_progress.record(conn, 1, "text", now=sent, message=message)
             await conn.commit()
@@ -83,3 +84,32 @@ async def test_progress_rolls_over_at_moscow_midnight(tmp_path):
             await conn.commit()
     days = await db.fetchall("SELECT day FROM pet_quest_days ORDER BY day")
     assert [day["day"] for day in days] == ["2026-11-01", "2026-11-02"]
+
+
+async def test_commands_and_reputation_attempts_count_once(tmp_path):
+    db = Database(tmp_path / "pets.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    now = pet_progress.moscow_now()
+    day = now.date().isoformat()
+    await pet_progress.dashboard(db, 1)
+    await db.execute(
+        "UPDATE pet_quests SET events='text',target=10 WHERE user_id=1 AND day=? AND slot=1", (day,),
+    )
+    await db.execute(
+        "UPDATE pet_quests SET events='plus,minus',target=1 WHERE user_id=1 AND day=? AND slot=3", (day,),
+    )
+
+    sender = User(id=1, is_bot=False, first_name="Автор")
+    other = User(id=2, is_bot=False, first_name="Участник")
+    chat = Chat(id=-100123, type="supergroup")
+    reply = Message(message_id=100, date=now, chat=chat, from_user=other, text="Привет")
+    command = Message(message_id=101, date=now, chat=chat, from_user=sender, text="/pet")
+    attempt = Message(message_id=103, date=now, chat=chat, from_user=sender, text="-реп", reply_to_message=reply)
+    for message in (command, command, command.model_copy(update={"message_id": 102}), attempt, attempt):
+        await pet_progress.record_message(db, message)
+    quests = await db.fetchall("SELECT slot,progress,xp FROM pet_quests ORDER BY slot")
+    assert quests[0]["progress"] == 2
+    assert (quests[2]["progress"], quests[2]["xp"]) == (1, 50)
+    assert (await db.fetchone("SELECT messages FROM pet_development"))["messages"] == 3
+    assert not await db.fetchall("SELECT id FROM reputation_actions")

@@ -1892,12 +1892,10 @@ class Database:
         return new - current
 
     async def apply_reputation(self, actor_id: int, target_id: int, delta: int, action_date: date) -> int:
-        from community_bot.pet_progress import record
-
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
-            applied = await self._change_reputation_value(db, target_id, delta, now)
+            await self._change_reputation_value(db, target_id, delta, now)
             cursor = await db.execute("SELECT reputation FROM users WHERE user_id=?", (target_id,))
             target = await cursor.fetchone()
             if not target:
@@ -1909,8 +1907,6 @@ class Database:
                 """,
                 (actor_id, target_id, delta, action_date.isoformat(), now),
             )
-            if applied and actor_id != target_id:
-                await record(db, actor_id, "plus" if applied > 0 else "minus")
             await db.commit()
             return int(target["reputation"])
 
