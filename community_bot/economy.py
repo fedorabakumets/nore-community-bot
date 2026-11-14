@@ -27,6 +27,7 @@ TRANSACTION_LABELS = {
     "subscription_freebie": "Халява",
     "pet_farm": "Находки питомца",
     "pet_expedition": "Экспедиция питомца",
+    "pet_stage": "Этап развития питомца",
     "pet_shop": "Магазин питомца",
     "rsvp": "Мероприятие",
     "rsvp_refund": "Возврат залога за мероприятие",

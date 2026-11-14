@@ -610,6 +610,7 @@ class Database:
         from community_bot.friends_api import SCHEMA as friends_schema
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.nora_game_api import SCHEMA as nora_game_schema
+        from community_bot.pet_progress import SCHEMA as pet_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
@@ -621,7 +622,12 @@ class Database:
             # Additive, independent game tables: existing balances, party games and pets stay shared.
             await db.executescript(
                 friends_schema + mafia_schema + rocket_schema + sea_schema
-                + seasonal_schema + presence_schema + nora_game_schema
+                + seasonal_schema + presence_schema + nora_game_schema + pet_schema
+            )
+            await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
+            await db.execute(
+                "INSERT OR IGNORE INTO pet_stage_rewards "
+                "SELECT user_id,1,'unlock',1,created_at,created_at FROM pets",
             )
             event_columns = {
                 str(row[1]) for row in await (await db.execute("PRAGMA table_info(studio_events)")).fetchall()
@@ -1866,27 +1872,35 @@ class Database:
             await db.commit()
             return cursor.rowcount == 1
 
-    async def apply_reputation(self, actor_id: int, target_id: int, delta: int, action_date: date) -> int:
+    @staticmethod
+    async def _change_reputation_value(db, user_id: int, delta: int, now: str) -> int:
         from community_bot.profile_fill import reputation_cap
+
+        row = await (await db.execute("SELECT * FROM users WHERE user_id=?", (user_id,))).fetchone()
+        if not row:
+            raise ValueError("Пользователь не найден")
+        current = int(row["reputation"])
+        if delta > 0:
+            cap = reputation_cap(dict(row))
+            new = max(current, min(cap, current + delta))
+        elif delta < 0:
+            new = max(-20, current + delta)
+        else:
+            return 0
+        await db.execute("UPDATE users SET reputation=?,updated_at=? WHERE user_id=?", (new, now, user_id))
+        return new - current
+
+    async def apply_reputation(self, actor_id: int, target_id: int, delta: int, action_date: date) -> int:
+        from community_bot.pet_progress import record
 
         now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
-            cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (target_id,))
-            target_row = await cursor.fetchone()
-            if not target_row:
-                await db.rollback()
+            applied = await self._change_reputation_value(db, target_id, delta, now)
+            cursor = await db.execute("SELECT reputation FROM users WHERE user_id=?", (target_id,))
+            target = await cursor.fetchone()
+            if not target:
                 raise ValueError("Пользователь не найден")
-            current = int(target_row["reputation"])
-            if delta > 0:
-                cap = reputation_cap(dict(target_row))
-                nxt = current if current >= cap else min(cap, current + delta)
-            else:
-                nxt = max(-20, current + delta)
-            await db.execute(
-                "UPDATE users SET reputation = ?, updated_at = ? WHERE user_id = ?",
-                (nxt, now, target_id),
-            )
             await db.execute(
                 """
                 INSERT INTO reputation_actions(actor_id, target_id, delta, action_date, created_at)
@@ -1894,8 +1908,10 @@ class Database:
                 """,
                 (actor_id, target_id, delta, action_date.isoformat(), now),
             )
+            if applied and actor_id != target_id:
+                await record(db, actor_id, "plus" if applied > 0 else "minus")
             await db.commit()
-            return nxt
+            return int(target["reputation"])
 
     async def create_transfer(self, sender_id: int, receiver_id: int, amount: int) -> int:
         return await self.execute(
@@ -1914,6 +1930,7 @@ class Database:
         *, intent_id: str | None = None,
     ) -> tuple[bool, str, int]:
         from community_bot.domain import transfer_commission_percent
+        from community_bot.pet_progress import record
 
         now = utcnow()
         async with self.connect() as db:
@@ -1983,6 +2000,8 @@ class Database:
                 "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
                 (int(transfer["receiver_id"]), receiver_amount, "transfer", f"from:{sender_id}", now),
             )
+            if sender_id != transfer["receiver_id"]:
+                await record(db, sender_id, "transfer")
             await db.commit()
             return True, "ok", receiver_amount
 
@@ -2289,18 +2308,21 @@ class Database:
             await db.commit()
             return cursor.rowcount == 1
 
+    @staticmethod
+    async def _add_cookies(db, user_id: int, amount: int, kind: str, details: str, now: str) -> None:
+        await db.execute(
+            "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
+            (amount, now, user_id),
+        )
+        await db.execute(
+            "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, amount, kind, details, now),
+        )
+
     async def add_cookies(self, user_id: int, amount: int, kind: str, details: str = "") -> None:
-        now = utcnow()
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
-            await db.execute(
-                "UPDATE users SET cookies = cookies + ?, updated_at = ? WHERE user_id = ?",
-                (amount, now, user_id),
-            )
-            await db.execute(
-                "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, amount, kind, details, now),
-            )
+            await self._add_cookies(db, user_id, amount, kind, details, utcnow())
             await db.commit()
 
     async def set_cookies(self, user_id: int, amount: int, actor_id: int) -> tuple[bool, int]:
@@ -2464,15 +2486,25 @@ class Database:
             for part in ("rep_shield", "pet_meal"):
                 await self._apply_shop_effect(db, user_id, part, now)
         elif item == "pet_meal":
-            await db.execute(
-                "UPDATE pets SET hunger = MIN(100, hunger + 40), sleeping = 0, updated_at = ? WHERE user_id = ?",
+            cursor = await db.execute(
+                "UPDATE pets SET hunger = MIN(100, hunger + 40), sleeping = 0, updated_at = ? "
+                "WHERE user_id = ? AND hunger < 100",
                 (now, user_id),
             )
+            if cursor.rowcount:
+                from community_bot.pet_progress import record
+
+                await record(db, user_id, "food")
         elif item == "pet_drink":
-            await db.execute(
-                "UPDATE pets SET thirst = MIN(100, thirst + 50), sleeping = 0, updated_at = ? WHERE user_id = ?",
+            cursor = await db.execute(
+                "UPDATE pets SET thirst = MIN(100, thirst + 50), sleeping = 0, updated_at = ? "
+                "WHERE user_id = ? AND thirst < 100",
                 (now, user_id),
             )
+            if cursor.rowcount:
+                from community_bot.pet_progress import record
+
+                await record(db, user_id, "water")
         elif item in IMMUNITY_HOURS or item == "immunity":
             cursor = await db.execute("SELECT hate_immunity_until FROM users WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
@@ -2949,6 +2981,7 @@ class Database:
     async def purchase_pet(
         self, user_id: int, species: str, name: str, price: int, *, intent_id: str | None = None,
     ) -> tuple[bool, str]:
+        from community_bot.pet_progress import ensure_pet
         from community_bot.pets_talk import SPECIES
 
         if price <= 0 or species not in SPECIES or not 1 <= len(name.strip()) <= 24:
@@ -2987,6 +3020,7 @@ class Database:
                 "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
                 (user_id, -price, "shop", "tamagotchi", now),
             )
+            await ensure_pet(db, user_id, now)
             await db.commit()
             return True, "ok"
 
@@ -3090,6 +3124,8 @@ class Database:
     async def use_pet_supply(
         self, user_id: int, kind: str, *, intent_id: str | None = None,
     ) -> tuple[bool, str, dict[str, Any] | None]:
+        from community_bot.pet_progress import record
+
         if kind not in {"food", "water"}:
             return False, "Неизвестный припас.", None
         await self.settle_pet(user_id)
@@ -3111,6 +3147,7 @@ class Database:
             if cursor.rowcount != 1:
                 await db.rollback()
                 return False, "Нет подходящих припасов. Их дают за каждые 120 сообщений.", None
+            await record(db, user_id, kind)
             await db.commit()
         return True, "ok", await self.get_pet(user_id, settle=False)
 
@@ -3125,6 +3162,8 @@ class Database:
         *,
         intent_id: str | None = None,
     ) -> tuple[bool, str, dict[str, Any] | None]:
+        from community_bot.pet_progress import record
+
         if kind not in {"food", "water"} or gain <= 0 or price <= 0:
             return False, "Некорректный товар.", None
         payer = payer_id or user_id
@@ -3160,6 +3199,8 @@ class Database:
                 "INSERT INTO transactions(user_id, amount, kind, details, created_at) VALUES (?, ?, ?, ?, ?)",
                 (payer, -price, "pet_shop", item, now),
             )
+            if payer == user_id:
+                await record(db, user_id, kind)
             await db.commit()
         return True, "ok", await self.get_pet(user_id, settle=False)
 
@@ -3218,6 +3259,8 @@ class Database:
         )
 
     async def stroke_pet(self, user_id: int) -> tuple[bool, str]:
+        from community_bot.pet_progress import record
+
         await self.settle_pet(user_id)
         now = datetime.now(UTC)
         key = f"pet_stroke:{user_id}"
@@ -3247,6 +3290,7 @@ class Database:
                              (stamp, user_id))
             await db.execute("INSERT INTO bot_state(key, value) VALUES (?, ?) "
                              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, stamp))
+            await record(db, user_id, "stroke", now=now)
             await db.commit()
         return True, f"Настроение питомца: +{min(50, 100 - int(row['mood']))}."
 
@@ -4443,6 +4487,7 @@ class Database:
         self, user_id: int, timezone: str = "Europe/Moscow", *, intent_id: str | None = None,
     ) -> tuple[bool, str, int]:
         from community_bot.expedition import expedition_until_iso, remaining_label, roll_expedition_loot
+        from community_bot.pet_progress import record
 
         pet = await self.get_pet(user_id)
         if not pet:
@@ -4477,6 +4522,7 @@ class Database:
                 await db.rollback()
                 leftover = remaining_label(str(dict(row).get("expedition_until") if row else ""), timezone)
                 return False, f"Питомец ещё в экспедиции ({leftover}).", 0
+            await record(db, user_id, "expedition")
             await db.commit()
         return True, "ok", 0
 

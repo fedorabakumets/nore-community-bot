@@ -432,6 +432,9 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
+    from community_bot.routers.group import CommunityModerationMiddleware
+
+    dispatcher.message.outer_middleware(CommunityModerationMiddleware())
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.message.outer_middleware(ProfileAccessMiddleware())
     dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())

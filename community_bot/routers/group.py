@@ -151,7 +151,7 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
         await send_member_welcome(bot, event.chat.id, member.user)
 
 
-class DeleteGroupCommandMiddleware(BaseMiddleware):
+class CommunityModerationMiddleware(BaseMiddleware):
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque[float]] = defaultdict(deque)
         self._admin_cache: dict[tuple[int, int], tuple[float, bool]] = {}
@@ -179,7 +179,7 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
         db = data.get("db")
         settings = data.get("settings")
         bot = data.get("bot")
-        if isinstance(db, Database) and event.from_user:
+        if event.chat.type in {"group", "supergroup"} and isinstance(db, Database) and event.from_user:
             if (
                 isinstance(settings, Settings)
                 and event.chat.id == settings.community_chat_id
@@ -273,11 +273,11 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
                         target_name=event.from_user.full_name,
                     )
                     return None
-        result = await handler(event, data)
-        return result
+                if settings.community_chat_id == event.chat.id and flags.get("tamagotchi"):
+                    from community_bot.pet_progress import record_message
 
-
-router.message.outer_middleware(DeleteGroupCommandMiddleware())
+                    await record_message(db, event)
+        return await handler(event, data)
 
 
 def _group_chat(message: Message) -> bool:
