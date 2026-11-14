@@ -165,6 +165,10 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
     ) -> Any:
         if not isinstance(event, Message) or event.chat.type not in {"group", "supergroup"}:
             return await handler(event, data)
+        from community_bot.pet_video import video_command
+
+        if video_command(event.text):
+            return await handler(event, data)
         openrouter_chat = data.get("openrouter_chat")
         is_cmd = is_group_command_to_sweep(event) and not (
             openrouter_chat and openrouter_chat.prompt_for(event)

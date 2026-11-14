@@ -486,6 +486,9 @@ async def main() -> None:
     await prepare_reset(db)
     await verify_requested_release_backup(db)
     await verify_widget_notification_backup(db)
+    from community_bot.release_backup import verify_pet_development_backup
+
+    await verify_pet_development_backup(db)
     await db.initialize()
     await apply_reset(db, settings)
     await apply_wallet_reset_release(db)
@@ -560,6 +563,7 @@ async def main() -> None:
     daily_chat_task = asyncio.create_task(daily_chat_job(db, settings, bot))
     birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
     memory_task = asyncio.create_task(memory_cleanup_job(db))
+    from community_bot.pet_video import PetVideoQueue
     from community_bot.rsvp import event_counters_job
     from community_bot.widget_notifications import widget_notification_job
 
@@ -568,6 +572,9 @@ async def main() -> None:
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
+    pet_video_queue = PetVideoQueue(db)
+    pet_video_queue.start()
+    dispatcher["pet_video_queue"] = pet_video_queue
     try:
         await dispatcher.start_polling(
             bot,
@@ -578,6 +585,7 @@ async def main() -> None:
             restart_stop=restart_stop,
         )
     finally:
+        await pet_video_queue.close()
         for task in (
             profile_access_task,
             reputation_task,

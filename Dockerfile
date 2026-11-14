@@ -1,3 +1,4 @@
+FROM denoland/deno:bin-2.6.10 AS deno
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -5,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
+
+COPY --from=deno /deno /usr/bin/deno
 
 COPY pyproject.toml ./
 COPY community_bot ./community_bot

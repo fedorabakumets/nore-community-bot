@@ -74,6 +74,7 @@ class OpenRouterChat:
         self._db = db
         self._community_chat_id = settings.community_chat_id
         self._timezone = settings.timezone
+        self._archive_users = settings.owner_ids | settings.moderator_ids
         self._using_deepseek = bool(settings.deepseek_api_key)
         self._openrouter_api_key = settings.openrouter_api_key
         self._openrouter_model = settings.openrouter_model
@@ -244,8 +245,11 @@ class OpenRouterChat:
         self._next_user_request[user_id] = now + _USER_INTERVAL
         return True
 
+    def can_read_archive(self, message: Message) -> bool:
+        return bool(message.from_user and message.from_user.id in self._archive_users)
+
     def uses_contextual_memory(self, message: Message) -> bool:
-        return self._using_deepseek and message.chat.id == self._community_chat_id
+        return self._using_deepseek and message.chat.id == self._community_chat_id and self.can_read_archive(message)
 
     async def answer(self, prompt: str, user_id: int, *, message: Message | None = None) -> str | None:
         return await self._answer(prompt, user_id, None, message)
@@ -288,7 +292,8 @@ class OpenRouterChat:
     async def memory_prompt(
         self, prompt: str, message: Message, *, search_query: str | None = None,
     ) -> str | None:
-        if message.chat.id != self._community_chat_id or (search_query is None and not is_memory_question(prompt)):
+        if (message.chat.id != self._community_chat_id or not self.can_read_archive(message)
+                or (search_query is None and not is_memory_question(prompt))):
             return None
         now = datetime.now(ZoneInfo(self._timezone))
         window = parse_time_window(prompt, now) or parse_time_window(search_query or "", now)

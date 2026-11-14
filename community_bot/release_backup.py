@@ -45,7 +45,7 @@ def _snapshot(source: Path, destination: Path) -> None:
         raise
 
 
-def _financial_state(path: Path) -> tuple[str, str]:
+def _protected_state(path: Path) -> tuple[str, str, str]:
     with closing(_read_only(path)) as db:
         if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
             raise RuntimeError("SQLite integrity check failed")
@@ -55,7 +55,15 @@ def _financial_state(path: Path) -> tuple[str, str]:
             balances.update(json.dumps(row, ensure_ascii=False).encode())
         for row in db.execute("SELECT * FROM transactions ORDER BY id"):
             ledger.update(json.dumps(row, ensure_ascii=False).encode())
-        return balances.hexdigest(), ledger.hexdigest()
+        pets = hashlib.sha256()
+        pet_columns = {row[1] for row in db.execute("PRAGMA table_info(pets)")}
+        if pet_columns:
+            # Compare legacy fields even when initialization adds unrelated columns.
+            for row in db.execute(
+                "SELECT user_id,species,name,hunger,thirst,mood,food_units,water_units FROM pets ORDER BY user_id"
+            ):
+                pets.update(json.dumps(row, ensure_ascii=False).encode())
+        return balances.hexdigest(), ledger.hexdigest(), pets.hexdigest()
 
 
 def _prepare(database: Path, request: str) -> tuple[Path, Path] | None:
@@ -76,14 +84,14 @@ def _prepare(database: Path, request: str) -> tuple[Path, Path] | None:
 
 
 async def _verify_restored_copy(backup: Path, restored: Path) -> None:
-    before = await asyncio.to_thread(_financial_state, backup)
+    before = await asyncio.to_thread(_protected_state, backup)
     await asyncio.to_thread(_snapshot, backup, restored)
-    if await asyncio.to_thread(_financial_state, restored) != before:
+    if await asyncio.to_thread(_protected_state, restored) != before:
         raise RuntimeError("Restored SQLite state differs from the backup")
     copy = Database(restored)
     await copy.initialize()
-    if await asyncio.to_thread(_financial_state, restored) != before:
-        raise RuntimeError("Schema initialization changed existing balances or ledger")
+    if await asyncio.to_thread(_protected_state, restored) != before:
+        raise RuntimeError("Schema initialization changed existing balances, ledger or pets")
     # Synthetic participant and catalog changes exist only in the disposable restored copy.
     row = await copy.fetchone("SELECT MIN(user_id) AS minimum FROM users")
     actor_id = min(0, int(row["minimum"] or 0)) - 1
@@ -104,7 +112,8 @@ def _write_marker(marker: Path, backup: Path) -> None:
     result = {
         "backup": backup.name,
         "verified_at": datetime.now(UTC).isoformat(),
-        "integrity_ok": True, "balances_preserved": True, "ledger_preserved": True, "replay_blocked": True,
+        "integrity_ok": True, "balances_preserved": True, "ledger_preserved": True,
+        "pets_preserved": True, "replay_blocked": True,
     }
     descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as report:
@@ -132,18 +141,25 @@ async def verify_requested_release_backup(db: Database, *, request: str | None =
     return True
 
 
-def _needs_widget_notification_backup(database: Path) -> bool:
+def _needs_schema_backup(database: Path, new_table: str) -> bool:
     if not database.is_file():
         return False
     with closing(_read_only(database)) as db:
         tables = {row[0] for row in db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users', 'widget_notifications')"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users', ?)", (new_table,),
         )}
     return tables == {"users"}
 
 
 async def verify_widget_notification_backup(db: Database) -> bool:
     """Keep a verified recovery point before introducing widgets on an existing database."""
-    if not await asyncio.to_thread(_needs_widget_notification_backup, db.path):
+    if not await asyncio.to_thread(_needs_schema_backup, db.path, "widget_notifications"):
         return False
     return await verify_requested_release_backup(db, request="widget-notifications-v1")
+
+
+async def verify_pet_development_backup(db: Database) -> bool:
+    """Verify restoration on the mounted volume before the pet schema is introduced."""
+    if not await asyncio.to_thread(_needs_schema_backup, db.path, "pet_development"):
+        return False
+    return await verify_requested_release_backup(db, request="pet-development-v2")

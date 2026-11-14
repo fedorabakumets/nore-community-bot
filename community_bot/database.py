@@ -611,6 +611,7 @@ class Database:
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.nora_game_api import SCHEMA as nora_game_schema
         from community_bot.pet_progress import SCHEMA as pet_schema
+        from community_bot.pet_video import SCHEMA as pet_video_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
@@ -622,7 +623,7 @@ class Database:
             # Additive, independent game tables: existing balances, party games and pets stay shared.
             await db.executescript(
                 friends_schema + mafia_schema + rocket_schema + sea_schema
-                + seasonal_schema + presence_schema + nora_game_schema + pet_schema
+                + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
             )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
             await db.execute(

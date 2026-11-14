@@ -12,14 +12,23 @@ from community_bot.chat_memory import is_memory_question, retention_notice
 from community_bot.command_registry import get_command, nora_enabled
 from community_bot.community_facts import community_fact
 from community_bot.config import Settings
+from community_bot.database import Database
 from community_bot.ephemeral import delete_user_command, reply_ttl
 from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_address
 from community_bot.openrouter_chat import NO_MEMORY_REPLY, OpenRouterChat
+from community_bot.pet_progress import level
+from community_bot.pet_video import PetVideoQueue, video_command
 
 router = Router(name="nora")
 assistant_router = Router(name="nora_assistant")
 
 _NORA = re.compile(r"(?i)^\s*нора\b")
+
+
+async def has_assistant_access(user_id: int, settings: Settings, db: Database | None) -> bool:
+    if user_id in settings.owner_ids | settings.moderator_ids:
+        return True
+    return bool(db and await level(db, user_id) >= 2 and await db.feature_enabled("tamagotchi"))
 
 
 def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
@@ -46,6 +55,9 @@ async def _respond_to_prompt(
         return
     model_prompt = prompt
     if not chat.uses_contextual_memory(message) and is_memory_question(prompt):
+        if not chat.can_read_archive(message):
+            await message.reply("Архив переписки доступен только модерации.", parse_mode=None)
+            return
         memory_prompt = await chat.memory_prompt(prompt, message)
         if memory_prompt is None:
             await message.reply(
@@ -85,17 +97,20 @@ async def _respond_to_prompt(
 )
 async def nora_address(
     message: Message, settings: Settings, openrouter_chat: OpenRouterChat | None = None,
+    db: Database | None = None,
 ) -> None:
     if not message.from_user or message.from_user.is_bot:
         return
     text = message.text or ""
+    if video_command(text):
+        return
     if parse_trigger(text):
         raise SkipHandler
     body = strip_address(text)
     if body is None:
         return
     if openrouter_chat is not None and (rule_intent(body) is None or is_memory_question(body)):
-        if message.from_user.id not in (settings.owner_ids | settings.moderator_ids) or not nora_enabled():
+        if not nora_enabled() or not await has_assistant_access(message.from_user.id, settings, db):
             return
         if message.reply_to_message is not None:
             found = openrouter_chat.continuation_for(message)
@@ -130,18 +145,29 @@ async def nora_address(
 )
 async def nora_reply_continuation(
     message: Message, settings: Settings, openrouter_chat: OpenRouterChat | None = None,
+    db: Database | None = None,
 ) -> None:
     if openrouter_chat is None or not message.from_user or message.from_user.is_bot:
         return
-    if message.from_user.id not in (settings.owner_ids | settings.moderator_ids):
-        return
-    if not nora_enabled():
+    if not nora_enabled() or not await has_assistant_access(message.from_user.id, settings, db):
         return
     if parse_trigger(message.text or ""):
         raise SkipHandler
     found = openrouter_chat.continuation_for(message)
     if found is not None:
         await _respond_to_prompt(message, settings, openrouter_chat, *found)
+
+
+@router.message(
+    F.text.func(video_command), F.chat.type.in_({"private", "group", "supergroup"}), StateFilter(None),
+)
+async def nora_video(message: Message, settings: Settings, pet_video_queue: PetVideoQueue | None = None) -> None:
+    user = message.from_user
+    if (not user or user.is_bot or message.sender_chat or message.forward_origin or message.via_bot
+            or (message.chat.type != "private" and message.chat.id != settings.community_chat_id)):
+        return
+    if pet_video_queue is not None:
+        await pet_video_queue.enqueue(message, video_command(message.text))
 
 
 class CustomCommand(Filter):
