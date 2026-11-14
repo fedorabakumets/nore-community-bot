@@ -3255,7 +3255,7 @@ class Database:
             (now, now, user_id),
         )
 
-    async def stroke_pet(self, user_id: int, *, intent_id: str | None = None) -> tuple[bool, str]:
+    async def stroke_pet(self, user_id: int) -> tuple[bool, str]:
         from community_bot.pet_progress import record
 
         await self.settle_pet(user_id)
@@ -3263,9 +3263,6 @@ class Database:
         key = f"pet_stroke:{user_id}"
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
-            error = await self._consume_wallet_intent(db, intent_id, user_id, 'pet_action', 1, user_id)
-            if error:
-                return False, error
             row = await (await db.execute(
                 "SELECT expedition_until, mood FROM pets WHERE user_id = ?", (user_id,)
             )).fetchone()

@@ -79,7 +79,7 @@ window.NoraCompanion = (() => {
     }
     async function refresh(){
       if(flight)return flight;
-      flight=(async()=>{try{const response=await api('nora-game/pet');if(disposed)return;apply(response.pet);valid=true;if(typeof data!=='undefined'&&data)data.pet=pet;}
+      flight=(async()=>{try{const response=await api('nora-game/pet');if(disposed)return;apply(response.pet);valid=true;}
         catch(error){if(!disposed){valid=false;message.textContent=error.message;}}
         finally{flight=null;if(!disposed)render();}})();return flight;
     }
@@ -104,7 +104,27 @@ window.NoraCompanion = (() => {
       finally{pending=false;if(!disposed)render();}
     });
     on(document,'visibilitychange',()=>{if(!document.hidden&&!pending)refresh();});
-    refresh();
+    let hint = null;
+    const panelOpen = () => panel.open || !!hint?.open;
+    async function showArrivalHint() {
+      await refresh();
+      if (disposed || !root.isConnected) return;
+      hint = document.createElement('dialog');
+      hint.className = 'nora-pet-panel nora-pet-hint';
+      hint.setAttribute('aria-labelledby', 'nora-pet-hint-title');
+      hint.innerHTML = '<h2 id="nora-pet-hint-title">Питомец</h2><p></p><button type="button">Понятно</button>';
+      hint.querySelector('p').textContent = !valid ? 'Не удалось узнать, где питомец.'
+        : pet?.expedition_until ? 'До питомца сейчас не дотянуться. Он в походе где-то далеко.'
+        : pet ? 'Погладь питомца. Он скучал по тебе всё это время 😢' : 'Питомец пока не появился.';
+      on(hint.querySelector('button'), 'click', () => hint.close());
+      on(hint, 'cancel', event => event.stopPropagation());
+      on(hint, 'close', () => { resetInput(); hint.remove(); hint = null; });
+      root.appendChild(hint);
+      resetInput();
+      hint.showModal();
+    }
+    if (root.dataset.playWithPet === '1') void showArrivalHint();
+    else void refresh();
     function update(dt,camera){
       timer+=dt;if(timer>30){timer=0;if(!pending)refresh();}
       if(!model)return;
@@ -116,7 +136,7 @@ window.NoraCompanion = (() => {
       pettingHold=Math.max(0,pettingHold-dt);
       if(ownerDistance>3.5){following=true;wanderTarget=null;}
       else if(following&&ownerDistance<2.2){following=false;route=[new T.Vector3(player.position.x,.017,player.position.z)];wanderWait=2+Math.random()*3;}
-      if(!panel.open&&pettingHold===0){
+      if(!panelOpen()&&pettingHold===0){
         if(following){
           // Retrace the owner's path around walls, instead of cutting across them.
           const target=route[0],dx=target.x-position.x,dz=target.z-position.z,distance=Math.hypot(dx,dz);
@@ -155,9 +175,9 @@ window.NoraCompanion = (() => {
       near=Math.hypot(position.x-player.position.x,position.z-player.position.z)<1.8;
       // Do not offer interaction across walls/furniture.
       const probe=position.clone();move(probe,player.position.x-probe.x,player.position.z-probe.z,getZone());near=near&&Math.hypot(probe.x-player.position.x,probe.z-player.position.z)<.1;
-      actions.hidden=!near||panel.open;model.animate(dt,distance,camera);
+      actions.hidden=!near||panelOpen();model.animate(dt,distance,camera);
     }
-    return {update,reset,panelOpen:()=>panel.open,dispose(){disposed=true;controls.abort();if(panel.open)panel.close();model?.dispose();actions.hidden=true;}};
+    return {update,reset,panelOpen,dispose(){disposed=true;controls.abort();hint?.remove();if(panel.open)panel.close();model?.dispose();actions.hidden=true;}};
   }
   return {create,mount};
 })();

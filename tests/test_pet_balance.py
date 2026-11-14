@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from test_nora_game import content, request
 
-from community_bot import expedition, nora_game_api
+from community_bot import cabinet_api, expedition, nora_game_api, pet_progress
 from community_bot.database import Database
 from community_bot.helpers import pet_guard_reputation
 
@@ -47,7 +47,20 @@ async def test_stroking_is_private_hourly_and_mood_is_not_overwritten(tmp_path):
         await db.add_cookies(uid, 10, 'test')
         await db.purchase_pet(uid, 'cat', 'Кот', 1)
     await db.execute('UPDATE pets SET hunger=80, thirst=80, mood=10 WHERE user_id=1')
+    day = pet_progress.moscow_now().date().isoformat()
+    await pet_progress.dashboard(db, 1)
+    await db.execute(
+        "UPDATE pet_quests SET events='food,stroke',progress=0 WHERE user_id=1 AND day=? AND slot=2", (day,),
+    )
+    care = (await pet_progress.dashboard(db, 1))['quests'][1]
+    assert care['label'] == pet_progress.STROKE_QUEST and care['play_with_pet']
+    with pytest.raises(ValueError):
+        await cabinet_api.pet_prepare(request(db, 1, {'action': 'stroke'}))
+    old_intent = await db.create_wallet_intent(1, 'pet_action', 1, payload={'action': 'stroke'})
+    assert (await cabinet_api.pet_action(request(db, 1, {'token': old_intent}))).status == 409
+    assert (await db.get_pet(1, settle=False))['mood'] == 10
     assert content(await nora_game_api.stroke_companion(request(db, 1)))['ok']
+    assert (await pet_progress.dashboard(db, 1))['quests'][1]['progress'] == 1
     assert (await db.get_pet(1))['mood'] == 60
     assert (await db.get_pet(2))['mood'] == 80
     assert not content(await nora_game_api.stroke_companion(request(db, 1)))['ok']

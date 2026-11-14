@@ -8,7 +8,7 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const script = document.createElement("script"); script.src = "/" + name + ".js";
+      const script = document.createElement("script"); script.src = "/" + name + ".js" + (name === "nora-companion" ? "?v=pet-game" : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
       document.head.appendChild(script);
     }));
@@ -19,7 +19,7 @@
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;
-  let music = null, pendingGift = false;
+  let music = null, entry = null, petTrigger = null;
   const settings = {pov: 100, music: 100, effects: 100};
   const logo = '<span class="nora-game-logo">N<span>O</span>RA</span>';
   function createMusic() {
@@ -192,13 +192,16 @@
     return {start,attach,close,worldAudio,setLevel};
   }
   function close() {
-    active++;pendingGift=false;
+    active++;entry=null;
+    const trigger = petTrigger;
+    petTrigger = null;
     music?.close(); music = null;
     sceneStop?.(); sceneStop = null;
     overlay?.remove(); overlay = null;
     if (requestedFullscreen) { try { tg?.exitFullscreen?.(); } catch (_) {} }
     requestedFullscreen = false;
-    document.getElementById('nora-game-open')?.focus();
+    (trigger || document.getElementById('nora-game-open'))?.focus();
+    if (trigger && tab === 'pet') void refresh();
   }
   function frame(content) {
     if (!overlay) return;
@@ -226,7 +229,9 @@
     dialog.querySelectorAll('[data-settings-back]').forEach(button=>button.onclick=()=>showSection(null));
     dialog.querySelector('.nora-settings-continue').onclick=()=>dialog.close(); dialog.querySelector('.nora-settings-exit').onclick=close;
     back.onclick=()=>{showSection(null);root.dispatchEvent(new Event('nora-settings-open'));dialog.showModal();}; root.dataset.pov=String(settings.pov);
-    root.dataset.recordGift=pendingGift?'1':'';pendingGift=false;
+    root.dataset.recordGift = entry === 'record' ? '1' : '';
+    root.dataset.playWithPet = entry === 'pet' ? '1' : '';
+    entry = null;
     root.querySelector('.nora-world-outfit').onclick = () => editor(nickname);
     root.querySelector('.nora-world-help-close').onclick = () => {
       helpDismissed = true;
@@ -385,9 +390,10 @@
       catch (error) { if (version === active) { form.querySelector('.nora-game-error').textContent = error.message; button.disabled = false; } }
     };
   }
-  async function open(gift=false) {
+  async function open(destination=null, trigger=null) {
     if (overlay) return;
-    pendingGift=gift;
+    entry = destination;
+    petTrigger = trigger;
     const version = ++active;
     overlay = document.createElement('section'); overlay.className = 'nora-game-screen';
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Игра НОРА');
@@ -396,12 +402,14 @@
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
     try { await loadGame(); if (version !== active) return; const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
-    catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const gift=pendingGift;close();open(gift); }; } }
+    catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const destination=entry, trigger=petTrigger;close();open(destination,trigger); }; } }
   }
   window.NoraGame = {open};
   document.addEventListener('click', event => {
     if (event.target.closest('#nora-game-open')) open();
-    if (event.target.closest('button[data-record-gift]')) open(true);
+    if (event.target.closest('button[data-record-gift]')) open('record');
+    const petButton = event.target.closest('button[data-play-with-pet]');
+    if (petButton) open('pet', petButton);
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay && ![...overlay.querySelectorAll('dialog')].some(dialog=>dialog.open)) close(); });
 })();

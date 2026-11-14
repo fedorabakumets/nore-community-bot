@@ -17,14 +17,14 @@ window.NoraPet = (() => {
       ]],
       ['Уход и взаимодействия', [
         ['care', 'Чем кормить и поить?', 'Порция из запасов даёт +20 к выбранному показателю. При включённых наградах за активность каждые 120 сообщений пополняют запас еды и воды. В магазине обед даёт +' + r.meal_gain + ', поилка +' + r.drink_gain + '. Цена с учётом скидки показывается перед покупкой. У порций нет отдельного таймера. При 100 порция или награда не расходуется.'],
-        ['stroke', 'Как погладить питомца?', 'В этой вкладке или рядом с питомцем в 3D-лобби. Поглаживание восстанавливает до 50 настроения раз в час. Во время похода и при настроении 100 действие недоступно. Только успешное поглаживание засчитывается в задании.'],
+        ['stroke', 'Как погладить питомца?', 'Нажми «Погладить» в этой вкладке, чтобы попасть в Нору. В игре подойди к питомцу и погладь его. Поглаживание восстанавливает до 50 настроения раз в час. Во время похода и при настроении 100 действие недоступно. Только успешное поглаживание засчитывается в задании.'],
         ['expedition', 'Что происходит в походе?', 'Поход длится ' + r.expedition_hours + ' ч. и начинается при сытости и воде от 50. Пока питомец в пути, показатели не убывают, новый поход и поглаживание недоступны. Возможный результат — 1–10 печенек или пустые лапы. Настроение при отправке влияет на результат. Находка начисляется при возвращении, а задание засчитывается при успешной отправке.'],
         ['name', 'Где ещё можно увидеть питомца?', 'В Telegram есть карточка /pet, а в 3D-лобби питомец ходит рядом и прячется на время похода. Кнопка «Имя» меняет имя в боте и Mini App. Имя может содержать от 1 до 24 символов.'],
       ]],
       ['Развитие и опыт', [
         ['stage', 'Чем этап отличается от уровня?', 'Этап — одна из ' + d.stages.length + ' ступеней «Пути развития». Основной уровень открывает функции. Сейчас у тебя этап ' + d.stage + ' и уровень ' + d.level + '. Ступени открываются по порядку. Нажми номер на шкале, чтобы увидеть условия и награду.'],
         ['xp', 'Как начисляется и переносится XP?', 'Завершённое задание даёт ' + r.quest_xp + ' XP в пределах ' + r.daily_xp + ' XP в сутки. Для следующего этапа нужно ' + r.stage_xp + ' XP. Повыситься можно один раз за сутки, поэтому путь занимает минимум ' + (d.stages.length - 1) + ' активных дней. Уже начисленный XP до следующего этапа сохраняется. Опыт сверх дневного лимита не переносится.'],
-        ['max', 'Что происходит после последнего этапа?', 'Все функции и неиспользованные награды остаются. Можно заботиться о питомце и отмечать задания, шкала достигнет максимума и XP больше не начисляется.'],
+        ['max', 'Что происходит после последнего этапа?', 'Все функции и неиспользованные награды остаются. Ежедневные задания исчезают. Уход за питомцем остаётся доступен.'],
       ]],
       ['Ежедневные задания', [
         ['quests', 'Почему достаточно двух заданий?', 'Каждый день доступны три задания: общение, уход и дополнительный вариант. Сервер чередует форматы, учитывает запрет медиа и может дать альтернативу, если уход сейчас недоступен. Два выполненных задания дают полный дневной XP, третье можно выполнить для отметки.'],
@@ -82,12 +82,18 @@ window.NoraPet = (() => {
     }).join('');
   }
 
+  function petGameButton(label) {
+    return '<button type="button" class="nora-pixel-button pet2-play" data-play-with-pet><span>'
+      + esc(label) + '</span><span aria-hidden="true">↗</span></button>';
+  }
+
   function quests(d) {
     return d.quests.map(q => {
       const complete = q.progress >= q.target;
       const xp = complete ? (q.xp ? '+' + q.xp + ' XP' : '✓')
         : d.stage === d.stages.length || d.daily_xp >= d.rules.daily_xp ? 'Без XP' : '+' + d.rules.quest_xp + ' XP';
-      return '<li><div><span>' + esc(q.label) + '</span><progress max="' + q.target + '" value="' + q.progress
+      const label = q.play_with_pet ? petGameButton(q.label) : '<span>' + esc(q.label) + '</span>';
+      return '<li><div>' + label + '<progress max="' + q.target + '" value="' + q.progress
         + '" aria-label="' + esc(q.label) + '"></progress></div><span class="pet2-quest-score"><b>'
         + q.progress + '/' + q.target + '</b><small>' + xp + '</small></span></li>';
     }).join('');
@@ -120,7 +126,6 @@ window.NoraPet = (() => {
     trackStage(p);
     queueMicrotask(clock);
     const away = !!p.expedition_until;
-    const ready = p.stroke_at && Date.parse(p.stroke_at) > Date.now();
     const next = d.stages[d.stage];
     const age = Math.max(0, Math.floor((Date.now() - Date.parse(p.created_at)) / 86400000));
     const products = Object.fromEntries((data.products || []).map(item => [item.sku, item]));
@@ -150,8 +155,7 @@ window.NoraPet = (() => {
       + '<button class="text-btn" data-open-pet-shop>Магазин</button></div><div class="pet2-actions">'
       + action('food', 'Покормить', '+20 · порций ' + number(p.food_units), !p.enabled || !p.food_units || p.hunger >= 100)
       + action('water', 'Напоить', '+20 · порций ' + number(p.water_units), !p.enabled || !p.water_units || p.thirst >= 100)
-      + action('stroke', 'Погладить', ready ? 'Через ' + Math.ceil((Date.parse(p.stroke_at) - Date.now()) / 60000) + ' мин' : '+50 настроения',
-        !p.enabled || away || ready || p.mood >= 100)
+      + petGameButton('Погладить')
       + action('expedition', away ? 'В походе' : 'В поход', trip, !p.enabled || away || p.hunger < 50 || p.thirst < 50)
       + '</div><div class="pet2-shop"><button class="text-btn" data-product="pet_meal">Обед · ' + supplyPrice('pet_meal')
       + '</button><button class="text-btn" data-product="pet_drink">Поилка · ' + supplyPrice('pet_drink') + '</button></div>'
@@ -162,11 +166,11 @@ window.NoraPet = (() => {
       + (next ? 'Следующая награда · ' + esc(next.label) : 'Все уровни открыты') + '</p>'
       + (saved.length ? '<div class="pet2-rewards">' + saved.map(s => '<div><span>' + esc(s.label)
         + '</span>' + rewardButton(s, p) + '</div>').join('') + '</div>' : '') + '</section>'
-      + '<section class="card pet2-panel"><div class="pet2-heading">' + section('Задания на сегодня', 'quests') + '</div>'
+      + (next ? '<section class="card pet2-panel"><div class="pet2-heading">' + section('Задания на сегодня', 'quests') + '</div>'
       + '<ul class="pet2-quests">' + quests(d) + '</ul><div class="pet2-daily"><strong>' + d.daily_xp + '/'
       + d.rules.daily_xp + ' XP</strong><span data-pet-reset="' + esc(d.reset_at) + '"></span></div>'
       + '<details class="pet2-milestones"><summary>Многодневная активность</summary><p>Сообщения · '
-      + milestones + '</p></details></section><button class="secondary pet2-guide" data-pet-help="all">'
+      + milestones + '</p></details></section>' : '') + '<button class="secondary pet2-guide" data-pet-help="all">'
       + 'Справка о питомце <span aria-hidden="true">?</span></button></div>';
   }
 

@@ -52,10 +52,12 @@ async def test_nine_days_and_rewards(tmp_path):
         assert day["xp"] == 100
         assert state["stage"] == offset + 2
         assert state["level"] == (1 if offset < 3 else 2 if offset < 8 else 3)
-        assert state["messages"] == (offset + 1) * 10
+        assert state["messages"] == min(offset + 1, 8) * 10
 
     rewards = await db.fetchall("SELECT * FROM pet_stage_rewards ORDER BY stage")
     assert len(rewards) == 10
+    assert (await pet_progress.dashboard(db, 1))['quests'] == []
+    assert len(await db.fetchall('SELECT day FROM pet_quest_days')) == 9
     assert (await db.get_user(1))["cookies"] == 115
     assert sum(row["amount"] for row in rewards if row["kind"] == "reputation") == 10
     for kind, stat in pet_progress.CONSUMABLES.items():

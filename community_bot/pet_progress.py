@@ -31,6 +31,7 @@ MEDIA_LABELS = {
 }
 ACTIVITY_MILESTONES = (50, 100)
 TEXT_TARGET = 10
+STROKE_QUEST = "Зайти в Нору и погладить питомца"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pet_development (
     user_id INTEGER PRIMARY KEY REFERENCES pets(user_id) ON DELETE CASCADE,
@@ -114,6 +115,12 @@ async def ensure_day(db, user_id, now):
     day = now.date().isoformat()
     inserted = await db.execute("INSERT OR IGNORE INTO pet_quest_days VALUES (?,?,0)", (user_id, day))
     if not inserted.rowcount:
+        await db.execute(
+            "UPDATE pet_quests SET label=?,events='stroke' WHERE user_id=? AND day=? AND slot=2 "
+            "AND progress=0 AND events IN ('stroke,expedition','food,stroke','stroke,expedition,food,water') "
+            "AND EXISTS (SELECT 1 FROM pets WHERE user_id=? AND expedition_until IS NULL AND mood<100)",
+            (STROKE_QUEST, user_id, day, user_id),
+        )
         return day
 
     # Telegram retry windows are shorter than this retention window. Reject stale deliveries too.
@@ -132,10 +139,10 @@ async def ensure_day(db, user_id, now):
                     (user_id,))
     away = bool(pet["expedition_until"] and pet["expedition_until"] > now.astimezone(UTC).isoformat())
     preferred = (
-        ("Погладь питомца или отправь в поход", "stroke,expedition"),
+        (STROKE_QUEST, "stroke"),
         ("Покорми или напои питомца", "food,water"),
         ("Отправь питомца в поход или напои его", "expedition,water"),
-        ("Покорми или погладь питомца", "food,stroke"),
+        (STROKE_QUEST, "stroke"),
     )[cycle % 4]
     wallet = await one(db, "SELECT cookies FROM users WHERE user_id=?", (user_id,))
     rewards = await (await db.execute(
@@ -148,12 +155,12 @@ async def ensure_day(db, user_id, now):
         "stroke": not away and pet["mood"] < 100,
         "expedition": not away and min(pet["hunger"], pet["thirst"]) >= 50,
     }
-    care = preferred if any(actions[key] for key in preferred[1].split(",")) else (
-        ("Позаботься о питомце", "stroke,expedition,food,water")
-    )
-    if not any(actions.values()):
-        care = ("Погладь питомца, покорми, напои или отправь в поход", "stroke,expedition,food,water")
-    care_target = TEXT_TARGET if "text" in care[1].split(",") else 1
+    if any(actions[key] for key in preferred[1].split(",")):
+        care = preferred
+    elif actions["stroke"]:
+        care = (STROKE_QUEST, "stroke")
+    else:
+        care = ("Покорми, напои или отправь питомца в поход", "expedition,food,water")
     if activity[1] != "text":
         extra = (f"Поддержи участника или напиши {TEXT_TARGET} сообщений", "text,plus,minus,transfer", TEXT_TARGET)
     else:
@@ -161,9 +168,9 @@ async def ensure_day(db, user_id, now):
         extra = (
             "Поддержи участника, переведи печеньку или отправь медиа"
             if media else "Поддержи участника, переведи печеньку или позаботься о питомце",
-            f"plus,minus,transfer,{media or 'food,water,stroke,expedition'}", 1,
+            f"plus,minus,transfer,{media or 'food,water,expedition'}", 1,
         )
-    rows = (activity, (*care, care_target), extra)
+    rows = (activity, (*care, 1), extra)
     await db.executemany(
         "INSERT INTO pet_quests(user_id,day,slot,label,events,target) VALUES (?,?,?,?,?,?)",
         ((user_id, day, slot, label, events, target) for slot, (label, events, target) in enumerate(rows, 1)),
@@ -198,7 +205,7 @@ async def record(db, user_id, event, *, now=None, message=None, alternatives=())
     if not await one(db, "SELECT 1 FROM feature_flags WHERE key='tamagotchi' AND enabled=1"):
         return
     state = await ensure_pet(db, user_id, stamp)
-    if not state:
+    if not state or state["stage"] == len(REWARDS):
         return
     day = await ensure_day(db, user_id, now)
     if message:
@@ -223,8 +230,6 @@ async def record(db, user_id, event, *, now=None, message=None, alternatives=())
             continue
         progress = quest["progress"] + 1 if candidate == "text" else quest["target"]
         xp = min(QUEST_XP, DAILY_XP - daily["xp"]) if progress == quest["target"] else 0
-        if state["stage"] == len(REWARDS):
-            xp = 0
         await db.execute(
             "UPDATE pet_quests SET progress=?,xp=? WHERE user_id=? AND day=? AND slot=?",
             (progress, xp, user_id, day, quest["slot"]),
@@ -321,11 +326,15 @@ async def dashboard(database, user_id):
         state = await ensure_pet(db, user_id, now.astimezone(UTC).isoformat())
         if not state:
             return None
-        day = await ensure_day(db, user_id, now)
-        daily = await one(db, "SELECT xp FROM pet_quest_days WHERE user_id=? AND day=?", (user_id, day))
-        quests = await (await db.execute(
-            "SELECT label,target,progress,xp FROM pet_quests WHERE user_id=? AND day=? ORDER BY slot", (user_id, day),
-        )).fetchall()
+        daily_xp, quests = 0, []
+        if state["stage"] < len(REWARDS):
+            day = await ensure_day(db, user_id, now)
+            daily = await one(db, "SELECT xp FROM pet_quest_days WHERE user_id=? AND day=?", (user_id, day))
+            daily_xp = daily["xp"]
+            quests = await (await db.execute(
+                "SELECT label,target,progress,xp,events='stroke' AS play_with_pet "
+                "FROM pet_quests WHERE user_id=? AND day=? ORDER BY slot", (user_id, day),
+            )).fetchall()
         rewards = await (await db.execute(
             "SELECT stage,used_at,amount FROM pet_stage_rewards WHERE user_id=?", (user_id,),
         )).fetchall()
@@ -333,7 +342,7 @@ async def dashboard(database, user_id):
     earned = {r["stage"]: r for r in rewards}
     return {
         "level": state["level"], "stage": state["stage"], "xp": state["xp"],
-        "level_name": LEVELS[state["level"] - 1], "daily_xp": daily["xp"],
+        "level_name": LEVELS[state["level"] - 1], "daily_xp": daily_xp,
         "reset_at": (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat(),
         "quests": [dict(q) for q in quests],
         "stages": [

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from aiohttp import web
 
@@ -79,17 +79,12 @@ async def pet_data(db, user, *, development=False):
         progress = await dashboard(db, user["user_id"])
         if progress is None:  # The pet can be removed by moderation during the request.
             return None
-        stroke_at = await db.get_bot_state(f"pet_stroke:{user['user_id']}")
-        try:
-            stroke_at = (datetime.fromisoformat(stroke_at) + timedelta(hours=1)).isoformat() if stroke_at else None
-        except ValueError:
-            stroke_at = None
         progress["rules"].update(
             expedition_hours=int(EXPEDITION_DURATION.total_seconds() // 3600),
             ai_daily_limit=_DAILY_LIMIT, ai_interval=_GLOBAL_INTERVAL,
             meal_gain=PET_SUPPLIES["pet_meal"][1], drink_gain=PET_SUPPLIES["pet_drink"][1],
         )
-        value.update(development=progress, stroke_at=stroke_at)
+        value["development"] = progress
     return value
 
 
@@ -97,7 +92,7 @@ async def pet_prepare(request):
     user, db = await actor(request), request.app["db"]
     body = await request.json()
     action = body.get("action") if isinstance(body, dict) else None
-    actions = {"food", "water", "expedition", "rename", "stroke"} | {f"reward:{kind}" for kind in CONSUMABLES}
+    actions = {"food", "water", "expedition", "rename"} | {f"reward:{kind}" for kind in CONSUMABLES}
     if action not in actions or not await db.feature_enabled("tamagotchi"):
         raise ValueError("Это действие питомца сейчас недоступно")
     if not await db.get_pet(user["user_id"], settle=False):
@@ -125,8 +120,6 @@ async def pet_action(request):
         action = intent["payload"]["action"]
         if action.startswith("reward:") and action[7:] in CONSUMABLES:
             return result(*(await redeem(db, user["user_id"], action[7:], token)))
-        if action == "stroke":
-            return result(*(await db.stroke_pet(user["user_id"], intent_id=token)))
         if action == "expedition":
             ok, message, _ = await db.start_expedition(
                 user["user_id"], request.app["settings"].timezone, intent_id=token
