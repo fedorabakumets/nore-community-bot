@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
 from yt_dlp.networking import _urllib as transport
+from yt_dlp.networking.exceptions import RequestError
 from yt_dlp.utils import DownloadError
 
 from community_bot.pet_progress import VIDEO_MAX_MB
@@ -72,28 +74,53 @@ def download(url, path):
     # Prefer compatible progressive formats within the cap when the source provides a size.
     capped = f"[filesize<={MAX_BYTES}]"
     base = "b[ext=mp4][protocol=https]"
-    options["format"] = f"{base}{capped}/{base}[filesize<=?{MAX_BYTES}]"
+    video = "bv[ext=mp4][protocol=https][vcodec^=avc1]"
+    audio = "ba[ext=m4a][protocol=https]"
+    options["format"] = f"{base}{capped}/{base}[filesize<=?{MAX_BYTES}]/{video}+{audio}/{base}"
     with SafeYoutubeDL(options) as ydl:
         info = ydl.extract_info(url, download=False)
         if info.get("_type") not in (None, "video") or info.get("has_drm"):
             raise ValueError("Not a public video")
         if info.get("filesize", 0) and info["filesize"] > MAX_BYTES:
             raise VideoTooLarge
-        url = info["url"]
-        with ydl.urlopen(Request(url, headers=info.get("http_headers"))) as response, path.open("xb") as output:
-            length = response.get_header("Content-Length")
-            if length and int(length) > MAX_BYTES:
+        formats = info.get("requested_formats")
+        if not formats:
+            stream(ydl, info, path, MAX_BYTES)
+            return
+        video, audio = formats
+        video_path, audio_path = path.with_suffix(".video.mp4"), path.with_suffix(".audio.m4a")
+        used = stream(ydl, video, video_path, MAX_BYTES)
+        stream(ydl, audio, audio_path, MAX_BYTES - used)
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file",
+             "-f", "mov", "-i", str(video_path), "-f", "mov", "-i", str(audio_path), "-map", "0:v:0",
+             "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", "-fs", str(MAX_BYTES), str(path)],
+            check=True, timeout=15,
+        )
+        if path.stat().st_size >= MAX_BYTES:
+            raise VideoTooLarge
+
+
+def stream(ydl, info, path, limit):
+    with ydl.urlopen(Request(info["url"], headers=info.get("http_headers"))) as response, path.open("xb") as output:
+        length = response.get_header("Content-Length")
+        if length and int(length) > limit:
+            raise VideoTooLarge
+        prefix = response.read(12)
+        if len(prefix) < 12 or prefix[4:8] != b"ftyp":
+            raise ValueError("The source did not return an MP4")
+        size = len(prefix)
+        if size > limit:
+            raise VideoTooLarge
+        output.write(prefix)
+        while chunk := response.read(64 * 1024):
+            size += len(chunk)
+            if size > limit:
                 raise VideoTooLarge
-            size = 0
-            while chunk := response.read(64 * 1024):
-                size += len(chunk)
-                if size > MAX_BYTES:
-                    raise VideoTooLarge
-                if size == len(chunk) and (len(chunk) < 12 or chunk[4:8] != b"ftyp"):
-                    raise ValueError("The source did not return an MP4")
-                output.write(chunk)
-            if not size:
-                raise ValueError("Empty video")
+            output.write(chunk)
+        if length and size != int(length):
+            raise ValueError("Incomplete video")
+        return size
 
 
 def main():
@@ -104,7 +131,7 @@ def main():
         download(sys.argv[1], Path(sys.argv[2]))
     except VideoTooLarge:
         return 2
-    except (DownloadError, OSError, ValueError, KeyError):
+    except (DownloadError, RequestError, OSError, ValueError, KeyError, subprocess.SubprocessError):
         return 1
     return 0
 

@@ -97,3 +97,19 @@ async def test_video_queue_gates_size_cache_and_quota(tmp_path, monkeypatch):
         assert message.reply_video.await_count == 5
     finally:
         await queue.close()
+
+
+def test_stream_stops_at_size_limit(tmp_path):
+    from contextlib import nullcontext
+    from io import BytesIO
+
+    class Response(BytesIO):
+        def get_header(self, name):
+            return None
+
+    sample = b"\x00\x00\x00\x14ftypisom" + b"X" * 200
+    downloader = SimpleNamespace(urlopen=lambda request: nullcontext(Response(sample)))
+    destination = tmp_path / "oversized.mp4"
+    with pytest.raises(pet_video_worker.VideoTooLarge):
+        pet_video_worker.stream(downloader, {"url": "https://www.youtube.com/"}, destination, 50)
+    assert destination.stat().st_size <= 50

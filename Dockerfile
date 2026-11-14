@@ -8,6 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY --from=deno /deno /usr/bin/deno
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
 COPY community_bot ./community_bot
