@@ -133,7 +133,7 @@ async def overview(request):
 
     db, settings = request.app['db'], request.app['settings']
     user = await actor(request)
-    pet = await pet_data(db, user)
+    pet = await pet_data(db, user, development=True)
     user = await db.get_user(user['user_id'])
     shop = await shop_data(db, user, settings)
     from community_bot.events_api import allowed, public_events
@@ -455,7 +455,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/delete', events_api.delete)
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
-    for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'admin.js',
+    for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
                  'community.js', 'avatars.js',
@@ -475,6 +475,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/game/wings-license.txt', lambda _: web.FileResponse(ROOT / 'nora-wings-license.txt'))
     app.router.add_static('/game/sounds/', ASSETS / 'game' / 'sounds', show_index=False)
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
+    app.router.add_static('/pet-art/', ASSETS / 'pets' / 'mini', show_index=False)
     app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app

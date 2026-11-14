@@ -905,3 +905,64 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 
 /* Screen shown when the account has no Mini App access. */
 .tester-access{max-width:430px;margin:0 auto;text-align:center}.tester-access img{display:block;width:100%;height:auto;border-radius:22px;border:1px solid var(--line)}#app .tester-access h1{font-size:clamp(27px,7vw,36px);margin:22px 0 12px}.tester-access p{color:var(--muted);font-size:15px;line-height:1.6;margin:0 0 22px}.tester-access .primary{min-height:50px}
+
+/* Pet development */
+.pet2{display:grid;gap:12px}
+.pet2 .card{margin:0;padding:13px;border-color:var(--line);background:var(--panel);min-width:0}
+.pet2-profile{background:radial-gradient(ellipse at 7% 8%,#731e342f,transparent 72%),var(--panel)!important}
+.pet2-identity{display:grid;grid-template-columns:76px minmax(0,1fr) auto;align-items:center;gap:10px}
+.pet2-art{display:grid;place-items:center;aspect-ratio:1;border:1px solid var(--line);border-radius:17px;background:#c42e451a;overflow:hidden;font-size:42px}
+.pet2-art img{width:100%;height:100%;object-fit:contain}
+.pet2-name h2,.pet2-heading h2,.pet2-handbook h2{margin:0;font-family:Monocraft,monospace;overflow-wrap:anywhere}
+.pet2-name h2{font-size:clamp(19px,5vw,28px);line-height:1.15}
+.pet2-name p{margin:3px 0;color:var(--muted);font-size:12px}
+.pet2-rank,.pet2-heading,.pet2-daily{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pet2-rank{margin-top:7px;font-size:13px}
+.pet2-rank>span,.pet2-daily>span,.pet2-heading>span{margin-inline-start:auto;color:var(--muted);font-size:12px}
+.pet2-rank strong,.pet2-daily strong{color:var(--red)}
+.pet2-heading>span,.pet2-heading h2{display:flex;align-items:center;gap:4px}
+.pet2-heading h2,.pet2-handbook h2{font-size:17px}
+.pet2-heading>.text-btn,.pet2-close{margin-inline-start:auto}
+.pet-question{display:inline-grid;place-items:center;min-width:32px;min-height:36px;border:0;background:none;color:var(--muted);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.pet-question:focus-visible,.pet2-step:focus-visible,.pet2 details summary:focus-visible{outline:2px solid var(--red);outline-offset:1px}
+.pet2-close{font-size:25px}
+.pet2-meters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.pet2-meter>div{display:flex;align-items:center;justify-content:space-between;font-size:11px;gap:1px}
+.pet2-meter .pet-question{min-width:22px;min-height:32px}
+.pet2 progress{display:block;width:100%;height:5px;appearance:none;border:none;border-radius:999px;overflow:hidden;background:#ffffff15}
+.pet2 progress::-webkit-progress-bar{background:#ffffff15}
+.pet2 progress::-webkit-progress-value{background:var(--red);border-radius:999px;transition:width .2s ease}
+.pet2 progress::-moz-progress-bar{background:var(--red);border-radius:999px}
+.pet2-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:4px}
+.pet2-action{display:grid;gap:3px;min-height:50px;text-align:left;padding:7px 9px;line-height:1.2;font-size:13px}
+.pet2-action small,.pet2-quest-score small{color:var(--muted);font-size:11px}
+.pet2-shop{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:5px}
+.pet2-shop button{min-height:34px}
+.pet2-note{margin:6px 0 0;font-size:12px}
+.pet2-route{display:grid;grid-template-columns:repeat(10,minmax(27px,1fr));gap:3px;margin:3px 0 0;padding:2px 1px;list-style:none;overflow:auto;scrollbar-width:thin}
+.pet2-route li{min-width:0}
+.pet2-step{width:100%;min-height:40px;padding:0;border:1px solid var(--line);border-radius:8px;background:#ffffff07;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}
+.pet2-step[data-state]:not([data-state="locked"]){color:var(--red);background:#d1344d23}
+.pet2-step.major{font-weight:800;border-color:#ae415b}
+.pet2-step[aria-current]{color:#fff!important;background:#ad2d47!important;border-color:#e77288;box-shadow:inset 0 0 0 1px #e77288}
+.pet2-rewards{display:grid;gap:4px;margin-top:8px}
+.pet2-rewards>div{display:flex;align-items:center;justify-content:space-between;gap:6px;border-top:1px solid var(--line);padding-top:4px;font-size:13px}
+.pet2-rewards button,.pet2-handbook .secondary{min-height:40px;font-size:12px}
+.pet2-quests{list-style:none;margin:2px 0 0;padding:0}
+.pet2-quests li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:6px 0;font-size:13px}
+.pet2-quests progress{margin-top:5px;height:3px}
+.pet2-quest-score{text-align:right;display:grid;gap:2px}
+.pet2-daily{margin-top:9px;font-size:13px}
+.pet2-milestones{margin-top:5px;color:var(--muted);font-size:12px}
+.pet2-milestones summary{padding:7px 0;cursor:pointer}
+.pet2-milestones p{margin:0 0 5px}
+.pet2-guide{min-height:44px}
+.pet2-guide span{color:var(--red);margin-inline-start:4px}
+.pet2-handbook{max-height:65vh;max-height:65dvh;overflow:auto;overscroll-behavior:contain;padding-inline-end:3px}
+.pet2-handbook h3{margin:14px 0 4px;font-size:15px;color:var(--red)}
+.pet2-handbook details{border-bottom:1px solid var(--line)}
+.pet2-handbook summary{min-height:44px;align-content:center;padding:6px 2px;font-size:14px;cursor:pointer}
+.pet2-handbook p{line-height:1.55;font-size:14px;overflow-wrap:anywhere}
+.pet2-handbook details p{padding:0 6px;color:var(--muted);margin:4px 0 12px}
+.pet2-handbook .text-btn{min-height:44px}
+@media(prefers-reduced-motion:reduce){.pet2 progress::-webkit-progress-value{transition:none}}

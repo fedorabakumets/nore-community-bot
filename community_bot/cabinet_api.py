@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from aiohttp import web
 
@@ -16,6 +16,7 @@ from community_bot.economy import (
     loan_repay_amount,
 )
 from community_bot.miniapp import actor
+from community_bot.pet_progress import CONSUMABLES, dashboard, redeem
 from community_bot.pets_talk import SPECIES
 from community_bot.rsvp import event_lock
 from community_bot.shop_api import recipient
@@ -40,7 +41,7 @@ async def wallet_data(db, settings, user):
     }
 
 
-async def pet_data(db, user):
+async def pet_data(db, user, *, development=False):
     from community_bot.expedition import ExpeditionLoot, parse_loot
 
     pet = await db.get_pet(user["user_id"])
@@ -70,6 +71,25 @@ async def pet_data(db, user):
         last_find=loot.label() if loot and not pet["expedition_until"] else None,
         enabled=await db.feature_enabled("tamagotchi"),
     )
+    if development:
+        from community_bot.expedition import EXPEDITION_DURATION
+        from community_bot.openrouter_chat import _DAILY_LIMIT, _GLOBAL_INTERVAL
+        from community_bot.shop_catalog import PET_SUPPLIES
+
+        progress = await dashboard(db, user["user_id"])
+        if progress is None:  # The pet can be removed by moderation during the request.
+            return None
+        stroke_at = await db.get_bot_state(f"pet_stroke:{user['user_id']}")
+        try:
+            stroke_at = (datetime.fromisoformat(stroke_at) + timedelta(hours=1)).isoformat() if stroke_at else None
+        except ValueError:
+            stroke_at = None
+        progress["rules"].update(
+            expedition_hours=int(EXPEDITION_DURATION.total_seconds() // 3600),
+            ai_daily_limit=_DAILY_LIMIT, ai_interval=_GLOBAL_INTERVAL,
+            meal_gain=PET_SUPPLIES["pet_meal"][1], drink_gain=PET_SUPPLIES["pet_drink"][1],
+        )
+        value.update(development=progress, stroke_at=stroke_at)
     return value
 
 
@@ -77,7 +97,8 @@ async def pet_prepare(request):
     user, db = await actor(request), request.app["db"]
     body = await request.json()
     action = body.get("action") if isinstance(body, dict) else None
-    if action not in {"food", "water", "expedition", "rename"} or not await db.feature_enabled("tamagotchi"):
+    actions = {"food", "water", "expedition", "rename", "stroke"} | {f"reward:{kind}" for kind in CONSUMABLES}
+    if action not in actions or not await db.feature_enabled("tamagotchi"):
         raise ValueError("Это действие питомца сейчас недоступно")
     if not await db.get_pet(user["user_id"], settle=False):
         raise ValueError("Сначала заведи питомца в магазине")
@@ -102,6 +123,10 @@ async def pet_action(request):
         if not intent or intent["item"] != "pet_action":
             return result(False, "Действие уже выполнено или устарело")
         action = intent["payload"]["action"]
+        if action.startswith("reward:") and action[7:] in CONSUMABLES:
+            return result(*(await redeem(db, user["user_id"], action[7:], token)))
+        if action == "stroke":
+            return result(*(await db.stroke_pet(user["user_id"], intent_id=token)))
         if action == "expedition":
             ok, message, _ = await db.start_expedition(
                 user["user_id"], request.app["settings"].timezone, intent_id=token

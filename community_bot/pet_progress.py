@@ -131,12 +131,32 @@ async def ensure_day(db, user_id, now):
         activity = (f"{MEDIA_LABELS[media]} в основном чате", media, 1)
 
     # Either action in a pair can complete it. A single event counts only once.
-    care = (
+    pet = await one(db, "SELECT hunger,thirst,mood,food_units,water_units,expedition_until FROM pets WHERE user_id=?",
+                    (user_id,))
+    away = bool(pet["expedition_until"] and pet["expedition_until"] > now.astimezone(UTC).isoformat())
+    preferred = (
         ("Погладь питомца или отправь в поход", "stroke,expedition"),
         ("Покорми или напои питомца", "food,water"),
         ("Отправь питомца в поход или напои его", "expedition,water"),
         ("Покорми или погладь питомца", "food,stroke"),
     )[cycle % 4]
+    wallet = await one(db, "SELECT cookies FROM users WHERE user_id=?", (user_id,))
+    rewards = await (await db.execute(
+        "SELECT kind FROM pet_stage_rewards WHERE user_id=? AND used_at IS NULL", (user_id,),
+    )).fetchall()
+    available = {row["kind"] for row in rewards}
+    actions = {
+        "food": pet["food_units"] or wallet["cookies"] or "meal" in available,
+        "water": pet["water_units"] or wallet["cookies"] or "drink" in available,
+        "stroke": not away and pet["mood"] < 100,
+        "expedition": not away and min(pet["hunger"], pet["thirst"]) >= 50,
+    }
+    care = preferred if any(actions[key] for key in preferred[1].split(",")) else (
+        ("Позаботься о питомце", "stroke,expedition,food,water")
+    )
+    if not any(actions.values()):
+        care = ("Погладь питомца, покорми, напои или отправь в поход", "stroke,expedition,food,water")
+    care_target = TEXT_TARGET if "text" in care[1].split(",") else 1
     if activity[1] != "text":
         extra = (f"Поддержи участника или напиши {TEXT_TARGET} сообщений", "text,plus,minus,transfer", TEXT_TARGET)
     else:
@@ -146,7 +166,7 @@ async def ensure_day(db, user_id, now):
             if media else "Поддержи участника, переведи печеньку или позаботься о питомце",
             f"plus,minus,transfer,{media or 'food,water,stroke,expedition'}", 1,
         )
-    rows = (activity, (*care, 1), extra)
+    rows = (activity, (*care, care_target), extra)
     await db.executemany(
         "INSERT INTO pet_quests(user_id,day,slot,label,events,target) VALUES (?,?,?,?,?,?)",
         ((user_id, day, slot, label, events, target) for slot, (label, events, target) in enumerate(rows, 1)),
@@ -196,6 +216,8 @@ async def record(db, user_id, event, *, now=None, message=None):
         if event == "text":
             digest = hashlib.sha256(text.encode()).hexdigest()
             timestamp = int(sent_at.timestamp())
+            if timestamp <= (state["last_text_at"] or 0):
+                return
             if state["last_text_hash"] == digest or timestamp - (state["last_text_at"] or 0) < TEXT_INTERVAL:
                 return
             await db.execute(
@@ -330,6 +352,7 @@ async def dashboard(database, user_id):
             "quest_xp": QUEST_XP, "daily_xp": DAILY_XP, "stage_xp": STAGE_XP,
             "text_interval": TEXT_INTERVAL, "text_min_length": TEXT_MIN_LENGTH,
             "ai_stage": AI_STAGE, "video_stage": VIDEO_STAGE, "video_daily_limit": VIDEO_DAILY_LIMIT,
-            "video_max_mb": VIDEO_MAX_MB, "timezone": "МСК", "reset_hour": "00:00",
+            "video_max_mb": VIDEO_MAX_MB, "timezone": MSK.tzname(None), "reset_hour": "00:00",
+            "max_stages_per_day": 1, "text_target": TEXT_TARGET,
         },
     }

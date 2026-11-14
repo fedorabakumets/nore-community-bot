@@ -42,7 +42,7 @@ if(tab==='lk')content=profileScreen(u);
 if(tab==='community')content=window.NoraCommunity?.screen()||'';
 if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
-if(tab==='pet')content=window.NoraCabinet?.petScreen()||'';
+if(tab==='pet')content=window.NoraPet?.screen()||'';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
