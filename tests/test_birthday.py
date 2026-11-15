@@ -168,3 +168,26 @@ def test_rich_greeting_embeds_bound_button_and_image():
     assert rich.blocks[3].blocks[0].text == "Забери свой подарок по кнопке ниже или в мини-приложении"
     assert rich.blocks[-1].buttons[0].style == "primary"
     assert rich.blocks[-1].buttons[0].callback_data == "birthday:claim:2026-11-02-owner:7"
+
+
+@pytest.mark.asyncio
+async def test_profile_birthday_is_delivered_once_at_midnight(tmp_path):
+    db = Database(tmp_path / "profile-birthday.sqlite3")
+    await db.initialize()
+    await db.ensure_user(71, "birthday_person", "Именинник")
+    await db.update_profile(71, "birth_date", "2000-11-16")
+    await db.ensure_user(72, "other", "Другой")
+    await db.update_profile(72, "birth_date", "2000-11-17")
+    await db.set_bot_state("birthday_date:72", "11-16")
+    bot = SimpleNamespace(send_message=AsyncMock(), send_photo=AsyncMock())
+    settings = SimpleNamespace(owner_id=7, community_chat_id=-100123, timezone="Europe/Moscow")
+    now = datetime(2026, 11, 16, 0, 6, tzinfo=ZoneInfo("Europe/Moscow"))
+
+    await deliver_today(bot, db, settings, now)
+    await deliver_today(bot, db, settings, now)
+
+    assert bot.send_message.await_count == 1
+    assert bot.send_message.await_args.args[0] == 71
+    assert bot.send_photo.await_count == 1
+    assert await pending_gift(db, 71) == "2026-11-16"
+    assert await pending_gift(db, 72) is None

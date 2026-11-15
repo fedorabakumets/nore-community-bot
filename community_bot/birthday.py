@@ -176,9 +176,9 @@ async def _private_offer(bot, user_id: int, day: str, *, preview: bool = False) 
 
 async def _today_users(db: Database, day: str) -> list[dict]:
     users = await db.fetchall(
-        "SELECT u.* FROM users u JOIN bot_state s ON s.key='birthday_date:'||u.user_id "
-        "WHERE s.value=?",
-        (day[5:],),
+        "SELECT u.* FROM users u LEFT JOIN bot_state s ON s.key='birthday_date:'||u.user_id "
+        "WHERE substr(u.birth_date, 6, 5)=? OR (u.birth_date IS NULL AND s.value=?)",
+        (day[5:], day[5:]),
     )
     if day == SPECIAL_DAY:
         special = await db.fetchone(
@@ -252,12 +252,7 @@ async def birthday_job(bot, db: Database, settings) -> None:
         except Exception:
             logger.exception("Birthday job failed")
         now = datetime.now(timezone)
-        if now.hour < 9:
-            target = now.replace(hour=9, minute=0, second=0, microsecond=0)
-        elif now.hour < 23:
-            target = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        else:
-            target = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        target = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         await asyncio.sleep(max(1, (target - now).total_seconds()))
 
 
