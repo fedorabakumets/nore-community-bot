@@ -175,8 +175,7 @@ window.NoraPet = (() => {
   }
 
   function sheetHead(title) {
-    return '<div class="pet2-heading"><h2>' + esc(title) + '</h2>'
-      + '<button class="pet-question pet2-close" data-lk-close aria-label="Закрыть">×</button></div>';
+    return '<div class="pet2-heading"><h2>' + esc(title) + '</h2></div>';
   }
 
   function showHelp(p, key) {
