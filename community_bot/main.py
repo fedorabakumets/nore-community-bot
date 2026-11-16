@@ -387,6 +387,8 @@ async def morning_digest_job(db: Database, settings: Settings, bot: Bot) -> None
 
 
 async def cookie_loan_job(db: Database, bot: Bot) -> None:
+    from community_bot.widget_notifications import Sender, send_service_notification
+
     while True:
         try:
             collected = await db.collect_due_loans()
@@ -396,9 +398,10 @@ async def cookie_loan_job(db: Database, bot: Bot) -> None:
                 debt = int(loan.get("debt_added") or 0)
                 extra = f" Недостающие {debt} 🍪 ушли в долг кошелька." if debt else ""
                 with contextlib.suppress(Exception):
-                    await bot.send_message(
-                        user_id,
+                    await send_service_notification(
+                        bot, db, user_id, Sender(), "Кошелёк",
                         f"💳 Срок стартер-пака истёк: списано {due_amount} 🍪.{extra}",
+                        "history", event_key=f"loan-repaid:{loan['id']}",
                     )
                 await asyncio.sleep(0.05)
         except Exception:

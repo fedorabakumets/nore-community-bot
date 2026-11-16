@@ -81,7 +81,7 @@ async def test_reset_keeps_only_confirmed_owner_and_queues_each_notice_once(tmp_
     queued = await db.fetchall("SELECT recipient_id,target,details,delivery FROM widget_notifications")
     assert queued == [{
         "recipient_id": rollout.RETAINED_OWNER_ID, "target": "lk", "details": rollout.NOTICE,
-        "delivery": "inbox_queued",
+        "delivery": "notice_queued",
     }]
     rows = await db.fetchall("SELECT user_id FROM notify_inbox WHERE channel=?", (rollout.REQUEST,))
     assert {row["user_id"] for row in rows} == {8, rollout.RETAINED_OWNER_ID}

@@ -29,11 +29,23 @@ window.NoraShop=(()=>{
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-seasonal-new'))seasonalEdit(null);if(b.hasAttribute('data-seasonal-edit'))seasonalEdit(b.dataset.seasonalEdit);if(b.hasAttribute('data-seasonal-action'))seasonalAction(b.dataset.seasonalAction);if(b.hasAttribute('data-seasonal-manage'))seasonalManage(b.dataset.seasonalManage,Number(b.dataset.offset||0))});
 
   function route(){const u=new URL(location.href),view=u.searchParams.get('view');if(view)return {view,category:u.searchParams.get('category')};try{if(location.hash.startsWith('#shop/'))return {view:'shop',category:decodeURIComponent(location.hash.slice(6))};const legacy=location.hash.match(/^#(home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:[&?]|$)/);return {view:legacy?.[1]||'home',category:null}}catch{return {view:'home',category:null}}}
-  function writeRoute(next,push=false){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next},'',u)}
+  let backPending=false;
+  function writeRoute(next,push=false,petFrom=null){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next,petFrom},'',u)}
   function navigate(next,push=true){category=next;tab='shop';writeRoute(tab,push);render();window.scrollTo(0,0);syncBack()}
-  function syncBack(){if(category&&tab==='shop'||(window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)))tg?.BackButton?.show();else tg?.BackButton?.hide()}
+  function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
+    window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
+  function syncBack(){if(category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide()}
   function resume(){category=route().category;syncBack()}
-  function tabChanged(next){writeRoute(next);syncBack()}
+  function tabChanged(next,previous){
+    if(next==='pet'){
+      if(previous&&previous!=='pet'){
+        // Keep the actual parent in browser history for the WebView edge gesture.
+        writeRoute(previous);
+        writeRoute(next,true,previous);
+      }else if(history.state?.noraView!=='pet')writeRoute(next);
+    }else writeRoute(next);
+    syncBack();
+  }
   function renderQuote(q){sheet(`<span class="eyebrow">Проверим покупку</span><h2>${esc(title(q.title))}</h2><p class="sub">${esc(q.description)}${q.recipient?`<br><br>Подарок для <b>${esc(q.recipient)}</b>`:''}</p><div class="amount">${number(q.price)} 🍪</div><p class="sub">Баланс сейчас: ${number(data.user.cookies)} 🍪.<br>${q.gift?'Подарок: +10% к базовой цене, скидка уровня не применяется.':'Цена учитывает твою скидку.'}</p><button class="primary" id="pay" ${Number(data.user.cookies)<q.price?'disabled':''}>${Number(data.user.cookies)<q.price?'Недостаточно печенек':'Подтвердить покупку'}</button>`);$('#pay').onclick=()=>perform('shop/confirm',{token:q.token})}
   async function product(sku){if(busy){toast('Секунду, обновляем магазин');return}const p=data.products.find(p=>p.sku===sku);if(!p)return;if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}const seq=++sequence;if(p.mode==='event'){const e=data.events[0];if(!e){toast('Сейчас нет опубликованного мероприятия');return}sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(e.title)}</h2><div class="amount">${e.price?number(e.price)+' 🍪':'Бесплатно'}</div><button class="primary" id="pay" ${e.paid||!e.price&&e.joined?'disabled':''}>${e.paid||!e.price&&e.joined?'Ты в списке участников':'Подтвердить участие'}</button>`);$('#pay').onclick=()=>perform('events/join',{event_id:e.id,price:e.price});return}
     sheet(`<span class="eyebrow">${esc(title(data.categories.find(c=>c.id===p.category)?.title||'Магазин'))}</span><h2>${esc(title(p.title))}</h2>${p.image?`<div class="shop-product-image" data-shop-image="${esc(p.sku)}"></div>`:''}<p class="sub">${esc(p.description)}</p><div class="amount" id="shop-product-price">${price(p)}</div>${p.reason?`<p class="shop-unavailable">${esc(p.reason)}</p>`:''}<form id="shop-product-form">${p.mode==='pet'?`<label>Твой питомец<select name="species">${data.species.map(s=>`<option value="${esc(s.id)}">${esc(s.emoji+' '+s.title)}</option>`).join('')}</select></label><label>Имя<input name="name" maxlength="24" required placeholder="Как его зовут?"></label>`:''}${p.mode==='video'?'<label>Видео MP4<input name="video" type="file" accept="video/mp4" required></label><p class="sub">До 20 МБ. Загрузим в Telegram, затем отдельно подтвердим покупку.</p>':''}${p.mode==='amount'?'<label>Сумма в печеньках<input name="amount" type="number" inputmode="numeric" min="1" max="1000000" required></label>':''}${p.giftable?'<label class="shop-gift-check"><input type="checkbox" id="shop-gift"> Подарить участнику</label><label id="recipient-label" hidden>Получатель<input name="recipient" maxlength="40" placeholder="@username или Telegram ID" disabled></label>':''}<button class="primary" type="submit" id="shop-next" ${p.buyable?'':'disabled'}>Перейти к подтверждению</button></form>`);
@@ -84,7 +96,26 @@ window.NoraShop=(()=>{
     }catch(err){toast(err.message)}finally{busy=false}
   }
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.shopCategory!==undefined)navigate(b.dataset.shopCategory);if(b.hasAttribute('data-shop-root'))navigate(null);if(b.dataset.topup)topup(Number(b.dataset.topup));if(b.dataset.tab)queueMicrotask(syncBack)});
-  window.addEventListener('popstate',()=>{if(!data)return;const next=route();if(next.view==='shop'&&data.profile.fill_percent===100){resume();tab='shop';render()}else if(tab==='shop'){category=null;tab=['home','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','mafia','rocket','sea'].includes(next.view)?next.view:'home';render()}syncBack()});
-  tg?.BackButton?.onClick?.(()=>{const parent=(window.NoraInteractive?.parent(tab)||(tab==='sea'?'games':null)||window.NoraCabinet?.parent(tab));if(parent){tab=parent;tabChanged(tab);render();window.scrollTo(0,0)}else navigate(null)});
+  window.addEventListener('popstate',()=>{
+    backPending=false;
+    if(!data)return;
+    const next=route();
+    tab=['home','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea'].includes(next.view)?next.view:'home';
+    category=tab==='shop'?next.category:null;
+    if($('#sheet').open)$('#sheet').close();
+    render();
+  });
+  tg?.BackButton?.onClick?.(()=>{
+    if(!data||backPending)return;
+    if($('#sheet').open){$('#sheet').close();return}
+    if(tab==='pet'&&history.state?.petFrom){
+      backPending=true;
+      history.back();
+      return;
+    }
+    const next=parent();
+    if(next){tab=next;tabChanged(tab);render();window.scrollTo(0,0)}
+    else if(tab==='shop')navigate(null);
+  });
   return {screen,cards,product,resume,syncBack,svg,route,tabChanged,preloadSeasonal,openCategory:navigate};
 })();

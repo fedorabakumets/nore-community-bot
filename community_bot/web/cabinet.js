@@ -166,7 +166,6 @@ window.NoraCabinet=(()=>{
     catch(err){toast(err.message);button.disabled=false}
     finally{pending=false}
   });
-  window.addEventListener('popstate',()=>{const next=window.NoraShop?.route().view;if(data&&['lk','pet','wallet','history','notices','admin'].includes(next)){tab=next;render();NoraShop.syncBack()}});
   function refreshCurrent(){if(tab==='notices')loadNotices()}
   return {profileScreen,transferForm,reloadNotices:loadNotices,refreshCurrent,syncHistory,header,walletScreen,historyScreen,noticesScreen,parent,showHelp};
 })();

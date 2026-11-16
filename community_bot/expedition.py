@@ -162,6 +162,8 @@ async def announce_expedition_result(
         return False
     from community_bot.helpers import user_link
     from community_bot.pets_talk import pet_pronouns
+    from community_bot.shop_text import plain_shop_text
+    from community_bot.widget_notifications import Sender, send_service_notification
 
     words = pet_pronouns(str(pet.get("species") or ""))
     pet_name = str(pet.get("name") or "Питомец")
@@ -181,7 +183,10 @@ async def announce_expedition_result(
         except Exception:
             logger.exception("Не удалось написать в чат о возвращении тамагочи %s", user_id)
     try:
-        await bot.send_message(user_id, dm_text, parse_mode="HTML")
+        await send_service_notification(
+            bot, db, user_id, Sender(), "Питомец вернулся из похода", plain_shop_text(dm_text), "notices",
+            event_key=f"pet-expedition:{claimed['updated_at']}",
+        )
     except (TelegramBadRequest, TelegramForbiddenError):
         logger.info("Личка о возвращении тамагочи недоступна user=%s", user_id)
     except Exception:

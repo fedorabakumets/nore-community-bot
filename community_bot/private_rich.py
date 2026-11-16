@@ -1,7 +1,6 @@
-"""A persistent RichMessage surface for all private bot screens.
+"""A persistent RichMessage surface for private bot navigation.
 
-The request middleware also covers answer/reply shortcuts and background notices.
-Handlers keep their authorization and FSM logic; only presentation is centralized.
+Private messages sent outside navigation keep their own Telegram message.
 """
 from __future__ import annotations
 
@@ -46,6 +45,10 @@ _SEND = {"sendMessage", "sendRichMessage", "sendSticker", "sendPoll", *(
     "send" + kind.title() for kind in _MEDIA
 )}
 _EDIT = {"editMessageText", "editMessageCaption", "editMessageMedia", "editMessageReplyMarkup"}
+_NOTICE_ACTIONS = (
+    "application:approve:", "application:reject:", "birthday:claim:", "mfin:", "seafin:",
+    "ticket:reply:", "ticket:close:", "updates:page:", "cookie_order:",
+)
 _MISSING = ("message to edit not found", "message_id_invalid")
 _LOCKS: WeakValueDictionary[tuple[int, int], asyncio.Lock] = WeakValueDictionary()
 _EVENT_LOCKS: WeakValueDictionary[tuple[int, int], asyncio.Lock] = WeakValueDictionary()
@@ -70,6 +73,7 @@ class Turn:
     active: bool = True
     reopen: bool = False
     action: str = ""
+    standalone: bool = False
 
     @property
     def is_handler(self):
@@ -83,7 +87,7 @@ _FRESH_PANEL: ContextVar[int | None] = ContextVar("fresh_private_panel", default
 
 @contextmanager
 def standalone_rich_message():
-    """Send a Rich message separately from the persistent private panel."""
+    """Send separately from the persistent private panel."""
     token = _STANDALONE.set(True)
     try:
         yield
@@ -338,6 +342,27 @@ def _content(method, bot):
     return blocks
 
 
+def copy_content(source, caption=None, parse_mode=None, entities=None):
+    from community_bot.helpers import media_from_message
+
+    kind, file_id = media_from_message(source)
+    if caption is None:
+        caption, entities = source.text or source.caption, source.entities or source.caption_entities
+    blocks = text_blocks(caption, parse_mode, entities)
+    if kind:
+        rich_kind = _MEDIA[kind]
+        blocks.insert(0, {"type": rich_kind, rich_kind: {"type": rich_kind, "media": file_id}})
+    return blocks
+
+
+async def send_private_copy(bot, uid, source, *, header=None, reply_markup=None):
+    blocks = text_blocks(header, "HTML") + copy_content(source)
+    with standalone_rich_message():
+        return await bot.send_rich_message(
+            uid, rich_message=InputRichMessage(blocks=blocks), reply_markup=reply_markup,
+        )
+
+
 def _reusable(blocks):
     """Convert returned RichBlock media into reusable InputRichBlock file IDs."""
     result = []
@@ -392,13 +417,20 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                     return "nora_widget_rejected"
             if isinstance(event, CallbackQuery) and event.data != CLOSE_COMMANDS_CARD and source.message_id > 0:
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
-                if saved and json.loads(saved)["message_id"] != source.message_id:
+                is_panel = saved and json.loads(saved)["message_id"] == source.message_id
+                standalone = (not is_panel and (event.data or "").startswith(_NOTICE_ACTIONS)
+                              and any(button.callback_data == event.data
+                                      for row in (source.reply_markup.inline_keyboard if source.reply_markup else [])
+                                      for button in row))
+                if saved and not is_panel and not standalone:
                     await event.answer(
                         "Это старое меню. Открой актуальное сообщение или отправь /start.", show_alert=True,
                     )
                     return
+            else:
+                standalone = False
             action = (event.data or "") if isinstance(event, CallbackQuery) else ""
-            context = Turn(source, data.get("state"), action=action)
+            context = Turn(source, data.get("state"), action=action, standalone=standalone)
             token = _TURN.set(context)
             try:
                 return await handler(event, data)
@@ -412,9 +444,15 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         uid, name = getattr(method, "chat_id", None), method.__api_method__
         if not isinstance(uid, int) or uid <= 0 or not getattr(bot, "community_db", None):
             return await make_request(bot, method)
-        if name == "sendRichMessage" and _STANDALONE.get():
+        if name in _SEND | _EDIT | {"copyMessage"} and _STANDALONE.get():
             return await make_request(bot, method)
         if name not in _SEND | _EDIT | {"copyMessage", "deleteMessage"}:
+            return await make_request(bot, method)
+        turn = _TURN.get()
+        personal = turn and turn.is_handler and turn.source.chat.id == uid
+        if name in _SEND | {"copyMessage"} and not personal and _FRESH_PANEL.get() != uid:
+            return await make_request(bot, method)
+        if name in _EDIT and personal and turn.standalone and method.message_id == turn.source.message_id:
             return await make_request(bot, method)
         async with _lock(_LOCKS, bot, uid):
             return await self.render(make_request, bot, method, uid, name)
@@ -451,16 +489,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             source = turn.source if turn else None
             if not source or (method.from_chat_id, method.message_id) != (source.chat.id, source.message_id):
                 raise TelegramBadRequest(method=method, message="Source message is unavailable for Rich rendering")
-            from community_bot.helpers import media_from_message
-
-            kind, file_id = media_from_message(source)
-            blocks = text_blocks(method.caption if method.caption is not None else source.text or source.caption,
-                                 _mode(method, bot) if method.caption is not None else None,
-                                 method.caption_entities if method.caption is not None else
-                                 source.entities or source.caption_entities)
-            if kind:
-                rich_kind = _MEDIA[kind]
-                blocks.insert(0, {"type": rich_kind, rich_kind: {"type": rich_kind, "media": file_id}})
+            blocks = copy_content(source, method.caption,
+                                  _mode(method, bot) if method.caption is not None else None, method.caption_entities)
         else:
             blocks = _content(method, bot)
         markup = getattr(method, "reply_markup", None)
@@ -470,8 +500,6 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         elif name == "editMessageCaption":
             blocks = [block for block in page.get("body", []) if block["type"] in _MEDIA.values()] + blocks
         append = bool(turn and turn.is_handler and uid in turn.sent)
-        # Background notices must not hide the question the user is currently answering.
-        append |= bool(current and not personal_turn)
         append = append and not fresh
         if name in _SEND | {"copyMessage"} and append:
             # A handler may send a cover, its long body and a keyboard separately.

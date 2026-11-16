@@ -97,7 +97,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     slugify_role,
 )
-from community_bot.private_rich import fresh_private_panel
+from community_bot.private_rich import fresh_private_panel, send_private_copy, standalone_rich_message
 from community_bot.profile_fields import parse_birth_date, profile_age
 from community_bot.restart import play_countdown, try_begin
 from community_bot.routers.flows import restore_private_menu
@@ -1375,13 +1375,14 @@ async def _notify_application_decision(
             await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
             unread=await db.notify_unread_count(user_id),
         )
-        with fresh_private_panel(user_id):
-            await safe_send(bot, user_id, f"{result}.{reason_text}{invite}", parse_mode="HTML", reply_markup=markup)
+        menu_text = "Выбери раздел."
     else:
-        await safe_send(
-            bot, user_id, f"{result}.{reason_text}", parse_mode="HTML",
-            reply_markup=await _private_keyboard(user_id, db, settings),
-        )
+        markup = await _private_keyboard(user_id, db, settings)
+        menu_text = WELCOME_TEXT
+    with standalone_rich_message():
+        await safe_send(bot, user_id, f"{result}.{reason_text}{invite}", parse_mode="HTML")
+    with fresh_private_panel(user_id):
+        await safe_send(bot, user_id, menu_text, reply_markup=markup)
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, user_id}:
         await safe_send(bot, reviewer_id, report, parse_mode="HTML")
@@ -2229,7 +2230,7 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
     failed = 0
     for user in await db.list_all_users():
         try:
-            await bot.copy_message(int(user["user_id"]), message.chat.id, message.message_id)
+            await send_private_copy(bot, int(user["user_id"]), message)
             delivered += 1
         except (TelegramForbiddenError, TelegramBadRequest):
             failed += 1
@@ -3087,14 +3088,15 @@ async def open_ticket(
     await state.set_data({"ticket_id": ticket_id})
     if created:
         for reviewer_id in settings.reviewers:
-            await safe_send(
-                bot,
-                reviewer_id,
-                f"🎫 Открыт тикет №{ticket_id} пользователем "
-                f"{user_link(actor.id, actor.full_name)}.",
-                parse_mode="HTML",
-                reply_markup=ticket_keyboard(ticket_id),
-            )
+            with standalone_rich_message():
+                await safe_send(
+                    bot,
+                    reviewer_id,
+                    f"🎫 Открыт тикет №{ticket_id} пользователем "
+                    f"{user_link(actor.id, actor.full_name)}.",
+                    parse_mode="HTML",
+                    reply_markup=ticket_keyboard(ticket_id),
+                )
         body = (
             f"🎫 <b>Тикет №{ticket_id}</b>\n"
             "Открыт. Пишите сюда. Закроет стафф или /close."
@@ -3138,17 +3140,11 @@ async def relay_ticket_message(message: Message, state: FSMContext, db: Database
     header = f"🎫 <b>Тикет №{ticket_id}</b> от {user_link(message.from_user.id, message.from_user.full_name)}"
     delivered = 0
     for reviewer_id in settings.reviewers:
-        if await safe_send(
-            bot,
-            reviewer_id,
-            header,
-            parse_mode="HTML",
-            reply_markup=ticket_keyboard(ticket_id),
-        ):
-            try:
-                await bot.copy_message(reviewer_id, message.chat.id, message.message_id)
-            except TelegramBadRequest:
-                pass
+        try:
+            await send_private_copy(bot, reviewer_id, message, header=header, reply_markup=ticket_keyboard(ticket_id))
+        except (TelegramForbiddenError, TelegramBadRequest):
+            continue
+        else:
             delivered += 1
     await message.answer("Сообщение передано модераторам." if delivered else "Сообщение сохранено в тикете.")
 
@@ -3188,8 +3184,8 @@ async def send_ticket_reply(message: Message, state: FSMContext, db: Database, b
     text = message.text or message.caption
     await db.add_ticket_message(ticket_id, message.from_user.id, "moderator", text, media_type, file_id)
     try:
-        await bot.send_message(int(ticket["user_id"]), f"💬 Ответ модератора по тикету №{ticket_id}:")
-        await bot.copy_message(int(ticket["user_id"]), message.chat.id, message.message_id)
+        await send_private_copy(bot, int(ticket["user_id"]), message,
+                                header=f"💬 Ответ модератора по тикету №{ticket_id}:")
     except (TelegramForbiddenError, TelegramBadRequest):
         await message.answer("Ответ сохранён, но пользователь заблокировал бота.")
         await state.clear()
@@ -3219,7 +3215,8 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
     await callback.answer("Тикет закрыт.")
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
-    await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
+    with standalone_rich_message():
+        await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
 
 
 @router.callback_query(F.data.startswith("admin:event:"))

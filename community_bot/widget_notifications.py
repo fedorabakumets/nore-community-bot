@@ -75,7 +75,7 @@ async def send_admin_test(bot, db, recipient_id: int, event_key: str) -> str:
 
     return await enqueue(
         bot, db, recipient_id, Sender(), "Проверка уведомлений", "Это тестовое уведомление от Норы.",
-        "Открой Нору, отметь одну карточку прочитанной или прочитай всю пачку и закрой виджет.",
+        "Открой Нору или отметь эту карточку прочитанной.",
         "notices", TEST_CATEGORY, event_key, context="Проверка из админ-панели", required=True,
     )
 

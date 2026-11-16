@@ -218,6 +218,11 @@ class WidgetUpdateMiddleware(BaseMiddleware):
             if await handle_widget_query(data["bot"], data["db"], query):
                 return
         callback = event.callback_query
+        if callback and (callback.data or "").startswith("nwn:") and data.get("db") is not None:
+            from community_bot.widget_inbox import handle_fallback_read
+
+            await handle_fallback_read(data["bot"], data["db"], callback)
+            return
         button = callback and (callback.data or "").startswith("nora:")
         if button and isinstance(callback.message, Message):
             query = {"id": callback.id, "from": callback.from_user.model_dump(by_alias=True),

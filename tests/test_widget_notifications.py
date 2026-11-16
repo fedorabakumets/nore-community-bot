@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError
-from aiogram.types import Chat, Message, Update, User
+from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError, TelegramNotFound
+from aiogram.types import CallbackQuery, Chat, Message, Update, User
 
 from community_bot import profile_access_rollout as rollout
 from community_bot import widget_inbox
@@ -41,8 +41,8 @@ class WidgetSession(BaseSession):
             raise self.failures[name](method, "fake API error")
         if name == "getMe":
             return User(id=bot.id, is_bot=True, first_name="Нора", username="nora_test_bot")
-        if name == "sendWidget":
-            number = sum(call.__api_method__ == "sendWidget" for call in self.calls)
+        if name in {"sendWidget", "sendMessage"}:
+            number = sum(call.__api_method__ == name for call in self.calls)
             return Message(message_id=455 + number, chat=Chat(id=method.chat_id, type="private"),
                            date=datetime.now(UTC), widget={"id": "fixture"})
         return True
@@ -91,19 +91,18 @@ async def test_opt_in_concurrent_delivery_and_caption(runtime):
 
     outcomes = await asyncio.gather(emit(bot, db), emit(bot, db), emit(bot, db))
     assert sorted(outcomes) == ["sent", "suppressed", "suppressed"]
-    assert await emit(bot, db, "rep:101") == "updated"
+    assert await emit(bot, db, "rep:101") == "sent"
     assert await emit(bot, db) == "suppressed"
-    sent, updated, edited = api_calls(session)
+    sent, second = api_calls(session)
     assert sent.__api_method__ == "sendWidget" and sent.chat_id == 7
     assert sent.disable_notification is False and sent.allow_queries is True
     assert sent.reply_markup is None and sent.height is None and sent.width is None
     assert sent.parse_mode == "HTML"
     assert "У вас 1 уведомление!" in sent.caption and "репутации" not in sent.caption
     assert json.loads(sent.chat_data)["p"]["sender"] == "@member"
-    assert (updated.__api_method__, updated.message_id, json.loads(updated.chat_data)["n"]) == (
-        "editMessageWidgetData", 456, 2,
-    )
-    assert edited.__api_method__ == "editMessageCaption" and "У вас 2 уведомления!" in edited.caption
+    assert second.__api_method__ == "sendWidget"
+    assert json.loads(second.chat_data)["n"] == 1
+    assert json.loads(second.chat_data)["p"]["id"] != json.loads(sent.chat_data)["p"]["id"]
     row = await db.fetchone("SELECT * FROM widget_notifications WHERE message_id=456")
     assert row["sender_id"] == 8 and row["details"] == "Полные подробности"
     assert f"https://t.me/nora_test_bot?startapp=nora_notice_{row['id']}" in sent.caption
@@ -178,7 +177,7 @@ async def test_send_failure_does_not_duplicate_or_spam(runtime, failure, status)
         assert await emit(bot, db, "rep:101") == "blocked"
     assert [m.__api_method__ for m in api_calls(session)] == ["sendWidget"]
     row = await db.fetchone("SELECT delivery,message_id FROM widget_notifications WHERE event_key='rep:100'")
-    expected = "inbox_paused" if status == "blocked" else "inbox_unconfirmed"
+    expected = "notice_paused" if status == "blocked" else "notice_unconfirmed"
     assert row == {"delivery": expected, "message_id": None}
 
 
@@ -221,44 +220,71 @@ def test_widget_uses_text_nodes_and_stays_within_telegram_limits():
     assert len(("nwi:read:" + "a" * 32).encode()) <= 64
 
 
-async def test_pages_and_close_are_owner_bound_and_do_not_drop_new_events(runtime):
+async def test_read_and_close_only_affect_their_own_widget(runtime):
     bot, db, session, clock = runtime
     await db.notify_toggle_enabled(7, "widget_reputation")
     assert await emit(bot, db) == "sent"
-    assert await emit(bot, db, "rep:101") == "updated"
-    dispatcher = Dispatcher()
-    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    assert await emit(bot, db, "rep:101") == "sent"
+    first, second = [json.loads(call.chat_data) for call in api_calls(session)]
 
     async def query(data, **changes):
-        await dispatcher.feed_update(bot, Update(update_id=1, widget_query=widget_query(data=data, **changes)), db=db)
+        assert await widget_inbox.handle_query(bot, db, widget_query(data=data, **changes))
         return json.loads(next(call.data for call in reversed(session.calls)
                                if call.__api_method__ == "answerWidgetQuery"))
 
-    assert await query("nwi:page:0", message_id=123) == {}
-    assert await query("nwi:page:0", **{"from": {"id": 8}}) == {}
-    first, second = await query("nwi:page:0"), await query("nwi:page:1")
-    assert (first["n"], first["i"], second["i"]) == (2, 0, 1)
-    assert first["p"]["id"] != second["p"]["id"]
-    await emit(bot, db, "rep:102")
-    stale = await query(f"nwi:close:{first['r']}")
-    assert stale["changed"] is True and stale["n"] == 3
-    remaining = await query(f"nwi:read:{second['p']['id']}")
-    assert remaining["n"] == 2
-    assert not any(call.__api_method__ == "deleteMessage" for call in session.calls)
-
+    assert await query(f"nwi:close:{first['r']}", message_id=457) == {}
+    assert await query(f"nwi:read:{second['p']['id']}") == {}
+    assert await query(f"nwi:close:{first['r']}", **{"from": {"id": 8}}) == {}
+    assert await query(f"nwi:read:{first['p']['id']}") == {"closed": True}
     session.failures["deleteMessage"] = TelegramNetworkError
-    assert (await query(f"nwi:close:{remaining['r']}"))["closed"]
-    closed = await db.fetchall("SELECT read_at FROM widget_notifications ORDER BY rowid")
-    assert all(row["read_at"] is not None for row in closed)
-    assert await emit(bot, db, "rep:103") == "queued"
+    clock.now += notices.DELETE_DELAY
+    await widget_inbox.settle_due(bot, db)
+    assert await emit(bot, db, "rep:102") == "sent"
     del session.failures["deleteMessage"]
     clock.now += 60
     await widget_inbox.settle_due(bot, Database(db.path))
-    deleted = [call for call in session.calls if call.__api_method__ == "deleteMessage"]
-    assert [(call.chat_id, call.message_id) for call in deleted] == [(7, 456), (7, 456)]
-    last = session.calls[-1]
-    assert last.__api_method__ == "sendWidget" and json.loads(last.chat_data)["n"] == 1
+    assert await query(f"nwi:close:{second['r']}", message_id=457) == {"closed": True}
+    rows = await db.fetchall("SELECT message_id,delivery FROM widget_notifications ORDER BY rowid")
+    assert rows == [{"message_id": 456, "delivery": "notice_closed"},
+                    {"message_id": 457, "delivery": "notice_closed"},
+                    {"message_id": 458, "delivery": "notice_sent"}]
     assert await db.get_bot_state("private_rich_panel:7") == '{"message_id":123,"screen":"home"}'
+
+
+async def test_widget_rejection_sends_separate_text_and_can_be_read(runtime):
+    bot, db, session, _ = runtime
+    session.failures["sendWidget"] = TelegramNotFound
+    assert await notices.send_admin_test(bot, db, 7, "fallback") == "sent"
+    attempt, fallback = api_calls(session)
+    assert attempt.__api_method__ == "sendWidget"
+    assert fallback.__api_method__ == "sendMessage" and fallback.disable_notification is False
+    assert "Проверка уведомлений" in fallback.text
+    row = await db.fetchone("SELECT id,delivery FROM widget_notifications")
+    assert row["delivery"] == "notice_text"
+    callback = CallbackQuery(
+        id="fixture", from_user=User(id=7, is_bot=False, first_name="Участник"), chat_instance="private",
+        message=Message(message_id=456, date=datetime.now(UTC), chat=Chat(id=7, type="private")),
+        data=f"nwn:{row['id']}",
+    )
+    dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    await dispatcher.feed_update(bot, Update(update_id=1, callback_query=callback), db=db)
+    assert session.calls[-1].__api_method__ == "deleteMessage"
+    assert session.calls[-1].message_id == 456
+    assert (await db.fetchone("SELECT delivery FROM widget_notifications"))["delivery"] == "notice_closed"
+    assert await db.get_bot_state("private_rich_panel:7") == '{"message_id":123,"screen":"home"}'
+
+
+async def test_closing_old_inbox_keeps_new_notice(runtime):
+    bot, db, session, _ = runtime
+    await db.notify_toggle_enabled(7, "widget_reputation")
+    assert await emit(bot, db) == "sent"
+    old = json.loads(api_calls(session)[0].chat_data)
+    await db.execute("UPDATE widget_notifications SET delivery='inbox_open' WHERE message_id=456")
+    assert await emit(bot, db, "rep:101") == "sent"
+    assert await widget_inbox.handle_query(bot, db, widget_query(data=f"nwi:close:{old['r']}"))
+    rows = await db.fetchall("SELECT message_id,delivery FROM widget_notifications ORDER BY rowid")
+    assert rows == [{"message_id": 456, "delivery": "inbox_closed"}, {"message_id": 457, "delivery": "notice_sent"}]
 
 
 async def queue_profile_invite(db, clock, monkeypatch):
@@ -285,7 +311,7 @@ async def test_profile_completion_removes_only_its_invite(runtime, monkeypatch, 
     assert json.loads(sent.chat_data)["p"]["id"] == row["id"]
     if with_other_notice:
         await db.notify_toggle_enabled(7, "widget_reputation")
-        assert await emit(bot, db) == "updated"
+        assert await emit(bot, db) == "sent"
 
     await db.update_profile(7, "birth_date", "2000-01-01")
     # Scheduled cleanup survives a restart.
@@ -296,14 +322,12 @@ async def test_profile_completion_removes_only_its_invite(runtime, monkeypatch, 
     assert (await widget_notice(request)).status == 404
     assert json.loads((await list_notices(request)).body)["items"] == []
     assert (await db.get_user(7))["cookies"] == 0
+    assert api_calls(session)[-1].__api_method__ == "deleteMessage"
+    assert api_calls(session)[-1].message_id == 456
     if with_other_notice:
-        assert not any(call.__api_method__ == "deleteMessage" for call in api_calls(session))
-        data_edit = [call for call in api_calls(session) if call.__api_method__ == "editMessageWidgetData"][-1]
-        assert json.loads(data_edit.chat_data)["n"] == 1
-        assert json.loads(data_edit.chat_data)["p"]["title"] == "Изменение репутации"
-    else:
-        assert api_calls(session)[-1].__api_method__ == "deleteMessage"
-        assert api_calls(session)[-1].message_id == 456
+        other = await db.fetchone("SELECT delivery,message_id FROM widget_notifications WHERE event_key='rep:100'")
+        assert other == {"delivery": "notice_sent", "message_id": 457}
+
 
 
 @pytest.mark.parametrize("surface", ["miniapp", "widget"])
@@ -321,7 +345,7 @@ async def test_profile_invite_can_be_closed_manually(runtime, monkeypatch, surfa
         assert await widget_inbox.handle_query(bot, db, widget_query(data=f"nwi:close:{state['r']}"))
     assert not await db.fetchone("SELECT id FROM notify_inbox WHERE channel=?", (rollout.REQUEST,))
     assert (await db.fetchone("SELECT delivery FROM widget_notifications WHERE id=?", (row["id"],))) == {
-        "delivery": "inbox_closed",
+        "delivery": "notice_closed",
     }
     assert api_calls(session)[-1].__api_method__ == "deleteMessage"
 
@@ -335,5 +359,5 @@ async def test_profile_invite_closed_before_delivery_is_never_sent(runtime, monk
     await widget_inbox.settle_due(bot, db)
     assert not api_calls(session)
     assert (await db.fetchone("SELECT delivery FROM widget_notifications WHERE id=?", (row["id"],))) == {
-        "delivery": "inbox_read",
+        "delivery": "notice_read",
     }

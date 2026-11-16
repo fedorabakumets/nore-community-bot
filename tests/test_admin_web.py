@@ -211,10 +211,10 @@ async def test_workspace_profile_and_role_have_direct_return_paths(env):
     role = await click(env, view, 'Роль и права')
     await click(env, role, 'Модератор')
     assert (await env.db.get_user(8))['role'] == 'moderator'
-    assert sum(m.__api_method__ == 'sendWidget' for m in env.telegram.calls) == 1
-    edited = next(m for m in env.telegram.calls if m.__api_method__ == 'editMessageWidgetData')
-    state = json.loads(edited.chat_data)
-    assert state['n'] == 2 and state['p']['title'] == 'Изменение роли'
+    sent = [m for m in env.telegram.calls if m.__api_method__ == 'sendWidget']
+    assert len(sent) == 2 and all(m.chat_id == 8 for m in sent)
+    state = json.loads(sent[-1].chat_data)
+    assert state['n'] == 1 and state['p']['title'] == 'Изменение роли'
 
 
 
@@ -400,8 +400,9 @@ async def test_ticket_history_and_text_reply_recreate_synthetic_message_for_reci
     assert any('Помогите' in c['html'] for c in view['cards'])
     view = await click(env, view, 'Ответить')
     await text(env, view, 'Сейчас разберёмся')
-    assert any(m.__api_method__ == 'sendMessage' and m.chat_id == 8 and m.text == 'Сейчас разберёмся'
-               for m in env.telegram.calls)
+    (reply,) = [m for m in env.telegram.calls if m.__api_method__ == 'sendRichMessage' and m.chat_id == 8]
+    assert 'Сейчас разберёмся' in reply.rich_message.model_dump_json()
+    assert f'Ответ модератора по тикету №{ticket_id}' in reply.rich_message.model_dump_json()
     count = await env.db.fetchone('SELECT COUNT(*) AS n FROM ticket_messages WHERE ticket_id=?', (ticket_id,))
     assert count['n'] == 2
 
@@ -467,9 +468,9 @@ async def test_broadcast_copies_web_text_to_real_recipients_once(env):
     await env.bridge.input(env.actor, payload)
     with pytest.raises(web.HTTPConflict):
         await env.bridge.input(env.actor, payload)
-    messages = [m for m in env.telegram.calls if m.__api_method__ == 'sendMessage' and m.text == 'Тест']
+    messages = [m for m in env.telegram.calls if m.__api_method__ == 'sendRichMessage']
     assert sorted(m.chat_id for m in messages) == [7, 8, 9]
-    assert all(m.entities[0].type == 'bold' for m in messages)
+    assert all('"type":"bold","text":"Тест"' in m.rich_message.model_dump_json(exclude_none=True) for m in messages)
 
 
 async def test_drafts_do_not_use_the_telegram_dialog_state(env):

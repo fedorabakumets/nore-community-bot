@@ -67,15 +67,15 @@ window.NoraInteractive = (() => {
   }
   function go(view) {
     if (!views.has(view) && view !== "pet" && view !== "lk" && view !== "community") return;
+    const previous = tab;
     tab = view;
-    NoraShop.tabChanged(view);
+    NoraShop.tabChanged(view, previous);
     render();
     window.scrollTo(0, 0);
   }
   function parent(view) {
     return (
       {
-        pet: "interactive",
         games: "interactive",
         mafia: "games",
         rocket: "games",
@@ -851,14 +851,6 @@ window.NoraInteractive = (() => {
       performAction("rocket", "rocket/cashout", {
         round_id: state.rocket.round.id,
       });
-  });
-  window.addEventListener("popstate", () => {
-    const next = window.NoraShop?.route().view;
-    if (data && views.has(next)) {
-      tab = next;
-      render();
-      NoraShop.syncBack();
-    }
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {

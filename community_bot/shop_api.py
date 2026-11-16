@@ -354,6 +354,7 @@ async def notify_cookie_order(bot, db, settings, order_id):
     from community_bot.helpers import has_permission, user_link
     from community_bot.keyboards import cookie_order_review_keyboard
     from community_bot.permissions import PERM_PAYMENTS
+    from community_bot.private_rich import standalone_rich_message
 
     order = await db.get_cookie_order(order_id)
     if not order:
@@ -370,7 +371,8 @@ async def notify_cookie_order(bot, db, settings, order_id):
             continue
         try:
             send = bot.send_photo if order['receipt_media_type'] == 'photo' else bot.send_document
-            await send(uid, order['receipt_file_id'], caption=caption, parse_mode='HTML',
-                       reply_markup=cookie_order_review_keyboard(order_id))
+            with standalone_rich_message():
+                await send(uid, order['receipt_file_id'], caption=caption, parse_mode='HTML',
+                           reply_markup=cookie_order_review_keyboard(order_id))
         except TelegramAPIError:
             continue

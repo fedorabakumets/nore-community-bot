@@ -69,6 +69,15 @@ async def dismiss_profile_notice(db, uid):
             await conn.execute("BEGIN IMMEDIATE")
             await conn.execute("DELETE FROM notify_inbox WHERE user_id=? AND channel=?", (uid, REQUEST))
             now = int(time())
+            await conn.execute(
+                "UPDATE widget_notifications SET read_at=?,"
+                "delivery=CASE delivery WHEN 'notice_sent' THEN 'notice_closing' "
+                "WHEN 'notice_text' THEN 'notice_text_closing' ELSE 'notice_read' END,"
+                "next_action_at=CASE WHEN delivery IN ('notice_sent','notice_text') THEN ? ELSE NULL END "
+                "WHERE recipient_id=? AND category='widget_personal' AND event_key=? AND read_at IS NULL "
+                "AND delivery IN ('notice_sent','notice_text','notice_queued','notice_paused','notice_unconfirmed')",
+                (now, now, uid, REQUEST),
+            )
             read = await conn.execute(
                 "UPDATE widget_notifications SET read_at=?,next_action_at=NULL,"
                 "delivery=CASE WHEN delivery='inbox_open' THEN delivery ELSE 'inbox_read' END "
@@ -114,7 +123,7 @@ async def queue_notices(db):
                    id,recipient_id,sender_type,sender_label,title,preview,details,
                    category,target,context,event_at,event_key,created_at,delivery,next_action_at)
                SELECT lower(hex(randomblob(16))),user_id,'nora','Нора','Вам открыт доступ к Норе',
-                      text,text,'widget_personal','lk','',created_at,channel,?,'inbox_queued',?
+                      text,text,'widget_personal','lk','',created_at,channel,?,'notice_queued',?
                FROM notify_inbox WHERE channel=? AND delivered=0
                ON CONFLICT(recipient_id,category,event_key) DO NOTHING""",
             (now, now, REQUEST),

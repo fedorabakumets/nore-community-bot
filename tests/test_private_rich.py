@@ -10,7 +10,7 @@ import pytest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound, TelegramRetryAfter
-from aiogram.methods import EditMessageText, SendRichMessage
+from aiogram.methods import EditMessageText, SendPhoto, SendRichMessage
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -72,7 +72,7 @@ class RecordingSession(BaseSession):
         uid = method.chat_id
         if isinstance(method, EditMessageText) and (uid, method.message_id) in self.uneditable:
             raise TelegramBadRequest(method=method, message="Bad Request: message can't be edited")
-        if isinstance(method, SendRichMessage) or method.__api_method__ == "sendWidget":
+        if method.__api_method__.startswith("send"):
             mid = self.next_id
             self.next_id += 1
             if method.reply_markup is not None and not isinstance(method.reply_markup, InlineKeyboardMarkup):
@@ -94,6 +94,11 @@ class RecordingSession(BaseSession):
             fields["rich_message"] = {"blocks": blocks}
         else:
             fields["text"] = getattr(method, "text", None)
+        if isinstance(method, SendPhoto):
+            fields["photo"] = [{"file_id": "photo-cached", "file_unique_id": "photo-unique",
+                                "width": 500, "height": 300}]
+        if isinstance(getattr(method, "reply_markup", None), InlineKeyboardMarkup):
+            fields["reply_markup"] = method.reply_markup
         return Message(message_id=mid, date=datetime.now(UTC),
                        chat=Chat(id=uid, type="private" if uid > 0 else "supergroup"), **fields).as_(bot)
 
@@ -120,6 +125,13 @@ async def turn(setup, handler, event=None):
     db, bot, _, state = setup
     return await PrivateRichContextMiddleware()(handler, (event or incoming()).as_(bot),
                                                 {"bot": bot, "db": db, "state": state})
+
+
+async def show_panel(setup, method, uid, *args, **kwargs):
+    async def handler(message, data):
+        return await method(uid, *args, **kwargs)
+
+    return await turn(setup, handler, incoming(uid=uid))
 
 
 def content(call):
@@ -166,7 +178,8 @@ def test_rich_buttons_preserve_callbacks_links_webapps_and_colors():
 
 async def test_commands_and_repeated_callbacks_edit_one_rich_message(setup):
     _, bot, session, _ = setup
-    first = await bot.send_message(7, "<b>Главная</b>", parse_mode="HTML", reply_markup=main_private_keyboard())
+    first = await show_panel(setup, bot.send_message, 7, "<b>Главная</b>", parse_mode="HTML",
+                             reply_markup=main_private_keyboard())
     assert isinstance(session.calls[0], SendRichMessage)
     assert session.calls[0].reply_markup is None
     await replace_block(first, "wallet", "Баланс", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -199,7 +212,7 @@ async def test_cover_long_text_and_secondary_keyboard_stay_in_one_page(setup):
 
 async def test_guest_and_form_controls_do_not_expose_member_sections(setup):
     _, bot, session, state = setup
-    await bot.send_message(8, "Добро пожаловать", reply_markup=main_private_keyboard())
+    await show_panel(setup, bot.send_message, 8, "Добро пожаловать", reply_markup=main_private_keyboard())
     assert set(actions(session.calls[-1])) == {"start:apply", "menu:question"}
     state.get_state.return_value = "ApplicationForm:name"
 
@@ -209,15 +222,16 @@ async def test_guest_and_form_controls_do_not_expose_member_sections(setup):
     await turn(setup, handler, incoming(uid=8))
     assert set(actions(session.calls[-1])) == {"flow:cancel", "flow:restart"}
     assert actions(session.calls[-1])["flow:cancel"]["style"] == "link"
+    panel = await setup[0].get_bot_state("private_rich_panel:8")
     await bot.send_message(8, "Уведомление")
-    raw = session.calls[-1].rich_message.model_dump_json()
-    assert "Как тебя зовут?" in raw and "Уведомление" in raw
-    assert "flow:cancel" in actions(session.calls[-1])
+    assert session.calls[-1].__api_method__ == "sendMessage"
+    assert session.calls[-1].text == "Уведомление"
+    assert await setup[0].get_bot_state("private_rich_panel:8") == panel
 
 
 async def test_restarted_middleware_reuses_saved_panel_and_cached_photo(setup, tmp_path):
     db, bot, session, _ = setup
-    first = await bot.send_photo(7, FSInputFile(tmp_path / "image.jpg"), caption="Обложка")
+    first = await show_panel(setup, bot.send_photo, 7, FSInputFile(tmp_path / "image.jpg"), caption="Обложка")
     saved = json.loads(await db.get_bot_state("private_rich_panel:7"))
     assert saved["body"][0]["photo"]["media"] == "photo-cached"
     bot.session.middleware.unregister(bot.session.middleware[1])
@@ -234,7 +248,7 @@ async def test_restarted_middleware_reuses_saved_panel_and_cached_photo(setup, t
 async def test_all_supported_media_are_embedded(setup, method, upload):
     _, bot, session, _ = setup
     file = BufferedInputFile(b"offline-media", filename="upload.bin") if upload else "telegram-file"
-    result = await getattr(bot, method)(7, file, caption="<b>Вложение</b>", parse_mode="HTML")
+    result = await show_panel(setup, getattr(bot, method), 7, file, caption="<b>Вложение</b>", parse_mode="HTML")
     assert getattr(result, method.removeprefix("send_")) is not None
     assert len(session.calls) == 1 and isinstance(session.calls[0], SendRichMessage)
     assert content(session.calls[0])[0]["type"] in {"photo", "video", "audio", "document", "voice_note", "animation"}
@@ -245,28 +259,33 @@ async def test_ticket_header_and_copied_attachment_include_all_text_and_actions(
     source = incoming(text=None, caption="Ответ <без HTML>",
                       document={"file_id": "doc", "file_unique_id": "unique"})
 
-    async def handler(message, data):
-        await bot.send_message(8, "Ответ по тикету №1", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            ibtn("Ответить", "ticket:reply:1"),
-        ]]))
-        sent = await bot.copy_message(8, message.chat.id, message.message_id)
-        assert sent.message_id == 100
+    from community_bot.private_rich import send_private_copy
 
-    await turn(setup, handler, source)
+    async def handler(message, data):
+        return await send_private_copy(bot, 8, message, header="Ответ по тикету №1",
+                                       reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                           ibtn("Ответить", "ticket:reply:1"),
+                                       ]]))
+
+    await show_panel(setup, bot.send_message, 8, "Личное меню получателя")
+    saved = await setup[0].get_bot_state("private_rich_panel:8")
+    sent = await turn(setup, handler, source)
     last = session.calls[-1]
     text = json.dumps(content(last), ensure_ascii=False, default=str)
+    assert sent.message_id == 101
     assert "Ответ по тикету №1" in text and "Ответ <без HTML>" in text
-    assert "ticket:reply:1" in actions(last)
+    assert last.reply_markup.inline_keyboard[0][0].callback_data == "ticket:reply:1"
     assert any(b["type"] == "document" for b in content(last))
-    assert len(session.calls) == 2 and isinstance(last, EditMessageText)
+    assert len(session.calls) == 2 and isinstance(last, SendRichMessage)
+    assert await setup[0].get_bot_state("private_rich_panel:8") == saved
 
 
 async def test_deleted_panel_is_recreated_once(setup):
     _, bot, session, _ = setup
-    await bot.send_message(7, "Первый экран")
+    await show_panel(setup, bot.send_message, 7, "Первый экран")
     session.fail = TelegramBadRequest(method=EditMessageText(chat_id=7, message_id=100, text="x"),
                                       message="Bad Request: message to edit not found")
-    result = await bot.send_message(7, "Новый экран")
+    result = await show_panel(setup, bot.send_message, 7, "Новый экран")
     assert result.message_id == 101
     assert [type(call) for call in session.calls] == [SendRichMessage, EditMessageText, SendRichMessage]
 
@@ -274,7 +293,7 @@ async def test_deleted_panel_is_recreated_once(setup):
 @pytest.mark.parametrize("error", ["format", "network", "rate", "unchanged", "uneditable"])
 async def test_errors_do_not_send_duplicate_messages(setup, error):
     _, bot, session, _ = setup
-    await bot.send_message(7, "Экран")
+    await show_panel(setup, bot.send_message, 7, "Экран")
     method = EditMessageText(chat_id=7, message_id=100, text="x")
     errors = {
         "uneditable": TelegramBadRequest(method=method, message="Bad Request: message can't be edited"),
@@ -285,22 +304,22 @@ async def test_errors_do_not_send_duplicate_messages(setup, error):
     }
     session.fail = errors[error]
     if error == "unchanged":
-        assert (await bot.send_message(7, "Экран")).message_id == 100
+        assert (await show_panel(setup, bot.send_message, 7, "Экран")).message_id == 100
     else:
         with pytest.raises(type(errors[error])):
-            await bot.send_message(7, "Другой экран")
+            await show_panel(setup, bot.send_message, 7, "Другой экран")
     assert len(session.calls) == 2 and isinstance(session.calls[-1], EditMessageText)
 
 
 async def test_concurrent_private_sends_create_only_one_panel(setup):
     _, bot, session, _ = setup
-    await asyncio.gather(*(bot.send_message(7, str(i)) for i in range(5)))
+    await asyncio.gather(*(show_panel(setup, bot.send_message, 7, str(i)) for i in range(5)))
     assert sum(isinstance(call, SendRichMessage) for call in session.calls) == 1
 
 
 async def test_native_rich_and_buttons_are_preserved(setup):
     _, bot, session, _ = setup
-    await bot.send_rich_message(7, InputRichMessage(blocks=[
+    await show_panel(setup, bot.send_rich_message, 7, InputRichMessage(blocks=[
         InputRichBlockParagraph(text="Подарок"), InputRichBlockButtons(buttons=[RichMessageButton(
             text="Забрать", style="success", callback_data="birthday:claim:2026-11-05:7",
         )]),
@@ -310,7 +329,7 @@ async def test_native_rich_and_buttons_are_preserved(setup):
 
 async def test_markup_cleanup_does_not_remove_buttons_of_next_screen(setup):
     _, bot, session, _ = setup
-    first = await bot.send_message(7, "Приглашение")
+    first = await show_panel(setup, bot.send_message, 7, "Приглашение")
 
     async def handler(message, data):
         await message.answer("Открыть лобби", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -325,7 +344,7 @@ async def test_markup_cleanup_does_not_remove_buttons_of_next_screen(setup):
 
 async def test_stale_callback_cannot_apply_business_action(setup):
     _, bot, session, _ = setup
-    await bot.send_message(7, "Текущий экран")
+    await show_panel(setup, bot.send_message, 7, "Текущий экран")
     callback = CallbackQuery(id="old", from_user=incoming().from_user, chat_instance="x",
                              message=incoming(), data="shop:pay:old")
     handler = AsyncMock()
@@ -334,15 +353,38 @@ async def test_stale_callback_cannot_apply_business_action(setup):
     assert session.calls[-1].__api_method__ == "answerCallbackQuery"
 
 
+async def test_invitation_button_works_next_to_an_open_panel(setup):
+    db, bot, session, _ = setup
+    await show_panel(setup, bot.send_message, 7, "Главная")
+    saved = await db.get_bot_state("private_rich_panel:7")
+    action = "seafin:y:room"
+    notice = await bot.send_message(7, "Приглашение в Морской бой", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Принять", callback_data=action)]],
+    ))
+    callback = CallbackQuery(id="invite", from_user=incoming().from_user, chat_instance="x",
+                             message=notice, data=action)
+
+    async def handler(event, data):
+        await event.message.edit_reply_markup(reply_markup=None)
+
+    await turn(setup, handler, callback)
+    assert session.calls[-1].__api_method__ == "editMessageReplyMarkup"
+    assert session.calls[-1].message_id == notice.message_id
+    assert await db.get_bot_state("private_rich_panel:7") == saved
+
+
 async def test_close_keeps_panel_and_group_requests_are_untouched(setup):
     from community_bot.ephemeral import _PENDING
     from community_bot.routers.flows import ui_close
 
     _, bot, session, _ = setup
-    first = await bot.send_message(7, "Экран")
+    first = await show_panel(setup, bot.send_message, 7, "Экран")
     callback = CallbackQuery(id="close", from_user=incoming().from_user, chat_instance="x",
                              message=first, data="ui:close").as_(bot)
-    await ui_close(callback)
+    async def handler(event, data):
+        await ui_close(event)
+
+    await turn(setup, handler, callback)
     assert session.calls[-1].message_id == 100
     assert "menu:home" in actions(session.calls[-1])
     assert not any(call.__api_method__ == "deleteMessage" for call in session.calls)
@@ -353,7 +395,7 @@ async def test_close_keeps_panel_and_group_requests_are_untouched(setup):
 
 async def test_navigation_cancels_intent_embedded_in_rich_buttons(setup):
     db, bot, _, state = setup
-    first = await bot.send_message(7, "Оплата", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+    first = await show_panel(setup, bot.send_message, 7, "Оплата", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
         ibtn("Оплатить", "shop:pay:test-intent"),
     ]]))
     callback = CallbackQuery(id="back", from_user=incoming().from_user, chat_instance="x",
@@ -368,7 +410,7 @@ async def test_navigation_cancels_intent_embedded_in_rich_buttons(setup):
 @pytest.mark.parametrize("navigate_away", [False, True])
 async def test_background_game_updates_respect_the_current_screen(setup, navigate_away):
     _, bot, session, _ = setup
-    first = await bot.send_message(7, "Игра")
+    first = await show_panel(setup, bot.send_message, 7, "Игра")
     ready = asyncio.Event()
     job = None
 
@@ -384,7 +426,7 @@ async def test_background_game_updates_respect_the_current_screen(setup, navigat
 
     await turn(setup, handler)
     if navigate_away:
-        await bot.send_message(7, "Профиль")
+        await show_panel(setup, bot.send_message, 7, "Профиль")
     before = len(session.calls)
     ready.set()
     await job
@@ -418,7 +460,7 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
         await profile_click(callback.message.message_id)
 
     dispatcher.include_router(router)
-    first = await bot.send_message(8, "Добро пожаловать")
+    first = await show_panel(setup, bot.send_message, 8, "Добро пожаловать")
     actor = incoming(uid=8).from_user
 
     async def callback(action, update_id, message, user=actor):
@@ -448,12 +490,13 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
     assert session.calls[-1].__api_method__ == "deleteMessage"
     assert session.calls[-1].message_id == first.message_id
 
-    review = await bot.send_message(99, "Анкета на проверку")
+    review = await show_panel(setup, bot.send_message, 99, "Анкета на проверку")
     application = (await db.pending_applications())[0]
     await callback(f"application:approve:{application['id']}", 9, review, incoming(uid=99).from_user)
+    (notice,) = [call for call in session.calls if call.__api_method__ == "sendMessage" and call.chat_id == 8]
+    assert "Заявка одобрена" in notice.text and "https://t.me/+community" in notice.text
     approved = [call for call in session.calls if isinstance(call, SendRichMessage) and call.chat_id == 8][-1]
-    assert "Заявка одобрена" in approved.rich_message.model_dump_json()
-    assert "https://t.me/+community" in approved.rich_message.model_dump_json()
+    assert "Выбери раздел" in approved.rich_message.model_dump_json()
     assert "отправлена на проверку" not in approved.rich_message.model_dump_json()
     assert {"menu:profile", "menu:wallet", "menu:shop", "menu:pet", "menu:notices", "menu:question"} == set(
         actions(approved)
@@ -480,7 +523,7 @@ async def test_web_admin_ui_is_captured_before_rich_and_recipients_receive_rich(
                              timezone="Europe/Moscow", community_chat_id=-100123,
                              community_invite_url="", cookie_price_rub=1)
     await db.ensure_user(8, telegram_name="Участник")
-    await bot.send_message(7, "Личное меню")
+    await show_panel(setup, bot.send_message, 7, "Личное меню")
     bridge = AdminBridge(db, settings, bot)
     actor = {"id": 7, "first_name": "Владелец"}
 
@@ -516,7 +559,7 @@ async def test_web_admin_ui_is_captured_before_rich_and_recipients_receive_rich(
                            upload=("photo", output.getvalue()))
         context = await bridge.context(7)
         assert (await context.get_data())["post_file_id"] == "photo-cached"
-        assert len(session.calls) == 2 and isinstance(session.calls[-1], EditMessageText)
+        assert len(session.calls) == 2 and isinstance(session.calls[-1], SendPhoto)
         await bridge.dispatcher.storage.close()
         return
     await bridge.input(actor, {"form": view["form"], "version": view["version"],
@@ -557,7 +600,7 @@ async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatc
     ]
     assert session.calls[1].message_id == 100
     assert session.calls[-1].reply_markup is None
-    await bot.send_message(8, 'Следующая страница')
+    await show_panel(setup, bot.send_message, 8, 'Следующая страница')
     assert isinstance(session.calls[-1], EditMessageText)
     assert session.calls[-1].message_id == 101
 
@@ -567,7 +610,7 @@ async def test_start_restores_locally_deleted_panel_once_for_multiple_answers(se
     from community_bot.private_rich import reopen_private_panel
 
     db, bot, session, _ = setup
-    await bot.send_message(7, 'Hidden locally; Telegram would still accept edits')
+    await show_panel(setup, bot.send_message, 7, 'Hidden locally; Telegram would still accept edits')
     if deletion_error:
         session.fail = TelegramBadRequest(method=session.calls[0], message=deletion_error)
 
@@ -588,17 +631,17 @@ async def test_start_restores_locally_deleted_panel_once_for_multiple_answers(se
 
 async def test_legacy_uneditable_panel_is_deleted_before_one_time_replacement(setup):
     db, bot, session, _ = setup
-    await bot.send_message(7, 'Old panel')
+    await show_panel(setup, bot.send_message, 7, 'Old panel')
     page = json.loads(await db.get_bot_state('private_rich_panel:7'))
     page.pop('version')
     await db.set_bot_state('private_rich_panel:7', json.dumps(page))
     session.uneditable.add((7, 100))
-    await bot.send_message(7, 'New page')
+    await show_panel(setup, bot.send_message, 7, 'New page')
     assert [c.__api_method__ for c in session.calls] == [
         'sendRichMessage', 'editMessageText', 'deleteMessage', 'sendRichMessage',
     ]
     assert session.calls[-1].reply_markup is None
-    await bot.send_message(7, 'Next page')
+    await show_panel(setup, bot.send_message, 7, 'Next page')
     assert isinstance(session.calls[-1], EditMessageText)
     assert session.calls[-1].message_id == 101
     assert json.loads(await db.get_bot_state('private_rich_panel:7'))['version'] == 2
@@ -617,7 +660,7 @@ async def test_failed_legacy_deletion_cannot_create_another_panel(setup):
 
     session.make_request = request
     with pytest.raises(TelegramBadRequest):
-        await bot.send_message(7, 'Next page')
+        await show_panel(setup, bot.send_message, 7, 'Next page')
     assert not any(isinstance(c, SendRichMessage) for c in session.calls)
 
 
@@ -625,7 +668,7 @@ async def test_home_has_only_section_buttons_without_home_or_close(setup):
     from community_bot.keyboards import private_menu_keyboard
 
     _, bot, session, _ = setup
-    await bot.send_message(7, 'Кабинет', reply_markup=private_menu_keyboard(False))
+    await show_panel(setup, bot.send_message, 7, 'Кабинет', reply_markup=private_menu_keyboard(False))
     assert set(actions(session.calls[-1])) == {
         'menu:wallet', 'menu:shop', 'menu:profile', 'menu:pet', 'menu:notices', 'menu:question',
     }
@@ -639,14 +682,15 @@ async def test_nested_page_keeps_one_parent_back_and_deduplicates_actions(setup)
         [ibtn('Назад', 'wallet:home'), ibtn('Меню', 'menu:home')],
         [ibtn('Закрыть', 'ui:close')],
     ])
-    await bot.send_message(7, 'История', reply_markup=markup)
+    await show_panel(setup, bot.send_message, 7, 'История', reply_markup=markup)
     buttons = [b for block in content(session.calls[-1]) if block['type'] == 'buttons' for b in block['buttons']]
     assert len([b for b in buttons if b.get('callback_data') == 'wallet:history']) == 1
     assert actions(session.calls[-1])['wallet:home']['text'] == '← Назад'
     assert 'ui:close' not in actions(session.calls[-1])
     assert 'menu:home' not in actions(session.calls[-1])
     await bot.send_message(7, 'Фоновое уведомление')
-    assert actions(session.calls[-1])['wallet:home']['text'] == '← Назад'
+    assert session.calls[-1].text == 'Фоновое уведомление'
+    assert actions(session.calls[-2])['wallet:home']['text'] == '← Назад'
 
 
 async def test_profile_input_back_returns_to_profile_without_global_navigation(setup):
@@ -697,7 +741,7 @@ async def test_number_widget_replaces_panel_and_keeps_navigation(setup):
     from community_bot.message_widgets import SendWidget
 
     db, bot, session, state = setup
-    first = await bot.send_message(7, 'Кабинет')
+    first = await show_panel(setup, bot.send_message, 7, 'Кабинет')
     session.widgets = True
     state.get_state.return_value = 'FlexiblePurchase:amount'
 
@@ -825,7 +869,7 @@ async def test_widget_rejects_forged_and_stale_submissions(setup, change):
 
 async def test_widget_network_error_preserves_current_panel_without_duplicate(setup):
     db, bot, session, state = setup
-    await bot.send_message(7, 'Кабинет')
+    await show_panel(setup, bot.send_message, 7, 'Кабинет')
     page = await db.get_bot_state('private_rich_panel:7')
     state.get_state.return_value = 'FlexiblePurchase:amount'
     session.fail = TelegramNetworkError(method=session.calls[0], message='Connection lost')

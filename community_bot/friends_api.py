@@ -112,7 +112,16 @@ async def deliver_notice(bot, db, inbox_id: int, uid: int, text: str, *, reply_m
     try:
         if not force and (not await db.notify_channel_on(uid, "games") or await db.notify_digest_on(uid, "games")):
             return
-        await bot.send_message(uid, text, parse_mode="HTML", disable_notification=True, reply_markup=reply_markup)
+        if reply_markup:
+            await bot.send_message(uid, text, parse_mode="HTML", reply_markup=reply_markup)
+        else:
+            from community_bot.shop_text import plain_shop_text
+            from community_bot.widget_notifications import Sender, send_service_notification
+
+            await send_service_notification(
+                bot, db, uid, Sender(), "Друзья", plain_shop_text(text), "notices",
+                event_key=f"legacy-inbox:{inbox_id}",
+            )
         await db.notify_mark_delivered(inbox_id)
     except Exception as error:
         logger.warning("Friend/game invitation kept in inbox: %s", type(error).__name__)
