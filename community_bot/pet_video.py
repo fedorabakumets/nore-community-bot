@@ -125,8 +125,25 @@ class PetVideoQueue:
         )
         return row["total"] < VIDEO_DAILY_LIMIT
 
-    async def _access(self, user_id):
-        return await level(self.db, user_id) >= 3 and await self.db.feature_enabled("tamagotchi")
+    async def _access_error(self, user_id):
+        if not await self.db.feature_enabled("tamagotchi"):
+            return "Скачивание видео недоступно: питомцы временно отключены."
+        pet = await self.db.get_pet(user_id)
+        if not pet:
+            return "Чтобы скачивать видео, сначала заведи питомца и достигни 10-го этапа его развития."
+        if await level(self.db, user_id) < 3:
+            return "Скачивание видео открывается на 10-м этапе развития питомца."
+        if pet.get("expedition_until"):
+            return "Пока питомец в походе, скачивание видео недоступно. Дождись его возвращения."
+        return None
+
+    async def _delivery_error(self, user_id):
+        error = await self._access_error(user_id)
+        if error:
+            return error
+        if not await self._quota(user_id, moscow_now().date().isoformat()):
+            return f"Сегодня уже получено {VIDEO_DAILY_LIMIT} видео. Лимит обновится в 00:00 МСК."
+        return None
 
     async def enqueue(self, message, raw_url):
         url = canonical_url(raw_url)
@@ -134,8 +151,9 @@ class PetVideoQueue:
             await message.reply("Пришли ссылку на TikTok, Instagram Reels или YouTube Shorts.")
             return
         user_id = message.from_user.id
-        if not await self._access(user_id):
-            await message.reply("Загрузка видео открывается на 10-м этапе развития питомца.")
+        error = await self._access_error(user_id)
+        if error:
+            await message.reply(error)
             return
         day = moscow_now().date().isoformat()
         if message.date and message.date.astimezone(moscow_now().tzinfo).date().isoformat() != day:
@@ -172,8 +190,9 @@ class PetVideoQueue:
 
     async def _deliver(self, job):
         day = moscow_now().date().isoformat()
-        if not await self._access(job.user_id) or not await self._quota(job.user_id, day):
-            await job.message.reply("Доступ или дневной лимит видео изменился. Проверь вкладку питомца.")
+        error = await self._delivery_error(job.user_id)
+        if error:
+            await job.message.reply(error)
             return
         cached = await self.db.fetchone("SELECT file_id FROM pet_video_cache WHERE url=?", (job.url,))
         sent = None
@@ -195,6 +214,10 @@ class PetVideoQueue:
                     return
                 if status or not path.is_file() or not path.stat().st_size:
                     await job.message.reply("Источник не отдал доступное видео в MP4. Проверь, открыта ли публикация.")
+                    return
+                error = await self._delivery_error(job.user_id)
+                if error:
+                    await job.message.reply(error)
                     return
                 try:
                     sent = await asyncio.wait_for(job.message.reply_video(FSInputFile(path)), SEND_SECONDS)

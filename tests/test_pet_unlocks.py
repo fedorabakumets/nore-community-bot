@@ -118,6 +118,46 @@ async def test_video_queue_gates_size_cache_and_quota(tmp_path, monkeypatch):
         await queue.close()
 
 
+async def test_video_access_explains_reasons_and_rechecks_during_download(tmp_path, monkeypatch):
+    db = Database(tmp_path / "video-access.sqlite3")
+    await db.initialize()
+    queue = pet_video.PetVideoQueue(db)
+    message = SimpleNamespace(
+        message_id=123, from_user=SimpleNamespace(id=7, is_bot=False),
+        chat=SimpleNamespace(id=7, type="private"), reply=AsyncMock(), reply_video=AsyncMock(),
+        date=None, sender_chat=None, forward_origin=None, via_bot=None, text="Нора https://vm.tiktok.com/abc/",
+    )
+    await nora_video(message, SimpleNamespace(), queue)
+    assert "заведи питомца" in message.reply.call_args.args[0]
+    await pet_owner(db)
+    await nora_video(message, SimpleNamespace(), queue)
+    assert "10-м этапе" in message.reply.call_args.args[0]
+    await db.execute("UPDATE pet_development SET stage=10,level=3 WHERE user_id=7")
+    started, finish = asyncio.Event(), asyncio.Event()
+
+    async def download(url, path):
+        started.set()
+        await finish.wait()
+        path.write_bytes(b"video")
+        return 0
+
+    monkeypatch.setattr(pet_video, "download", download)
+    queue.start()
+    try:
+        await nora_video(message, SimpleNamespace(), queue)
+        await asyncio.wait_for(started.wait(), 1)
+        assert (await db.start_expedition(7))[0]
+        finish.set()
+        await asyncio.wait_for(queue.queue.join(), 1)
+        assert "в походе" in message.reply.call_args.args[0]
+        message.reply_video.assert_not_awaited()
+        await nora_video(message, SimpleNamespace(), queue)
+        assert "в походе" in message.reply.call_args.args[0]
+        assert await queue._quota(7, pet_video.moscow_now().date().isoformat())
+    finally:
+        await queue.close()
+
+
 def test_stream_stops_at_size_limit(tmp_path):
     from contextlib import nullcontext
     from io import BytesIO
