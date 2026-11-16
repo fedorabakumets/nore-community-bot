@@ -94,7 +94,7 @@ async def test_video_queue_gates_size_cache_and_quota(tmp_path, monkeypatch):
     queue.start()
     try:
         await nora_video(message, SimpleNamespace(), queue)
-        assert "10-м этапе" in message.reply.call_args.args[0]
+        assert "3-м уровне" in message.reply.call_args.args[0]
         await db.execute("UPDATE pet_development SET stage=10,level=3 WHERE user_id=7")
         await nora_video(message, SimpleNamespace(), queue)
         await asyncio.wait_for(started.wait(), 1)
@@ -129,9 +129,10 @@ async def test_video_access_explains_reasons_and_rechecks_during_download(tmp_pa
     )
     await nora_video(message, SimpleNamespace(), queue)
     assert "заведи питомца" in message.reply.call_args.args[0]
+    assert "3-го уровня" in message.reply.call_args.args[0]
     await pet_owner(db)
     await nora_video(message, SimpleNamespace(), queue)
-    assert "10-м этапе" in message.reply.call_args.args[0]
+    assert "3-м уровне" in message.reply.call_args.args[0]
     await db.execute("UPDATE pet_development SET stage=10,level=3 WHERE user_id=7")
     started, finish = asyncio.Event(), asyncio.Event()
 
