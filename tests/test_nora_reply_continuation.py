@@ -234,7 +234,7 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
             "а мне?", uid=7, reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id),
         )
         assert len(history_calls) == 1
-        assert not replies()
+        assert replies() and "заведите питомца" in replies()[0].text
         clock.now += 6
         await dispatch(
             "продолжи", uid=1, reply_to_message=bot_message("Служебное сообщение", 999),
@@ -255,7 +255,7 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         get_admins.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
         await dispatch("Нора, расскажи о сообществе", uid=7)
         get_chat.assert_not_awaited()
-        assert not replies()
+        assert replies() and "заведите питомца" in replies()[0].text
         await dispatch("Нора, расскажи о сообществе")
         assert replies()[0].text == "Это «Нора». Петербургское сообщество"
         get_chat.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
@@ -265,6 +265,19 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         await dispatch("Отлично, кто я?", reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id))
         assert replies()[0].text == "В Telegram твоё имя — Участник 1."
         assert chat._request.await_count == len(history_calls) == 1
+
+        await db.ensure_user(7)
+        await db.add_cookies(7, 20, "test")
+        assert (await db.purchase_pet(7, "cat", "Кот", 10))[0]
+        await dispatch("Нора, как дела?", uid=7)
+        assert "2 уровне" in replies()[0].text
+        await dispatch("а мне?", uid=7, reply_to_message=bot_message("ответ", continued_id))
+        assert "2 уровне" in replies()[0].text
+        await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=7")
+        assert (await db.start_expedition(7))[0]
+        await dispatch("Нора, как дела?", uid=7)
+        assert "в походе" in replies()[0].text
+        assert chat._request.await_count == 1
     finally:
         restore_defaults()
         await dispatcher.storage.close()

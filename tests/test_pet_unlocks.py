@@ -6,7 +6,7 @@ import pytest
 
 from community_bot import pet_video, pet_video_worker
 from community_bot.database import Database
-from community_bot.routers.nora import has_assistant_access, nora_video
+from community_bot.routers.nora import assistant_access_error, has_assistant_access, nora_video
 
 
 async def pet_owner(db):
@@ -25,6 +25,25 @@ async def test_ai_preserves_staff_access_and_unlocks_on_stage_five(tmp_path):
     assert not await has_assistant_access(7, settings, db)
     await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=7")
     assert await has_assistant_access(7, settings, db)
+
+
+async def test_ai_access_explains_pet_level_and_expedition(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    db = Database(tmp_path / "access.sqlite3")
+    await db.initialize()
+    settings = SimpleNamespace(owner_ids={1}, moderator_ids={2})
+    assert "заведите питомца" in await assistant_access_error(7, settings, db)
+    await pet_owner(db)
+    assert "2 уровне" in await assistant_access_error(7, settings, db)
+    await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=7")
+    assert await assistant_access_error(7, settings, db) is None
+    assert (await db.start_expedition(7))[0]
+    assert "в походе" in await assistant_access_error(7, settings, db)
+    await db.execute("UPDATE pets SET expedition_until=? WHERE user_id=7", (
+        (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+    ))
+    assert await assistant_access_error(7, settings, db) is None
 
 
 @pytest.mark.parametrize("url", [

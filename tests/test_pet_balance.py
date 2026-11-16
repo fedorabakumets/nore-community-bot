@@ -27,6 +27,9 @@ async def test_expedition_requires_both_stats_and_saves_departure_result(tmp_pat
         return expedition.ExpeditionLoot(kind='cookies', amount=0)
     monkeypatch.setattr(expedition, 'roll_expedition_loot', roll)
     assert (await db.start_expedition(1))[0]
+    spent = await db.get_pet(1, settle=False)
+    assert (spent['hunger'], spent['thirst'], spent['mood'], spent['sleeping']) == (0, 0, 2, 1)
+    assert not (await db.start_expedition(1))[0]
     await db.execute('UPDATE pets SET mood=100, expedition_until=? WHERE user_id=1',
                      ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(),))
     before = (await db.get_user(1))['cookies']
@@ -119,4 +122,18 @@ async def test_parallel_strokes_and_expedition_time(tmp_path):
         (datetime.now(UTC) - timedelta(minutes=30)).isoformat(),
     ))
     pet = await db.settle_pet(1)
-    assert (pet['hunger'], pet['thirst'], pet['mood']) == (80, 80, 50)
+    assert (pet['hunger'], pet['thirst'], pet['mood']) == (20, 20, 10)
+
+
+@pytest.mark.asyncio
+async def test_parallel_expedition_charges_once(tmp_path):
+    db = Database(tmp_path / 'expedition-race.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pets SET hunger=100, thirst=100, mood=100 WHERE user_id=1')
+    results = await asyncio.gather(db.start_expedition(1), db.start_expedition(1))
+    assert sum(result[0] for result in results) == 1
+    pet = await db.get_pet(1, settle=False)
+    assert (pet['hunger'], pet['thirst'], pet['mood']) == (40, 40, 60)

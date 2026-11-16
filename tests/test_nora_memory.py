@@ -364,7 +364,7 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         assert 'другом чате' not in sent_prompt
         clock.now += 6
         await dispatch('Нора, что вчера обсуждали про кино?', uid=7)
-        assert not replies()
+        assert replies() and 'заведите питомца' in replies()[0].text
         assert request.await_count == 1
         clock.now += 6
         reply_msg = bot_message('Вчера обсуждали кино, выбрали комедию.', ai_id)

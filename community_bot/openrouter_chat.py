@@ -170,7 +170,9 @@ class OpenRouterChat:
         self._prune_conversations(now)
         return conversation_id
 
-    def continuation_for(self, message: Message) -> tuple[str, list[dict[str, str]], str] | None:
+    def continuation_for(
+        self, message: Message, *, allow_other_user: bool = False,
+    ) -> tuple[str, list[dict[str, str]], str] | None:
         replied = message.reply_to_message
         if replied is None or not message.from_user or message.from_user.is_bot:
             return None
@@ -187,7 +189,9 @@ class OpenRouterChat:
         conversation = self._conversations.get(conversation_id)
         if conversation is None:
             return None
-        if conversation["chat_id"] != message.chat.id or conversation["user_id"] != message.from_user.id:
+        if conversation["chat_id"] != message.chat.id or (
+            not allow_other_user and conversation["user_id"] != message.from_user.id
+        ):
             return None
         text = message.text or ""
         body = strip_address(text)

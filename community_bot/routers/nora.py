@@ -31,6 +31,20 @@ async def has_assistant_access(user_id: int, settings: Settings, db: Database | 
     return bool(db and await level(db, user_id) >= 2 and await db.feature_enabled("tamagotchi"))
 
 
+async def assistant_access_error(user_id: int, settings: Settings, db: Database | None) -> str | None:
+    if not await has_assistant_access(user_id, settings, db):
+        if db and not await db.feature_enabled("tamagotchi"):
+            return "Нора ИИ сейчас недоступна: питомцы временно отключены."
+        if db and not await db.get_pet(user_id, settle=False):
+            return "Чтобы общаться с Норой ИИ, сначала заведите питомца и достигните 2 уровня."
+        return "Нора ИИ открывается на 2 уровне питомца."
+    if db:
+        pet = await db.get_pet(user_id)
+        if pet and pet.get("expedition_until"):
+            return "Пока питомец в походе, Нора ИИ недоступна. Дождитесь его возвращения."
+    return None
+
+
 def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -110,7 +124,14 @@ async def nora_address(
     if body is None:
         return
     if openrouter_chat is not None and (rule_intent(body) is None or is_memory_question(body)):
-        if not nora_enabled() or not await has_assistant_access(message.from_user.id, settings, db):
+        if not nora_enabled():
+            return
+        prompt = openrouter_chat.prompt_for(message)
+        if not prompt:
+            return
+        error = await assistant_access_error(message.from_user.id, settings, db)
+        if error:
+            await message.reply(error, parse_mode=None)
             return
         if message.reply_to_message is not None:
             found = openrouter_chat.continuation_for(message)
@@ -149,12 +170,17 @@ async def nora_reply_continuation(
 ) -> None:
     if openrouter_chat is None or not message.from_user or message.from_user.is_bot:
         return
-    if not nora_enabled() or not await has_assistant_access(message.from_user.id, settings, db):
+    if not nora_enabled():
         return
     if parse_trigger(message.text or ""):
         raise SkipHandler
     found = openrouter_chat.continuation_for(message)
-    if found is not None:
+    if found is None and openrouter_chat.continuation_for(message, allow_other_user=True) is None:
+        return
+    error = await assistant_access_error(message.from_user.id, settings, db)
+    if error:
+        await message.reply(error, parse_mode=None)
+    elif found is not None:
         await _respond_to_prompt(message, settings, openrouter_chat, *found)
 
 

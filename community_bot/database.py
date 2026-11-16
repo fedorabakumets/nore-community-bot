@@ -4500,6 +4500,10 @@ class Database:
 
             cursor = await db.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
+            if row and row["expedition_until"] and str(row["expedition_until"]) > now:
+                leftover = remaining_label(str(row["expedition_until"]), timezone)
+                await db.rollback()
+                return False, f"Питомец ещё в экспедиции ({leftover}).", 0
             if not row or int(row["hunger"]) < 50 or int(row["thirst"]) < 50:
                 await db.rollback()
                 return False, "Для похода сытость и вода должны быть не ниже 50.", 0
@@ -4508,7 +4512,10 @@ class Database:
             cursor = await db.execute(
                 """
                 UPDATE pets SET expedition_until = ?, expedition_reward = 0, expedition_loot = ?,
-                    expedition_notice_sent = 1, last_tick_at = ?, updated_at = ?
+                    expedition_notice_sent = 1, hunger = MAX(0, hunger - 60),
+                    thirst = MAX(0, thirst - 60), mood = MAX(0, mood - 40),
+                    sleeping = CASE WHEN hunger <= 60 OR thirst <= 60 THEN 1 ELSE 0 END,
+                    last_tick_at = ?, updated_at = ?
                 WHERE user_id = ? AND (expedition_until IS NULL OR expedition_until <= ?)
                 """,
                 (until, loot, now, now, user_id, now),
