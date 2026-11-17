@@ -76,7 +76,7 @@ window.NoraInteractive = (() => {
   function parent(view) {
     return (
       {
-        games: "interactive",
+        games: "community",
         mafia: "games",
         rocket: "games",
         friends: "community",
@@ -138,7 +138,7 @@ window.NoraInteractive = (() => {
     </button>`;
   }
   function gamesScreen() {
-    return `${back("interactive", "Интерактив")}${mafiaInvites()}<p class="eyebrow">Есть время на ещё одну?</p><h1>Давай<br><em>сыграем</em></h1>${noraGameCard()}<button class="play-hero sea-hero" data-tab="sea"><span class="play-hero-copy"><span class="play-tags">${badge("С ботом или с другом")}${badge("Бесплатно · 🍪", true)}</span><strong><em>Морской бой</em></strong><span class="play-hero-description">Классика на 100 клетках.<br>Попадание — стреляй ещё.</span><span class="play-hero-cta">К бою ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}</span></button><button class="play-hero mafia-hero" data-tab="mafia"><span class="play-hero-copy"><span class="play-tags">${badge("5–12 человек")}${badge("Бесплатно", true)}</span><strong><em>Мафия</em></strong><span class="play-hero-description">Ночь скрывает роли.<br>Днём решают люди.</span><span class="play-hero-cta">Собрать своих ${icon("arrow")}</span></span><span class="play-hero-art">${icon("mafia")}</span></button><button class="play-hero rocket-hero" data-tab="rocket"><span class="play-hero-copy"><span class="play-tags">${badge("Соло")}${badge("18+ · 🍪")}</span><strong><em>Ракетка</em></strong><span class="play-hero-description">Поймай свой момент.<br>Забери до срыва.</span><span class="play-hero-cta">На старт ${icon("arrow")}</span></span><span class="play-hero-art">${icon("rocket")}</span></button><p class="footer-note">Морской бой — с ботом бесплатно, с другом бесплатно или на печеньки.<br>Мафия — командная игра без ставок. В Ракетке печеньки можно потерять.</p>`;
+    return `${back(parent("games"), "Коммьюнити")}${mafiaInvites()}<p class="eyebrow">Есть время на ещё одну?</p><h1>Давай<br><em>сыграем</em></h1>${window.NoraCommunity?.lobbies() || ""}${noraGameCard()}<button class="play-hero sea-hero" data-tab="sea"><span class="play-hero-copy"><span class="play-tags">${badge("С ботом или с другом")}${badge("Бесплатно · 🍪", true)}</span><strong><em>Морской бой</em></strong><span class="play-hero-description">Классика на 100 клетках.<br>Попадание — стреляй ещё.</span><span class="play-hero-cta">К бою ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}</span></button><button class="play-hero mafia-hero" data-tab="mafia"><span class="play-hero-copy"><span class="play-tags">${badge("5–12 человек")}${badge("Бесплатно", true)}</span><strong><em>Мафия</em></strong><span class="play-hero-description">Ночь скрывает роли.<br>Днём решают люди.</span><span class="play-hero-cta">Собрать своих ${icon("arrow")}</span></span><span class="play-hero-art">${icon("mafia")}</span></button><button class="play-hero rocket-hero" data-tab="rocket"><span class="play-hero-copy"><span class="play-tags">${badge("Соло")}${badge("18+ · 🍪")}</span><strong><em>Ракетка</em></strong><span class="play-hero-description">Поймай свой момент.<br>Забери до срыва.</span><span class="play-hero-cta">На старт ${icon("arrow")}</span></span><span class="play-hero-art">${icon("rocket")}</span></button><p class="footer-note">Морской бой — с ботом бесплатно, с другом бесплатно или на печеньки.<br>Мафия — командная игра без ставок. В Ракетке печеньки можно потерять.</p>`;
   }
   function friendRow(person, section) {
     const actions = {
@@ -158,7 +158,25 @@ window.NoraInteractive = (() => {
   }
   function friendsScreen() {
     const f = state.friends;
-    return `${tab === "community" ? "" : `${back("community", "Коммьюнити")}<div class="play-title-row"><div><p class="eyebrow">Близкие по духу</p><h2><em>Друзья</em></h2></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.</p>`}${errorBox("friends")}<button class="secondary community-find" data-community-search>⌕ Найти участников</button>${!f ? '<div class="empty">Загружаем друзей…</div>' : ""}${f?.incoming?.length ? `<section class="friend-section"><h2>Зовут дружить ${badge(f.incoming.length, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}<section class="friend-section"><h2>Друзья ${badge(f?.friends?.length || 0)}</h2>${f?.friends?.length ? f.friends.map((p) => friendRow(p, "friends")).join("") : '<div class="card empty">Список пока пуст.<br>Начни с одного знакомого имени.</div>'}</section>${f?.outgoing?.length ? `<section class="friend-section"><h2>Ждём ответа</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
+    const count = f?.friends?.length || 0;
+    const incoming = f?.incoming?.length || 0;
+    const embedded = tab === "community";
+    const search = '<button class="secondary community-find" data-community-search>⌕ Найти участников</button>';
+    const list = `${errorBox("friends")}${search}
+      ${!f ? '<div class="empty">Загружаем друзей…</div>' : ""}
+      ${incoming ? `<section class="friend-section"><h2>Зовут дружить ${badge(incoming, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}
+      ${f ? `<section class="friend-section">${embedded && !incoming ? "" : `<h2>${embedded ? "В списке" : "Друзья"} ${badge(count)}</h2>`}
+        ${count ? f.friends.map((p) => friendRow(p, "friends")).join("") : '<div class="card empty">Список пока пуст.<br>Начни с одного знакомого имени.</div>'}
+      </section>` : ""}
+      ${f?.outgoing?.length ? `<section class="friend-section"><h2>Ждём ответа</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}
+      ${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
+    if (embedded) {
+      return `<details class="community-table community-friends" data-detail="community-friends" data-retain-open="community-friends">
+        <summary id="community-friends-summary"><span>Друзья ${f ? badge(count) : ""}${incoming ? ` ${badge("Заявки: " + incoming, true)}` : ""}</span><span class="community-chevron" aria-hidden="true">⌄</span></summary>
+        <div class="community-table-body">${list}</div>
+      </details>`;
+    }
+    return `${back("community", "Коммьюнити")}<div class="play-title-row"><div><p class="eyebrow">Близкие по духу</p><h2><em>Друзья</em></h2></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.</p>${list}`;
   }
   function roleExplanation(role) {
     return (

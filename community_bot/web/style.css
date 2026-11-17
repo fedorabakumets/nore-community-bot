@@ -871,12 +871,17 @@ form label{font-size:14px;color:var(--poster-muted)}
 #app[data-screen="shop"] .seasonal-copy { padding: 14px; }
 #app[data-screen="shop"] .seasonal-badges span { padding: 4px 8px; background: var(--glass-raised); color: var(--glass-muted); }
 
-#app[data-screen="community"] :is(.sea-lobbies, .community-music, .friend-row) { margin: 12px 0; padding: 14px; }
-#app[data-screen="community"] .sea-lobbies-head { margin: 0 0 4px; }
-#app[data-screen="community"] .sea-lobby-row { padding-block: 8px; border-color: var(--glass-line); }
-#app[data-screen="community"] .sea-lobby-create { width: 44px; background: var(--poster-red); border: 0; box-shadow: none; }
+#app[data-screen="community"] :is(.community-music, .friend-row),
+#app[data-screen="games"] .sea-lobbies { margin: 12px 0; padding: 14px; }
+#app[data-screen="games"] .sea-lobbies {
+  background: var(--glass-panel); border: 0; border-radius: var(--glass-radius);
+}
+#app[data-screen="games"] .sea-lobbies-head { margin: 0 0 4px; }
+#app[data-screen="games"] .sea-lobby-row { padding-block: 8px; border-color: var(--glass-line); }
+#app[data-screen="games"] .sea-lobby-create { width: 44px; background: var(--poster-red); border: 0; box-shadow: none; }
 #app[data-screen="community"] .community-table { margin: 8px 0; overflow: hidden; }
 #app[data-screen="community"] .community-table summary { min-height: 48px; padding: 12px 14px; }
+#app .community-friends .community-find { margin: 0 0 8px; }
 #app[data-screen="community"] .community-person { padding-block: 8px; }
 #app[data-screen="community"] .community-music h2 { font-size: 20px; margin: 8px 0; }
 #app[data-screen="community"] .community-music-motto { font-size: 16px; }
