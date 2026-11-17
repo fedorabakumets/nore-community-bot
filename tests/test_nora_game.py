@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from community_bot import cabinet_api, nora_game_api
+from community_bot import cabinet_api, nora_game_api, nora_observatory
 from community_bot.database import Database
 
 
@@ -223,6 +223,67 @@ async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path,
     await exchange(2)
     now += nora_game_api.LOBBY_TTL
     assert await exchange(1) == []
+
+
+@pytest.mark.asyncio
+async def test_observatory_shared_room_individual_progress_and_one_time_wallet_reward(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'observatory.db')
+    await db.initialize()
+    for uid in (1, 2):
+        await db.ensure_user(uid)
+    now = 100.
+    monkeypatch.setattr(nora_game_api, 'time', SimpleNamespace(monotonic=lambda: now))
+    app = {'db': db, 'nora_lobby': {}, 'nora_observatory': {}}
+    platforms = nora_observatory.LAYOUT['platforms']
+
+    async def frame(uid, x, z, y, *, grounded=True, room='observatory'):
+        body = {'session': f'00000000-0000-4000-8000-{uid:012d}', 'room': room,
+                'x': x, 'z': z, 'y': y + .017, 'heading': 0, 'grounded': grounded}
+        profile = {'nickname': ('Alice', 'Robin')[uid - 1], 'outfit': {'shirt': 'gray', 'wings': 'raven'}}
+        return await nora_game_api.lobby_snapshot(app, uid, body, profile)
+
+    finish_x, finish_z, finish_y, _, _ = platforms[-1]
+    assert (await frame(1, finish_x, finish_z, finish_y))['challenge']['reset']
+    assert (await db.get_user(1))['cookies'] == 0
+    assert not (await frame(1, 0, 10, 1))['challenge']['reset']
+    assert not (await frame(2, 0, 0, 0, room=None))['players']
+    shared = await frame(2, .3, 10, 1)
+    assert [peer['nickname'] for peer in shared['players']] == ['Alice']
+    assert shared['challenge']['checkpoint'] == 0
+
+    # Sample playable positions on the island route, on the bridge's safe sides,
+    # and on the progressively higher platforms.
+    async def complete():
+        nonlocal now
+        for i, (x, z, y, _, _) in enumerate(platforms):
+            route = {
+                5: [(.8, .4), (.8, -2.2), (-.8, -2.2), (-.8, -4.35), (.8, -4.35), (.8, -6.2)],
+                6: [(0, -7.75)],
+            }.get(i, [(x, z)])
+            for px, pz in route:
+                now += 1.15
+                result = await frame(1, px, pz, y)
+                assert not result['challenge']['reset'], (i, px, pz)
+            if i == 4:
+                assert result['challenge']['checkpoint'] == 1
+                now += .08
+                assert (await frame(1, 0, 4.5, 1.8, grounded=False))['challenge']['reset']
+                now += .08
+                assert not (await frame(1, x, z, y))['challenge']['reset']
+        return result['challenge']
+
+    assert await complete() == {'checkpoint': 4, 'reward': 50, 'reset': False}
+    assert (await db.get_user(1))['cookies'] == 50
+    assert (await frame(2, 0, 10, 1))['challenge'] == {'checkpoint': 0, 'reward': None, 'reset': False}
+    assert (await db.get_user(2))['cookies'] == 0
+    now += .1
+    await frame(1, 0, 0, 0, room=None)
+    assert await complete() == {'checkpoint': 4, 'reward': 0, 'reset': False}
+    ledger = await db.list_transactions(1)
+    assert [(row['kind'], row['amount']) for row in ledger] == [('nora_observatory', 50)]
+
+    payouts = await asyncio.gather(*(nora_observatory.claim(db, 2) for _ in range(3)))
+    assert sorted(payouts) == [0, 0, 50]
 
 
 @pytest.mark.asyncio

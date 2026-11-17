@@ -83,7 +83,7 @@ try {
   tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false, equipped=null) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false, equipped=null, observatory=null) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
@@ -97,6 +97,10 @@ try {
       auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, toast:()=>{}, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
       performance:{now:()=>time}, requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
     if(realScenery)vm.runInContext(sceneryCode, context);
+    if(observatory){
+      vm.runInContext(observatory.code,context);
+      window.NoraObservatory.load=async()=>observatory.layout;
+    }
     vm.runInContext(wings, context);
     vm.runInContext(voxel, context);
     const createCharacter = window.NoraVoxel.createCharacter;
@@ -595,6 +599,81 @@ try {
   }
   parkour.stop();
   console.log('NORA parkour: sprint-only ordinary jump, automatic pressure plate, teleport and reset passed.');
+  const observatory={
+    code:await readFile(new URL('nora-observatory.js',web),'utf8'),
+    layout:JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8')),
+  };
+  const course=await setup(0,60,undefined,undefined,true,true,'raven',observatory);
+  const {portal,platforms,checkpoints}=observatory.layout;
+  const courseHud=course.root.querySelector('.nora-observatory-hud');
+  const courseAction=course.root.querySelector('.nora-world-action');
+  const level=course.scene().getObjectByName('nora-observatory');
+  let checkpoint=0, sentAt=0;
+  course.window.WebSocket=class {
+    readyState=1;bufferedAmount=0;
+    close(){}
+    send(raw){
+      const {room,x,y,z,grounded}=JSON.parse(raw);
+      if(!room){this.onmessage({data:JSON.stringify({players:[]})});return;}
+      const next=platforms[checkpoints[checkpoint+1]];
+      if(next&&grounded&&Math.abs(y-next[2]-.017)<.01&&
+          Math.abs(x-next[0])<=next[3]/2+.12&&Math.abs(z-next[1])<=next[4]/2+.12)checkpoint++;
+      sentAt+=80;
+      this.onmessage({data:JSON.stringify({room,time:sentAt,players:[],
+        challenge:{checkpoint,reward:checkpoint===4?50:null,reset:false}})});
+    }
+  };
+  course.player.position.set(0,.017,5.6);course.frames(1);courseAction.emit('click');course.frames(2);
+  assert.equal(course.scene().getObjectByName('nora-observatory-portal').parent.visible,true);
+  course.player.position.set(portal.x,.017,portal.z+1);
+  course.frames(1);assert.equal(courseAction.textContent,'Звёздная обсерватория');
+  courseAction.emit('click');course.frames(6);assert.equal(level.visible,true);
+  assert.equal(courseHud.hidden,false);
+  assert.deepEqual(course.player.position.toArray(),[0,1.017,10]);
+
+  // Walk off the initial landing with no jump. The respawn must stay in the level.
+  course.key('KeyS');course.frames(132);course.key('KeyS',false);
+  assert.deepEqual(course.player.position.toArray(),[0,1.017,10]);
+  const steer=(x,z,frames)=>{
+    course.stick(x,z,true);course.frames(frames);
+    course.joystick.emit('pointerup',{pointerId:1});
+  };
+  function walkTo(x,z){
+    for(let i=0;i<240;i++){
+      const dx=x-course.player.position.x,dz=z-course.player.position.z,distance=Math.hypot(dx,dz);
+      if(distance<.07)break;
+      steer(dx/distance,dz/distance,1);
+    }
+    course.frames(10);
+    assert.ok(Math.hypot(x-course.player.position.x,z-course.player.position.z)<.15,'walk destination');
+  }
+  function jumpAcross(from,to){
+    const [x,z, ,w,d]=platforms[from], [tx,tz,top,tw,td]=platforms[to];
+    const length=Math.hypot(tx-x,tz-z), dx=(tx-x)/length, dz=(tz-z)/length;
+    const reach=(width,depth)=>Math.min(width/(2*Math.abs(dx)),depth/(2*Math.abs(dz)));
+    const edge=reach(w,d)-.08, landing=length-reach(tw,td)+.17;
+    walkTo(x+dx*edge,z+dz*edge);
+    course.key('ShiftLeft');
+    const button=course.root.querySelector('.nora-world-jump');
+    button.emit('pointerdown',{button:0,pointerType:'touch'});
+    for(let i=0;i<39;i++){
+      if((course.player.position.x-x)*dx+(course.player.position.z-z)*dz>=landing)break;
+      steer(dx,dz,1);
+    }
+    course.key('ShiftLeft',false);course.frames(43);
+    assert.equal(course.player.position.y,top+.017,`reachable platform ${to}`);
+  }
+  for(let i=1;i<=4;i++)jumpAcross(i-1,i);
+  assert.equal(checkpoint,1);
+  for(const [x,z] of [[.8,.8],[.8,-2.1],[-.8,-2.1],[-.8,-4.15],[.8,-4.15],[.8,-6.2],[0,-7.9]])walkTo(x,z);
+  assert.equal(checkpoint,2);
+  for(let i=7;i<platforms.length;i++)jumpAcross(i-1,i);
+  assert.equal(checkpoint,4);
+  assert.equal(courseHud.querySelector('.nora-observatory-hint').textContent,'+50 печенек в кошельке');
+  courseHud.querySelector('button').emit('click');course.frames(1);
+  assert.equal(level.visible,false);assert.equal(courseHud.hidden,true);
+  course.stop();
+  console.log('NORA Observatory: portal, fall and respawn, mobile jumps, beam route, all beacons and reward screen passed.');
   const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
   function widget(){
     const children=[],listeners={};

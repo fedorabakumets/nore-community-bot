@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from community_bot import music_api
+from community_bot import music_api, nora_observatory
 from community_bot.database import utcnow
 
 logger = logging.getLogger(__name__)
@@ -282,8 +282,15 @@ async def lobby_snapshot(app, user_id, body, profile=None):
             del presence[user_id]
             await music_api.return_departed_record(app['db'], user_id, session)
         return {'players': []}
+    room = body.get('room')
+    if room not in (None, nora_observatory.ROOM):
+        raise ValueError('Проверь локацию игрока')
+    bounds = LOBBY_BOUNDS
+    if room:
+        limits = nora_observatory.LAYOUT['bounds']
+        bounds = {**bounds, 'x': (-limits['x'], limits['x']), 'z': (-limits['z'], limits['z'])}
     pose = {}
-    for key, (minimum, maximum) in LOBBY_BOUNDS.items():
+    for key, (minimum, maximum) in bounds.items():
         value = body.get(key)
         if type(value) not in (int, float) or not minimum <= value <= maximum:
             raise ValueError('Проверь координаты игрока')
@@ -306,7 +313,10 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         raise ValueError('Сначала создай персонажа')
     height = body.get('y')
     maximum = LOBBY_PLATFORM_HEIGHT + (LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT)
-    if type(height) not in (int, float) or not 0 <= height <= maximum:
+    minimum = 0
+    if room:
+        minimum, maximum = limits['minY'], limits['maxY']
+    if type(height) not in (int, float) or not minimum <= height <= maximum:
         raise ValueError('Проверь высоту прыжка')
     pose['y'] = height
     for key in ('grounded', 'sprinting', 'boosting'):
@@ -314,7 +324,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
             if type(body[key]) is not bool:
                 raise ValueError('Проверь данные игрока')
             pose[key] = body[key]
-    if pose.get('boosting') and not equipped:
+    if pose.get('boosting') and (not equipped or room):
         pose['boosting'] = False
     outfit = dict(profile['outfit'])
     if equipped:
@@ -323,15 +333,27 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         outfit.pop('wings', None)
     profile = {'nickname': profile['nickname'], 'outfit': outfit}
     now = time.monotonic()
+    challenge = None
+    if room:
+        pose['room'] = room
+        challenge = await nora_observatory.progress(app, user_id, session, pose, now)
+        if challenge['reset']:
+            x, z, top, _, _ = nora_observatory.CHECKPOINTS[challenge['checkpoint']]
+            pose.update(x=x, y=top + .017, z=z, grounded=True, sprinting=False)
+    else:
+        attempts = app.get('nora_observatory')
+        if attempts and user_id in attempts and attempts[user_id].session == session:
+            del attempts[user_id]
     presence[user_id] = (now, session, {**profile, **pose})
     others = [
         (seen, player) for key, (seen, _, player) in presence.items()
-        if key != user_id and now - seen < LOBBY_TTL
+        if key != user_id and now - seen < LOBBY_TTL and player.get('room') == room
     ]
     others.sort(key=lambda entry: (entry[1]['x'] - pose['x']) ** 2 + (entry[1]['z'] - pose['z']) ** 2)
     return {
         'time': now * 1000,
         'players': [{**player, 'time': seen * 1000} for seen, player in others[:20]],
+        **({'room': room, 'challenge': challenge} if room else {}),
     }
 
 

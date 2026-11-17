@@ -125,7 +125,9 @@ window.NoraCompanion = (() => {
     }
     if (root.dataset.playWithPet === '1') void showArrivalHint();
     else void refresh();
-    function update(dt,camera){
+    function update(dt,camera,active=true){
+      if(!active){if(model)model.body.visible=false;actions.hidden=true;return;}
+      if(model)model.body.visible=true;
       timer+=dt;if(timer>30){timer=0;if(!pending)refresh();}
       if(!model)return;
       const position=model.body.position,last=route[route.length-1];

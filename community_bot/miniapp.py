@@ -410,6 +410,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app['nora_lobby'] = {}
+    app['nora_observatory'] = {}
     app.cleanup_ctx.append(lobby_widget.lifecycle)
     app.cleanup_ctx.append(nora_game_api.lobby_record_lifecycle)
     app.router.add_post('/api/nora-game/lobby', nora_game_api.lobby)
@@ -459,6 +460,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
+                 'nora-observatory.js', 'nora-observatory.json',
                  'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))

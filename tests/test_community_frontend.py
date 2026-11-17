@@ -21,13 +21,14 @@ const context = {
 context.window = context;
 vm.createContext(context);
 // Respect the actual entry point's order, with the game still unopened.
-for (const match of html.matchAll(/<script src="\/([^\"]+)" defer><\/script>/g)) {
+for (const match of html.matchAll(/<script src="\/([^"?]+)(?:\?[^"]*)?" defer><\/script>/g)) {
   if (['nora-game.js', 'nora-records.js', 'community.js'].includes(match[1])) {
     vm.runInContext(fs.readFileSync('community_bot/web/' + match[1], 'utf8'), context);
   }
 }
 assert.equal(context.NoraVoxel, undefined);
 assert.equal(context.NoraWorld, undefined);
+assert.equal(context.NoraObservatory, undefined);
 for (let visit = 0; visit < 2; visit++) {
   const screen = context.NoraCommunity.screen();
   assert.ok(screen.includes('Коммьюнити'));

@@ -8,14 +8,14 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const script = document.createElement("script"); script.src = "/" + name + ".js" + (name === "nora-companion" ? "?v=pet-game" : "");
+      const script = document.createElement("script"); script.src = "/" + name + ".js" + (["nora-companion", "nora-world"].includes(name) ? "?v=observatory" : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
       document.head.appendChild(script);
     }));
     return scripts.get(name);
   }
   async function loadGame() {
-    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-world"]) await loadScript(name);
+    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-world"]) await loadScript(name);
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;
@@ -214,6 +214,10 @@
   async function world(nickname) {
     frame(`<div class="nora-world"><canvas aria-label="Стартовый остров Норы. Обзор поворачивается пальцем"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛЕСНАЯ ПОЛЯНА</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</span><button class="nora-world-help-close" type="button" aria-label="Закрыть инструкцию движения">×</button></p><div class="nora-world-context"><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-action nora-record-toggle" type="button" aria-pressed="true" hidden>Выключить проигрыватель</button></div><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
+    root.insertAdjacentHTML('beforeend', `<section class="nora-observatory-hud" aria-label="Звёздная обсерватория" hidden>
+      <div role="status"><strong class="nora-observatory-progress"></strong><span class="nora-observatory-hint"></span></div>
+      <button type="button">В лобби</button>
+    </section>`);
     const back = overlay.querySelector('.nora-game-back');
     back.textContent='⚙ Настройки'; back.setAttribute('aria-label','Настройки игры');
     const dialog=document.createElement('dialog'); dialog.className='nora-settings'; dialog.setAttribute('aria-label','Настройки игры');

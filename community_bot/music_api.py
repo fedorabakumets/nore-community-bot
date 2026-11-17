@@ -85,7 +85,7 @@ async def settle_lobby_deck(db, deck, app):
     presence = app.get('nora_lobby')
     if deck.get('record') and presence is not None:
         owner = presence.get(deck.get('owner'))
-        if (not owner or time.monotonic() - owner[0] >= 8 or
+        if (not owner or owner[2].get('room') or time.monotonic() - owner[0] >= 8 or
                 (deck.get('session') and deck['session'] != owner[1])):
             return await return_lobby_record(db, deck, time.time())
     return await expire_lobby_deck(db, deck, time.time())
@@ -169,7 +169,7 @@ async def record_action(request):
                 return web.json_response({'error': 'Проигрыватель изменился. Попробуй снова'}, status=409)
             if action == 'lobby_insert':
                 presence = request.app.get('nora_lobby')
-                if presence is not None and (uid not in presence or
+                if presence is not None and (uid not in presence or presence[uid][2].get('room') or
                                              time.monotonic() - presence[uid][0] >= 8):
                     raise ValueError('Подключись к лобби, чтобы включить пластинку')
                 owner_session = presence[uid][1] if presence is not None else None
