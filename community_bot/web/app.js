@@ -47,8 +47,15 @@ if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
 const app=$('#app'), html=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;
+const expanded=app.dataset.screen===tab
+  ?new Set([...app.querySelectorAll('details[open][data-retain-open]')].map(el=>el.dataset.retainOpen))
+  :null;
+app.dataset.screen=tab;
 if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
 else app.innerHTML=html;
+if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open]')){
+  if(expanded.has(el.dataset.retainOpen))el.open=true;
+}
 if(tab==='admin')window.NoraAdmin?.mount();
 const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
