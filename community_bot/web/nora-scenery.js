@@ -274,6 +274,7 @@ window.NoraScenery = (() => {
     const flameMaterial=new T.MeshBasicMaterial({color:'#ffd18a'});
     const lanterns=new T.Group();
     for(const x of [-12,-4,4,12])for(const z of [-5,5]){
+      if(x===12&&z===-5&&window.NoraCinema)continue;
       box(x,.39,z,2.25,.15,.65,'#624943');
       box(x,.67,z-.28,2.25,.48,.12,'#59454a');
       for(const dx of [-.85,.85])box(x+dx,.16,z,.18,.32,.53,'#797282');
@@ -288,8 +289,44 @@ window.NoraScenery = (() => {
       flame.position.set(lx,2.1,z);flame.scale.set(.29,.42,.29);lanterns.add(flame);
       const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
     }
+    if(window.NoraCinema){
+      const {entrance,seats}=window.NoraCinema;
+      box(10.8,.035,-4.85,7.7,.07,9.5,'#492738');
+      box(10.8,2.35,-9.48,7.6,4.7,.35,'#3d283d');
+      solid(10.8,2.35,-9.48,7.6,4.7,.35);
+      box(10.8,2.56,-9.23,6.9,3.88,.18,'#ba6d7a');
+      box(10.8,2.56,-9.1,6.64,3.74,.18,'#a293ad');
+      for(const side of [-1,1]){
+        const x=10.8+side*3.75;
+        box(x,.52,-5.8,.32,1.04,7.25,'#432d43');
+        solid(x,.52,-5.8,.32,1.04,7.25,1.04);
+        for(const z of [-8.7,-6.3,-3.9]){
+          box(x,1.07,z,.36,.14,.34,'#c48569');
+        }
+      }
+      for(const {x,z} of seats){
+        box(x,.21,z,1.04,.42,.87,'#682b42');
+        box(x,.47,z,1.02,.15,.84,'#963d55');
+        box(x,.52,z+.43,1.03,1.04,.21,'#763248');
+        for(const side of [-1,1])box(x+side*.51,.6,z,.11,.34,.81,'#af596b');
+      }
+      box(entrance.x,.065,entrance.z,2.4,.08,.62,'#ae677c');
+    }
     consoleAt(lobbyDeck.x,lobbyDeck.z);
     const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes);lobby.visible=false;
+    let cinemaSign=null;
+    if(window.NoraCinema){
+      const canvas=document.createElement('canvas');canvas.width=320;canvas.height=72;
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#422637';ctx.fillRect(0,0,320,72);
+      ctx.strokeStyle='#d6998d';ctx.lineWidth=5;ctx.strokeRect(5,5,310,62);
+      ctx.fillStyle='#ffe3b5';ctx.font='bold 36px monospace';ctx.textAlign='center';
+      ctx.fillText('КИНОТЕАТР',160,48);
+      const texture=new T.CanvasTexture(canvas);texture.colorSpace=T.SRGBColorSpace;
+      cinemaSign=new T.Sprite(new T.SpriteMaterial({map:texture}));
+      cinemaSign.position.set(10.8,2.5,-.52);cinemaSign.scale.set(3.3,.75,1);
+      lobby.add(cinemaSign);
+    }
     const portal=new T.Group();
     portal.name='nora-world-portal';
     // Stepped stone surround and brass inlays from the NORA cover.
@@ -380,9 +417,12 @@ window.NoraScenery = (() => {
       }
       if(gateMaterials.length)gateMaterials[2].opacity=highlightMaterial.opacity;
     }
-    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,dispose(){
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,setCinemaOpen(open){
+      if(cinemaSign)cinemaSign.visible=!open;
+    },dispose(){
       recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();
       outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();lobbyNotes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();
+      if(cinemaSign){cinemaSign.material.map.dispose();cinemaSign.material.dispose();}
       for(const mesh of gateMeshes)mesh.dispose();
       for(const material of gateMaterials)material.dispose();
       for(const label of gateLabels){label.material.map.dispose();label.material.dispose();}

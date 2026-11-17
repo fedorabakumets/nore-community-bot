@@ -368,10 +368,21 @@ window.NoraVoxel = (() => {
         joints['forearm'+key].rotation.x=mix(forearm,-.16-.34*tuck,airBlend);
       }
     }
+    function animateSeated() {
+      motion.position.y=-.74;
+      torso.rotation.set(0,0,0);
+      for(const [key,,side] of strideSides){
+        joints['thigh'+key].rotation.x=-Math.PI/2;
+        joints['shin'+key].rotation.x=Math.PI/2;
+        joints['foot'+key].rotation.x=0;
+        joints['arm'+key].rotation.set(-.2,0,side*.1);
+        joints['forearm'+key].rotation.x=-.7;
+      }
+    }
     build();
     setWings(outfit.wings);
     return {
-      group:pivot, rebuild:build, animateMotion, setWings, animateWings, setArmor,
+      group:pivot, rebuild:build, animateMotion, animateSeated, setWings, animateWings, setArmor,
       setOpacity(value) {
         material.opacity=Math.max(0,Math.min(1,value));
         for(const mesh of meshes)mesh.visible=material.opacity>.001;

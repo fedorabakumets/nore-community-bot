@@ -1020,7 +1020,7 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
         event.message_id if from_welcome else None
     )
     assert send.message_thread_id == (42 if chat_id < 0 else None)
-    assert [block["type"] for block in content(send)] == ["photo", "buttons"]
+    assert [block["type"] for block in content(send)] == ["photo", "paragraph", "buttons"]
     assert send.rich_message.blocks[0].photo.media.path.is_file()
     assert actions(send)[CLOSE_COMMANDS_CARD]["style"] == "danger"
     assert actions(send)[CLOSE_COMMANDS_CARD]["text"] == "Закрыть"

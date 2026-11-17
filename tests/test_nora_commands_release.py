@@ -128,7 +128,7 @@ async def test_rich_post_has_personal_pages_and_one_photo(monkeypatch):
     bot.send_message.assert_not_awaited()
     photo = PhotoSize(file_id='photo', file_unique_id='photo', width=1280, height=720)
     await switch_update_page(callback(f'updates:page:{item.number}:2', photo=[photo]))
-    assert 'Все команды репутации' in edit.await_args.kwargs['caption']
+    assert item.sections[1].heading in edit.await_args.kwargs['caption']
     edit.reset_mock()
     await switch_update_page(callback(f'updates:page:{item.number}:2', chat_id=-100123))
     await switch_update_page(callback(f'updates:page:{item.number}:99'))

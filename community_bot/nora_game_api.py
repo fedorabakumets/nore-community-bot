@@ -269,6 +269,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if not isinstance(session, str) or not re.fullmatch(r'[a-f0-9-]{36}', session):
         raise ValueError('Проверь данные сессии')
     presence = app['nora_lobby']
+    cinema = app.get('nora_cinema')
     now = time.monotonic()
     expired = [(key, sid) for key, (seen, sid, _) in presence.items() if now - seen >= LOBBY_TTL]
     for key, _ in expired:
@@ -279,6 +280,8 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if body.get('leave') is True:
         if current and current[1] == session:
             del presence[user_id]
+            if cinema and 'seat' in current[2]:
+                cinema.refresh(presence, now)
             await music_api.return_departed_record(app['db'], user_id, session)
         return {'players': []}
     room = body.get('room')
@@ -352,7 +355,26 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         attempts = app.get('nora_observatory')
         if attempts and user_id in attempts and attempts[user_id].session == session:
             del attempts[user_id]
+    wants_seat = cinema and not room and isinstance(body.get('cinema'), str)
+    seat = None
+    if wants_seat:
+        from community_bot.nora_cinema import SEATS
+
+        if not current or 'seat' not in current[2]:
+            cinema.refresh(presence, now)
+        seat = cinema.seat(presence, user_id, current, session, pose, now)
+        if seat is not None:
+            x, z = SEATS[seat]
+            pose.update(seat=seat, x=x, z=z, y=.017, heading=math.pi,
+                        grounded=True, sprinting=False, boosting=False)
     presence[user_id] = (now, session, {**profile, **pose})
+    cinema_state = {}
+    if wants_seat:
+        cinema_state = {'seat': seat}
+        if seat is not None:
+            cinema_state.update(cinema.snapshot(presence, user_id, body['cinema'], now))
+    elif cinema and current and 'seat' in current[2]:
+        cinema.refresh(presence, now)
     others = [
         (seen, player) for key, (seen, _, player) in presence.items()
         if key != user_id and now - seen < LOBBY_TTL and player.get('room') == room
@@ -362,6 +384,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         'time': now * 1000,
         'players': [{**player, 'time': seen * 1000} for seen, player in others[:20]],
         **({'room': room, 'challenge': challenge} if room else {}),
+        **({'cinema': cinema_state} if wants_seat else {}),
     }
 
 
@@ -409,6 +432,10 @@ async def lobby_socket(request):
         await socket.close(code=1008, message=b'Lobby session ended')
     finally:
         if session is not None:
-            await lobby_snapshot(request.app, user_id, {'session': session, 'leave': True})
+            current = request.app['nora_lobby'].get(user_id)
+            # A seated client may continue on the HTTP fallback with the same session.
+            # Explicit leave still releases immediately, and stale seats expire with presence.
+            if not current or 'seat' not in current[2]:
+                await lobby_snapshot(request.app, user_id, {'session': session, 'leave': True})
         await socket.close()
     return socket

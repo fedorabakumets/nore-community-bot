@@ -427,6 +427,25 @@ async def group_commands(message: Message, bot: Bot) -> None:
     await send_commands_card(message, bot)
 
 
+@router.message(command_or_alias("cinema"), F.chat.type.in_({"group", "supergroup"}))
+async def cinema_from_chat(message: Message, bot: Bot, settings: Settings, nora_cinema=None) -> None:
+    if message.chat.id != settings.community_chat_id or not message.from_user or message.sender_chat:
+        return
+    if not nora_cinema:
+        await _respond(message, "Кинотеатр пока недоступен.")
+        return
+    media = message.reply_to_message
+    if not media:
+        await _respond(message, "Ответь «Нора, в кино» на видео MP4 до 20 МБ.")
+        return
+    try:
+        await nora_cinema.import_clip(bot, media)
+    except ValueError as error:
+        await _respond(message, str(error))
+        return
+    await _respond(message, "Ролик в кинотеатре. Открой список «Видео из Telegram» в зале.")
+
+
 @router.message(command_or_alias("pogoda"), F.chat.type.in_({"group", "supergroup"}))
 async def group_weather(message: Message, settings: Settings) -> None:
     from community_bot.morning import weather_reply

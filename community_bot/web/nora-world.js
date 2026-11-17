@@ -93,7 +93,7 @@ window.NoraWorld = (() => {
     }
     return {update,dispose(){scene.remove(stars,leaves);stars.dispose();leaves.dispose();starsMaterial.dispose();leafMaterial.dispose();}};
   }
-  function lobbyPlayers(T,scene,player,status,onChallenge){
+  function lobbyPlayers(T,scene,player,status,onChallenge,onCinema){
     const peers=new Map();
     const interval=80, playbackDelay=150, maxPrediction=65, correctionSpeed=4.8;
     let session=null,pending=null,next=0,clockOffset=null,lastReply=0,failures=0;
@@ -118,7 +118,7 @@ window.NoraWorld = (() => {
       ws.onclose=()=>{if(socket===ws){socket=null;next=0;}};
       ws.onerror=()=>ws.close();
     }
-    function receive({players,time:serverTime,room:receivedRoom=null,challenge},sentAt){
+    function receive({players,time:serverTime,room:receivedRoom=null,challenge,cinema},sentAt){
       if(room!==receivedRoom)return;
       const receivedAt=performance.now();
       lastReply=receivedAt;failures=0;
@@ -151,6 +151,7 @@ window.NoraWorld = (() => {
       }
       for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
       if(challenge)onChallenge(challenge);
+      if(cinema)onCinema(cinema);
     }
     function remove(nickname){
       const peer=peers.get(nickname);
@@ -183,7 +184,7 @@ window.NoraWorld = (() => {
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
       return pending;
     }
-    function update(time,dt,grounded,sprinting,boosting,interaction){
+    function update(time,dt,grounded,sprinting,boosting,interaction,cinema){
       if(!session){
         session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
         if(!room)status.textContent='ЛОББИ · ПОДКЛЮЧЕНИЕ';
@@ -192,11 +193,13 @@ window.NoraWorld = (() => {
       if(socket&&time-lastReply>2500){socket.close();socket=null;retrySocket=time+30000;next=0;}
       const streaming=socket?.readyState===1;
       if((streaming||!pending)&&time>=next){
-        next=time+interval;
+        const seated=typeof cinema==='string';
+        next=time+(seated?240:interval);
         const {x,y,z}=player.position,angle=player.rotation.y;
         const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
         const body={session,x,y,z,heading,grounded,sprinting,boosting};
         if(room)body.room=room;
+        if(seated)Object.assign(body,window.NoraCinema.entrance,{cinema});
         if(room&&interaction)body.interaction=interaction;
         if(streaming){
           // Do not wait a round trip before sending the next pose, and do not
@@ -239,11 +242,12 @@ window.NoraWorld = (() => {
         const airborne=!(state.grounded??(state.y<=.04));
         const travelled=distance*step;
         const verticalSpeed=span?(b.y-a.y)*1000/span:0;
-        avatar.animateMotion(travelled,dt,state.sprinting??(travelled>2.2*dt),airborne?verticalSpeed:null);
+        if(Number.isInteger(state.seat))avatar.animateSeated();
+        else avatar.animateMotion(travelled,dt,state.sprinting??(travelled>2.2*dt),airborne?verticalSpeed:null);
         avatar.animateWings(dt,airborne,state.boosting);
       }
     }
-    return {update,leave,setRoom,avatar(nickname){return peers.get(nickname)?.avatar.group;},serverSeconds(time){return (time-(clockOffset??0))/1000;}};
+    return {update,leave,setRoom,session:()=>session,avatar(nickname){return peers.get(nickname)?.avatar.group;},serverSeconds(time){return (time-(clockOffset??0))/1000;}};
   }
   async function mount(canvas, root, outfit, sounds) {
     const observatory=window.NoraObservatory;
@@ -344,7 +348,7 @@ window.NoraWorld = (() => {
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
     player.scale.setScalar(.32);player.position.set(lobbySpawn.x,.017,lobbySpawn.z);player.rotation.y=Math.PI;scene.add(player);
     const locationLabel=root.querySelector('.nora-world-bar small');
-    const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge);
+    const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge,payload=>cinema?.receive(payload));
     // Soft contact patches without costly real-time shadow maps.
     const shadowCanvas=document.createElement('canvas');shadowCanvas.width=64;shadowCanvas.height=64;
     const context=shadowCanvas.getContext('2d'), gradient=context.createRadialGradient(32,32,3,32,32,32);
@@ -411,7 +415,7 @@ window.NoraWorld = (() => {
     const reduceTransition=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     let transition=null, resultTime=0;
     let recordPlaying=true, audioPlaying=true;
-    function inputPaused(){return !!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen()||!!chat?.panelOpen();}
+    function inputPaused(){return !!cinema?.active()||!!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen()||!!chat?.panelOpen();}
     function nearLobbyDeck(){
       return inLobby&&Math.hypot(player.position.x-lobbyDeck.x,player.position.z-lobbyDeck.z)<1.8&&jumpHeight===0&&jumpVelocity===0;
     }
@@ -526,6 +530,8 @@ window.NoraWorld = (() => {
       const {x,z}=player.position;
       if(inside)return Math.abs(x)<1.5&&z>3.3?'Выйти из таверны':'';
       if(inLobby){
+        const entrance=window.NoraCinema?.entrance;
+        if(entrance&&Math.hypot(x-entrance.x,z-entrance.z)<1.7)return 'Кинотеатр';
         if(Math.hypot(x-tavernPortal.x,z-tavernPortal.z)<1.62)return 'НОРА';
         if(challenge&&Math.hypot(x-challenge.entrance.x,z-challenge.entrance.z)<1.62)return observatory.title;
         return '';
@@ -540,6 +546,7 @@ window.NoraWorld = (() => {
         interaction={id:challenge.actionAt(player.position,challengeState.checkpoint).id,serial:++interactionSerial};
         action.hidden=true;action.blur();return;
       }
+      if(label==='Кинотеатр'){cinema.enter();return;}
       if(label===observatory?.title){beginTransition(true);return;}
       if(label==='ЛОББИ'){
         inLobby=true;
@@ -555,7 +562,7 @@ window.NoraWorld = (() => {
       jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;action.hidden=true;action.blur();
       for(const g of gusts)g.age=1;companion.reset();reset();
     });
-    on(document,'visibilitychange',()=>{if(document.hidden&&!inChallenge)lobby.leave();});
+    on(document,'visibilitychange',()=>{if(document.hidden&&!inChallenge&&!cinema?.active())lobby.leave();});
     function resize(){
       const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
       // Bound fill rate independently of orientation / Retina density. CSS stays full resolution.
@@ -583,6 +590,13 @@ window.NoraWorld = (() => {
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
     const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset);
+    const cinema=window.NoraCinema?.mount(root,reset,lobby.session,
+      time=>lobby.serverSeconds(time)*1000,()=>chat?.panelOpen(),()=>{
+        const {x,z}=window.NoraCinema.entrance;
+        player.position.set(x,.017,z);
+      });
+    // Shorter renders during a film leave more GPU time for video decoding and composition.
+    let nextCinemaFrame=0;
     function tick(time){
       if(disposed)return;const previousFrame=previous;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
@@ -632,11 +646,17 @@ window.NoraWorld = (() => {
           }
         }
         player.position.y=.017+jumpHeight;
+        cinema?.setAvailable(inLobby);
+        const cinemaActive=cinema?.active();
+        scenery.setCinemaOpen?.(cinemaActive);
+        const seat=cinema?.seat();
+        if(seat){player.position.set(seat.x,.017,seat.z);player.rotation.y=Math.PI;}
         const serverSeconds=lobby.serverSeconds(time);
         character.animateWings(dt,!grounded,wingBoostUsed&&jumpVelocity>0);
         const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
         const travelled=Math.hypot(travelledX,travelledZ);
-        character.animateMotion(travelled,dt,sprinting,grounded?null:jumpVelocity);
+        if(seat)character.animateSeated();
+        else character.animateMotion(travelled,dt,sprinting,grounded?null:jumpVelocity);
         // Face actual travel, preserving the last heading when stopped/blocked.
         const heading=travelled>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
@@ -645,7 +665,13 @@ window.NoraWorld = (() => {
         playerShadow.position.set(player.position.x,inChallenge?floor+.008:.008,player.position.z);
         target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
         const wanted=(inside?4.6:(camera.aspect<.7?5.7:5.1))*Math.max(.04,pov/100);
-        if(view===1){
+        if(cinemaActive){
+          player.visible=true;playerShadow.visible=false;character.setOpacity(1);
+          const distance=Math.max(0,.82-camera.aspect)*12;
+          camera.position.set(10.8,3.7,1.9+distance);
+          target.set(10.8,3.6,-5.6);
+          camera.lookAt(target);
+        }else if(view===1){
           player.visible=false;playerShadow.visible=false;
           camera.position.set(player.position.x-Math.sin(yaw)*.22,1.51+jumpHeight,player.position.z-Math.cos(yaw)*.22);
           target.set(camera.position.x-Math.sin(yaw)*Math.cos(pitch),camera.position.y-Math.sin(pitch),camera.position.z-Math.cos(yaw)*Math.cos(pitch));
@@ -683,7 +709,8 @@ window.NoraWorld = (() => {
           action.textContent=actionText;
           action.classList?.toggle('nora-portal-action',actionText==='ЛОББИ'||actionText==='НОРА'||actionText===observatory?.title);
         }
-        if(inLobby||inChallenge)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0,interaction);
+        if(inLobby||inChallenge)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0,interaction,
+          cinemaActive?cinema.revision():null);
         if(inChallenge){
           const storm=challenge.update(serverSeconds,player.position);
           sunlight.intensity=.79+storm.light*.39;
@@ -692,7 +719,7 @@ window.NoraWorld = (() => {
         updateWind(dt,sprinting&&travelled>.001);
         const daylight=updateLighting(Date.now());
         const audioYaw=yaw+(view===2?Math.PI:0);
-        const playing=inChallenge||transition?.entering?false:inLobby?!!records?.lobbyPlaying():recordPlaying;
+        const playing=cinemaActive||inChallenge||transition?.entering?false:inLobby?!!records?.lobbyPlaying():recordPlaying;
         if(playing!==audioPlaying){audioPlaying=playing;sounds?.playing(playing);}
         if(inLobby){
           const dx=lobbyDeck.x-player.position.x,dz=lobbyDeck.z-player.position.z;
@@ -710,11 +737,15 @@ window.NoraWorld = (() => {
         atmosphere.update(dt,daylight,inside||inLobby||inChallenge);
         companion.update(dt,camera,!inChallenge);
         chat?.update(time);
-        renderer.render(scene,camera);
+        cinema?.sync(time);
+        if(!cinemaActive||time>=nextCinemaFrame){
+          renderer.render(scene,camera);
+          nextCinemaFrame=time+1000/30;
+        }
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;lobby.leave();sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();chat?.dispose();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;lobby.leave();sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();cinema?.dispose();chat?.dispose();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }

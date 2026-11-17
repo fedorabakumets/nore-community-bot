@@ -11,11 +11,13 @@ from aiogram.types import (
     FSInputFile,
     InputMediaPhoto,
     InputRichBlockButtons,
+    InputRichBlockParagraph,
     InputRichBlockPhoto,
     InputRichMessage,
     Message,
     ReplyParameters,
     RichMessageButton,
+    RichTextBold,
 )
 
 from community_bot.config import Settings
@@ -52,6 +54,13 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
 
     rich_message = InputRichMessage(blocks=[
         InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(COMMANDS_ART))),
+        InputRichBlockParagraph(text=[
+            RichTextBold(text="3D-игра Норы"),
+            "\nЧат под инвентарём связывает игру и Telegram."
+            "\nКинотеатр в лобби показывает YouTube, MP4 и ролики из группы."
+            "\n«Нора, в кино» — ответом на видео MP4 до 20 МБ в группе."
+            "\nПервое прохождение «Воспоминания» — 50 🍪 в кошелёк.",
+        ]),
         InputRichBlockButtons(buttons=[
             RichMessageButton(text="Закрыть", style="danger", callback_data=CLOSE_COMMANDS_CARD),
         ], align="center"),

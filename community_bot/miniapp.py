@@ -114,9 +114,10 @@ async def protection(request, handler):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' https: data: blob:; media-src 'self' blob:; connect-src 'self'; "
-        "font-src 'self'; base-uri 'none'; "
+        "default-src 'self'; script-src 'self' https://telegram.org https://www.youtube.com https://s.ytimg.com; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; "
+        "media-src 'self' blob: https:; connect-src 'self'; "
+        "frame-src https://www.youtube.com; font-src 'self'; base-uri 'none'; "
         "frame-ancestors https://web.telegram.org https://*.telegram.org"
     )
     return response
@@ -404,7 +405,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
-    from community_bot import lobby_widget, music_api, nora_game_api, nora_game_chat
+    from community_bot import lobby_widget, music_api, nora_cinema, nora_game_api, nora_game_chat
 
     app.router.add_get('/api/community/music', music_api.delivery_status)
     app.router.add_post('/api/community/music', music_api.send_track)
@@ -413,6 +414,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app['nora_lobby'] = {}
+    app['nora_cinema'] = nora_cinema.Cinema(app['media_images'])
+    app.router.add_get('/api/nora-game/cinema', nora_cinema.cinema_api)
+    app.router.add_post('/api/nora-game/cinema', nora_cinema.cinema_api)
     app['nora_game_chat'] = nora_game_chat.GameChat(bot, getattr(settings, 'community_chat_id', 0))
     app.router.add_get('/api/nora-game/chat', nora_game_chat.feed)
     app.router.add_post('/api/nora-game/chat', nora_game_chat.send)
@@ -466,7 +470,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
-                 'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js',
+                 'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js',
                  'community.js', 'avatars.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))

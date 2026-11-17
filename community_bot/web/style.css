@@ -1237,7 +1237,7 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 /* Shared world chat */
 .nora-chat-open {
   position: absolute;
-  top: calc(var(--nora-top) + 50px);
+  top: calc(var(--nora-top) + 102px);
   right: var(--hud-right);
   display: inline-flex;
   align-items: center;
@@ -1251,6 +1251,9 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   color: #fff1d0;
   font-size: 12px;
   touch-action: manipulation;
+}
+.nora-world:has(.nora-observatory-hud:not([hidden])) .nora-chat-open {
+  top: calc(var(--nora-top) + 178px);
 }
 .nora-chat-open::before {
   content: '';
@@ -1389,4 +1392,90 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .nora-chat-open:focus-visible, .nora-chat :focus-visible { outline: 2px solid #ffcf88; outline-offset: -3px; }
 @media (prefers-reduced-motion: reduce) {
   .nora-chat[open] { animation: none; }
+}
+
+/* The cinema keeps its video above the 3D seats and the room controls outside the player. */
+.nora-cinema {
+  position: absolute;
+  z-index: 4;
+  inset: var(--nora-top) var(--hud-right) auto var(--hud-left);
+  width: min(100% - var(--hud-right) - var(--hud-left), 570px);
+  max-height: calc(100dvh - var(--nora-top) - 16px - var(--safe-bottom));
+  box-sizing: border-box;
+  overflow: auto;
+  margin-inline: auto;
+  padding: 10px;
+  border: 2px solid #b7838d;
+  background: #221823f2;
+  box-shadow: 4px 4px #130c16;
+  color: #ffedcf;
+  font-size: 12px;
+}
+.nora-cinema[hidden], .nora-cinema [hidden] { display: none; }
+.nora-cinema header, .nora-cinema-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.nora-cinema header { min-height: 36px; margin: 0; padding: 0; }
+.nora-cinema h2 { margin: 0 auto 0 0; font-size: 15px; }
+.nora-cinema button, .nora-cinema summary {
+  min-height: 36px;
+  padding: 5px 8px;
+  border: 1px solid #bd8c8c;
+  background: #482b40;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.nora-cinema input:not([type=range]), .nora-cinema select {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 6px;
+  background: #251b2a;
+  color: inherit;
+  border: 1px solid #bd8c8c;
+  font: 16px system-ui, sans-serif;
+}
+.nora-cinema summary { display: grid; align-content: center; }
+.nora-cinema details, .nora-cinema-controls { margin-block-start: 8px; }
+.nora-cinema form { display: grid; gap: 6px; padding-top: 8px; }
+.nora-cinema form label { display: grid; gap: 4px; }
+.nora-cinema-media {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+  margin-block-start: 6px;
+  background: #09080c;
+}
+.nora-cinema-media :is(iframe, video) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  border: 0;
+}
+.nora-cinema [data-note] { margin: 7px 0; padding: 0; font-size: 11px; line-height: 1.45; }
+.nora-cinema [data-watch] { background: #853952; }
+.nora-cinema input[type=range] { min-width: 75px; flex: 1; accent-color: #d8839d; }
+.nora-cinema :focus-visible { outline: 2px solid #ffd39d; outline-offset: 2px; }
+.nora-cinema-open {
+  position: absolute;
+  top: calc(var(--nora-top) + 154px);
+  right: var(--hud-right);
+  min-height: 44px;
+  padding: 0 9px;
+  border: 2px solid #b7838d;
+  box-shadow: 3px 3px #130c16;
+  background: #40273c;
+  color: #ffedcf;
+  font-size: 10px;
+  cursor: pointer;
+}
+.nora-cinema-active :is(.nora-cinema-open, .nora-world-bar, .nora-world-context, .nora-world-help, .nora-world-view,
+  .nora-world-jump, .nora-world-sprint, .nora-world-joystick, .nora-pet-actions, .nora-chat-open) {
+  visibility: hidden;
+}
+.nora-world-active:has(.nora-cinema-active) :is(.nora-game-music, .nora-game-mixer, .nora-game-back),
+.nora-cinema-active:has(.nora-chat[open]) .nora-cinema-media { visibility: hidden; }
+@media (max-height: 540px) {
+  .nora-cinema { width: min(100% - var(--hud-right) - var(--hud-left), 370px); }
 }

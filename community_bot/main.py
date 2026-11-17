@@ -559,6 +559,7 @@ async def main() -> None:
 
         web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
         dispatcher["nora_game_chat"] = web_runner.app["nora_game_chat"]
+        dispatcher["nora_cinema"] = web_runner.app["nora_cinema"]
         logger.info("Nora Mini App HTTP server started")
     profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))

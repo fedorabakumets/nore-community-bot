@@ -25,6 +25,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "buycookies": ("купитьпеченьки",),
     "admin": ("админка",),
     "games": ("игры",),
+    "cinema": ("в кино", "вкино"),
     "cgames": ("печенеигры",),
     "blackjack": ("блэкджек",),
     "dice": ("кости", "кубик"),
