@@ -8,7 +8,7 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"observatory", "nora-world":"memory", "nora-scenery":"memory",
+      const version = {"nora-companion":"observatory", "nora-world":"lobby-chat", "nora-scenery":"memory",
         "nora-voxel":"memory", "nora-observatory":"memory"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
@@ -17,7 +17,7 @@
     return scripts.get(name);
   }
   async function loadGame() {
-    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-world"]) await loadScript(name);
+    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-chat", "nora-world"]) await loadScript(name);
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;

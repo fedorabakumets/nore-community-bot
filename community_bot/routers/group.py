@@ -151,6 +151,23 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
         await send_member_welcome(bot, event.chat.id, member.user)
 
 
+async def text_moderation_reason(db, settings, flags, text, activity_count):
+    blocked_reason = None
+    if flags.get("quiet_hours") and 0 <= datetime.now(ZoneInfo(settings.timezone)).hour < 7:
+        blocked_reason = "Включён ночной режим: чат открыт с 07:00."
+    if flags.get("raid_mode") and activity_count <= 2:
+        blocked_reason = "Включён рейд-режим: первые сообщения новых участников проходят проверку."
+    if flags.get("link_filter") and any(marker in text.casefold() for marker in ("http://", "https://", "t.me/")):
+        blocked_reason = "Ссылки сейчас запрещены настройками чата."
+    if flags.get("word_filter") and text:
+        from community_bot.life import matches_stop_word
+
+        words = [str(row["word"]) for row in await db.list_stop_words()]
+        if matches_stop_word(text, words):
+            blocked_reason = "Слово из стоп-листа."
+    return blocked_reason
+
+
 class CommunityModerationMiddleware(BaseMiddleware):
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque[float]] = defaultdict(deque)
@@ -209,26 +226,12 @@ class CommunityModerationMiddleware(BaseMiddleware):
                     pass
                 chat_admin = await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
                 member = (not chat_admin) and await rank_of_user(db, settings, event.from_user.id) < 40
-                blocked_reason: str | None = None
                 text = event.text or event.caption or ""
+                blocked_reason = (
+                    await text_moderation_reason(db, settings, flags, text, activity_count) if member else None
+                )
                 media_filter_on = bool(flags.get("media_filter"))
                 sticker_filter_on = bool(flags.get("sticker_filter"))
-                if member and flags.get("quiet_hours"):
-                    local_hour = datetime.now(ZoneInfo(settings.timezone)).hour
-                    if 0 <= local_hour < 7:
-                        blocked_reason = "Включён ночной режим: чат открыт с 07:00."
-                if member and flags.get("raid_mode") and activity_count <= 2:
-                    blocked_reason = "Включён рейд-режим: первые сообщения новых участников проходят проверку."
-                contains_link = any(marker in text.casefold() for marker in ("http://", "https://", "t.me/"))
-                if member and flags.get("link_filter") and contains_link:
-                    blocked_reason = "Ссылки сейчас запрещены настройками чата."
-                if member and flags.get("word_filter") and text:
-                    words = [str(row["word"]) for row in await db.list_stop_words()]
-                    from community_bot.life import matches_stop_word
-
-                    hit = matches_stop_word(text, words)
-                    if hit:
-                        blocked_reason = "Слово из стоп-листа."
                 has_media = bool(
                     event.photo
                     or event.video

@@ -243,7 +243,7 @@ window.NoraWorld = (() => {
         avatar.animateWings(dt,airborne,state.boosting);
       }
     }
-    return {update,leave,setRoom,serverSeconds(time){return (time-(clockOffset??0))/1000;}};
+    return {update,leave,setRoom,avatar(nickname){return peers.get(nickname)?.avatar.group;},serverSeconds(time){return (time-(clockOffset??0))/1000;}};
   }
   async function mount(canvas, root, outfit, sounds) {
     const observatory=window.NoraObservatory;
@@ -411,7 +411,7 @@ window.NoraWorld = (() => {
     const reduceTransition=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     let transition=null, resultTime=0;
     let recordPlaying=true, audioPlaying=true;
-    function inputPaused(){return !!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen();}
+    function inputPaused(){return !!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen()||!!chat?.panelOpen();}
     function nearLobbyDeck(){
       return inLobby&&Math.hypot(player.position.x-lobbyDeck.x,player.position.z-lobbyDeck.z)<1.8&&jumpHeight===0&&jumpVelocity===0;
     }
@@ -582,6 +582,7 @@ window.NoraWorld = (() => {
     syncLocation();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
+    const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset);
     function tick(time){
       if(disposed)return;const previousFrame=previous;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
       if(!document.hidden){
@@ -708,11 +709,12 @@ window.NoraWorld = (() => {
         sounds?.update(inside||inChallenge,daylight,travelled,grounded);
         atmosphere.update(dt,daylight,inside||inLobby||inChallenge);
         companion.update(dt,camera,!inChallenge);
+        chat?.update(time);
         renderer.render(scene,camera);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);
-    function stop(){if(disposed)return;disposed=true;lobby.leave();sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    function stop(){if(disposed)return;disposed=true;lobby.leave();sounds?.stop();cancelAnimationFrame(raf);controls.abort();observer.disconnect();resetStick();chat?.dispose();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
     on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
     return stop;
   }

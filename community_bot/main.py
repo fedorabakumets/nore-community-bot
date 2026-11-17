@@ -435,9 +435,13 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
+    from community_bot.nora_game_chat import GameChatMiddleware
     from community_bot.routers.group import CommunityModerationMiddleware
 
     dispatcher.message.outer_middleware(CommunityModerationMiddleware())
+    game_chat_middleware = GameChatMiddleware()
+    dispatcher.message.outer_middleware(game_chat_middleware)
+    dispatcher.chat_member.outer_middleware(game_chat_middleware)
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.message.outer_middleware(ProfileAccessMiddleware())
     dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())
@@ -554,6 +558,7 @@ async def main() -> None:
         from community_bot.miniapp import start_server
 
         web_runner = await start_server(db, settings, bot, {"restart_stop": restart_stop})
+        dispatcher["nora_game_chat"] = web_runner.app["nora_game_chat"]
         logger.info("Nora Mini App HTTP server started")
     profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))

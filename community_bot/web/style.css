@@ -1233,3 +1233,160 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .pet2-handbook details p{padding:0 6px;color:var(--muted);margin:4px 0 12px}
 .pet2-handbook .text-btn{min-height:44px}
 @media(prefers-reduced-motion:reduce){.pet2 progress::-webkit-progress-value{transition:none}}
+
+/* Shared world chat */
+.nora-chat-open {
+  position: absolute;
+  top: calc(var(--nora-top) + 50px);
+  right: var(--hud-right);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid #b59a70;
+  border-radius: 0;
+  background: #182322f0;
+  box-shadow: 3px 3px #090e13;
+  color: #fff1d0;
+  font-size: 12px;
+  touch-action: manipulation;
+}
+.nora-chat-open::before {
+  content: '';
+  width: 16px;
+  height: 14px;
+  background: #f0cb8d;
+  clip-path: polygon(0 0, 100% 0, 100% 71%, 44% 71%, 18% 100%, 18% 71%, 0 71%,
+    0 17%, 16% 17%, 16% 55%, 84% 55%, 84% 17%, 0 17%);
+}
+.nora-chat-open span {
+  width: 6px;
+  height: 6px;
+  background: #ff9caa;
+  box-shadow: 2px 2px #6b3d50;
+}
+.nora-chat {
+  --chat-bottom: max(var(--hud-bottom), calc(var(--chat-keyboard, 0px) + 8px));
+  position: fixed;
+  inset: auto auto var(--chat-bottom) var(--hud-left);
+  width: min(420px, calc(100% - var(--hud-left) - var(--hud-right) - 4px));
+  height: min(398px, calc(var(--chat-viewport, 100dvh) - var(--hud-bottom) - max(var(--safe-top), 12px) - 14px));
+  max-height: none;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid #c8a879;
+  border-radius: 0;
+  background: #15191f;
+  box-shadow: 4px 4px #0a0c11, inset 0 0 0 2px #43362e;
+  color: #fff0da;
+  font: 13px/1.5 NoraCraft, monospace;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+}
+.nora-chat[open] { animation: nora-chat-reveal .18s steps(5, end) both; }
+.nora-chat::backdrop { background: #0a0e165e; backdrop-filter: none; }
+@keyframes nora-chat-reveal {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.nora-chat-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+.nora-chat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px 8px 13px;
+  border-bottom: 2px solid #514335;
+  background: linear-gradient(90deg, #25332e, #25282b);
+}
+.nora-game-screen .nora-chat h2 {
+  margin: 0;
+  color: #f7dfac;
+  font: 16px/1.35 NoraCraft, monospace;
+}
+.nora-chat-top small { color: #c6c8b6; font-size: 10px; }
+.nora-chat button {
+  box-sizing: border-box;
+  min-height: 44px;
+  border-radius: 0;
+  touch-action: manipulation;
+}
+.nora-chat .nora-chat-close {
+  width: 44px;
+  padding: 0;
+  border: 1px solid #857659;
+  background: #1b2524;
+  color: #f7dfac;
+  font-size: 25px;
+  line-height: 1;
+}
+.nora-chat-feed {
+  position: relative;
+  padding: 4px 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #857659 #15191f;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  text-align: left;
+}
+.nora-chat-feed ol { list-style: none; padding: 0; margin: 0; }
+.nora-chat-feed li {
+  margin: 0;
+  padding: 9px 0 8px;
+  border-bottom: 1px solid #39323a;
+}
+.nora-chat-feed li:last-child { border-bottom: 0; }
+.nora-chat-feed li > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.nora-chat-feed b { min-width: 0; overflow-wrap: anywhere; }
+.nora-chat-feed small { font-size: 9px; color: #a5ddea; }
+.nora-chat-feed small[data-source='game'] { color: #f1c58d; }
+.nora-chat-feed time { margin-inline-start: auto; color: #b3a8b4; font-size: 10px; }
+.nora-chat-feed li p {
+  margin: 3px 0 0;
+  color: #fff0da;
+  text-align: start;
+  font: 13px/1.55 NoraCraft, monospace;
+  overflow-wrap: anywhere;
+}
+.nora-chat-empty { margin: 12px 0; color: #c6c8b6; font-size: 11px; }
+.nora-chat-form { padding: 7px 10px 10px; border-top: 2px solid #514335; background: #1e2026; }
+.nora-chat-status { margin: 0 0 6px 2px; color: #e4c6a0; text-align: left; font-size: 10px; }
+.nora-chat-compose { display: flex; gap: 6px; }
+.nora-chat .nora-chat-compose input {
+  min-width: 0;
+  flex: 1;
+  min-height: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid #8e805f;
+  border-radius: 0;
+  background: #11151b;
+  color: #fff0da;
+  font-size: 16px;
+  touch-action: manipulation;
+}
+.nora-chat-compose input::placeholder { color: #a8a1a7; font-size: 12px; }
+.nora-chat-compose button {
+  flex: none;
+  padding: 0 8px;
+  border: 2px solid #cba370;
+  background: #68394a;
+  box-shadow: 2px 2px #120e16;
+  color: #fff0da;
+  font-size: 10px;
+}
+.nora-chat-compose button:disabled { opacity: .6; }
+.nora-chat-open:focus-visible, .nora-chat :focus-visible { outline: 2px solid #ffcf88; outline-offset: -3px; }
+@media (prefers-reduced-motion: reduce) {
+  .nora-chat[open] { animation: none; }
+}
