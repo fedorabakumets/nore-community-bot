@@ -22,6 +22,7 @@ TRANSACTION_LABELS = {
     "ban_reset": "Сброс баланса при бане",
     "shop": "Магазин",
     "seasonal_purchase": "Сезонный предмет",
+    "seasonal_entry": "Заявка на сезонный розыгрыш",
     "sbp_payment": "Пополнение СБП",
     "roulette": "Рулетка",
     "subscription_freebie": "Халява",
@@ -61,6 +62,7 @@ TRANSACTION_SOURCES = {
     "shop": "Магазин Норы",
     "pet_shop": "Магазин питомцев",
     "seasonal_purchase": "Сезонный магазин",
+    "seasonal_entry": "Сезонный магазин",
     "sbp_payment": "СБП",
     "subscription_freebie": "Нора · подписка на канал",
     "pet_farm": "Твой питомец",
@@ -175,8 +177,8 @@ def transaction_item(row: dict, party: tuple[str, str] | None = None) -> dict:
         label = ITEM_LABELS.get(sku, extra_labels.get(sku, label))
         if target.isdigit():
             label = "Подарок: " + label
-    elif kind == "seasonal_purchase" and details:
-        label = "Сезонный предмет: " + details
+    elif kind in {"seasonal_purchase", "seasonal_entry"} and details:
+        label += ": " + details
     elif kind == "transfer":
         label = "Перевод отправлен" if amount < 0 else "Перевод получен"
     elif kind == "wallet_reset" and amount > 0:

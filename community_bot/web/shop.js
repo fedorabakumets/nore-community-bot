@@ -20,12 +20,165 @@ window.NoraShop=(()=>{
   let seasonalPending=false;
   const seasonalPreloads=new Map();
   function preloadSeasonal(){for(const item of data.seasonal_items||[]){if(!item.image||seasonalPreloads.has(item.image))continue;const img=new Image();seasonalPreloads.set(item.image,img);img.onerror=()=>seasonalPreloads.delete(item.image);img.src=item.image}}
-  function seasonalCards(){const list=data.seasonal_items||[data.seasonal].filter(Boolean);return `${list[0]?.can_manage?'<button class="secondary" data-seasonal-new>＋ Новый сезонный предмет</button>':''}${list.map(seasonalCard).join('')}`}
-  function seasonalCard(s){const paid=s.mode==='paid',closed=s.status!=='open',id=esc(s.id);return `<article class="seasonal-drop"><div class="seasonal-cover"><img src="${esc(s.image)}" alt="${esc(s.image_alt)}" loading="lazy"></div><div class="seasonal-copy"><div class="seasonal-badges"><span>Сезон 1 · Bloody Nora</span><span>Эксклюзив</span><span>${paid?'Покупка':'Розыгрыш'}</span>${s.enabled===false?'<span>Скрыт</span>':''}</div><h2>${esc(s.title)}</h2><p class="seasonal-intro">${esc(s.description)}</p><div class="seasonal-meta"><span>${paid?'Цена':'Участие'} <b>${paid?number(s.price)+' 🍪':'Бесплатно'}</b></span><span>${paid?'Покупателей':'Участников'} <b>${number(s.count)}</b></span></div>${!paid&&closed?`<p class="seasonal-result">${s.won?'Вы победили!':`Победитель: ${esc(s.winner||'итог сохранён')}`}</p>`:''}<button class="primary seasonal-join" data-seasonal-action="${id}" ${closed||s.joined||s.enabled===false?'disabled':''}>${s.enabled===false?'Скрыт':closed?'Завершено':s.joined?(paid?'Вы купили ✓':'Вы участвуете ✓'):(paid?'Купить':'Участвовать')}</button><p class="footer-note">${paid?'После покупки администрация свяжется с вами.':'Один человек — одна бесплатная заявка.'}</p><details class="seasonal-details"><summary>Подробнее</summary><div class="seasonal-author"><b><a href="${esc(s.author_url)}" target="_blank" rel="noopener noreferrer">${esc(s.author)} ↗</a></b><div class="seasonal-links">${(s.links||[]).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)} ↗</a>`).join('')}</div></div></details>${s.can_manage?`<button class="text-btn seasonal-admin" data-seasonal-edit="${id}">Редактировать предмет</button><button class="text-btn seasonal-admin" data-seasonal-manage="${id}" data-offset="0">${paid?'Покупатели':'Участники и итоги'}</button>`:''}</div></article>`}
-  function seasonalEdit(id){const s=(data.seasonal_items||[]).find(x=>x.id===id)||{title:'',description:'',image:'',author:'',author_url:'',links:[],mode:'raffle',price:0};const links=(s.links||[]).map(l=>l.label+' | '+l.url).join('\n');sheet(`<span class="eyebrow">Сезонный предмет</span><h2>${id?'Редактировать':'Новый предмет'}</h2><p class="sub">После первой заявки или покупки способ получения изменить нельзя.</p><form id="seasonal-edit-form"><label>Название<input name="title" maxlength="100" required value="${esc(s.title)}"></label><label>Описание<textarea name="description" maxlength="1500" required>${esc(s.description)}</textarea></label><label>Изображение<input name="image_file" type="file" accept="image/jpeg,image/png,image/webp" ${s.image?'':'required'}></label><p class="sub">JPG, PNG или WebP до 5 МБ.${s.image?' Если не выбрать новый файл, сохранится текущее изображение.':''}</p><label>Автор<input name="author" maxlength="100" required value="${esc(s.author)}"></label><label>Ссылка на автора<input name="author_url" type="url" maxlength="2048" required value="${esc(s.author_url)}"></label><label>Источники: название | HTTPS-ссылка, по одному на строку<textarea name="links" rows="6">${esc(links)}</textarea></label><label class="shop-gift-check"><input name="enabled" type="checkbox" ${s.enabled!==false?'checked':''}> Показывать в магазине</label><label>Способ получения<select name="mode"><option value="raffle" ${s.mode!=='paid'?'selected':''}>Бесплатный розыгрыш</option><option value="paid" ${s.mode==='paid'?'selected':''}>Покупка за печеньки</option></select></label><label>Цена в печеньках (для розыгрыша 0)<input name="price" type="number" min="0" max="1000000" required value="${Number(s.price||0)}"></label><button class="primary" type="submit">Сохранить</button></form>`);document.querySelector('#seasonal-edit-form').onsubmit=async e=>{e.preventDefault();if(seasonalPending)return;const f=new FormData(e.target),lines=String(f.get('links')).split('\n').map(x=>x.trim()).filter(Boolean),links=[];for(const line of lines){const i=line.indexOf('|');if(i<0){toast('Укажите название и ссылку через |');return}links.push({label:line.slice(0,i).trim(),url:line.slice(i+1).trim()})}const file=f.get('image_file');if(file?.size>5*1024*1024){toast('Фото должно быть не больше 5 МБ');return}seasonalPending=true;try{let image=s.image;if(file?.size){const uploaded=await upload('seasonal/upload',null,file);image=uploaded.image}const r=await api('seasonal/save',{id:id||null,item:{title:f.get('title'),description:f.get('description'),image,author:f.get('author'),author_url:f.get('author_url'),links,mode:f.get('mode'),price:Number(f.get('price')),enabled:f.has('enabled')}});data.seasonal_items=r.items;data.seasonal=r.items[0];document.querySelector('#sheet').close();render();toast('Предмет сохранён')}catch(err){toast(err.message)}finally{seasonalPending=false}}}
-  async function seasonalAction(id){if(seasonalPending||busy)return;const s=data.seasonal_items.find(x=>x.id===id);if(!s)return;seasonalPending=true;try{if(s.mode==='paid'){const q=await api('seasonal/buy/prepare',{id});sheet(`<span class="eyebrow">Подтверждение покупки</span><h2>${esc(q.title)}</h2><p>Стоимость: <b>${number(q.price)} 🍪</b>. После покупки администрация свяжется с вами.</p><button class="primary" id="seasonal-buy-confirm">Подтвердить покупку</button>`);document.querySelector('#seasonal-buy-confirm').onclick=async()=>{if(seasonalPending)return;seasonalPending=true;try{const r=await api('seasonal/buy/confirm',{token:q.token});data.seasonal_items=r.items;data.seasonal=r.items[0];document.querySelector('#sheet').close();await refresh();toast(r.message)}catch(err){toast(err.message)}finally{seasonalPending=false}}}else{const r=await api('seasonal/join',{id});data.seasonal_items=(await api('seasonal/items')).items;data.seasonal=data.seasonal_items[0];render();toast(r.message)}}catch(err){toast(err.message)}finally{seasonalPending=false}}
+  function seasonalCards(){
+    const list=data.seasonal_items||[data.seasonal].filter(Boolean);
+    const canManage=data.can_manage_seasonal??list[0]?.can_manage;
+    return `${canManage?'<button class="secondary" data-seasonal-new>＋ Новый сезонный предмет</button>':''}${list.map(seasonalCard).join('')}`;
+  }
+  function seasonalCard(s){
+    const sale=s.mode==='paid', paidEntry=s.mode==='paid_raffle', closed=s.status!=='open', id=esc(s.id);
+    const price=sale||paidEntry?number(s.price)+' 🍪':'Бесплатно';
+    const action=s.enabled===false?'Скрыт':closed?'Завершено':s.joined
+      ?(sale?'Вы купили ✓':'Вы участвуете ✓')
+      :(sale?'Купить':paidEntry?'Оплатить участие':'Участвовать');
+    return `<article class="seasonal-drop">
+      <img class="seasonal-cover" src="${esc(s.image)}" alt="" loading="lazy">
+      <div class="seasonal-copy">
+        <div class="seasonal-badges"><span>Сезон 1 · Bloody Nora</span><span>${sale?'Товар':paidEntry?'Платный розыгрыш':'Розыгрыш'}</span>${s.enabled===false?'<span>Скрыт</span>':''}</div>
+        <h2>${esc(s.title)}</h2>
+        <p class="seasonal-intro">${esc(s.description)}</p>
+        <div class="seasonal-meta"><span>${sale?'Цена':'Участие'} <b>${price}</b></span><span>${sale?'Покупателей':'Участников'} <b>${number(s.count)}</b></span></div>
+        ${!sale&&closed?`<p class="seasonal-result">${s.won?'Вы победили!':`Победитель: ${esc(s.winner||'итог сохранён')}`}</p>`:''}
+        <button class="primary seasonal-join" data-seasonal-action="${id}" ${closed||s.joined||s.enabled===false?'disabled':''}>${action}</button>
+        <p class="footer-note">${sale?'После покупки администрация свяжется с вами.':'Одна заявка на человека.'}</p>
+        <details class="seasonal-details">
+          <summary>Подробнее</summary>
+          <div class="seasonal-author"><b><a href="${esc(s.author_url)}" target="_blank" rel="noopener noreferrer">${esc(s.author)} ↗</a></b>
+            <div class="seasonal-links">${(s.links||[]).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)} ↗</a>`).join('')}</div>
+          </div>
+        </details>
+        ${s.can_manage?`<button class="text-btn seasonal-admin" data-seasonal-edit="${id}">Редактировать предмет</button>
+          <button class="text-btn seasonal-admin" data-seasonal-manage="${id}" data-offset="0">${sale?'Покупатели':'Участники и итоги'}</button>`:''}
+      </div>
+    </article>`;
+  }
+  function seasonalEdit(id,source){
+    if(seasonalPending)return;
+    const existing=data.seasonal_items?.find(x=>x.id===id);
+    const s=existing||source||{title:'',description:'',image:'',author:'',author_url:'',links:[],mode:'raffle',price:0};
+    const mode=source?'paid':s.mode||'raffle';
+    const locked=existing&&(existing.count>0||existing.status!=='open');
+    const links=(s.links||[]).map(l=>l.label+' | '+l.url).join('\n');
+    sheet(`<span class="eyebrow">Сезонный предмет</span><h2>${id?'Редактировать':source?'Новый товар':'Новый предмет'}</h2>
+      <form id="seasonal-edit-form">
+        <label>Название<input name="title" maxlength="100" required value="${esc(s.title)}"></label>
+        <label>Описание<textarea name="description" maxlength="1500" required>${esc(s.description)}</textarea></label>
+        <label>Изображение<input name="image_file" type="file" accept="image/jpeg,image/png,image/webp" ${s.image?'':'required'}></label>
+        <p class="sub">JPG, PNG или WebP до 5 МБ.${s.image?' Текущее изображение сохранится, если не выбрать новый файл.':''}</p>
+        <label>Автор<input name="author" maxlength="100" required value="${esc(s.author)}"></label>
+        <label>Ссылка на автора<input name="author_url" type="url" maxlength="2048" required value="${esc(s.author_url)}"></label>
+        <label>Источники (название | HTTPS-ссылка, по одному на строку)<textarea name="links" rows="6">${esc(links)}</textarea></label>
+        <label class="shop-gift-check"><input name="enabled" type="checkbox" ${source||s.enabled!==false?'checked':''}> Показывать в магазине</label>
+        <label>Способ получения<select name="mode" ${locked?'disabled':''}>
+          <option value="raffle" ${mode==='raffle'?'selected':''}>Бесплатный розыгрыш</option>
+          <option value="paid_raffle" ${mode==='paid_raffle'?'selected':''}>Платное участие в розыгрыше</option>
+          <option value="paid" ${mode==='paid'?'selected':''}>Продажа товара за печеньки</option>
+        </select></label>
+        ${locked?'<p class="sub">После первой заявки или покупки способ получения закреплён за карточкой.</p>':''}
+        <label id="seasonal-price-field">Цена в печеньках<input name="price" type="number" inputmode="numeric" min="1" max="1000000" value="${source?'':Number(s.price||0)||''}"></label>
+        <button class="primary" type="submit">Сохранить</button>
+        ${locked&&mode!=='paid'?'<button class="secondary" type="button" id="seasonal-copy-as-sale">Создать товар из этой карточки</button>':''}
+        ${id?'<button class="text-btn danger-action" type="button" id="seasonal-remove">Удалить предмет</button>':''}
+      </form>`);
+    const form=$('#seasonal-edit-form');
+    const modeSelect=form.elements.mode;
+    const priceInput=form.elements.price;
+    function syncPrice(){
+      const free=modeSelect.value==='raffle';
+      $('#seasonal-price-field').hidden=free;
+      priceInput.disabled=free;
+      priceInput.required=!free;
+    }
+    syncPrice();
+    modeSelect.onchange=syncPrice;
+    if($('#seasonal-copy-as-sale'))$('#seasonal-copy-as-sale').onclick=()=>seasonalEdit(null,s);
+    if(id)$('#seasonal-remove').onclick=()=>seasonalRemove(s);
+    form.onsubmit=async e=>{
+      e.preventDefault();
+      if(seasonalPending)return;
+      const fields=new FormData(form);
+      const lines=String(fields.get('links')).split('\n').map(x=>x.trim()).filter(Boolean);
+      const links=[];
+      for(const line of lines){
+        const i=line.indexOf('|');
+        if(i<0){toast('Укажите название и ссылку через |');return}
+        links.push({label:line.slice(0,i).trim(),url:line.slice(i+1).trim()});
+      }
+      const file=fields.get('image_file');
+      if(file?.size>5*1024*1024){toast('Фото должно быть не больше 5 МБ');return}
+      const item={
+        title:fields.get('title'),description:fields.get('description'),image:s.image,
+        author:fields.get('author'),author_url:fields.get('author_url'),links,
+        mode:modeSelect.value,price:Number(fields.get('price')),enabled:fields.has('enabled'),
+      };
+      seasonalPending=true;
+      try{
+        if(file?.size)item.image=(await upload('seasonal/upload',null,file)).image;
+        const r=await api('seasonal/save',{id,item});
+        updateSeasonalItems(r.items);
+        $('#sheet').close();
+        render();
+        toast('Предмет сохранён');
+      }catch(err){toast(err.message)}finally{seasonalPending=false}
+    };
+  }
+  function updateSeasonalItems(items){
+    data.seasonal_items=items;
+    data.seasonal=items.find(item=>item.id==='season1-crimson-guardian');
+  }
+  function seasonalRemove(s){
+    if(seasonalPending)return;
+    const details=s.mode==='paid'?'Продажи закроются. История покупок сохранится.'
+      :s.status==='open'?'Розыгрыш закроется без выбора победителя. Заявки сохранятся.'
+      :'Карточка исчезнет из магазина. Итоги сохранятся.';
+    const paidEntries=s.mode==='paid_raffle'&&s.status==='open';
+    sheet(`<h2>Удалить «${esc(s.title)}»?</h2><p>${details}${paidEntries?' Возврат печенек оформляется отдельно.':''}</p>
+      <button class="primary" type="button" id="seasonal-remove-confirm">Удалить предмет</button>`);
+    $('#seasonal-remove-confirm').onclick=async()=>{
+      if(seasonalPending)return;
+      seasonalPending=true;
+      try{
+        const r=await api('seasonal/remove',{id:s.id});
+        updateSeasonalItems(r.items);
+        $('#sheet').close();
+        render();
+        toast('Предмет удалён');
+      }catch(err){toast(err.message)}finally{seasonalPending=false}
+    };
+  }
+  async function seasonalAction(id){
+    if(seasonalPending||busy)return;
+    const s=data.seasonal_items?.find(x=>x.id===id);
+    if(!s)return;
+    seasonalPending=true;
+    try{
+      if(s.mode!=='paid'&&s.mode!=='paid_raffle'){
+        const r=await api('seasonal/join',{id});
+        updateSeasonalItems((await api('seasonal/items')).items);
+        render();
+        toast(r.message);
+        return;
+      }
+      const q=await api('seasonal/buy/prepare',{id});
+      const entry=q.mode==='paid_raffle';
+      sheet(`<span class="eyebrow">${entry?'Платное участие':'Подтверждение покупки'}</span><h2>${esc(q.title)}</h2>
+        <p>Стоимость ${entry?'заявки':'товара'} <b>${number(q.price)} 🍪</b>. ${entry?'Оплата даёт один шанс в розыгрыше.':'После покупки администрация свяжется с вами.'}</p>
+        <button class="primary" id="seasonal-buy-confirm">${entry?'Оплатить заявку':'Подтвердить покупку'}</button>`);
+      $('#seasonal-buy-confirm').onclick=async()=>{
+        if(seasonalPending)return;
+        seasonalPending=true;
+        try{
+          const r=await api('seasonal/buy/confirm',{token:q.token});
+          updateSeasonalItems(r.items);
+          $('#sheet').close();
+          await refresh();
+          toast(r.message);
+        }catch(err){toast(err.message)}finally{seasonalPending=false}
+      };
+    }catch(err){toast(err.message)}finally{seasonalPending=false}
+  }
   async function seasonalManage(id,offset=0){if(seasonalPending)return;seasonalPending=true;try{const r=await api('seasonal/manage?id='+encodeURIComponent(id)+'&offset='+offset),paid=r.seasonal.mode==='paid';sheet(`<span class="eyebrow">${paid?'Покупатели':'Участники розыгрыша'}</span><h2>${esc(r.seasonal.title)}</h2><p>Всего: <b>${number(r.seasonal.count)}</b></p>${r.seasonal.winner?`<p>Победитель: <b>${esc(r.seasonal.winner)}</b></p>`:''}<div class="seasonal-roster">${r.items.map(p=>`<p><b>${esc(p.profile_name||p.telegram_name)}</b><small>${p.username?'@'+esc(p.username):'ID '+number(p.user_id)} · ${esc(new Date(p.joined_at).toLocaleString('ru-RU'))}</small></p>`).join('')||'<p class="sub">Список пуст.</p>'}</div><div class="pet-action-row">${offset?`<button class="secondary" data-seasonal-manage="${esc(id)}" data-offset="${Math.max(0,offset-20)}">← Назад</button>`:''}${r.has_more?`<button class="secondary" data-seasonal-manage="${esc(id)}" data-offset="${offset+20}">Далее →</button>`:''}</div>${!paid&&r.seasonal.status==='open'?`<button class="primary" id="seasonal-prepare-draw" ${!r.seasonal.count?'disabled':''}>Подвести итоги…</button>`:''}`);const b=document.querySelector('#seasonal-prepare-draw');if(b)b.onclick=()=>seasonalPrepare(id)}catch(e){toast(e.message)}finally{seasonalPending=false}}
-  async function seasonalPrepare(id){if(seasonalPending)return;seasonalPending=true;try{const q=await api('seasonal/draw/prepare',{id});sheet(`<span class="eyebrow">Подтверждение итогов</span><h2>Выбрать победителя?</h2><p class="sub">Среди ${number(q.count)} участников сервер случайно выберет победителя. Повторный выбор невозможен.</p><button class="primary" id="seasonal-confirm-draw">Завершить и выбрать победителя</button>`);document.querySelector('#seasonal-confirm-draw').onclick=async()=>{if(seasonalPending)return;seasonalPending=true;try{const result=await api('seasonal/draw/confirm',{token:q.token,id});data.seasonal_items=(await api('seasonal/items')).items;data.seasonal=data.seasonal_items[0];document.querySelector('#sheet').close();render();toast(result.message)}catch(e){toast(e.message)}finally{seasonalPending=false}}}catch(e){toast(e.message)}finally{seasonalPending=false}}
+  async function seasonalPrepare(id){if(seasonalPending)return;seasonalPending=true;try{const q=await api('seasonal/draw/prepare',{id});sheet(`<span class="eyebrow">Подтверждение итогов</span><h2>${esc(q.title)}</h2><p class="sub">Среди ${number(q.count)} участников сервер случайно выберет победителя. Повторный выбор невозможен.</p><button class="primary" id="seasonal-confirm-draw">Завершить и выбрать победителя</button>`);document.querySelector('#seasonal-confirm-draw').onclick=async()=>{if(seasonalPending)return;seasonalPending=true;try{const result=await api('seasonal/draw/confirm',{token:q.token,id});updateSeasonalItems((await api('seasonal/items')).items);document.querySelector('#sheet').close();render();toast(result.message)}catch(e){toast(e.message)}finally{seasonalPending=false}}}catch(e){toast(e.message)}finally{seasonalPending=false}}
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-seasonal-new'))seasonalEdit(null);if(b.hasAttribute('data-seasonal-edit'))seasonalEdit(b.dataset.seasonalEdit);if(b.hasAttribute('data-seasonal-action'))seasonalAction(b.dataset.seasonalAction);if(b.hasAttribute('data-seasonal-manage'))seasonalManage(b.dataset.seasonalManage,Number(b.dataset.offset||0))});
 
   function route(){const u=new URL(location.href),view=u.searchParams.get('view');if(view)return {view,category:u.searchParams.get('category')};try{if(location.hash.startsWith('#shop/'))return {view:'shop',category:decodeURIComponent(location.hash.slice(6))};const legacy=location.hash.match(/^#(home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:[&?]|$)/);return {view:legacy?.[1]||'home',category:null}}catch{return {view:'home',category:null}}}

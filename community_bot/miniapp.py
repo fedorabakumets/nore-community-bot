@@ -378,6 +378,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/seasonal', seasonal.status)
     app.router.add_get('/api/seasonal/items', seasonal.items_endpoint)
     app.router.add_post('/api/seasonal/save', seasonal.save_endpoint)
+    app.router.add_post('/api/seasonal/remove', seasonal.remove_endpoint)
     app.router.add_post('/api/seasonal/upload', seasonal.upload_image)
     app.router.add_get('/seasonal/media/{token}', seasonal.image)
     app.router.add_post('/api/seasonal/buy/prepare', seasonal.buy_prepare_endpoint)

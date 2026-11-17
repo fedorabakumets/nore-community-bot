@@ -16,6 +16,7 @@ from community_bot.seasonal import (
     join,
     manage,
     prepare_draw,
+    remove_item,
     save_item,
     snapshot,
     validate_metadata,
@@ -323,3 +324,63 @@ async def test_seasonal_image_upload_save_and_read(env):
     item["image"] = "/seasonal/media/" + "0" * 48
     with pytest.raises(ValueError, match="не найдено"):
         await save_item(env.db, env.settings, 7, item_id, item)
+
+
+
+async def test_paid_raffle_charges_for_one_entry_and_can_draw(env):
+    item = {"title": "Платный розыгрыш", "description": "Описание", "author": "Автор",
+            "mode": "paid_raffle", "price": 20, "author_url": "https://example.com",
+            "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    with pytest.raises(ValueError, match="недоступен"):
+        await join(env.db, 8, item_id)
+    quote = await buy_prepare(env.db, env.settings, 8, item_id)
+    assert quote["mode"] == "paid_raffle"
+    assert await buy_confirm(env.db, 8, quote["token"]) == item_id
+    with pytest.raises(ValueError, match="недоступен"):
+        await buy_prepare(env.db, env.settings, 8, item_id)
+    assert (await env.db.get_user(8))["cookies"] == 80
+    assert (await env.db.fetchone("SELECT amount FROM transactions WHERE kind='seasonal_entry'"))["amount"] == -20
+    draw_quote = await prepare_draw(env.db, env.settings, 7, item_id)
+    assert await draw(env.db, env.settings, 7, draw_quote["token"], item_id) == 8
+
+
+async def test_remove_original_raffle_blocks_pending_draw_and_survives_restart(env):
+    await join(env.db, 8)
+    quote = await prepare_draw(env.db, env.settings, 7)
+    with pytest.raises(web.HTTPForbidden):
+        await remove_item(env.db, env.settings, 8, ITEM)
+    await remove_item(env.db, env.settings, 7, ITEM)
+    await remove_item(env.db, env.settings, 7, ITEM)
+    await env.db.initialize()
+    assert await all_items(env.db, env.settings, 7) == []
+    assert await all_items(env.db, env.settings, 8) == []
+    with pytest.raises(ValueError, match="удалён"):
+        await prepare_draw(env.db, env.settings, 7)
+    with pytest.raises(ValueError, match="удалён"):
+        await draw(env.db, env.settings, 7, quote["token"])
+    with pytest.raises(ValueError, match="недоступен"):
+        await join(env.db, 9)
+    entry = await snapshot(env.db, env.settings, 8)
+    assert entry["joined"] and entry["winner"] is None
+    assert not await env.db.fetchall("SELECT * FROM notify_inbox")
+
+
+async def test_remove_sale_preserves_purchase_and_blocks_pending_payment(env):
+    item = {"title": "Товар", "description": "Описание", "author": "Автор",
+            "mode": "paid", "price": 20, "author_url": "https://example.com",
+            "image": "https://example.com/a.jpg", "links": []}
+    item_id = await save_item(env.db, env.settings, 7, None, item)
+    quote = await buy_prepare(env.db, env.settings, 8, item_id)
+    await buy_confirm(env.db, 8, quote["token"])
+    pending = await buy_prepare(env.db, env.settings, 9, item_id)
+    await remove_item(env.db, env.settings, 7, item_id)
+    with pytest.raises(ValueError, match="изменились"):
+        await buy_confirm(env.db, 9, pending["token"])
+    with pytest.raises(ValueError, match="удалён"):
+        await save_item(env.db, env.settings, 7, item_id, item)
+    assert (await env.db.get_user(8))["cookies"] == 80
+    assert (await env.db.get_user(9))["cookies"] == 100
+    assert [row["user_id"] for row in await env.db.fetchall(
+        "SELECT user_id FROM transactions WHERE kind='seasonal_purchase'"
+    )] == [8]

@@ -1,4 +1,4 @@
-"""Season-one physical collectible: free entry and one irreversible, server-side draw."""
+"""Seasonal shop cards, purchases, and server-side raffle draws."""
 
 from __future__ import annotations
 
@@ -59,6 +59,15 @@ async def one(conn, sql, args=()):
     return dict(row) if row else None
 
 
+def metadata_key(item_id):
+    return "seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id
+
+
+async def read_metadata(conn, item_id):
+    row = await one(conn, "SELECT value FROM bot_state WHERE key=?", (metadata_key(item_id),))
+    return json.loads(row["value"]) if row else {}
+
+
 def fingerprint(ids, item_id=ITEM):
     value = ids if item_id == ITEM else [item_id, ids]
     return hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
@@ -74,6 +83,7 @@ async def snapshot(db, settings, uid, item_id=ITEM):
             raise ValueError("Предмет не найден")
         user = await one(conn, "SELECT * FROM users WHERE user_id=?", (uid,))
         winner = await one(conn, "SELECT profile_name,telegram_name FROM users WHERE user_id=?", (row["winner_id"],))
+        metadata = await read_metadata(conn, item_id)
     result = {
         "id": item_id,
         "title": TITLE,
@@ -95,9 +105,7 @@ async def snapshot(db, settings, uid, item_id=ITEM):
         "won": row["winner_id"] == uid,
         "drawn_at": row["drawn_at"],
     }
-    raw = await db.get_bot_state("seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id)
-    if raw:
-        result.update(json.loads(raw))
+    result.update(metadata)
     return result
 
 
@@ -147,10 +155,10 @@ async def save_item(db, settings, uid, item_id, body):
     enabled = body.get("enabled", True)
     if type(enabled) is not bool:
         raise ValueError("Проверьте доступность предмета")
-    if mode not in ("raffle", "paid") or type(price) is not int or not 0 <= price <= 1000000:
+    if mode not in ("raffle", "paid_raffle", "paid") or type(price) is not int or not 0 <= price <= 1000000:
         raise ValueError("Проверьте способ получения и цену")
-    if mode == "paid" and price < 1 or mode == "raffle" and price != 0:
-        raise ValueError("Укажите цену платного предмета")
+    if (mode == "raffle" and price != 0) or (mode != "raffle" and price == 0):
+        raise ValueError("Проверьте цену для выбранного способа получения")
     fields = ("title", "description", "image", "author", "author_url", "links")
     metadata = validate_metadata({k: body.get(k) for k in fields})
     if metadata["image"].startswith("/seasonal/media/"):
@@ -163,13 +171,14 @@ async def save_item(db, settings, uid, item_id, body):
         item_id = "seasonal-" + secrets.token_hex(12)
     if not isinstance(item_id, str) or len(item_id) > 80:
         raise ValueError("Предмет не найден")
-    key = "seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id
+    key = metadata_key(item_id)
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
         row = await one(conn, "SELECT * FROM seasonal_raffles WHERE id=?", (item_id,))
-        old = await one(conn, "SELECT value FROM bot_state WHERE key=?", (key,))
         if row:
-            previous = json.loads(old["value"]) if old else {}
+            previous = await read_metadata(conn, item_id)
+            if previous.get("removed"):
+                raise ValueError("Предмет удалён")
             count = await one(conn, "SELECT COUNT(*) n FROM seasonal_entries WHERE raffle_id=?", (item_id,))
             if (count["n"] or row["status"] != "open") and previous.get("mode", "raffle") != mode:
                 raise ValueError("Нельзя менять способ получения после первой заявки или покупки")
@@ -184,30 +193,51 @@ async def save_item(db, settings, uid, item_id, body):
     return item_id
 
 
+async def remove_item(db, settings, uid, item_id):
+    if not await can_manage(db, settings, uid):
+        raise web.HTTPForbidden()
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        if not await one(conn, "SELECT 1 FROM seasonal_raffles WHERE id=?", (item_id,)):
+            raise ValueError("Предмет не найден")
+        metadata = await read_metadata(conn, item_id)
+        if metadata.get("removed"):
+            return
+        metadata.update(removed=True, enabled=False)
+        await conn.execute(
+            "INSERT INTO bot_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (metadata_key(item_id), json.dumps(metadata, ensure_ascii=False)),
+        )
+        await conn.commit()
+
+
 async def all_items(db, settings, uid):
     rows = await db.fetchall("SELECT key FROM bot_state WHERE key LIKE 'seasonal_item:%' ORDER BY key")
     items = [await snapshot(db, settings, uid, item_id) for item_id in
              [ITEM, *(row["key"].removeprefix("seasonal_item:") for row in rows)]]
-    return [item for item in items if item.get("enabled", True) or item["can_manage"]]
+    return [item for item in items
+            if not item.get("removed") and (item.get("enabled", True) or item["can_manage"])]
 
 
 async def buy_prepare(db, settings, uid, item_id):
     item = await snapshot(db, settings, uid, item_id)
-    if item.get("mode") != "paid" or not item.get("enabled", True) or item["status"] != "open" or item["joined"]:
-        raise ValueError("Предмет недоступен для покупки")
+    if (item.get("mode") not in ("paid", "paid_raffle") or not item.get("enabled", True)
+            or item.get("removed") or item["status"] != "open" or item["joined"]):
+        raise ValueError("Предмет недоступен")
     if not item["eligible"]:
         raise ValueError("Заполни профиль на 100% в ЛК")
-    key = "seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id
+    key = metadata_key(item_id)
     raw = await db.get_bot_state(key)
     if not raw:
         raise ValueError("Предмет недоступен для покупки")
     metadata = json.loads(raw)
-    if metadata.get("mode") != "paid" or type(metadata.get("price")) is not int or metadata["price"] < 1:
+    if (metadata.get("mode") not in ("paid", "paid_raffle") or not metadata.get("enabled", True)
+            or metadata.get("removed") or type(metadata.get("price")) is not int or metadata["price"] < 1):
         raise ValueError("Условия изменились. Откройте предмет заново")
     revision = hashlib.sha256(raw.encode()).hexdigest()
     token = await db.create_wallet_intent(uid, item_id, metadata["price"],
                                           payload={"seasonal": True, "revision": revision})
-    return {"token": token, "price": metadata["price"], "title": metadata["title"]}
+    return {"token": token, "price": metadata["price"], "title": metadata["title"], "mode": metadata["mode"]}
 
 
 async def buy_confirm(db, uid, token):
@@ -221,15 +251,16 @@ async def buy_confirm(db, uid, token):
         payload = json.loads(intent["payload_json"])
         if not payload.get("seasonal"):
             raise ValueError("Некорректное подтверждение")
-        key = "seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id
+        key = metadata_key(item_id)
         raw = await one(conn, "SELECT value FROM bot_state WHERE key=?", (key,))
         item = json.loads(raw["value"]) if raw else {}
         raffle = await one(conn, "SELECT status FROM seasonal_raffles WHERE id=?", (item_id,))
         existing = await one(conn, "SELECT 1 FROM seasonal_entries WHERE raffle_id=? AND user_id=?", (item_id, uid))
         user = await one(conn, "SELECT * FROM users WHERE user_id=?", (uid,))
-        if (not raw or not item.get("enabled", True)
+        if (not raw or not item.get("enabled", True) or item.get("removed")
                 or hashlib.sha256(raw["value"].encode()).hexdigest() != payload.get("revision")
-                or not raffle or raffle["status"] != "open" or existing or item.get("mode") != "paid"
+                or not raffle or raffle["status"] != "open" or existing
+                or item.get("mode") not in ("paid", "paid_raffle")
                 or item.get("price") != intent["price"] or not user or not profile_is_complete(user)):
             raise ValueError("Условия изменились. Откройте предмет заново")
         changed = await conn.execute("UPDATE users SET cookies=cookies-?,updated_at=? "
@@ -237,8 +268,9 @@ async def buy_confirm(db, uid, token):
         if not changed.rowcount:
             raise ValueError("Недостаточно печенек")
         await conn.execute("INSERT INTO seasonal_entries VALUES(?,?,?)", (item_id, uid, now))
+        kind = "seasonal_entry" if item["mode"] == "paid_raffle" else "seasonal_purchase"
         await conn.execute("INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES(?,?,?,?,?)",
-                           (uid, -intent["price"], "seasonal_purchase", item["title"], now))
+                           (uid, -intent["price"], kind, item["title"], now))
         await conn.execute("UPDATE wallet_intents SET status='completed',completed_at=? WHERE token=?", (now, token))
         await conn.commit()
     return item_id
@@ -249,10 +281,9 @@ async def join(db, uid, item_id=ITEM):
         await conn.execute("BEGIN IMMEDIATE")
         row = await one(conn, "SELECT status FROM seasonal_raffles WHERE id=?", (item_id,))
         existing = await one(conn, "SELECT 1 FROM seasonal_entries WHERE raffle_id=? AND user_id=?", (item_id, uid))
-        metadata = await one(conn, "SELECT value FROM bot_state WHERE key=?",
-                             ("seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id,))
-        config = json.loads(metadata["value"]) if metadata else {}
-        if not row or not config.get("enabled", True) or config.get("mode") == "paid":
+        config = await read_metadata(conn, item_id)
+        if (not row or config.get("removed") or not config.get("enabled", True)
+                or config.get("mode", "raffle") != "raffle"):
             raise ValueError("Розыгрыш недоступен")
         if existing:
             return "Вы участвуете. Одна заявка — один шанс"
@@ -274,9 +305,10 @@ async def prepare_draw(db, settings, uid, item_id=ITEM):
         if not await can_manage(db, settings, uid):
             raise web.HTTPForbidden()
         row = await one(conn, "SELECT status FROM seasonal_raffles WHERE id=?", (item_id,))
-        raw = await one(conn, "SELECT value FROM bot_state WHERE key=?",
-                        ("seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id,))
-        if raw and json.loads(raw["value"]).get("mode") == "paid":
+        metadata = await read_metadata(conn, item_id)
+        if metadata.get("removed"):
+            raise ValueError("Предмет удалён")
+        if metadata.get("mode") == "paid":
             raise ValueError("Это платный предмет, а не розыгрыш")
         ids = [
             r[0]
@@ -296,7 +328,7 @@ async def prepare_draw(db, settings, uid, item_id=ITEM):
             (token, uid, fingerprint(ids, item_id), time.time() + 300)
         )
         await conn.commit()
-    return {"token": token, "count": len(ids), "title": TITLE}
+    return {"token": token, "count": len(ids), "title": metadata.get("title", TITLE)}
 
 
 async def draw(db, settings, uid, token, item_id=ITEM):
@@ -310,9 +342,10 @@ async def draw(db, settings, uid, token, item_id=ITEM):
             raise web.HTTPForbidden()
         intent = await one(conn, "SELECT * FROM seasonal_draw_tokens WHERE token=? AND actor_id=?", (token, uid))
         raffle = await one(conn, "SELECT * FROM seasonal_raffles WHERE id=?", (item_id,))
-        raw = await one(conn, "SELECT value FROM bot_state WHERE key=?",
-                        ("seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id,))
-        if raw and json.loads(raw["value"]).get("mode") == "paid":
+        metadata = await read_metadata(conn, item_id)
+        if metadata.get("removed"):
+            raise ValueError("Предмет удалён")
+        if metadata.get("mode") == "paid":
             raise ValueError("Это платный предмет, а не розыгрыш")
         if not raffle or raffle["status"] != "open":
             raise ValueError("Победитель уже определён. Повторный выбор запрещён")
@@ -335,9 +368,7 @@ async def draw(db, settings, uid, token, item_id=ITEM):
             (winner, now, uid, len(ids), fingerprint(ids, item_id), item_id),
         )
         await conn.execute("UPDATE seasonal_draw_tokens SET consumed=1 WHERE token=?", (token,))
-        metadata = await one(conn, "SELECT value FROM bot_state WHERE key=?",
-                             ("seasonal_item_metadata" if item_id == ITEM else "seasonal_item:" + item_id,))
-        title = json.loads(metadata["value"])["title"] if metadata else TITLE
+        title = metadata.get("title", TITLE)
         await conn.execute(
             "INSERT INTO notify_inbox(user_id,channel,text,created_at,read,delivered) VALUES(?,'shop',?,?,0,0)",
             (
@@ -355,7 +386,10 @@ async def status(request):
     from community_bot.miniapp import actor
 
     user = await actor(request)
-    return web.json_response(await snapshot(request.app["db"], request.app["settings"], user["user_id"]))
+    item = await snapshot(request.app["db"], request.app["settings"], user["user_id"])
+    if item.get("removed"):
+        raise web.HTTPNotFound()
+    return web.json_response(item)
 
 
 async def items_endpoint(request):
@@ -409,6 +443,18 @@ async def save_endpoint(request):
     return web.json_response({"items": await all_items(request.app["db"], request.app["settings"], user["user_id"])})
 
 
+async def remove_endpoint(request):
+    from community_bot.miniapp import actor
+
+    user = await actor(request)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("id"), str):
+        raise ValueError("Предмет не найден")
+    db, settings, uid = request.app["db"], request.app["settings"], user["user_id"]
+    await remove_item(db, settings, uid, body["id"])
+    return web.json_response({"items": await all_items(db, settings, uid)})
+
+
 async def buy_prepare_endpoint(request):
     from community_bot.miniapp import actor
 
@@ -426,9 +472,16 @@ async def buy_confirm_endpoint(request):
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("token"), str):
         raise ValueError("Открой подтверждение покупки заново")
-    await buy_confirm(request.app["db"], user["user_id"], body["token"])
-    return web.json_response({"message": "Покупка готова! Администрация свяжется с вами в ближайшее время.",
-                              "items": await all_items(request.app["db"], request.app["settings"], user["user_id"])})
+    db, settings, uid = request.app["db"], request.app["settings"], user["user_id"]
+    item_id = await buy_confirm(db, uid, body["token"])
+    async with db.connect() as conn:
+        metadata = await read_metadata(conn, item_id)
+    message = (
+        "Заявка оплачена! Вы участвуете в розыгрыше."
+        if metadata["mode"] == "paid_raffle"
+        else "Покупка готова! Администрация свяжется с вами в ближайшее время."
+    )
+    return web.json_response({"message": message, "items": await all_items(db, settings, uid)})
 
 
 async def participate(request):

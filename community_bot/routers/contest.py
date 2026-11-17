@@ -432,7 +432,8 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
                                      'WHERE e.raffle_id=? ORDER BY e.joined_at,u.user_id LIMIT 11 OFFSET ?',
                                      (ITEM, offset))
             result = await snapshot(db, settings, uid)
-            text = f'<b>Участники · {html.escape(result["title"])}</b>\n\n' + ('\n'.join(
+            roster = 'Покупатели' if result.get('mode') == 'paid' else 'Участники'
+            text = f'<b>{roster} · {html.escape(result["title"])}</b>\n\n' + ('\n'.join(
                 f'{offset+i+1}. {html.escape(row["profile_name"] or row["telegram_name"])}'
                 + (f' · @{html.escape(row["username"])}' if row['username'] else '')
                 for i, row in enumerate(rows[:10])) or 'Пока нет заявок')
@@ -442,13 +443,22 @@ async def admin_seasonal(callback: CallbackQuery, db: Database, settings: Settin
                 buttons.append([ibtn('Далее →', f'admin:season:list:{offset+10}')])
         else:
             result = await snapshot(db, settings, uid)
-            mode = 'покупка за печеньки' if result.get('mode') == 'paid' else 'бесплатный розыгрыш физической игрушки'
+            mode = {
+                'paid': 'товар за печеньки',
+                'paid_raffle': 'платный розыгрыш',
+            }.get(result.get('mode'), 'бесплатный розыгрыш физической игрушки')
+            sale = result.get('mode') == 'paid'
+            roster = 'Покупатели' if sale else 'Участники'
             text = (f'<b>{html.escape(result["title"])}</b>\nСезон 1 · {mode}\n\n'
-                    f'Участников: {result["count"]}\n'
-                    + ('Идёт запись.' if result['status']=='open' else
-                       f'Победитель: {html.escape(result["winner"] or "итог сохранён")}'))
-            buttons.append([ibtn('Участники', 'admin:season:list:0')])
-            if result['status']=='open' and result.get('mode') != 'paid':
+                    f'{roster}: {result["count"]}')
+            if result.get('removed'):
+                text += '\nКарточка удалена из магазина.'
+            elif result['status'] == 'open':
+                text += '\nПродажа открыта.' if sale else '\nИдёт запись.'
+            if result['winner']:
+                text += f'\nПобедитель: {html.escape(result["winner"])}'
+            buttons.append([ibtn(roster, 'admin:season:list:0')])
+            if result['status']=='open' and not sale and not result.get('removed'):
                 buttons.append([ibtn('Подвести итоги…', 'admin:season:prepare')])
     except ValueError as error:
         await callback.answer(str(error), show_alert=True)
