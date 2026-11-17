@@ -303,7 +303,8 @@ window.NoraWorld = (() => {
     if(challenge&&scenery.lobby){scenery.lobby.add(challenge.portal);scene.add(challenge.course);}
     const tavernOffset=window.NoraScenery.tavernOffset??0;
     const {portalZ,lobbyDeck,parkourStart,parkourFinish}=window.NoraScenery;
-    let inside=false,inLobby=false,inChallenge=false,zone=scenery.outdoorZone;
+    const portalArrivalOffset=2.2;
+    let inside=false,inLobby=true,inChallenge=false,zone;
     let challengeState=null;
     const atmosphere=createAtmosphere(T,scene,geometry);
     const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
@@ -340,9 +341,8 @@ window.NoraWorld = (() => {
       }
       return inLobby||inChallenge?0:phase.daylight;
     }
-    updateLighting(Date.now());
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
-    player.scale.setScalar(.32);player.position.set(0,.017,5.5+tavernOffset);player.rotation.y=Math.PI;scene.add(player);
+    player.scale.setScalar(.32);player.position.set(0,.017,portalZ.lobby-portalArrivalOffset);player.rotation.y=Math.PI;scene.add(player);
     const locationLabel=root.querySelector('.nora-world-bar small');
     const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge);
     // Soft contact patches without costly real-time shadow maps.
@@ -457,11 +457,20 @@ window.NoraWorld = (() => {
       else if(finished)challengeHint.textContent='Приз за первое прохождение уже получен.';
       else challengeHint.textContent=observatory.instructions[Math.min(state.checkpoint,3)];
     }
+    function syncLocation(){
+      const home=!inside&&!inLobby&&!inChallenge;
+      zone=inChallenge?challenge.zone:inside?scenery.indoorZone:inLobby?scenery.lobbyZone:scenery.outdoorZone;
+      scenery.indoor.visible=inside;scenery.outdoor.visible=home;scenery.lobby.visible=inLobby;
+      if(challenge)challenge.course.visible=inChallenge;
+      landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
+      locationLabel.textContent=inChallenge?'ОБСЕРВАТОРИЯ':inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
+      canvas.setAttribute('aria-label',inChallenge?observatory.title:inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
+      lightingAt=-Infinity;updateLighting(Date.now());
+    }
     function switchChallenge(entering){
       inChallenge=entering;inLobby=!entering;challengeState=null;
       lobby.setRoom(entering?observatory.room:null);
-      scenery.lobby.visible=inLobby;challenge.course.visible=inChallenge;
-      zone=entering?challenge.zone:scenery.lobbyZone;
+      syncLocation();
       challengeHud.hidden=!entering;
       if(entering){
         respawnChallenge(0);
@@ -472,11 +481,8 @@ window.NoraWorld = (() => {
         jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
         reset();companion.reset();records?.refresh();
       }
-      locationLabel.textContent=entering?'ОБСЕРВАТОРИЯ':'ЛОББИ';
-      canvas.setAttribute('aria-label',entering?observatory.title:'Общее лобби Норы');
       action.hidden=true;action.blur();
       for(const g of gusts)g.age=1;
-      lightingAt=-Infinity;updateLighting(Date.now());
     }
     if(challenge)on(challengeHud.querySelector('button'),'click',()=>{
       if(inChallenge)switchChallenge(false);
@@ -499,22 +505,15 @@ window.NoraWorld = (() => {
       if(throughPortal){
         inLobby=!inLobby;
         if(!inLobby)lobby.leave().then(()=>records?.refresh());
-        player.position.set(0,.017,portalZ[inLobby?'lobby':'home']-2.2);
+        player.position.set(0,.017,portalZ[inLobby?'lobby':'home']-portalArrivalOffset);
         player.rotation.y=Math.PI;yaw=targetYaw=0;
       }else{
         inside=!inside;sounds?.door(inside);
         player.position.set(0,.017,inside?3.7:3.6+tavernOffset);
         player.rotation.y=inside?Math.PI:0;
       }
-      const home=!inside&&!inLobby;
-      zone=inside?scenery.indoorZone:inLobby?scenery.lobbyZone:scenery.outdoorZone;
-      scenery.indoor.visible=inside;scenery.outdoor.visible=home;
-      if(scenery.lobby)scenery.lobby.visible=inLobby;
-      landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
-      lightingAt=-Infinity;updateLighting(Date.now());
+      syncLocation();
       jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;action.hidden=true;action.blur();
-      locationLabel.textContent=inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
-      canvas.setAttribute('aria-label',inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
       for(const g of gusts)g.age=1;companion.reset();reset();
     });
     on(document,'visibilitychange',()=>{if(document.hidden&&!inChallenge)lobby.leave();});
@@ -541,6 +540,7 @@ window.NoraWorld = (() => {
       wind.instanceMatrix.needsUpdate=true;
     }
     const target=new T.Vector3(), offset=new T.Vector3(), direction=new T.Vector3();
+    syncLocation();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
     function tick(time){

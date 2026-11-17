@@ -83,7 +83,8 @@ try {
   tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null}), sounds, mobile=false, realScenery=false, equipped=null, observatory=null) {
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,warmup=30}={}) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
     window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
@@ -91,7 +92,11 @@ try {
     let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
     const renderer = {ratio:1,resizes:0,setPixelRatio(value){this.ratio=value;}, setSize(w,h){this.width=w;this.height=h;this.resizes++;}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
-    window.NoraScenery = {create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), outdoorZone:zone, indoorZone:zone, dispose(){}})};
+    window.NoraScenery = {
+      portalZ:{home:6.75,lobby:9.75}, lobbyDeck:{x:0,z:-3},
+      create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), lobby:new Three.Group(),
+        outdoorZone:zone, indoorZone:zone, lobbyZone:zone, updatePortal(){}, dispose(){}}),
+    };
     let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
     const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
       auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, toast:()=>{}, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
@@ -110,12 +115,18 @@ try {
     const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes',wings:equipped}, sounds);
     for(let i=0;i<view;i++)root.querySelector('.nora-world-view').emit('click');
     const frames = count => {for(let i=0;i<count;i++)frame(time+=1000/fps);};
-    frames(30);
+    await flush();
+    frames(warmup);
     const key = (code, down=true) => window.emit(down?'keydown':'keyup',{code});
     const joystick = root.querySelector('.nora-world-joystick');
     const stick = (x,z,down=false) => joystick.emit(down?'pointerdown':'pointermove',{pointerId:1,clientX:60+x*36,clientY:60+z*36});
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
+  }
+  function goToIsland(world){
+    world.player.position.z=world.window.NoraScenery.portalZ.lobby-1.15;
+    world.root.querySelector('.nora-world-action').emit('click');
+    world.frames(1);
   }
   const povWorld=await setup();
   const fullDistance=povWorld.camera().position.distanceTo(povWorld.player.position);
@@ -161,6 +172,7 @@ try {
   const sounds={playing:value=>soundEvents.push(['playing',value]),spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
     land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};
   const audioWorld=await setup(0,60,undefined,sounds);
+  goToIsland(audioWorld);
   audioWorld.key('Space'); audioWorld.frames(60);
   assert.ok(soundEvents.some(e=>e[0]==='jump'&&!e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='land'&&!e[1]));
@@ -303,6 +315,7 @@ try {
     assert.equal(peaks[1],peaks[2]);assert.equal(peaks[2],peaks[3]);
   }
   const ceiling=await setup(0,60,undefined,undefined,false,true,'flame');
+  goToIsland(ceiling);
   ceiling.player.position.set(0,.017,3.6+ceiling.window.NoraScenery.tavernOffset);
   ceiling.root.querySelector('.nora-world-action').emit('click');
   ceiling.key('Space');ceiling.frames(15);ceiling.key('Space');
@@ -315,6 +328,7 @@ try {
   assert.equal(ceiling.player.position.y,.017);
   ceiling.stop();
   const env=await setup();
+  goToIsland(env);
   const api=env.world;
   assert.equal(api.timeOfDay(Date.UTC(2026,10,2,0)).hour,3,'Moscow UTC+3');
   assert.equal(api.timeOfDay(Date.UTC(2026,10,2,22)).hour,1,'Moscow date rollover');
@@ -389,7 +403,6 @@ try {
   assert.ok(runner.player.getObjectByName('torso').rotation.x<.04,'walk pose returns smoothly');
   runner.root.querySelector('.nora-world-sprint').emit('click');runner.frames(30);
   assert.ok(runner.delta(30).length()>walking*1.65,'touch sprint accelerates');runner.stop();
-  const flush=()=>new Promise(resolve=>setImmediate(resolve));
   for(const species of ['cat','dog','fox','raccoon','dragon']) {
     let current={name:'<Друг>',species,species_label:species,hunger:72,thirst:83,enabled:true,expedition_until:null};
     const calls=[];
@@ -422,6 +435,7 @@ try {
     assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'away pet disappears');
     panel.close();current={...current,expedition_until:null};h.frames(1900);await flush();h.frames(1);
     assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns after server sync');
+    h.player.position.x=0;goToIsland(h);
     h.player.position.set(0,.017,3.6);h.root.querySelector('.nora-world-action').emit('click');h.frames(1);
     assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');
     h.stop();assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'pet disposed');
@@ -438,7 +452,7 @@ try {
   assert.ok(separation<3.5&&separation>1.3,'pet catches up from far away but keeps a comfortable distance');
   wander.stop();console.log('NORA companion: relaxed wandering, delayed following and distance passed.');
   let resolvePet;
-  const late=await setup(0,60,()=>new Promise(resolve=>{resolvePet=resolve;}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
+  const late=await setup(0,60,path=>path==='nora-game/pet'?new Promise(resolve=>{resolvePet=resolve;}):Promise.resolve({players:[]}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
   assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
   console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
   const exchanges=[];
@@ -453,12 +467,14 @@ try {
       nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
       x:2+remoteTime*.003+remoteOffset,y:.017+height,z:4,heading:remoteTime<750?3.13:-3.13,grounded:height===0,time:remoteTime,
     }]};
-  },undefined,false,true);
+  },undefined,false,true,null,{warmup:0});
   const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
   assert.equal(lobbyAction.hidden,true,'portal button only appears nearby');
-  lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
-  assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
-  lobbyAction.emit('click');remoteTime=1000/60*32;lobbyWorld.frames(1);await flush();
+  assert.equal(lobbyWorld.scene().background.getHexString(),'171725','first frame has lobby lighting');
+  assert.equal(lobbyWorld.root.querySelector('.nora-world-bar small').textContent,'ЛОББИ');
+  const [firstPose]=exchanges;
+  assert.deepEqual([firstPose.x,firstPose.y,firstPose.z],[0,.017,7.55],'first pose is sent from the lobby spawn');
+  assert.equal(firstPose.room,undefined,'first pose joins the shared lobby');
   const hasPeer=()=>lobbyWorld.scene().children.find(node=>node.children.some(child=>child.isSprite));
   assert.ok(hasPeer(),'authenticated lobby snapshot creates a labeled avatar');
   let previousX=hasPeer().position.x;
@@ -503,6 +519,10 @@ try {
   lobbyAction.emit('click');await flush();
   assert.ok(exchanges.at(-1).leave,'returning to the island leaves the shared lobby');
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
+  lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
+  assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
+  lobbyAction.emit('click');lobbyWorld.frames(1);
+  assert.equal(lobbyWorld.player.position.z,firstPose.z,'returning through the portal shares the initial spawn');
   lobbyWorld.stop();
   console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
   // Delay all server replies: outgoing poses must still stream at 80 ms.
@@ -517,8 +537,7 @@ try {
     send(raw){this.sent.push(JSON.parse(raw));}
     close(){this.readyState=3;this.onclose?.();}
   };
-  streamed.player.position.set(0,.017,5.6);streamed.frames(1);
-  streamed.root.querySelector('.nora-world-action').emit('click');streamed.frames(1);await flush();
+  streamed.frames(1);await flush();
   const ws=sockets[0];ws.readyState=1;ws.onopen();
   assert.deepEqual(ws.sent[0],{auth:'test-auth'},'credentials are in the first frame, never the URL');
   streamed.frames(60);
@@ -536,7 +555,6 @@ try {
     nickname:'Slow',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
     x:slowTime*.0017,y:.017,z:4,heading:0,grounded:true,time:Math.floor(slowTime/1100)*1100,
   }]:[]}),undefined,false,true);
-  slow.player.position.set(0,.017,5.6);slow.frames(1);slow.root.querySelector('.nora-world-action').emit('click');
   let previous=null,movingFrames=0,maxStep=0,legMin=Infinity,legMax=-Infinity;
   for(let i=0;i<240;i++){
     slowTime+=1000/60;slow.frames(1);await flush();
@@ -554,7 +572,6 @@ try {
 
   const parkour=await setup(0,60,undefined,undefined,false,true);
   const parkourAction=parkour.root.querySelector('.nora-world-action');
-  parkour.player.position.set(0,.017,5.6);parkour.frames(1);parkourAction.emit('click');
   const plate=parkour.scene().getObjectByName('nora-parkour-plate');
   const finish=parkour.scene().getObjectByName('nora-parkour-finish');
   const raisedY=plate.position.y;
@@ -603,7 +620,7 @@ try {
     code:await readFile(new URL('nora-observatory.js',web),'utf8'),
     layout:JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8')),
   };
-  const course=await setup(0,60,undefined,undefined,true,true,'raven',observatory);
+  const course=await setup(0,60,undefined,undefined,true,true,'raven',{observatory});
   const {portal,platforms,checkpoints}=observatory.layout;
   const courseHud=course.root.querySelector('.nora-observatory-hud');
   const courseAction=course.root.querySelector('.nora-world-action');
@@ -623,7 +640,7 @@ try {
         challenge:{checkpoint,reward:checkpoint===4?50:null,reset:false}})});
     }
   };
-  course.player.position.set(0,.017,5.6);course.frames(1);courseAction.emit('click');course.frames(2);
+  course.frames(2);
   assert.equal(course.scene().getObjectByName('nora-observatory-portal').parent.visible,true);
   course.player.position.set(portal.x,.017,portal.z+1);
   course.frames(1);assert.equal(courseAction.textContent,'Звёздная обсерватория');
