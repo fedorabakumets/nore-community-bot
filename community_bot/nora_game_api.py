@@ -224,7 +224,6 @@ LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi
 # Ground offset plus the ordinary apex and, with wings, the 6.8-speed second launch.
 LOBBY_HEIGHT = .8
 LOBBY_WING_HEIGHT = 2.56
-LOBBY_PLATFORM_HEIGHT = 1.7  # Parkour finish in nora-scenery.js.
 
 
 async def settle_lobby_record(app):
@@ -312,7 +311,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if not profile['nickname'] or not profile['outfit']:
         raise ValueError('Сначала создай персонажа')
     height = body.get('y')
-    maximum = LOBBY_PLATFORM_HEIGHT + (LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT)
+    maximum = LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT
     minimum = 0
     if room:
         minimum, maximum = limits['minY'], limits['maxY']
@@ -336,10 +335,19 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     challenge = None
     if room:
         pose['room'] = room
-        challenge = await nora_observatory.progress(app, user_id, session, pose, now)
+        interaction = body.get('interaction')
+        if interaction is not None and (
+            not isinstance(interaction, dict)
+            or not isinstance(interaction.get('id'), str)
+            or interaction['id'] not in nora_observatory.LAYOUT['relics']
+            or type(interaction.get('serial')) is not int
+            or not 0 < interaction['serial'] <= 1_000_000
+        ):
+            raise ValueError('Проверь действие в воспоминании')
+        challenge = await nora_observatory.progress(app, user_id, session, pose, now, interaction)
         if challenge['reset']:
-            x, z, top, _, _ = nora_observatory.CHECKPOINTS[challenge['checkpoint']]
-            pose.update(x=x, y=top + .017, z=z, grounded=True, sprinting=False)
+            x, z = nora_observatory.SAFE[challenge['checkpoint']]
+            pose.update(x=x, y=.017, z=z, grounded=True, sprinting=False)
     else:
         attempts = app.get('nora_observatory')
         if attempts and user_id in attempts and attempts[user_id].session == session:

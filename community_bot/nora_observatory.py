@@ -1,4 +1,4 @@
-"""Per-player checkpoints and one-time wallet rewards for the Observatory."""
+"""Shared storm hazards, personal progress and the one-time Memory reward."""
 
 import json
 import math
@@ -10,15 +10,26 @@ from community_bot.database import Database, utcnow
 LAYOUT = json.loads((Path(__file__).with_name('web') / 'nora-observatory.json').read_text(encoding='utf-8'))
 ROOM = 'observatory'
 KIND = 'nora_observatory'
-CHECKPOINTS = [LAYOUT['platforms'][index] for index in LAYOUT['checkpoints']]
+SAFE = LAYOUT['safe']
+FINISH = len(SAFE) - 1
 ATTEMPT_TTL = 600
 
 
-def on_platform(pose, platform, margin=.14):
-    x, z, top, width, depth = platform
-    return (pose.get('grounded') is True and abs(pose['y'] - .017 - top) <= .04
-            and abs(pose['x'] - x) <= width / 2 + margin
-            and abs(pose['z'] - z) <= depth / 2 + margin)
+def near(pose, point, radius):
+    return math.hypot(pose['x'] - point[0], pose['z'] - point[1]) <= radius
+
+
+def danger_at(pose, now):
+    for x, z, radius, period, offset in LAYOUT['strikes']:
+        phase = (now + offset) % period
+        if period - .72 <= phase < period - .10 and near(pose, (x, z), radius - .12):
+            return 'Удар молнии. Ты снова у контрольной точки.'
+    for z, span, period, offset, radius in LAYOUT['guardians']:
+        phase = (now + offset) % period / period
+        x = span * (1 - 4 * abs(.5 - phase))
+        if near(pose, (x, z), radius - .12):
+            return 'Страж настиг тебя. Выжди, пока он пройдёт мимо.'
+    return ''
 
 
 @dataclass
@@ -27,42 +38,74 @@ class Attempt:
     seen: float
     checkpoint: int = 0
     last: dict | None = None
-    airborne_since: float = 0
-    lift_height: float = 0
+    bells: int = 0
+    action: int = 0
+    notice: str = ''
+    notice_until: float = 0
+    ritual_since: float | None = None
     reward: int | None = None
 
-    def advance(self, pose, now):
-        landed = any(on_platform(pose, platform) for platform in LAYOUT['platforms'])
+    def advance(self, pose, now, interaction=None):
         previous = self.last
-        elapsed = max(0, min(1.2, now - self.seen))
+        elapsed = min(1.2, max(0, now - self.seen))
+        if now - self.seen > 1.2:
+            self.ritual_since = None
         self.seen = now
-        # Respawns can only snap to the current safe landing. A new run starts there too.
-        if on_platform(pose, CHECKPOINTS[self.checkpoint]):
-            self.last = pose
-            self.airborne_since, self.lift_height = now, pose['y']
+        if now >= self.notice_until:
+            self.notice = ''
+        if interaction is not None and interaction['serial'] > self.action:
+            self.action = interaction['serial']
+        else:
+            interaction = None
+        if self.checkpoint == FINISH:
             return True
-        if previous is None or (pose.get('grounded') and not landed):
-            self.last = None
+        grounded = pose.get('grounded') is True and pose['y'] <= .06
+        if previous is None and not (grounded and near(pose, SAFE[self.checkpoint], 1.1)):
             return False
-        distance = math.hypot(pose['x'] - previous['x'], pose['z'] - previous['z'])
-        if (distance > 3.5 * elapsed + .34
-                or pose['y'] - previous['y'] > 4.6 * elapsed + .25
-                or pose['y'] > self.lift_height + .85
-                or (not landed and now - self.airborne_since > 1.5)):
+        danger = danger_at(pose, now)
+        gate = LAYOUT['gates'][self.checkpoint] if self.checkpoint < len(LAYOUT['gates']) else None
+        crossed_gate = gate is not None and pose['z'] < gate + .25
+        blocked = any(abs(pose['x'] - x) < width / 2 - .05 and abs(pose['z'] - z) < depth / 2 - .05
+                      for x, z, width, depth in LAYOUT['walls'])
+        moved_too_far = previous is not None and not near(pose, (previous['x'], previous['z']), 3.5 * elapsed + .34)
+        if danger or crossed_gate or blocked or moved_too_far:
             self.last = None
+            self.ritual_since = None
+            if self.checkpoint == 1:
+                self.bells = 0
+            if danger:
+                self.notice = danger
+                self.notice_until = now + 3.5
             return False
-        for x, z, y, width, offset in LAYOUT['beams']:
-            phase = (now + offset) % 4
-            if (1.15 < phase < 2.52 and abs(pose['x'] - x) < width / 2 - .08
-                    and abs(pose['z'] - z) < .12 and pose['y'] < y + .31):
-                self.last = None
-                return False
         self.last = pose
-        if landed:
-            self.airborne_since, self.lift_height = now, pose['y']
-        if self.checkpoint < len(CHECKPOINTS) - 1 and on_platform(pose, CHECKPOINTS[self.checkpoint + 1]):
-            self.checkpoint += 1
+        if interaction and grounded:
+            relic = interaction['id']
+            if near(pose, LAYOUT['relics'][relic], 1.55):
+                self.use(relic, now)
+        if self.checkpoint == FINISH - 1 and grounded and near(pose, SAFE[FINISH], 1.28):
+            if self.ritual_since is None:
+                self.ritual_since = now
+                self.notice = ''
+            if now - self.ritual_since >= LAYOUT['ritualSeconds']:
+                self.checkpoint = FINISH
+        else:
+            self.ritual_since = None
         return True
+
+    def use(self, relic, now):
+        if (self.checkpoint, relic) in ((0, 'seal'), (2, 'lantern')):
+            self.checkpoint += 1
+            self.notice = ''
+        elif self.checkpoint == 1 and relic in LAYOUT['bellOrder']:
+            if relic == LAYOUT['bellOrder'][self.bells]:
+                self.bells += 1
+                self.notice = ''
+                if self.bells == len(LAYOUT['bellOrder']):
+                    self.checkpoint += 1
+            else:
+                self.bells = 0
+                self.notice = 'Звон оборвался. Начни порядок заново.'
+                self.notice_until = now + 3.5
 
 
 async def claim(database, user_id):
@@ -79,18 +122,20 @@ async def claim(database, user_id):
         return amount
 
 
-async def progress(app, user_id, session, pose, now):
+async def progress(app, user_id, session, pose, now, interaction=None):
     attempts = app['nora_observatory']
     run = attempts.get(user_id)
     if run is None or run.session != session or now - run.seen > ATTEMPT_TTL:
         for stale in [uid for uid, active in attempts.items() if now - active.seen > ATTEMPT_TTL]:
             del attempts[stale]
         run = attempts[user_id] = Attempt(session, now)
-    valid = run.advance(pose, now)
+    valid = run.advance(pose, now, interaction)
     # Concurrent HTTP retries still share the same durable award. Preserve the first
     # award confirmation in this run if a duplicate also reaches the transaction.
-    if run.checkpoint == len(CHECKPOINTS) - 1 and run.reward is None:
+    if run.checkpoint == FINISH and run.reward is None:
         amount = await claim(app['db'], user_id)
         if amount or run.reward is None:
             run.reward = amount
-    return {'checkpoint': run.checkpoint, 'reward': run.reward, 'reset': not valid}
+    hold = None if run.ritual_since is None else max(0, math.ceil(LAYOUT['ritualSeconds'] - now + run.ritual_since))
+    return {'checkpoint': run.checkpoint, 'reward': run.reward, 'reset': not valid,
+            'bells': run.bells, 'action': run.action, 'notice': run.notice, 'hold': hold}

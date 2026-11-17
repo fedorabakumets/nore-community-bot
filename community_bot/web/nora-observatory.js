@@ -1,206 +1,278 @@
 'use strict';
 window.NoraObservatory = (() => {
-  const title = 'Звёздная обсерватория';
-  const room = 'observatory';
-  const instructions = [
-    'Разгонись и перепрыгни разлом. Зажги первый маяк.',
-    'На мосту пережди луч, обойди его сбоку или перепрыгни.',
-    'Поднимись по ступеням к третьему маяку.',
-    'Последний прыжок — к телескопу.',
+  const title = 'Воспоминание', room = 'observatory';
+  const chapters = [
+    ['Двор под грозой', 'Держись вдали от знаков на земле. Подними печать у ворот.'],
+    ['Крипта колоколов', 'На камне высечено: «Что оставил огонь? Что скрыло тропу? Что разбудило небо?»'],
+    ['Галерея стражей', 'Пережди стражей за простенками и зажги фонарь у дальних ворот.'],
+    ['Разбитая часовня', 'Пересеки двор и стой в круге у алтаря, пока ритуал не закончится.'],
   ];
 
   async function load() {
-    const response = await fetch('/nora-observatory.json');
-    if (!response.ok) throw Error('Не удалось загрузить обсерваторию');
+    const response = await fetch('/nora-observatory.json?v=memory');
+    if (!response.ok) throw Error('Не удалось загрузить воспоминание');
     return response.json();
   }
 
   function create(T, geometry, layout) {
-    const {portal: entrance, platforms, checkpoints, beams, bounds, reward} = layout;
-    const course = new T.Group(), portal = new T.Group();
+    const {portal: entrance, walls, gates, safe, bounds, relics, strikes, guardians} = layout;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const course = new T.Group();
     course.name = 'nora-observatory'; course.visible = false;
-    portal.name = 'nora-observatory-portal'; portal.position.set(entrance.x, 0, entrance.z);
-    const materials = [], textures = [], meshes = [];
-    const stone = new T.MeshLambertMaterial();
-    const light = new T.MeshBasicMaterial();
-    materials.push(stone, light);
-    const frame = [], frameLight = [], rocks = [], inlay = [], sparks = [];
-    const box = (list, x, y, z, w, h, d, col) => list.push([x, y, z, w, h, d, col]);
-
-    // Stepped stone arch, a translucent veil and the in-world wayfinding sign.
-    box(frame, 0, .06, 0, 2.7, .12, .8, '#393349');
-    box(frame, 0, 2.49, 0, 2.4, .34, .46, '#4a435a');
-    box(frame, 0, 2.75, 0, 1.58, .22, .45, '#57516e');
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 6; i++) {
-        const x = side * (i < 5 ? 1.06 : .9);
-        box(frame, x, .29 + .37 * i, 0, .35, .38, .5, i % 2 ? '#514864' : '#383449');
-        box(frameLight, x, .29 + .37 * i, .259, .075, .18, .04, '#70edda');
-      }
-      box(frameLight, side * .59, 2.48, .247, .68, .045, .04, '#70edda');
-    }
-    for (let i = 0; i < 4; i++) {
-      box(frameLight, 0, .024, .61 + .34 * i, .36 + i * .13, .027, .065, '#7bcbbd');
-    }
-
+    const materials = [], textures = [], meshes = [], geometries = [];
+    const stone = new T.MeshLambertMaterial(), glow = new T.MeshBasicMaterial();
+    materials.push(stone, glow);
+    const blocks = [], accents = [];
+    const box = (list, x, y, z, w, h, d, color) => list.push([x, y, z, w, h, d, color]);
     function batch(parent, material, pieces) {
       const mesh = new T.InstancedMesh(geometry, material, pieces.length);
-      const model = new T.Object3D(), color = new T.Color();
-      pieces.forEach(([x, y, z, w, h, d, col], i) => {
+      const model = new T.Object3D(), tint = new T.Color();
+      pieces.forEach(([x, y, z, w, h, d, color], i) => {
         model.position.set(x, y, z); model.scale.set(w, h, d); model.updateMatrix();
-        mesh.setMatrixAt(i, model.matrix); mesh.setColorAt(i, color.set(col));
+        mesh.setMatrixAt(i, model.matrix); mesh.setColorAt(i, tint.set(color));
       });
       mesh.computeBoundingSphere(); parent.add(mesh); meshes.push(mesh);
       return mesh;
     }
 
-    function sign(parent, at, lines, scale) {
+    const floor = ['#393640', '#3f3a43', '#353540', '#48404a', '#343740'];
+    const stoneColors = ['#504956', '#47404d', '#3d3845', '#5c5260'];
+    for (let x = -8; x < 8; x++) for (let z = -53; z < 35; z++) {
+      const seed = Math.abs(x * 541 + z * 137 + x * z * 11);
+      const crypt = z < 9 && z >= -9;
+      box(blocks, x + .5, -.15, z + .5, 1, .30, 1, crypt ? stoneColors[seed % 4] : floor[seed % 5]);
+      if (!crypt && seed % 17 < 3) {
+        box(accents, x + .58, .004, z + .52, .64, .012, .65, seed % 2 ? '#282937' : '#2e303d');
+      }
+      if (Math.abs(x + .5) > 7.3 && z % 2 === 0) {
+        const h = 1.2 + seed % 13 * .22;
+        box(blocks, Math.sign(x) * 8.36, h / 2, z, .64, h, 2.06, stoneColors[seed % 4]);
+        if (z % 6 === 0) {
+          box(blocks, Math.sign(x) * 8.32, 2.4, z, 1.2, 4.8, 1.2, '#332d3a');
+          box(blocks, Math.sign(x) * 8.27, 4.9, z, 1.43, .35, 1.42, '#514858');
+        }
+      }
+    }
+    const boxes = [], cameraBoxes = [];
+    for (const side of [-1, 1]) {
+      for (const z of [21, 16.8, -33.5, -44.5]) {
+        const x = side * (z === 21 ? 2.55 : z > 10 ? 4.4 : 6.5);
+        box(blocks, x, .23, z, 1.0, .46, 1.22, '#514758');
+        box(blocks, x, 1.17, z, .48, 1.63, .51, '#3f3443');
+        box(blocks, x, 1.96, z, .69, .27, .63, '#675568');
+        box(accents, x, 2.19, z, .23, .28, .22, '#b88165');
+        box(accents, x - side * .07, 2.36, z, .13, .13, .13, '#e7bc8c');
+      }
+      for (const z of [20.8, 13.1, -31.8, -42.8]) {
+        const x = side * 8.2;
+        box(blocks, x, 2.6, z, .43, 5.2, .48, '#2d2634');
+        for (let branch = 0; branch < 5; branch++) {
+          const spread = 1 + branch % 3;
+          box(blocks, x + side * (spread * .35 - .3), 3 + branch * .65,
+            z + branch % 2 * .58, 1.6 - branch * .12, .26, .31, '#362b38');
+        }
+      }
+      for (let z = -8; z <= 8; z += 4) {
+        box(blocks, side * 7.48, 2.65, z, .85, 5.3, .56, '#534453');
+        box(blocks, side * 5, 4.91, z, 5.2, .36, .59, '#504251');
+        box(blocks, side * 2.8, 5.22, z, 4.9, .39, .67, '#473947');
+        box(accents, side * 7.02, 2.77, z, .1, .28, .19, '#ae7b69');
+      }
+    }
+    function collision(x, z, w, d, h) {
+      const edges = [x - w / 2, x + w / 2, z - d / 2, z + d / 2];
+      cameraBoxes.push([edges[0], edges[1], 0, h, edges[2], edges[3]]);
+      return edges;
+    }
+    for (const [x, z, w, d] of walls) {
+      const h = Math.abs(x) < 1 ? 3.8 : 2.7;
+      boxes.push(collision(x, z, w, d, h));
+      box(blocks, x, h / 2, z, w, h, d, '#49424e');
+      for (let y = .55; y < h - .1; y += .53) box(blocks, x, y, z, w + .024, .027, d + .024, '#2d2935');
+      box(blocks, x, h, z, w + .15, .23, d + .14, '#59515f');
+    }
+    const gateParts = gates.map((z, index) => {
+      for (const side of [-1, 1]) {
+        box(blocks, side * 4.48, 2, z, .75, 4, .94, '#635264');
+        box(blocks, side * 3.76, 3.68, z, 1.76, .74, .96, '#5b4e5e');
+        box(accents, side * 4.1, 2.37, z + .49, .15, .34, .06, '#b08464');
+      }
+      box(blocks, 0, 4.26, z, 7.18, .5, .9, '#4d4253');
+      box(blocks, 0, 4.59, z, 3, .17, .91, '#5f5262');
+      const bars = [];
+      for (let i = -8; i <= 8; i++) {
+        box(bars, i * .51, 1.81, z, .14, 3.62, .36, '#24212e');
+        box(bars, i * .51, 2.35, z + .19, .09, .13, .024, '#ad7964');
+      }
+      box(bars, 0, 1.36, z, 8.7, .18, .28, '#695263');
+      const group = new T.Group();
+      group.name = 'memory-gate-' + (index + 1); course.add(group);
+      batch(group, stone, bars);
+      return {group, edges: [-9, 9, z - .36, z + .36]};
+    });
+
+    function label(text, x, y, z) {
       const canvas = document.createElement('canvas');
-      canvas.width = 512; canvas.height = 128;
+      canvas.width = 384; canvas.height = 64;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#171b2b'; ctx.fillRect(0, 0, 512, 128);
-      ctx.fillStyle = '#68cbbb'; ctx.fillRect(0, 0, 512, 5); ctx.fillRect(0, 123, 512, 5);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#f3e8cc'; ctx.font = 'bold 34px monospace';
-      const subtitle = lines.at(-1);
-      lines.slice(0, -1).forEach((line, i) => ctx.fillText(line, 256, (lines.length === 3 ? 38 : 51) + i * 34, 478));
-      ctx.fillStyle = '#a1e5d8'; ctx.font = '24px monospace';
-      ctx.fillText(subtitle, 256, lines.length === 3 ? 107 : 96, 480);
-      const texture = new T.CanvasTexture(canvas); texture.colorSpace = T.SRGBColorSpace;
-      const material = new T.SpriteMaterial({map: texture, depthWrite: false});
+      ctx.fillStyle = '#211925'; ctx.fillRect(0, 0, 384, 64);
+      ctx.fillStyle = '#dcb291'; ctx.font = 'bold 27px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(text, 192, 41, 362);
+      const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
+      const material = new T.SpriteMaterial({map, depthWrite: false, transparent: true, opacity: .87});
       const sprite = new T.Sprite(material);
-      sprite.position.set(...at); sprite.scale.set(scale, scale / (lines.length === 3 ? 3 : 4), 1); parent.add(sprite);
-      materials.push(material); textures.push(texture);
+      sprite.position.set(x, y, z); sprite.scale.set(2.56, .42, 1); course.add(sprite);
+      textures.push(map); materials.push(material);
     }
-
-    batch(portal, stone, frame);
-    batch(portal, light, frameLight);
-    const veilMaterial = new T.MeshBasicMaterial({
-      color: '#1a9f9c', transparent: true, opacity: .6, depthWrite: false,
-    });
-    const veil = new T.Mesh(geometry, veilMaterial);
-    veil.position.set(0, 1.23, 0); veil.scale.set(1.86, 2.25, .08); portal.add(veil);
-    materials.push(veilMaterial);
-    sign(portal, [0, 2.35, .68], ['ЗВЁЗДНАЯ', 'ОБСЕРВАТОРИЯ', `Первый финиш · ${reward} печенек`], 2.85);
-
-    const boxes = platforms.map(([x, z, y, w, d], i) => {
-      const beacon = checkpoints.includes(i);
-      const edge = beacon ? '#8bcdbb' : '#6c84ac';
-      box(rocks, x, y - .2, z, w, .4, d, i === 5 ? '#343c56' : '#444865');
-      box(rocks, x, y - .56, z, w * .88, .34, d * .81, '#363650');
-      box(rocks, x + .05, y - .84, z, w * .63, .26, d * .6, '#25273f');
-      box(rocks, x - .12, y - 1.08, z, w * .38, .28, d * .33, '#242237');
-      const columns = Math.ceil(w / .52), rows = Math.ceil(d / .52);
-      for (let a = 0; a < columns; a++) for (let b = 0; b < rows; b++) {
-        const tile = ['#555977', '#505672', '#494e6b', '#58607a'][(a * 11 + b * 13 + i) % 4];
-        box(rocks, x - w / 2 + w * (a + .5) / columns, y - .023,
-          z - d / 2 + d * (b + .5) / rows, w / columns - .018, .049, d / rows - .018, tile);
+    for (const [id, [x, z, text]] of Object.entries(relics)) {
+      box(blocks, x, .22, z, .6, .44, .6, '#4f4653');
+      box(blocks, x, .73, z, .42, .62, .43, '#574951');
+      box(accents, x, 1.12, z, .22, .22, .22, id === 'lantern' ? '#e6a05b' : '#bc8f74');
+      if (layout.bellOrder.includes(id)) {
+        box(blocks, x, 1.63, z, 1.20, .14, .27, '#543844');
+        box(blocks, x, 1.34, z, .43, .48, .48, '#a1785d');
+        box(blocks, x, 1.12, z, .62, .12, .61, '#9c6e57');
+        label(text, x, 1.97, z);
       }
-      for (const side of [-1, 1]) {
-        box(inlay, x + side * (w / 2 - .055), y + .006, z, .065, .02, d - .12, edge);
-        box(inlay, x, y + .006, z + side * (d / 2 - .055), w - .12, .02, .065, edge);
-      }
-      return [x - w / 2, x + w / 2, z - d / 2, z + d / 2, y];
-    });
-    // Mark the route even with fog or in first-person view.
-    for (const [i, x, z, rotation] of [[0, 0, 9, 0], [4, 0, 1.4, 0], [6, .6, -7.75, -Math.PI / 2]]) {
-      const arrow = new T.Group(); arrow.position.set(x, platforms[i][2] + .026, z); arrow.rotation.y = rotation;
-      const stem = new T.Mesh(geometry, light);
-      stem.position.z = .1; stem.scale.set(.08, .024, .51); arrow.add(stem);
-      for (const side of [-1, 1]) {
-        const wing = new T.Mesh(geometry, light);
-        wing.position.set(side * .12, 0, -.16);
-        wing.rotation.y = side * Math.PI / 4; wing.scale.set(.075, .024, .35); arrow.add(wing);
-      }
-      course.add(arrow);
     }
-    const beaconMaterial = new T.MeshBasicMaterial({color: '#75f7d7'});
-    const unlitMaterial = new T.MeshBasicMaterial({color: '#594e7e'});
-    materials.push(beaconMaterial, unlitMaterial);
-    const crystals = checkpoints.slice(1, -1).map((index) => {
-      const [x, z, y, w] = platforms[index];
-      const crystal = new T.Mesh(geometry, unlitMaterial);
-      crystal.position.set(x - w / 2 + .29, y + .83, z);
-      crystal.scale.set(.29, .47, .29); course.add(crystal);
-      box(rocks, crystal.position.x, y + .27, z, .28, .54, .28, '#5f5775');
-      return crystal;
-    });
-    sign(course, [0, 3.85, -.6], ['ИМПУЛЬСНЫЙ МОСТ', 'Светлеет → включается'], 2.82);
-    sign(course, [2.9, 3.9, -7.6], ['ЗВЁЗДНАЯ ЛЕСТНИЦА', 'Поднимайся по ступеням →'], 2.82);
-    sign(course, [3.25, 6.1, -21.0], ['ТЕЛЕСКОП', 'Финиш за третьим маяком'], 3.2);
-
-    // Separate rails for the beam emitters, and a voxel telescope pointed at the sky.
-    const beamMeshes = beams.map(([x, z, y, w]) => {
-      for (const side of [-1, 1]) {
-        box(rocks, x + side * w / 2, y + .28, z, .18, .56, .21, '#544361');
-        box(inlay, x + side * w / 2, y + .39, z, .19, .16, .22, '#be8ca5');
+    const [altarX, altarZ] = safe.at(-1);
+    for (let i = 0; i < 20; i++) {
+      const a = i / 20 * Math.PI * 2;
+      box(accents, altarX + Math.cos(a) * 1.23, .018, altarZ + Math.sin(a) * 1.23,
+        .19, .036, .19, i % 2 ? '#bd816b' : '#76586f');
+    }
+    box(blocks, 0, .41, altarZ - 2.3, 2.9, .81, 1.05, '#5d4c5e');
+    box(blocks, 0, .86, altarZ - 2.3, 3.07, .21, 1.16, '#75616e');
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const x = side * (3.4 + i * .42), z = -48.5 + i * 2.2;
+        box(blocks, x, .28, z, 1.3, .56, 1.48, '#524652');
+        box(blocks, x, 1.43, z, .71, 1.8, .7, '#36303b');
+        box(blocks, x, 2.44, z, .66, .72, .64, '#443845');
+        box(accents, x, 2.43, z + .33, .32, .047, .038, '#825264');
       }
-      const material = new T.MeshBasicMaterial({transparent: true, depthWrite: false});
+    }
+    for (let i = 0; i < 48; i++) {
+      const sign = i % 2 ? 1 : -1, z = 27 - (i * 37 % 78);
+      if (z < 9 && z > -9) continue;
+      const x = sign * (7 + (i % 4) * .24), h = .38 + (i % 7) * .15;
+      box(blocks, x, h / 2, z, .43, h, .24, '#565062');
+      box(blocks, x, h * .83, z, .72, .12, .26, '#413946');
+      if (i % 3 === 0) box(accents, x, .15, z + .52, .12, .3, .11, '#a97866');
+    }
+    batch(course, stone, blocks); batch(course, glow, accents);
+
+    const shadows = guardians.map(([z]) => {
+      const group = new T.Group();
+      group.name = 'memory-guardian'; group.position.z = z; course.add(group);
+      batch(group, stone, [
+        [0, .42, 0, .96, .85, .8, '#231e2a'],[0, 1.24, 0, .67, .88, .61, '#392b3b'],
+        [0, 1.94, 0, .69, .55, .62, '#281e29'],[.46, 1.38, .01, .29, .81, .32, '#3f2c3b'],
+        [-.46, 1.38, .01, .29, .81, .32, '#3f2c3b'], [0, 2.26, 0, .37, .21, .39, '#392b3b'],
+      ]);
+      batch(group, glow, [[0, 1.98, .322, .46, .075, .027, '#d36d6f']]);
+      return group;
+    });
+    const warningGeo = new T.RingGeometry(.86, 1, 24);
+    geometries.push(warningGeo);
+    const stormMarks = strikes.map(([x, z, radius]) => {
+      const material = new T.MeshBasicMaterial({color: '#be7779', transparent: true, opacity: .25, depthWrite: false});
       materials.push(material);
-      const mesh = new T.Mesh(geometry, material);
-      mesh.position.set(x, y + .23, z); mesh.scale.set(w, .17, .27); course.add(mesh);
-      return mesh;
+      const mark = new T.Mesh(warningGeo, material);
+      mark.rotation.x = -Math.PI / 2; mark.position.set(x, .026, z); mark.scale.setScalar(radius); course.add(mark);
+      return mark;
     });
-    const telescope = new T.Group();
-    telescope.position.set(3.25, 4.64, -20.94); telescope.rotation.x = -.47; telescope.rotation.y = -.36;
-    batch(telescope, stone, [
-      [0, 0, 0, .62, .62, 1.76, '#625477'],
-      [0, 0, -.76, .89, .89, .38, '#8b7899'],
-      [0, 0, .92, .34, .34, .38, '#a28379'],
-    ]);
-    batch(telescope, light, [[0, 0, -.96, .56, .56, .06, '#91f7db']]);
-    course.add(telescope);
-    box(rocks, 3.25, 4.04, -20.94, .38, .94, .38, '#7a677f');
 
-    for (let i = 0; i < 64; i++) {
-      const side = i % 2 ? 1 : -1;
-      const x = side * (6 + (i * 19 % 28) / 2.5), z = 12 - (i * 23 % 59) * .74;
-      const h = .8 + (i * 13 % 19) / 6.5;
-      box(rocks, x, -4.5 + h / 2, z, .7 + i % 4, h, 1.4, i % 3 ? '#23263a' : '#3d3351');
-      box(sparks, Math.sin(i * 17.8) * 26, 4 + (i * 29 % 97) * .22,
-        18 - (i * 31 % 101) * .64, .045 + i % 4 * .022, .05, .06,
-        i % 7 ? '#a99ac6' : '#f4dbaf');
+    const boltGeometry = new T.BufferGeometry();
+    const boltPoints = new Float32Array(54);
+    boltGeometry.setAttribute('position', new T.BufferAttribute(boltPoints, 3));
+    const boltMaterial = new T.LineBasicMaterial({color: '#b1a2cd', transparent: true, opacity: 0, depthWrite: false, fog: false});
+    const bolt = new T.LineSegments(boltGeometry, boltMaterial); bolt.frustumCulled = false; course.add(bolt);
+    materials.push(boltMaterial); geometries.push(boltGeometry);
+    const rainCount = reduced ? 0 : 180;
+    const rainGeometry = new T.BufferGeometry(), rainPoints = new Float32Array(rainCount * 6);
+    rainGeometry.setAttribute('position', new T.BufferAttribute(rainPoints, 3));
+    const rainMaterial = new T.LineBasicMaterial({color: '#9791af', transparent: true, opacity: .38, depthWrite: false});
+    const rain = new T.LineSegments(rainGeometry, rainMaterial);
+    rain.frustumCulled = false; course.add(rain); materials.push(rainMaterial); geometries.push(rainGeometry);
+
+    function lightning(x, z, pulse, sky) {
+      let tipX = x, tipZ = z;
+      for (let i = 0; i < 9; i++) {
+        const y = i * (sky ? 2.5 : 1.6);
+        const nextX = x + Math.sin(i * 6.9 + z) * (i % 3 + .45);
+        const nextZ = z + Math.cos(i * 5.1 + x) * .7;
+        boltPoints.set([tipX,y,tipZ,nextX,y + (sky ? 2.5 : 1.6),nextZ], i * 6);
+        tipX = nextX; tipZ = nextZ;
+      }
+      boltGeometry.attributes.position.needsUpdate = true;
+      boltMaterial.opacity = reduced ? 0 : .72 * pulse;
     }
-    batch(course, stone, rocks);
-    batch(course, light, inlay);
-    const starsMaterial = new T.MeshBasicMaterial({fog: false});
-    materials.push(starsMaterial);
-    batch(course, starsMaterial, sparks);
-
-    function beamPhase(beam, seconds) {
-      return ((seconds + beam[4]) % 4 + 4) % 4;
+    let lastStorm = null;
+    function update(seconds, position) {
+      guardians.forEach(([z, span, period, offset], i) => {
+        const phase = (((seconds + offset) % period + period) % period) / period;
+        const shadow = shadows[i];
+        shadow.position.x = span * (1 - 4 * Math.abs(.5 - phase));
+        shadow.position.y = reduced ? 0 : .08 + Math.sin(seconds * 3 + i) * .055;
+        // The watcher turns toward nearby footsteps.
+        shadow.rotation.y = Math.atan2(position.x - shadow.position.x, position.z - z);
+      });
+      let flash = null;
+      strikes.forEach(([x, z, radius, period, offset], i) => {
+        const phase = ((seconds + offset) % period + period) % period;
+        const warning = phase > period - 1.85, hit = phase >= period - .72 && phase < period - .10;
+        const mark = stormMarks[i];
+        mark.material.color.set(hit ? '#d9b5b0' : warning ? '#cf686b' : '#83596a');
+        mark.material.opacity = hit ? .89 : warning ? .72 : .35;
+        if (hit && Math.abs(position.z - z) < 16) {
+          flash = {x, z, pulse: .85, key: i + ':' + Math.floor((seconds + offset) / period)};
+        }
+      });
+      const skyPhase = ((seconds % 9) + 9) % 9;
+      if (!flash && skyPhase < .48) {
+        const sign = Math.floor(seconds / 9) % 2 ? 1 : -1;
+        flash = {x: position.x + sign * 5.4, z: position.z - 24, pulse: 1 - skyPhase / .48,
+          key: 'sky:' + Math.floor(seconds / 9), sky: true};
+      }
+      if (flash) lightning(flash.x, flash.z, flash.pulse, flash.sky);
+      else boltMaterial.opacity = 0;
+      for (let i = 0; i < rainCount; i++) {
+        const y = ((i * 7.13 - seconds * 12) % 10 + 10) % 10;
+        const x = position.x + Math.sin(i * 17.1) * 11 - y * .13;
+        const z = position.z + Math.cos(i * 8.3) * 14;
+        rainPoints.set([x,y,z,x - .1,y + .49,z - .035], i * 6);
+      }
+      rainGeometry.attributes.position.needsUpdate = true;
+      const thunder = flash && flash.key !== lastStorm;
+      if (flash) lastStorm = flash.key;
+      return {thunder, light: reduced ? 0 : (flash?.pulse ?? 0)};
     }
 
     return {
-      portal, course, entrance, reward, safe: checkpoints.map(i => platforms[i]),
-      zone: {limitX: bounds.x, limitZ: bounds.z, boxes, cameraBoxes: []},
-      belowCourse: bounds.minY + .2,
-      hitBeam({x, y, z}, seconds) {
-        return beams.some(beam => {
-          const [bx, bz, by, w] = beam, phase = beamPhase(beam, seconds);
-          return phase >= 1 && phase < 2.65 && Math.abs(x - bx) < w / 2 + .04 &&
-            Math.abs(z - bz) < .17 && y < by + .34;
-        });
+      entrance, course, safe,
+      zone: {limitX: bounds.x, limitZ: bounds.z, boxes: [...boxes], cameraBoxes},
+      checkpoint(index) {
+        for (const [i, gate] of gateParts.entries()) gate.group.visible = i >= index;
+        this.zone.boxes = [...boxes, ...gateParts.filter(gate => gate.group.visible).map(gate => gate.edges)];
       },
-      updatePortal(time) { veilMaterial.opacity = .52 + Math.sin(time / 680) * .12; },
-      update(seconds, checkpoint) {
-        beamMeshes.forEach((mesh, i) => {
-          const phase = beamPhase(beams[i], seconds), active = phase >= 1 && phase < 2.65;
-          mesh.scale.y = active ? .17 : .026;
-          mesh.material.color.set(active ? '#f281b3' : '#efba82');
-          mesh.material.opacity = active ? .84 : phase >= .5 && phase < 1 ? .65 : .12;
-        });
-        crystals.forEach((crystal, i) => {
-          crystal.material = i < checkpoint ? beaconMaterial : unlitMaterial;
-          crystal.rotation.set(Math.PI / 4, seconds * .75, Math.PI / 5);
-        });
+      actionAt(position, checkpoint) {
+        const available = checkpoint === 0 ? ['seal'] : checkpoint === 1 ? layout.bellOrder : checkpoint === 2 ? ['lantern'] : [];
+        for (const id of available) {
+          const [x, z, text] = relics[id];
+          if (Math.hypot(position.x - x, position.z - z) < 1.35) return {id, text};
+        }
+        return null;
       },
+      update,
       dispose() {
         for (const mesh of meshes) mesh.dispose();
         for (const material of materials) material.dispose();
         for (const texture of textures) texture.dispose();
+        for (const geometry of geometries) geometry.dispose();
       },
     };
   }
 
-  return {title, room, instructions, load, create};
+  return {title, room, chapters, load, create};
 })();

@@ -284,7 +284,43 @@ window.NoraVoxel = (() => {
         mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;joints[part].add(mesh);meshes.push(mesh);
       }
     }
-    let wingId, wings;
+    let wingId, wings, armored=false;
+    const armorMeshes=[];
+    function setArmor(active) {
+      if(armored===active)return;
+      armored=active;
+      if(active&&!armorMeshes.length){
+        const shape=new T.Object3D(), tint=new T.Color();
+        const iron='#575164', edge='#8c8193', dark='#332c3b', brass='#bd9275';
+        function plate(joint, pieces){
+          const mesh=new T.InstancedMesh(cube,material,pieces.length), origin=origins[joint];
+          pieces.forEach(([x,y,z,w,h,d,color],i)=>{
+            shape.position.set((x-origin[0])*unit,(y-origin[1])*unit,(z-origin[2])*unit);
+            shape.scale.set(w,h,d);shape.updateMatrix();mesh.setMatrixAt(i,shape.matrix);mesh.setColorAt(i,tint.set(color));
+          });
+          mesh.computeBoundingSphere();mesh.name='memory-armor';joints[joint].add(mesh);armorMeshes.push(mesh);
+        }
+        plate('body',[
+          [0,39,-2,25,21,19,iron],[0,48,0,23,5,22,edge],[0,45,3,25,3,21,iron],
+          [0,40,8.8,25,5,4,dark],[0,39,10.5,15,1.8,1.3,brass],[0,34,8.7,24,5,5,iron],
+          [0,23,0,18,6,12,iron],[0,22,5.9,17,3,1.3,edge],[0,20,5.8,2,7,1.5,brass],
+          [0,17,0,17,2.8,11,dark],[0,21,-5.8,17,7.8,2.4,dark],[0,15,-4.9,16,3.2,3.1,iron],
+          [0,38.1,-12,22,2.4,1.5,edge],[0,44,-12,2.3,9.3,1.65,edge],
+          [0,19,-6.65,13.2,10.2,2,'#614453'],[0,15.5,-7.96,9.6,2.3,.75,'#815667'],
+          [0,20.7,-7.96,3.4,3.8,1,brass],
+        ]);
+        for(const [key, ,side] of strideSides){
+          plate('arm'+key,[[side*11.6,24,0,8.4,6.3,10.4,iron],[side*12.5,26.5,0,7.1,1.8,10,edge]]);
+          plate('forearm'+key,[[side*11,16,1.6,5.2,5,7.6,iron],[side*11,14,1.7,5.5,1.5,7.7,edge],
+            [side*11,12.5,1.1,5.4,3,7.2,dark]]);
+          plate('thigh'+key,[[side*4.4,11,3,6.1,4.8,3.6,dark]]);
+          plate('shin'+key,[[side*4,6.5,3.3,6.2,5.4,3.8,iron],[side*4,7.8,5,4.5,1.4,.9,edge],
+            [side*4,6,-2,6.3,4.9,3.8,iron]]);
+          plate('foot'+key,[[side*4,1.8,5.1,7.4,3,9.9,iron]]);
+        }
+      }
+      for(const mesh of armorMeshes)mesh.visible=armored&&material.opacity>.001;
+    }
     function setWings(id) {
       if (id===wingId) return;
       wings?.dispose();
@@ -335,15 +371,17 @@ window.NoraVoxel = (() => {
     build();
     setWings(outfit.wings);
     return {
-      group:pivot, rebuild:build, animateMotion, setWings, animateWings,
+      group:pivot, rebuild:build, animateMotion, setWings, animateWings, setArmor,
       setOpacity(value) {
         material.opacity=Math.max(0,Math.min(1,value));
         for(const mesh of meshes)mesh.visible=material.opacity>.001;
+        for(const mesh of armorMeshes)mesh.visible=armored&&material.opacity>.001;
         wings?.setOpacity(material.opacity);
       },
       dispose() {
         wings?.dispose();
         for(const mesh of meshes)mesh.dispose();
+        for(const mesh of armorMeshes)mesh.dispose();
         material.dispose();cube.dispose();
       },
     };

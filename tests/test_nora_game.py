@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -226,64 +227,125 @@ async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_observatory_shared_room_individual_progress_and_one_time_wallet_reward(tmp_path, monkeypatch):
-    db = Database(tmp_path / 'observatory.db')
+async def test_memory_shared_room_personal_relics_and_one_time_wallet_reward(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'memory.db')
     await db.initialize()
     for uid in (1, 2):
         await db.ensure_user(uid)
     now = 100.
     monkeypatch.setattr(nora_game_api, 'time', SimpleNamespace(monotonic=lambda: now))
     app = {'db': db, 'nora_lobby': {}, 'nora_observatory': {}}
-    platforms = nora_observatory.LAYOUT['platforms']
+    serial = 0
+    cursor = (0, 27)
 
-    async def frame(uid, x, z, y, *, grounded=True, room='observatory'):
+    async def frame(uid, x, z, *, room='observatory', use=None, action_serial=None):
+        nonlocal serial
         body = {'session': f'00000000-0000-4000-8000-{uid:012d}', 'room': room,
-                'x': x, 'z': z, 'y': y + .017, 'heading': 0, 'grounded': grounded}
+                'x': x, 'z': z, 'y': .017, 'heading': 0, 'grounded': True}
+        if use:
+            if action_serial is None:
+                serial += 1
+                action_serial = serial
+            body['interaction'] = {'id': use, 'serial': action_serial}
         profile = {'nickname': ('Alice', 'Robin')[uid - 1], 'outfit': {'shirt': 'gray', 'wings': 'raven'}}
         return await nora_game_api.lobby_snapshot(app, uid, body, profile)
 
-    finish_x, finish_z, finish_y, _, _ = platforms[-1]
-    assert (await frame(1, finish_x, finish_z, finish_y))['challenge']['reset']
+    async def go(*waypoints):
+        nonlocal now, cursor
+        for x, z in waypoints:
+            steps = max(1, math.ceil(math.dist(cursor, (x, z)) / .32))
+            initial = cursor
+            positions = [(initial[0] + (x - initial[0]) * i / steps, initial[1] + (z - initial[1]) * i / steps)
+                         for i in range(1, steps + 1)]
+            for delay in range(48):
+                if all(not nora_observatory.danger_at({'x': px, 'z': pz}, now + (delay + i) * .15)
+                       for i, (px, pz) in enumerate(positions, 1)):
+                    break
+            else:
+                pytest.fail(f'No safe crossing from {initial} to {(x, z)}')
+            for _ in range(delay):
+                now += .15
+                assert not (await frame(1, *initial))['challenge']['reset']
+            start = now
+            for i, cursor in enumerate(positions, 1):
+                now = start + i * .15
+                result = await frame(1, *cursor)
+                assert not result['challenge']['reset'], cursor
+
+    async def use(relic, **kwargs):
+        nonlocal now
+        now += .12
+        return (await frame(1, *cursor, use=relic, **kwargs))['challenge']
+
+    assert (await frame(1, 0, -47))['challenge']['reset']
     assert (await db.get_user(1))['cookies'] == 0
-    assert not (await frame(1, 0, 10, 1))['challenge']['reset']
-    assert not (await frame(2, 0, 0, 0, room=None))['players']
-    shared = await frame(2, .3, 10, 1)
+    assert not (await frame(1, *cursor))['challenge']['reset']
+    assert not (await frame(2, 0, 0, room=None))['players']
+    shared = await frame(2, .3, 27)
     assert [peer['nickname'] for peer in shared['players']] == ['Alice']
     assert shared['challenge']['checkpoint'] == 0
+    assert (await use('seal'))['checkpoint'] == 0  # Too far from the relic.
+    assert (await frame(1, 0, 7))['challenge']['reset']  # The sealed gate cannot be skipped.
+    assert not (await frame(1, *cursor))['challenge']['reset']
 
-    # Sample playable positions on the island route, on the bridge's safe sides,
-    # and on the progressively higher platforms.
     async def complete():
-        nonlocal now
-        for i, (x, z, y, _, _) in enumerate(platforms):
-            route = {
-                5: [(.8, .4), (.8, -2.2), (-.8, -2.2), (-.8, -4.35), (.8, -4.35), (.8, -6.2)],
-                6: [(0, -7.75)],
-            }.get(i, [(x, z)])
-            for px, pz in route:
-                now += 1.15
-                result = await frame(1, px, pz, y)
-                assert not result['challenge']['reset'], (i, px, pz)
-            if i == 4:
-                assert result['challenge']['checkpoint'] == 1
-                now += .08
-                assert (await frame(1, 0, 4.5, 1.8, grounded=False))['challenge']['reset']
-                now += .08
-                assert not (await frame(1, x, z, y))['challenge']['reset']
-        return result['challenge']
+        nonlocal now, cursor
+        await go((1, 21.7), (-1, 17.8), (2.35, 14), (2.35, 11), (0, 11))
+        assert (await use('seal'))['checkpoint'] == 1
+        await go((0, 8), (-5.4, 8), (-5.4, 5.1))
+        assert 'заново' in (await use('fog'))['notice']
+        await go((-5.4, 0.4), (5.5, 0.4))
+        first = await use('ash')
+        assert first['bells'] == 1
+        assert (await use('ash', action_serial=first['action']))['bells'] == 1
+        await go((-5.4, .4), (-5.4, 5.1))
+        assert (await use('fog'))['bells'] == 2
+        await go((-5.4, -5.2))
+        assert (await use('thunder'))['checkpoint'] == 2
+        await go((-5.4, -7.7), (0, -7.7), (0, -10), (7.92, -10), (7.92, -14), (7.92, -19),
+                 (7.92, -24), (7.92, -27.25), (0, -27.25), (0, -28))
+        assert (await use('lantern'))['checkpoint'] == 3
+        await go((0, -31), (7.92, -31), (7.92, -39), (7.92, -45.5), (0, -45.5), (0, -47))
+        assert (await frame(1, *cursor))['challenge']['hold'] == 4
+        await go((0, -45.5))
+        assert (await frame(1, *cursor))['challenge']['hold'] is None
+        await go((0, -47))
+        for _ in range(4):
+            now += 1
+            final = (await frame(1, *cursor))['challenge']
+        assert final['checkpoint'] == 4
+        return final['reward']
 
-    assert await complete() == {'checkpoint': 4, 'reward': 50, 'reset': False}
+    assert await complete() == 50
     assert (await db.get_user(1))['cookies'] == 50
-    assert (await frame(2, 0, 10, 1))['challenge'] == {'checkpoint': 0, 'reward': None, 'reset': False}
+    assert (await frame(2, 0, 27))['challenge']['checkpoint'] == 0
     assert (await db.get_user(2))['cookies'] == 0
-    now += .1
-    await frame(1, 0, 0, 0, room=None)
-    assert await complete() == {'checkpoint': 4, 'reward': 0, 'reset': False}
+    await frame(1, 0, 0, room=None)
+    cursor = (0, 27)
+    assert not (await frame(1, *cursor))['challenge']['reset']
+    assert await complete() == 0
     ledger = await db.list_transactions(1)
     assert [(row['kind'], row['amount']) for row in ledger] == [('nora_observatory', 50)]
-
     payouts = await asyncio.gather(*(nora_observatory.claim(db, 2) for _ in range(3)))
     assert sorted(payouts) == [0, 0, 50]
+
+
+def test_memory_storm_and_guardians_reset_personal_checkpoint():
+    def at(x, z):
+        return {'x': x, 'z': z, 'y': .017, 'grounded': True}
+
+    x, z, _, period, offset = nora_observatory.LAYOUT['strikes'][0]
+    strike = period - .4 - offset
+    run = nora_observatory.Attempt('game', strike - .1, last=at(x, z))
+    assert not run.advance(at(x, z), strike)
+    assert 'молнии' in run.notice
+    assert run.advance(at(0, 27), strike + .15)
+    z, span, period, offset, _ = nora_observatory.LAYOUT['guardians'][0]
+    hit = period * 1.5 - offset
+    run = nora_observatory.Attempt('game', hit - .1, checkpoint=2, last=at(span, z))
+    assert not run.advance(at(span, z), hit)
+    assert run.checkpoint == 2 and 'Страж' in run.notice
+    assert run.advance(at(0, -7.4), hit + .2)
 
 
 @pytest.mark.asyncio
@@ -327,25 +389,25 @@ async def test_wing_purchase_and_lobby_bonus_use_persisted_equipment(tmp_path):
         ('nora_wings_frost', -50), ('nora_wings_raven', -50),
     ]
 
-    await exchange(1, 2.4)  # A regular jump from the parkour finish.
+    await exchange(1, .74)  # A regular jump from the lobby floor.
     with pytest.raises(ValueError, match='высоту'):
-        await exchange(1, 2.6)
+        await exchange(1, .9)
     await change(1, 'equip', 'raven')
     await change(1, 'equip', 'frost')
     reopened = Database(tmp_path / 'wings.db')
     profile = content(await nora_game_api.status(request(reopened, 1)))
     assert profile['wings'] == {'owned': ['raven', 'frost'], 'equipped': 'frost'}
     assert profile['outfit']['wings'] == 'frost'
-    await exchange(1, 4.2)
+    await exchange(1, 2.5)
     with pytest.raises(ValueError, match='высоту'):
-        await exchange(1, 4.3)
+        await exchange(1, 2.6)
     peer, = await exchange(2, .017)
     assert peer['outfit']['wings'] == 'frost'
-    assert peer['y'] == 4.2
+    assert peer['y'] == 2.5
     assert not {'wings', 'owned', 'telegram_id'} & peer.keys()
     await change(1, 'equip', None)
     with pytest.raises(ValueError, match='высоту'):
-        await exchange(1, 2.6)
+        await exchange(1, .9)
     await exchange(1, .017)
     peer, = await exchange(2, .017)
     assert 'wings' not in peer['outfit']

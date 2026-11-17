@@ -29,7 +29,7 @@ TRANSACTION_LABELS = {
     "pet_farm": "Находки питомца",
     "pet_expedition": "Экспедиция питомца",
     "pet_stage": "Этап развития питомца",
-    "nora_observatory": "Звёздная обсерватория",
+    "nora_observatory": "Воспоминание",
     "pet_shop": "Магазин питомца",
     "rsvp": "Мероприятие",
     "rsvp_refund": "Возврат залога за мероприятие",

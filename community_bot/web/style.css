@@ -342,11 +342,24 @@ body::after{bottom:0;height:var(--safe-bottom)}
 .nora-world-bar>span{position:absolute;top:54px;left:0;font-size:13px}
 .nora-world-context{position:absolute;left:var(--hud-left);right:var(--hud-right);bottom:calc(var(--control-row) + 58px);display:flex;flex-direction:column;gap:8px;align-items:stretch;width:auto;max-width:340px;margin:auto;pointer-events:none}
 .nora-world-context button{pointer-events:auto}
-.nora-observatory-hud{position:absolute;top:calc(var(--nora-top) + 98px);left:var(--hud-left);right:var(--hud-right);display:flex;align-items:center;justify-content:space-between;gap:10px;max-width:410px;box-sizing:border-box;padding:8px 8px 8px 11px;background:#191b2bea;border:1px solid #69baa8;box-shadow:3px 3px #0c101980;color:#f3e8cc;font:12px/1.4 system-ui,sans-serif;pointer-events:none}
+.nora-observatory-hud{position:absolute;top:calc(var(--nora-top) + 98px);left:var(--hud-left);right:var(--hud-right);display:flex;align-items:center;justify-content:space-between;gap:10px;max-width:435px;box-sizing:border-box;padding:9px 8px 9px 11px;background:#1d1725f0;border:1px solid #87667f;box-shadow:3px 3px #100a1680;color:#f1e4d6;font:12px/1.4 system-ui,sans-serif;pointer-events:none}
 .nora-observatory-hud[hidden]{display:none}
-.nora-observatory-progress{display:block;margin-bottom:2px;color:#a3f1da;font-family:Monocraft,monospace}
+.nora-observatory-progress{display:block;margin-bottom:3px;color:#ebba98;font-family:Monocraft,monospace}
 .nora-observatory-hint{display:block}
-.nora-observatory-hud button{flex:none;align-self:center;padding:5px 8px;min-height:44px;background:#2d3e49;border:1px solid #69baa8;color:#f6ead9;font-size:10px;pointer-events:auto}
+.nora-observatory-hud button{flex:none;align-self:center;padding:5px 8px;min-height:44px;background:#332633;border:1px solid #87667f;color:#f6ead9;font-size:10px;pointer-events:auto}
+.nora-memory-veil{display:none;position:absolute;inset:0;z-index:15;place-items:center;isolation:isolate;overflow:hidden;background:#130e1b;color:#e9d5ec;text-align:center;font:clamp(14px,4vw,24px) Monocraft,monospace;letter-spacing:.035em}
+.nora-memory-veil[data-phase]{display:grid}
+.nora-memory-veil::before{content:"";position:absolute;inset:-16px;z-index:-1;background:
+ linear-gradient(90deg,#140e1b00 44%,#140e1bc0 44% 56%,#140e1b00 56%),
+ conic-gradient(from 90deg,#4a2c54a6 25%,#100b1600 0 50%,#9b719585 0 75%,#27193260 0) 0 0/44px 44px,
+ radial-gradient(ellipse at center,#623f69,#100b19 76%);animation:nora-memory-pixels .6s steps(5,end) infinite}
+.nora-memory-veil[data-phase="return"]{background:#1b141e;color:#f5dfbc}
+.nora-memory-veil[data-phase="return"]::before{filter:sepia(.72)}
+.nora-memory-veil span{padding:13px 16px;background:#1c1322;border-block:2px solid #b190a9;text-shadow:2px 2px #37233c}
+@keyframes nora-memory-pixels{from{transform:translate(-7px,-10px) scale(1.06)}to{transform:translate(12px,11px) scale(1.11)}}
+@media(prefers-reduced-motion:reduce){.nora-memory-veil::before{animation:none}}
+.nora-world-active .nora-game-body .nora-memory-result{position:absolute;top:calc(var(--nora-top) + 106px);left:var(--hud-left);right:var(--hud-right);width:fit-content;max-width:calc(100% - var(--hud-left) - var(--hud-right));margin:0 auto;padding:10px 14px;box-sizing:border-box;background:#251c2b;border:1px solid #ca9b78;color:#f4e2c6;font:12px/1.5 Monocraft,monospace;text-align:center;pointer-events:none}
+.nora-memory-result[hidden]{display:none}
 .nora-world-active .nora-game-music{right:var(--hud-right);backdrop-filter:none;background:#111e1be8}
 @media (orientation:landscape) and (max-height:600px){
  .nora-world-active{--stick-size:80px}

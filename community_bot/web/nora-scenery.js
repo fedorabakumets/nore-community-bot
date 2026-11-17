@@ -1,10 +1,9 @@
 'use strict';
 window.NoraScenery = (() => {
-  const tavernOffset=-4.95, portalZ={home:6.75,lobby:9.75};
+  const tavernOffset=-4.95, portalZ={home:6.75};
   const lobbyDeck={x:0,z:-3};
-  const parkourStart={x:8.2,z:10.55};
-  const parkourFinish={x:8.2,z:1.23,y:1.7,size:1.75};
-  function create(T, geometry, material) {
+  const lobbySpawn={x:0,z:6.8}, tavernPortal={x:-1.64,z:.6};
+  function create(T, geometry, material, memoryPortal) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
     function box(x,y,z,w,h,d,color){blocks.push([x,y,z,w,h,d,color]);}
@@ -290,35 +289,7 @@ window.NoraScenery = (() => {
       const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
     }
     consoleAt(lobbyDeck.x,lobbyDeck.z);
-    box(parkourStart.x,.025,parkourStart.z,1.5,.05,.85,'#91ac8c');
-    const platforms=[
-      [8.2,9.15,.34,1.35],[9,7.45,.68,1.25],[8.2,5.8,1.02,1.2],
-      [9,4.15,1.36,1.2],
-    ];
-    for(const [x,z,top,size] of platforms){
-      box(x,(top-.08)/2,z,size,top-.08,size,'#55546b');
-      box(x,top-.04,z,size,.08,size,'#c3a47b');
-      solid(x,top/2,z,size,top,size,top);
-    }
-    const {x:finishX,z:finishZ,y:finishTop,size:finishSize}=parkourFinish;
-    const finishBase=new T.Mesh(geometry,material.clone());
-    finishBase.name='nora-parkour-finish';
-    finishBase.scale.set(finishSize,finishTop-.055,finishSize);
-    finishBase.position.set(finishX,finishBase.scale.y/2,finishZ);
-    const finishPlate=new T.Mesh(geometry,material.clone());
-    finishPlate.name='nora-parkour-plate';
-    finishPlate.scale.set(finishSize-.12,.10,finishSize-.12);
-    finishPlate.position.set(finishX,finishTop-.005,finishZ);
-    solid(finishX,finishTop/2,finishZ,finishSize,finishTop,finishSize,finishTop);
-    function setParkourPress(press){
-      finishPlate.position.y=finishTop-.005-.06*press;
-      finishBase.material.color.set(press?'#42d76b':'#777b83');
-      finishPlate.material.color.set(press?'#81ffa0':'#d1d4da');
-      finishBase.material.emissive.set(press?'#116b2b':0);
-      finishPlate.material.emissive.set(press?'#247d3c':0);
-    }
-    setParkourPress(0);
-    const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes,finishBase,finishPlate);lobby.visible=false;
+    const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes);lobby.visible=false;
     const portal=new T.Group();
     portal.name='nora-world-portal';
     // Stepped stone surround and brass inlays from the NORA cover.
@@ -361,21 +332,61 @@ window.NoraScenery = (() => {
     ])portalBox(highlightMaterial,x*side,y,side*.196,w,h,.012);
     const portalLight=new T.PointLight('#ef6575',8,5);
     portalLight.position.set(0,1.32,-.45);portal.add(portalLight);
-    const lobbyPortal=portal.clone(), lobbyPortalStone=portalStone.clone();
-    portal.add(portalStone);lobbyPortal.add(lobbyPortalStone);
-    portal.position.z=portalZ.home;lobbyPortal.position.z=portalZ.lobby;
-    outdoor.add(portal);lobby.add(lobbyPortal);
-    for(const [zone,z] of [[outdoorZone,portalZ.home],[lobbyZone,portalZ.lobby]]){
-      zone.boxes.push([-1.3,1.3,z-.38,z+.38]);
-      zone.cameraBoxes.push([-1.3,1.3,0,2.94,z-.38,z+.38]);
+    const gateMeshes=[], gateLabels=[], gateMaterials=[];
+    function addCollider(zone,x,z,scale=1){
+      const width=1.3*scale, depth=.38*scale;
+      zone.boxes.push([x-width,x+width,z-depth,z+depth]);
+      zone.cameraBoxes.push([x-width,x+width,0,2.94*scale,z-depth,z+depth]);
     }
+    function lobbyGate(position, label, tint){
+      const gate=portal.clone(), frame=portalStone.clone();
+      gateMeshes.push(frame);gate.add(frame);
+      gate.name=tint?'nora-observatory-portal':'nora-tavern-portal';
+      gate.position.set(position.x,0,position.z);gate.scale.setScalar(.76);lobby.add(gate);
+      if(tint){
+        const rim=rimMaterial.clone(), core=coreMaterial.clone(), detail=highlightMaterial.clone();
+        rim.color.set('#332239');core.color.set('#66476f');detail.color.set('#c7a0d3');
+        gateMaterials.push(rim,core,detail);
+        for(const object of gate.children){
+          if(object.material===rimMaterial)object.material=rim;
+          if(object.material===coreMaterial)object.material=core;
+          if(object.material===highlightMaterial)object.material=detail;
+          if(object.isPointLight)object.color.set('#936cac');
+        }
+      }
+      const canvas=document.createElement('canvas');canvas.width=384;canvas.height=88;
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='rgba(24,18,28,.68)';ctx.fillRect(0,0,384,88);
+      ctx.fillStyle=tint?'#e5c3e6':'#eed7b3';ctx.font='bold 44px monospace';
+      ctx.textAlign='center';ctx.fillText(label,192,58,357);
+      const map=new T.CanvasTexture(canvas);map.colorSpace=T.SRGBColorSpace;
+      const sprite=new T.Sprite(new T.SpriteMaterial({map,transparent:true,depthWrite:false,opacity:.8}));
+      sprite.name='nora-portal-label';sprite.scale.set(1.64,.38,1);
+      sprite.position.set(position.x,2.46,position.z+.88);lobby.add(sprite);gateLabels.push(sprite);
+      addCollider(lobbyZone,position.x,position.z,.76);
+    }
+    lobbyGate(tavernPortal,'НОРА',false);
+    if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ',true);
+    portal.add(portalStone);portal.position.z=portalZ.home;outdoor.add(portal);
+    addCollider(outdoorZone,0,portalZ.home);
     let portalTime=0;
     function updatePortal(dt){
       if(reduced)return;
       portalTime+=dt;
       highlightMaterial.opacity=.61+.13*Math.sin(portalTime*2);
+      for(const [i,sprite] of gateLabels.entries()){
+        sprite.position.y=2.46+.09*Math.sin(portalTime*1.7+i*.8);
+        sprite.material.opacity=.75+.06*Math.sin(portalTime*1.1+i);
+      }
+      if(gateMaterials.length)gateMaterials[2].opacity=highlightMaterial.opacity;
     }
-    return {outdoor,indoor,lobby,lobbyZone,setParkourPress,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,dispose(){recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();outdoor.dispose();indoor.dispose();lobby.dispose();finishBase.material.dispose();finishPlate.material.dispose();flameMaterial.dispose();portalStone.dispose();lobbyPortalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();lobbyNotes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();}};
+    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,dispose(){
+      recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();
+      outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();lobbyNotes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();
+      for(const mesh of gateMeshes)mesh.dispose();
+      for(const material of gateMaterials)material.dispose();
+      for(const label of gateLabels){label.material.map.dispose();label.material.dispose();}
+    }};
   }
-  return {create,tavernOffset,portalZ,lobbyDeck,parkourStart,parkourFinish};
+  return {create,tavernOffset,portalZ,lobbyDeck,lobbySpawn,tavernPortal};
 })();

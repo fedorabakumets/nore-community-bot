@@ -8,7 +8,8 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"observatory", "nora-world":"lobby-spawn"}[name];
+      const version = {"nora-companion":"observatory", "nora-world":"memory", "nora-scenery":"memory",
+        "nora-voxel":"memory", "nora-observatory":"memory"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
       document.head.appendChild(script);
@@ -27,6 +28,8 @@
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
     let button = null, panel = null, slider = null, muteButton = null, expanded = false, level = .4, nextStart = 0, overlap = 0;
     const sources = new Set();
+    const memorySources = new Set();
+    let memoryVersion = 0, memoryActive = false;
     let recordPlaying=true, selectedRecord='/game/nora-theme.mp3', trackVersion=0, recordOnce=false;
     const tracks=new Map();
     let musicGain=null, musicFilter=null, musicPan=null, musicLevel=null, effectsLevel=null, spatial={gain:1,cutoff:18000,pan:0};
@@ -66,6 +69,13 @@
       sources.add(source); source.onended = () => { sources.delete(source); source.disconnect(); gain.disconnect(); if (!closed && !recordOnce) schedule(); };
       source.start(start); nextStart = start + buffer.duration - overlap;
     }
+    function decodeTrack(url, audio) {
+      if(!tracks.has(url))tracks.set(url,(async()=>{
+        const response=await fetch(url);if(!response.ok)throw Error('audio unavailable');
+        return audio.decodeAudioData(await response.arrayBuffer());
+      })());
+      return tracks.get(url).catch(error=>{tracks.delete(url);throw error;});
+    }
     async function selectRecord(url,force=false,once=recordOnce) {
       if(!force&&url===selectedRecord&&once===recordOnce)return;
       selectedRecord=url;recordOnce=once;const version=++trackVersion;
@@ -74,11 +84,7 @@
       if(!url||!context||closed)return;
       const current=context;
       try {
-        if(!tracks.has(url))tracks.set(url,(async()=>{
-          const response=await fetch(url);if(!response.ok)throw Error('audio unavailable');
-          return current.decodeAudioData(await response.arrayBuffer());
-        })());
-        const decoded=await tracks.get(url);
+        const decoded=await decodeTrack(url,current);
         if(closed||version!==trackVersion||current!==context)return;
         if(!Number.isFinite(decoded.duration)||decoded.duration<.2)throw Error('invalid audio');
         buffer=decoded;overlap=recordOnce?0:Math.min(3,buffer.duration/3);nextStart=context.currentTime+.03;
@@ -105,7 +111,37 @@
       if (!context) { blocked = false; start(); return; }
       if (blocked || context.state !== 'running') {
         try { await context.resume(); blocked = context.state !== 'running'; } catch (_) { blocked = true; }
-        if (!blocked && !buffer && selectedRecord) { context.close(); context = null; start(); }
+        if (!blocked && !buffer && selectedRecord && !memoryActive) { context.close(); context = null; start(); }
+      }
+    }
+    async function memory(value) {
+      if(memoryActive===value)return;
+      memoryActive=value;
+      const version=++memoryVersion;
+      for(const source of memorySources){
+        source.onended=null;try{source.stop();}catch(_){}source.disconnect();
+      }
+      memorySources.clear();
+      if(!value||closed)return;
+      await ensureAudio();
+      const audio=context;
+      if(!audio||closed||version!==memoryVersion)return;
+      const intro=decodeTrack('/game/nora-memory-intro.mp3',audio).catch(()=>null);
+      const loop=decodeTrack('/game/nora-memory-loop.mp3',audio).catch(()=>null);
+      const play=(track,when,repeat)=>{
+        const source=audio.createBufferSource();
+        source.buffer=track;source.loop=repeat;source.connect(musicLevel);
+        memorySources.add(source);
+        source.onended=()=>{memorySources.delete(source);source.disconnect();};
+        source.start(when);
+      };
+      const first=await intro;
+      if(closed||version!==memoryVersion||audio!==context)return;
+      const start=audio.currentTime+.025;
+      if(first)play(first,start,false);
+      const second=await loop;
+      if(second&&!closed&&version===memoryVersion&&audio===context){
+        play(second,Math.max(audio.currentTime+.025,start+(first?.duration??0)),true);
       }
     }
     function attach(parent) {
@@ -120,12 +156,14 @@
     }
     function close() {
       closed = true; button = null; panel = null;
+      memory(false);
       if (!context) return;
       const old = context; volume(0, .15);
       setTimeout(() => { for (const source of sources) { try { source.stop(); } catch (_) {} } sources.clear(); old.close().catch(() => {}); }, 750);
     }
     function worldAudio() {
       let stopped = false, ambience = [], daylight = 1, indoors = false, distance = 0;
+      let thunderBuffer=null, thunderContext=null;
       recordPlaying=true; positionMusic({gain:.12,cutoff:1000,pan:0});
       const buffers = new Map();
       const names = ['birds_dawn', 'crickets', 'doorOpen_1', 'doorClose_1',
@@ -181,12 +219,26 @@
           if (distance >= .65) { distance %= .65; step(inside); }
         },
         record(url, once=false) { if(!stopped)return selectRecord(url,false,once); },
+        memory,
+        thunder() {
+          if(stopped||!context||context.state!=='running'||!context.createBuffer)return;
+          if(thunderContext!==context){
+            thunderContext=context;
+            thunderBuffer=context.createBuffer(1,Math.floor(context.sampleRate*1.35),context.sampleRate);
+            const noise=thunderBuffer.getChannelData(0);let rumble=0;
+            for(let i=0;i<noise.length;i++){
+              rumble=(rumble+(Math.random()*.052-.026))*.982;
+              noise[i]=rumble*5*Math.min(1,i/700)*(1-i/noise.length)**2;
+            }
+          }
+          buffers.set('memory-thunder',thunderBuffer);play('memory-thunder',.45);
+        },
         playing(value) { if(!stopped){recordPlaying=value;positionMusic(spatial);if(value)ensureAudio();} },
         spatial(value) { if(!stopped)positionMusic(value); },
         jump(inside) { distance = 0; step(inside, .8); },
         land(inside) { distance = 0; step(inside, 1.15); },
         door(inside) { play(inside ? 'doorOpen_1' : 'doorClose_1', .7); },
-        stop() { stopped = true; recordPlaying=true; positionMusic({gain:1,cutoff:18000,pan:0}); for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
+        stop() { stopped = true; memory(false);recordPlaying=true; positionMusic({gain:1,cutoff:18000,pan:0}); for (const item of ambience) if (item) { try { item.source.stop(); } catch (_) {} item.source.disconnect(); item.gain.disconnect(); } ambience = []; },
       };
     }
     function setLevel(kind,value){settings[kind]=value;const gain=kind==='music'?musicLevel:effectsLevel;if(context&&gain)gain.gain.setTargetAtTime(value/100,context.currentTime,.05);}
@@ -215,10 +267,11 @@
   async function world(nickname) {
     frame(`<div class="nora-world"><canvas aria-label="Общее лобби Норы"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛОББИ</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок</span><button class="nora-world-help-close" type="button" aria-label="Закрыть инструкцию движения">×</button></p><div class="nora-world-context"><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-action nora-record-toggle" type="button" aria-pressed="true" hidden>Выключить проигрыватель</button></div><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
-    root.insertAdjacentHTML('beforeend', `<section class="nora-observatory-hud" aria-label="Звёздная обсерватория" hidden>
+    root.insertAdjacentHTML('beforeend', `<section class="nora-observatory-hud" aria-label="Воспоминание" hidden>
       <div role="status"><strong class="nora-observatory-progress"></strong><span class="nora-observatory-hint"></span></div>
       <button type="button">В лобби</button>
-    </section>`);
+    </section><div class="nora-memory-veil" aria-hidden="true"><span></span></div>
+    <p class="nora-memory-result" role="status" hidden></p>`);
     const back = overlay.querySelector('.nora-game-back');
     back.textContent='⚙ Настройки'; back.setAttribute('aria-label','Настройки игры');
     const dialog=document.createElement('dialog'); dialog.className='nora-settings'; dialog.setAttribute('aria-label','Настройки игры');

@@ -3,7 +3,6 @@ window.NoraWorld = (() => {
   const GRAVITY=13, JUMP_SPEED=4.4;
   const WING_LIFT_SPEED=6.8, GLIDE_GRAVITY=6.5, GLIDE_FALL_SPEED=3.4;
   const TAVERN_JUMP_LIMIT=1.5; // Keep the avatar below the ceiling beams.
-  const PARKOUR_PRESS_DURATION=.08, PARKOUR_FLASH_DURATION=.18;
   const trees = [[-5.7,-5.6], [5.2,-4.7], [-5.6,5.3], [5.5,5.7]];
   const FURNITURE_RADIUS=.12;
   function overlapsBox(x,z,[x0,x1,z0,z1],radius){
@@ -160,7 +159,8 @@ window.NoraWorld = (() => {
       peers.delete(nickname);
     }
     function add({nickname,outfit,x,y,z,heading}){
-      const avatar=window.NoraVoxel.createCharacter(T,outfit);
+      const avatar=window.NoraVoxel.createCharacter(T,room?{...outfit,wings:null}:outfit);
+      if(room)avatar.setArmor(true);
       avatar.group.scale.setScalar(.32);
       avatar.group.position.set(x,y,z);avatar.group.rotation.y=heading;
       const canvas=document.createElement('canvas');canvas.width=256;canvas.height=48;
@@ -183,7 +183,7 @@ window.NoraWorld = (() => {
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
       return pending;
     }
-    function update(time,dt,grounded,sprinting,boosting){
+    function update(time,dt,grounded,sprinting,boosting,interaction){
       if(!session){
         session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
         if(!room)status.textContent='ЛОББИ · ПОДКЛЮЧЕНИЕ';
@@ -197,6 +197,7 @@ window.NoraWorld = (() => {
         const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
         const body={session,x,y,z,heading,grounded,sprinting,boosting};
         if(room)body.room=room;
+        if(room&&interaction)body.interaction=interaction;
         if(streaming){
           // Do not wait a round trip before sending the next pose, and do not
           // accumulate obsolete positions when the connection is congested.
@@ -209,7 +210,7 @@ window.NoraWorld = (() => {
             if(session!==sentSession)return;
             failures++;
             next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
-            if(failures>=2)status.textContent=room?'ОБСЕРВАТОРИЯ · СВЯЗЬ ПОТЕРЯНА':'ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
+            if(failures>=2)status.textContent=room?'ВОСПОМИНАНИЕ · СВЯЗЬ ПОТЕРЯНА':'ЛОББИ · СВЯЗЬ ПОТЕРЯНА';
           });
           const sent=pending;
           sent.finally(()=>{if(pending===sent)pending=null;});
@@ -234,7 +235,7 @@ window.NoraWorld = (() => {
         position.set(position.x+dx*step,a.y+(b.y-a.y)*t,position.z+dz*step);
         const angle=b.heading-a.heading;
         rotation.y=a.heading+Math.atan2(Math.sin(angle),Math.cos(angle))*t;
-        avatar.setWings(state.outfit.wings);
+        avatar.setWings(room?null:state.outfit.wings);
         const airborne=!(state.grounded??(state.y<=.04));
         const travelled=distance*step;
         const verticalSpeed=span?(b.y-a.y)*1000/span:0;
@@ -297,15 +298,14 @@ window.NoraWorld = (() => {
     sun.position.set(-8,12,-45);sun.scale.set(4,4,1);scene.add(sun);
     const moonMaterial=new T.MeshBasicMaterial({color:'#c6d4dc',fog:false,transparent:true,depthWrite:false});
     const moon=new T.Mesh(geometry,moonMaterial);moon.scale.set(2.6,2.6,.8);scene.add(moon);
-    const scenery=window.NoraScenery.create(T,geometry,material);scene.add(scenery.outdoor,scenery.indoor);if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
+    const scenery=window.NoraScenery.create(T,geometry,material,layout?.portal);scene.add(scenery.outdoor,scenery.indoor);if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
     if(scenery.lobby)scene.add(scenery.lobby);
     const challenge=layout&&observatory.create(T,geometry,layout);
-    if(challenge&&scenery.lobby){scenery.lobby.add(challenge.portal);scene.add(challenge.course);}
+    if(challenge)scene.add(challenge.course);
     const tavernOffset=window.NoraScenery.tavernOffset??0;
-    const {portalZ,lobbyDeck,parkourStart,parkourFinish}=window.NoraScenery;
-    const portalArrivalOffset=2.2;
+    const {portalZ,lobbyDeck,lobbySpawn,tavernPortal}=window.NoraScenery;
     let inside=false,inLobby=true,inChallenge=false,zone;
-    let challengeState=null;
+    let challengeState=null, interaction=null, interactionSerial=0;
     const atmosphere=createAtmosphere(T,scene,geometry);
     const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
     const lightNight=new T.Color('#9aadd0'),lightDay=new T.Color('#f3d8ad');
@@ -319,9 +319,9 @@ window.NoraWorld = (() => {
           ambient.color.set('#e8c594');ambient.groundColor.set('#534037');ambient.intensity=1.65;
           sunlight.color.set('#ffc083');sunlight.intensity=1.25;
         }else if(inChallenge){
-          scene.background.set('#141427');scene.fog.color.set('#26213c');scene.fog.near=12;scene.fog.far=32;
-          ambient.color.set('#d3c0fa');ambient.groundColor.set('#555378');ambient.intensity=1.66;
-          sunlight.color.set('#a8dbeb');sunlight.intensity=1.22;sunlight.position.set(-12,22,10);
+          scene.background.set('#16141e');scene.fog.color.set('#26202c');scene.fog.near=7;scene.fog.far=30;
+          ambient.color.set('#bdb0c8');ambient.groundColor.set('#615361');ambient.intensity=1.25;
+          sunlight.color.set('#c6aec9');sunlight.intensity=.79;sunlight.position.set(-12,22,10);
         }else if(inLobby){
           scene.background.set('#171725');scene.fog.color.copy(scene.background);
           scene.fog.near=10;scene.fog.far=32;
@@ -342,7 +342,7 @@ window.NoraWorld = (() => {
       return inLobby||inChallenge?0:phase.daylight;
     }
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
-    player.scale.setScalar(.32);player.position.set(0,.017,portalZ.lobby-portalArrivalOffset);player.rotation.y=Math.PI;scene.add(player);
+    player.scale.setScalar(.32);player.position.set(lobbySpawn.x,.017,lobbySpawn.z);player.rotation.y=Math.PI;scene.add(player);
     const locationLabel=root.querySelector('.nora-world-bar small');
     const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge);
     // Soft contact patches without costly real-time shadow maps.
@@ -406,9 +406,12 @@ window.NoraWorld = (() => {
     const challengeHud=challenge&&root.querySelector('.nora-observatory-hud');
     const challengeProgress=challengeHud?.querySelector('.nora-observatory-progress');
     const challengeHint=challengeHud?.querySelector('.nora-observatory-hint');
+    const veil=challenge&&root.querySelector('.nora-memory-veil');
+    const resultLabel=challenge&&root.querySelector('.nora-memory-result');
+    const reduceTransition=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let transition=null, resultTime=0;
     let recordPlaying=true, audioPlaying=true;
-    let parkourPressTime=0;
-    function inputPaused(){return (inChallenge&&!challengeState)||parkourPressTime>0||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen();}
+    function inputPaused(){return !!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen();}
     function nearLobbyDeck(){
       return inLobby&&Math.hypot(player.position.x-lobbyDeck.x,player.position.z-lobbyDeck.z)<1.8&&jumpHeight===0&&jumpVelocity===0;
     }
@@ -430,32 +433,30 @@ window.NoraWorld = (() => {
       else{recordPlaying=!recordPlaying;audioPlaying=recordPlaying;sounds?.playing(recordPlaying);}
       syncRecordButton();recordButton.blur();
     });
-    function returnToParkourStart(){
-      parkourPressTime=0;
-      scenery.setParkourPress(0);
-      player.position.set(parkourStart.x,.017,parkourStart.z);
-      player.rotation.y=Math.PI;yaw=targetYaw=0;
-      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
-      action.hidden=true;action.blur();companion.reset();reset();
-    }
     function respawnChallenge(index){
-      const [x,z,y]=challenge.safe[index];
-      yaw=targetYaw=index===2?-Math.PI/2:0;
-      player.position.set(x,y+.017,z);player.rotation.y=yaw+Math.PI;
-      jumpHeight=y;jumpVelocity=0;grounded=true;wingBoostUsed=false;
+      const [x,z]=challenge.safe[index];
+      yaw=targetYaw=0;
+      player.position.set(x,.017,z);player.rotation.y=Math.PI;
+      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
       reset();
     }
     function receiveChallenge(state){
-      locationLabel.textContent='ОБСЕРВАТОРИЯ';
+      if(!inChallenge)return;
+      locationLabel.textContent='ВОСПОМИНАНИЕ';
       const previous=challengeState;
+      if(interaction&&state.action>=interaction.serial)interaction=null;
       if(state.reset&&(!previous?.reset||previous.checkpoint!==state.checkpoint))respawnChallenge(state.checkpoint);
       challengeState=state;
-      if(previous?.checkpoint===state.checkpoint&&previous.reward===state.reward)return;
-      const finished=state.reward!==null;
-      challengeProgress.textContent=finished?'Испытание пройдено':`Маяки ${Math.min(state.checkpoint,3)} / 3`;
-      if(state.reward>0)challengeHint.textContent=`+${state.reward} печенек в кошельке`;
-      else if(finished)challengeHint.textContent='Приз за первое прохождение уже получен.';
-      else challengeHint.textContent=observatory.instructions[Math.min(state.checkpoint,3)];
+      if(previous?.checkpoint!==state.checkpoint)challenge.checkpoint(state.checkpoint);
+      if(state.reward!==null){
+        beginTransition(false,state.reward);
+        return;
+      }
+      const [title,hint]=observatory.chapters[Math.min(state.checkpoint,3)];
+      const heading=state.checkpoint===1?`${title} · ${state.bells}/3`:title;
+      const message=state.hold!==null?`Круг удерживает тьму. Осталось ${state.hold} с.`:state.notice||hint;
+      if(challengeProgress.textContent!==heading)challengeProgress.textContent=heading;
+      if(challengeHint.textContent!==message)challengeHint.textContent=message;
     }
     function syncLocation(){
       const home=!inside&&!inLobby&&!inChallenge;
@@ -463,54 +464,92 @@ window.NoraWorld = (() => {
       scenery.indoor.visible=inside;scenery.outdoor.visible=home;scenery.lobby.visible=inLobby;
       if(challenge)challenge.course.visible=inChallenge;
       landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
-      locationLabel.textContent=inChallenge?'ОБСЕРВАТОРИЯ':inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
-      canvas.setAttribute('aria-label',inChallenge?observatory.title:inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
+      locationLabel.textContent=inChallenge?'ВОСПОМИНАНИЕ':inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
+      canvas.setAttribute('aria-label',inChallenge?observatory.title:inside?'Таверна Норы':inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
       lightingAt=-Infinity;updateLighting(Date.now());
     }
     function switchChallenge(entering){
-      inChallenge=entering;inLobby=!entering;challengeState=null;
+      inChallenge=entering;inLobby=!entering;challengeState=null;interaction=null;
       lobby.setRoom(entering?observatory.room:null);
       syncLocation();
+      character.setArmor(entering);character.setWings(entering?null:outfit.wings);
       challengeHud.hidden=!entering;
       if(entering){
+        challenge.checkpoint(0);
         respawnChallenge(0);
-        challengeProgress.textContent='Маяки 0 / 3';challengeHint.textContent='Подключаемся к испытанию…';
+        challengeProgress.textContent=observatory.chapters[0][0];challengeHint.textContent='Воспоминание проступает…';
       }else{
-        player.position.set(challenge.entrance.x,.017,challenge.entrance.z+1.75);
-        player.rotation.y=0;yaw=targetYaw=Math.PI;
+        player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
+        player.rotation.y=Math.PI;yaw=targetYaw=0;
         jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
         reset();companion.reset();records?.refresh();
+        sounds?.memory?.(false);
       }
       action.hidden=true;action.blur();
       for(const g of gusts)g.age=1;
     }
+    function beginTransition(entering,reward=null){
+      if(transition)return;
+      transition={entering,reward,elapsed:0,switched:false};
+      veil.dataset.phase=entering?'enter':'return';
+      veil.style.opacity='0';
+      veil.querySelector('span').textContent=entering?'Воспоминание':'Ты снова в Норе';
+      resultLabel.hidden=true;resultTime=0;action.hidden=true;
+      if(entering)sounds?.memory?.(true);
+      reset();
+    }
+    function updateTransition(dt){
+      if(!transition)return;
+      const duration=reduceTransition?.24:1.08;
+      transition.elapsed+=dt;
+      const progress=Math.min(1,transition.elapsed/duration);
+      const opacity=Math.min(1,3.7*Math.min(progress,1-progress));
+      veil.style.opacity=String(reduceTransition?opacity:Math.ceil(opacity*7)/7);
+      if(!transition.switched&&transition.elapsed>=duration*.5){
+        transition.switched=true;
+        switchChallenge(transition.entering);
+      }
+      if(transition.elapsed<duration)return;
+      const {reward}=transition;
+      transition=null;delete veil.dataset.phase;
+      if(reward!==null){
+        resultLabel.textContent=reward>0?`Воспоминание пройдено · +${reward} 🍪`:'Воспоминание пройдено. Награда уже в кошельке.';
+        resultLabel.hidden=false;resultTime=6;
+      }
+    }
     if(challenge)on(challengeHud.querySelector('button'),'click',()=>{
-      if(inChallenge)switchChallenge(false);
+      if(inChallenge)beginTransition(false);
     });
     function nearbyAction(){
-      if(inChallenge||inputPaused()||jumpHeight>0||jumpVelocity!==0)return '';
+      if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return '';
+      if(inChallenge)return interaction?'':challenge.actionAt(player.position,challengeState.checkpoint)?.text||'';
       const {x,z}=player.position;
       if(inside)return Math.abs(x)<1.5&&z>3.3?'Выйти из таверны':'';
-      if(challenge&&inLobby&&Math.hypot(x-challenge.entrance.x,z-challenge.entrance.z)<1.53)
-        return observatory.title;
-      if(portalZ&&Math.abs(x)<1.65&&Math.abs(z-portalZ[inLobby?'lobby':'home'])<1.85)
-        return inLobby?'НА ОСТРОВ':'ЛОББИ';
+      if(inLobby){
+        if(Math.hypot(x-tavernPortal.x,z-tavernPortal.z)<1.62)return 'НОРА';
+        if(challenge&&Math.hypot(x-challenge.entrance.x,z-challenge.entrance.z)<1.62)return observatory.title;
+        return '';
+      }
+      if(Math.abs(x)<1.65&&Math.abs(z-portalZ.home)<1.85)return 'ЛОББИ';
       return !inLobby&&Math.abs(x)<1.5&&z-tavernOffset>2.55&&z-tavernOffset<4.8?'Войти в таверну':'';
     }
     on(action,'click',()=>{
       const label=nearbyAction();
       if(!label)return;
-      if(label===observatory?.title){switchChallenge(true);return;}
-      const throughPortal=label==='ЛОББИ'||label==='НА ОСТРОВ';
-      if(throughPortal){
-        inLobby=!inLobby;
-        if(!inLobby)lobby.leave().then(()=>records?.refresh());
-        player.position.set(0,.017,portalZ[inLobby?'lobby':'home']-portalArrivalOffset);
+      if(inChallenge){
+        interaction={id:challenge.actionAt(player.position,challengeState.checkpoint).id,serial:++interactionSerial};
+        action.hidden=true;action.blur();return;
+      }
+      if(label===observatory?.title){beginTransition(true);return;}
+      if(label==='ЛОББИ'){
+        inLobby=true;
+        player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
         player.rotation.y=Math.PI;yaw=targetYaw=0;
       }else{
+        if(inLobby){inLobby=false;lobby.leave().then(()=>records?.refresh());}
         inside=!inside;sounds?.door(inside);
         player.position.set(0,.017,inside?3.7:3.6+tavernOffset);
-        player.rotation.y=inside?Math.PI:0;
+        yaw=targetYaw=0;player.rotation.y=inside?Math.PI:0;
       }
       syncLocation();
       jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;action.hidden=true;action.blur();
@@ -556,11 +595,8 @@ window.NoraWorld = (() => {
           frameTotal=frameCount=0;qualityAt=time;
           if(Math.abs(next-quality)>.001){quality=next;resize();}
         }
-        if(parkourPressTime>0){
-          parkourPressTime+=dt;
-          if(parkourPressTime>=PARKOUR_FLASH_DURATION)returnToParkourStart();
-          else scenery.setParkourPress(Math.min(1,parkourPressTime/PARKOUR_PRESS_DURATION));
-        }
+        updateTransition(dt);
+        if(resultTime>0&&(resultTime-=dt)<=0)resultLabel.hidden=true;
         const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
         let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
         let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
@@ -578,7 +614,7 @@ window.NoraWorld = (() => {
         const dx=velocityX*dt,dz=velocityZ*dt;
         const oldX=player.position.x,oldZ=player.position.z;
         move(player.position,dx,dz,zone,jumpHeight);
-        let floor=inChallenge?-Infinity:0;
+        let floor=0;
         for(const box of zone.boxes){
           const top=box[4];
           if(top>floor&&top<=jumpHeight&&overlapsBox(player.position.x,player.position.z,box,FURNITURE_RADIUS))floor=top;
@@ -592,18 +628,10 @@ window.NoraWorld = (() => {
           if(inside&&jumpHeight>TAVERN_JUMP_LIMIT){jumpHeight=TAVERN_JUMP_LIMIT;jumpVelocity=0;}
           if(jumpHeight<=floor){
             jumpHeight=floor;jumpVelocity=0;grounded=true;wingBoostUsed=false;sounds?.land(inside);
-            if(inLobby&&floor===parkourFinish?.y){
-              parkourPressTime=dt;velocityX=velocityZ=0;
-              scenery.setParkourPress(Math.min(1,parkourPressTime/PARKOUR_PRESS_DURATION));
-            }
           }
         }
         player.position.y=.017+jumpHeight;
         const serverSeconds=lobby.serverSeconds(time);
-        if(inChallenge&&(player.position.y<challenge.belowCourse||
-            (challengeState&&challenge.hitBeam(player.position,serverSeconds)))){
-          respawnChallenge(challengeState?.checkpoint??0);
-        }
         character.animateWings(dt,!grounded,wingBoostUsed&&jumpVelocity>0);
         const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
         const travelled=Math.hypot(travelledX,travelledZ);
@@ -613,8 +641,8 @@ window.NoraWorld = (() => {
         const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
         player.rotation.y+=turn*(1-Math.exp(-12*dt));
         if(scenery.carriedRecord){const angle=player.rotation.y;scenery.carriedRecord.position.set(player.position.x+Math.cos(angle)*.26+Math.sin(angle)*.2,player.position.y+.64,player.position.z-Math.sin(angle)*.26+Math.cos(angle)*.2);scenery.carriedRecord.rotation.y=angle;}
-        playerShadow.position.set(player.position.x,inChallenge&&Number.isFinite(floor)?floor+.008:.008,player.position.z);
-        target.set(player.position.x,1.1+jumpHeight*(inChallenge?1:.65),player.position.z);
+        playerShadow.position.set(player.position.x,inChallenge?floor+.008:.008,player.position.z);
+        target.set(player.position.x,1.1+jumpHeight*.65,player.position.z);
         const wanted=(inside?4.6:(camera.aspect<.7?5.7:5.1))*Math.max(.04,pov/100);
         if(view===1){
           player.visible=false;playerShadow.visible=false;
@@ -622,7 +650,7 @@ window.NoraWorld = (() => {
           target.set(camera.position.x-Math.sin(yaw)*Math.cos(pitch),camera.position.y-Math.sin(pitch),camera.position.z-Math.cos(yaw)*Math.cos(pitch));
           camera.lookAt(target);
         }else{
-          player.visible=true;playerShadow.visible=!inChallenge||Number.isFinite(floor);
+          player.visible=true;playerShadow.visible=true;
           const cameraYaw=yaw+(view===2?Math.PI:0);
           direction.set(Math.sin(cameraYaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(cameraYaw)*Math.cos(pitch));
           const safe=cameraDistance(target,direction,wanted,zone.cameraBoxes);
@@ -652,15 +680,18 @@ window.NoraWorld = (() => {
         if(action.hidden!==!actionText)action.hidden=!actionText;
         if(actionText&&action.textContent!==actionText){
           action.textContent=actionText;
-          action.classList?.toggle('nora-portal-action',actionText==='ЛОББИ'||actionText==='НА ОСТРОВ'||actionText===observatory?.title);
+          action.classList?.toggle('nora-portal-action',actionText==='ЛОББИ'||actionText==='НОРА'||actionText===observatory?.title);
         }
-        if(inLobby||inChallenge)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0);
-        if(inChallenge)challenge.update(serverSeconds,challengeState?.checkpoint??0);
-        else if(inLobby)challenge?.updatePortal(time);
+        if(inLobby||inChallenge)lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0,interaction);
+        if(inChallenge){
+          const storm=challenge.update(serverSeconds,player.position);
+          sunlight.intensity=.79+storm.light*.39;
+          if(storm.thunder)sounds?.thunder?.();
+        }
         updateWind(dt,sprinting&&travelled>.001);
         const daylight=updateLighting(Date.now());
         const audioYaw=yaw+(view===2?Math.PI:0);
-        const playing=inChallenge?false:inLobby?!!records?.lobbyPlaying():recordPlaying;
+        const playing=inChallenge||transition?.entering?false:inLobby?!!records?.lobbyPlaying():recordPlaying;
         if(playing!==audioPlaying){audioPlaying=playing;sounds?.playing(playing);}
         if(inLobby){
           const dx=lobbyDeck.x-player.position.x,dz=lobbyDeck.z-player.position.z;
@@ -674,7 +705,7 @@ window.NoraWorld = (() => {
           if(!inside)scenery.updatePortal?.(dt);
         }
         scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
-        sounds?.update(inside,daylight,travelled,grounded);
+        sounds?.update(inside||inChallenge,daylight,travelled,grounded);
         atmosphere.update(dt,daylight,inside||inLobby||inChallenge);
         companion.update(dt,camera,!inChallenge);
         renderer.render(scene,camera);

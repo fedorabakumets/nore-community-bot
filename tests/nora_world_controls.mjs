@@ -32,7 +32,7 @@ try {
   }
   const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
   const sceneryWindow={matchMedia:()=>({matches:false})};
-  vm.runInNewContext(sceneryCode,{window:sceneryWindow});
+  vm.runInNewContext(sceneryCode,{window:sceneryWindow,document:{createElement:()=>new Element()}});
   const sharedGeometry=new Three.BoxGeometry(),sharedMaterial=new Three.MeshLambertMaterial();
   const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial);
   const record=tavern.indoor.getObjectByName('nora-record'),notes=tavern.indoor.getObjectByName('nora-music-notes');
@@ -42,7 +42,7 @@ try {
   const acousticContext={window:{}};vm.runInNewContext(world,acousticContext);
   acousticContext.window.NoraWorld.move(blocked,0,-2,tavern.indoorZone);
   assert.ok(blocked.z>.7,'console blocks walking through its cabinet');
-  const lobbyWalk={x:0,z:0};
+  const lobbyWalk={x:0,z:2.8};
   acousticContext.window.NoraWorld.move(lobbyWalk,20,0,tavern.lobbyZone);
   assert.equal(lobbyWalk.x,16.35,'the lobby is traversable across its wide central path');
   const movedHouse={x:0,z:0};
@@ -87,13 +87,13 @@ try {
   async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,warmup=30}={}) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     document.createElement = () => new Element();
-    window.matchMedia=()=>({matches:mobile});window.devicePixelRatio=3;
+    window.matchMedia=query=>({matches:query==='(pointer:coarse)'&&mobile});window.devicePixelRatio=3;
     let resizeCallback;
     let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
     const renderer = {ratio:1,resizes:0,setPixelRatio(value){this.ratio=value;}, setSize(w,h){this.width=w;this.height=h;this.resizes++;}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {
-      portalZ:{home:6.75,lobby:9.75}, lobbyDeck:{x:0,z:-3},
+      portalZ:{home:6.75}, lobbyDeck:{x:0,z:-3}, lobbySpawn:{x:0,z:6.8}, tavernPortal:{x:-1.64,z:.6},
       create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), lobby:new Three.Group(),
         outdoorZone:zone, indoorZone:zone, lobbyZone:zone, updatePortal(){}, dispose(){}}),
     };
@@ -124,7 +124,9 @@ try {
     return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
   function goToIsland(world){
-    world.player.position.z=world.window.NoraScenery.portalZ.lobby-1.15;
+    const {x,z}=world.window.NoraScenery.tavernPortal;
+    world.player.position.set(x,.017,z+1.15);
+    world.root.querySelector('.nora-world-action').emit('click');
     world.root.querySelector('.nora-world-action').emit('click');
     world.frames(1);
   }
@@ -473,9 +475,9 @@ try {
   assert.equal(lobbyWorld.scene().background.getHexString(),'171725','first frame has lobby lighting');
   assert.equal(lobbyWorld.root.querySelector('.nora-world-bar small').textContent,'ЛОББИ');
   const [firstPose]=exchanges;
-  assert.deepEqual([firstPose.x,firstPose.y,firstPose.z],[0,.017,7.55],'first pose is sent from the lobby spawn');
+  assert.deepEqual([firstPose.x,firstPose.y,firstPose.z],[0,.017,6.8],'first pose is sent from the lobby spawn');
   assert.equal(firstPose.room,undefined,'first pose joins the shared lobby');
-  const hasPeer=()=>lobbyWorld.scene().children.find(node=>node.children.some(child=>child.isSprite));
+  const hasPeer=()=>lobbyWorld.scene().children.find(node=>node.children.some(child=>child.isSprite)&&node.getObjectByName('gaitRoot'));
   assert.ok(hasPeer(),'authenticated lobby snapshot creates a labeled avatar');
   let previousX=hasPeer().position.x;
   for(let i=0;i<34;i++){
@@ -514,10 +516,13 @@ try {
   const peer=hasPeer();
   const remoteSplit=peer.getObjectByName('thighRight').rotation.x-peer.getObjectByName('thighLeft').rotation.x;
   assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
-  lobbyWorld.player.position.set(0,.017,8.6);lobbyWorld.frames(1);
-  assert.equal(lobbyAction.textContent,'НА ОСТРОВ');
+  lobbyWorld.player.position.set(-1.64,.017,1.75);lobbyWorld.frames(1);
+  assert.equal(lobbyAction.textContent,'НОРА');
   lobbyAction.emit('click');await flush();
-  assert.ok(exchanges.at(-1).leave,'returning to the island leaves the shared lobby');
+  assert.ok(exchanges.at(-1).leave,'entering the tavern leaves the shared lobby');
+  lobbyWorld.frames(1);
+  assert.equal(lobbyAction.textContent,'Выйти из таверны');
+  lobbyAction.emit('click');
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
@@ -558,7 +563,7 @@ try {
   let previous=null,movingFrames=0,maxStep=0,legMin=Infinity,legMax=-Infinity;
   for(let i=0;i<240;i++){
     slowTime+=1000/60;slow.frames(1);await flush();
-    const avatar=slow.scene().children.find(node=>node.children.some(child=>child.isSprite));
+    const avatar=slow.scene().children.find(node=>node.children.some(child=>child.isSprite)&&node.getObjectByName('gaitRoot'));
     if(!avatar)continue;
     if(previous!==null){const step=Math.abs(avatar.position.x-previous);maxStep=Math.max(maxStep,step);if(step>.001)movingFrames++;}
     previous=avatar.position.x;
@@ -570,127 +575,76 @@ try {
   slow.stop();
   console.log('NORA realtime: delayed replies, congestion, HTTP fallback and one-second snapshot animation passed.');
 
-  const parkour=await setup(0,60,undefined,undefined,false,true);
-  const parkourAction=parkour.root.querySelector('.nora-world-action');
-  const plate=parkour.scene().getObjectByName('nora-parkour-plate');
-  const finish=parkour.scene().getObjectByName('nora-parkour-finish');
-  const raisedY=plate.position.y;
-  const jump=()=>{parkour.key('Space');parkour.key('Space',false);};
-  const jumpToPenultimate=()=>{
-    parkour.player.position.set(8.6,.017,10.55);
-    parkour.frames(1);
-    for(const [z,top] of [[9.15,.34],[7.45,.68],[5.8,1.02],[4.15,1.36]]){
-      parkour.key('ShiftLeft');parkour.key('KeyW');jump();
-      for(let i=0;i<42&&parkour.player.position.z>z+.08;i++)parkour.frames(1);
-      parkour.key('KeyW',false);parkour.key('ShiftLeft',false);parkour.frames(24);
-      assert.equal(parkour.player.position.y,top+.017,'each platform is reachable without wings');
-    }
-  };
-  parkour.player.position.set(8.2,.017,1.23);parkour.frames(12);
-  assert.equal(plate.position.y,raisedY,'the finish does not activate on ground level');
-  jumpToPenultimate();
-  parkour.key('KeyW');
-  for(let i=0;i<40&&parkour.player.position.z>3.48;i++)parkour.frames(1);
-  assert.equal(parkour.player.position.y,1.36+.017,'the walking jump starts on the edge');
-  jump();parkour.frames(64);parkour.key('KeyW',false);
-  assert.equal(parkour.player.position.y,.017,'a walking jump from the lip falls short');
-  assert.equal(plate.position.y,raisedY);
-  parkour.frames(24);
-  for(let lap=0;lap<2;lap++){
-    jumpToPenultimate();
-    parkour.key('ShiftLeft');parkour.key('KeyW');
-    for(let i=0;i<25&&parkour.player.position.z>3.55;i++)parkour.frames(1);
-    jump();
-    for(let i=0;i<44&&plate.position.y===raisedY;i++)parkour.frames(1);
-    assert.equal(parkour.player.position.y,1.7+.017,'a sprint jump lands on the finish');
-    assert.ok(plate.position.y<raisedY,'landing depresses the plate automatically');
-    assert.equal(finish.material.color.getHexString(),'42d76b','the whole finish changes to green');
-    assert.equal(parkourAction.hidden,true,'the finish needs no manual action');
-    parkour.frames(5);
-    assert.ok(Math.abs(plate.position.y-(raisedY-.06))<1e-8,'the plate finishes depressing before teleport');
-    parkour.frames(8);
-    assert.deepEqual(parkour.player.position.toArray(),[8.2,.017,10.55],'the flash is followed by teleport to start');
-    assert.equal(plate.position.y,raisedY,'the plate rises again');
-    assert.equal(plate.material.color.getHexString(),'d1d4da');
-    assert.equal(finish.material.color.getHexString(),'777b83');
-  }
-  parkour.stop();
-  console.log('NORA parkour: sprint-only ordinary jump, automatic pressure plate, teleport and reset passed.');
-  const observatory={
+  const memory={
     code:await readFile(new URL('nora-observatory.js',web),'utf8'),
     layout:JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8')),
   };
-  const course=await setup(0,60,undefined,undefined,true,true,'raven',{observatory});
-  const {portal,platforms,checkpoints}=observatory.layout;
+  const audioChanges=[];
+  const memorySounds={memory:value=>audioChanges.push(value),playing(){},spatial(){},update(){},stop(){}};
+  const course=await setup(0,60,undefined,memorySounds,true,true,'raven',{observatory:memory});
+  const {portal,safe,relics}=memory.layout;
   const courseHud=course.root.querySelector('.nora-observatory-hud');
   const courseAction=course.root.querySelector('.nora-world-action');
+  const veil=course.root.querySelector('.nora-memory-veil');
+  const result=course.root.querySelector('.nora-memory-result');
   const level=course.scene().getObjectByName('nora-observatory');
-  let checkpoint=0, sentAt=0;
+  const gate=course.scene().getObjectByName('nora-observatory-portal');
+  const lobby=gate.parent;
+  assert.ok(!lobby.getObjectByName('nora-parkour-finish'),'the old lobby course is removed');
+  const [noraSign,memorySign]=lobby.children.filter(node=>node.name==='nora-portal-label');
+  assert.equal(noraSign.position.z,memorySign.position.z);
+  assert.ok(memorySign.position.z>portal.z+.8&&memorySign.material.opacity<1);
+  const signY=memorySign.position.y;
+  course.frames(20);
+  assert.notEqual(memorySign.position.y,signY,'the separated signs bob with the scene');
+
+  let reply={checkpoint:0,bells:0,reward:null,reset:false,action:0,hold:null,notice:''};
+  const used=[];
   course.window.WebSocket=class {
     readyState=1;bufferedAmount=0;
     close(){}
     send(raw){
-      const {room,x,y,z,grounded}=JSON.parse(raw);
+      const {room,interaction}=JSON.parse(raw);
       if(!room){this.onmessage({data:JSON.stringify({players:[]})});return;}
-      const next=platforms[checkpoints[checkpoint+1]];
-      if(next&&grounded&&Math.abs(y-next[2]-.017)<.01&&
-          Math.abs(x-next[0])<=next[3]/2+.12&&Math.abs(z-next[1])<=next[4]/2+.12)checkpoint++;
-      sentAt+=80;
-      this.onmessage({data:JSON.stringify({room,time:sentAt,players:[],
-        challenge:{checkpoint,reward:checkpoint===4?50:null,reset:false}})});
+      if(interaction&&interaction.serial>reply.action){
+        used.push(interaction.id);reply.action=interaction.serial;
+        if(interaction.id==='seal')reply.checkpoint=1;
+      }
+      const players=[{nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+        x:2,y:.017,z:27,heading:3.14,grounded:true}];
+      this.onmessage({data:JSON.stringify({room,players,challenge:reply})});
     }
   };
-  course.frames(2);
-  assert.equal(course.scene().getObjectByName('nora-observatory-portal').parent.visible,true);
-  course.player.position.set(portal.x,.017,portal.z+1);
-  course.frames(1);assert.equal(courseAction.textContent,'Звёздная обсерватория');
-  courseAction.emit('click');course.frames(6);assert.equal(level.visible,true);
-  assert.equal(courseHud.hidden,false);
-  assert.deepEqual(course.player.position.toArray(),[0,1.017,10]);
+  course.player.position.set(portal.x,.017,portal.z+1.25);
+  course.frames(1);assert.equal(courseAction.textContent,'Воспоминание');
+  courseAction.emit('click');assert.equal(veil.dataset.phase,'enter');
+  course.frames(80);
+  assert.equal(level.visible,true);assert.equal(courseHud.hidden,false);
+  assert.deepEqual(course.player.position.toArray(),[safe[0][0],.017,safe[0][1]]);
+  assert.ok(course.player.getObjectByName('memory-armor').visible);
+  const peerInMemory=course.scene().children.find(node=>node!==course.player&&node.getObjectByName('memory-armor'));
+  assert.ok(peerInMemory?.getObjectByName('memory-armor').visible,'other players wear armor too');
+  assert.ok(level.getObjectByName('memory-gate-1').visible);
 
-  // Walk off the initial landing with no jump. The respawn must stay in the level.
-  course.key('KeyS');course.frames(132);course.key('KeyS',false);
-  assert.deepEqual(course.player.position.toArray(),[0,1.017,10]);
-  const steer=(x,z,frames)=>{
-    course.stick(x,z,true);course.frames(frames);
-    course.joystick.emit('pointerup',{pointerId:1});
-  };
-  function walkTo(x,z){
-    for(let i=0;i<240;i++){
-      const dx=x-course.player.position.x,dz=z-course.player.position.z,distance=Math.hypot(dx,dz);
-      if(distance<.07)break;
-      steer(dx/distance,dz/distance,1);
-    }
-    course.frames(10);
-    assert.ok(Math.hypot(x-course.player.position.x,z-course.player.position.z)<.15,'walk destination');
-  }
-  function jumpAcross(from,to){
-    const [x,z, ,w,d]=platforms[from], [tx,tz,top,tw,td]=platforms[to];
-    const length=Math.hypot(tx-x,tz-z), dx=(tx-x)/length, dz=(tz-z)/length;
-    const reach=(width,depth)=>Math.min(width/(2*Math.abs(dx)),depth/(2*Math.abs(dz)));
-    const edge=reach(w,d)-.08, landing=length-reach(tw,td)+.17;
-    walkTo(x+dx*edge,z+dz*edge);
-    course.key('ShiftLeft');
-    const button=course.root.querySelector('.nora-world-jump');
-    button.emit('pointerdown',{button:0,pointerType:'touch'});
-    for(let i=0;i<39;i++){
-      if((course.player.position.x-x)*dx+(course.player.position.z-z)*dz>=landing)break;
-      steer(dx,dz,1);
-    }
-    course.key('ShiftLeft',false);course.frames(43);
-    assert.equal(course.player.position.y,top+.017,`reachable platform ${to}`);
-  }
-  for(let i=1;i<=4;i++)jumpAcross(i-1,i);
-  assert.equal(checkpoint,1);
-  for(const [x,z] of [[.8,.8],[.8,-2.1],[-.8,-2.1],[-.8,-4.15],[.8,-4.15],[.8,-6.2],[0,-7.9]])walkTo(x,z);
-  assert.equal(checkpoint,2);
-  for(let i=7;i<platforms.length;i++)jumpAcross(i-1,i);
-  assert.equal(checkpoint,4);
-  assert.equal(courseHud.querySelector('.nora-observatory-hint').textContent,'+50 печенек в кошельке');
-  courseHud.querySelector('button').emit('click');course.frames(1);
+  course.player.position.set(relics.seal[0],.017,relics.seal[1]);
+  course.frames(4);assert.equal(courseAction.textContent,'Поднять печать');
+  courseAction.emit('click');course.frames(8);
+  assert.deepEqual(used,['seal']);
+  assert.equal(level.getObjectByName('memory-gate-1').visible,false,'a confirmed relic opens the first gate');
+  reply={...reply,reset:true,notice:'Удар молнии'};
+  course.frames(8);
+  assert.deepEqual(course.player.position.toArray(),[safe[1][0],.017,safe[1][1]]);
+  reply={...reply,reset:false,checkpoint:4,hold:0,reward:50};
+  course.frames(12);
+  assert.equal(veil.dataset.phase,'return','a server-confirmed finish starts the return automatically');
+  course.frames(80);
   assert.equal(level.visible,false);assert.equal(courseHud.hidden,true);
+  assert.equal(course.player.getObjectByName('memory-armor').visible,false);
+  assert.equal(result.textContent,'Воспоминание пройдено · +50 🍪');
+  assert.deepEqual(course.player.position.toArray(),[0,.017,6.8]);
+  assert.deepEqual(audioChanges,[true,false]);
   course.stop();
-  console.log('NORA Observatory: portal, fall and respawn, mobile jumps, beam route, all beacons and reward screen passed.');
+  console.log('NORA Memory: centered portals, no lobby parkour, armor, relic, storm respawn, reward and automatic return passed.');
   const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
   function widget(){
     const children=[],listeners={};

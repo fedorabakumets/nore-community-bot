@@ -6,7 +6,7 @@ const code=await readFile(new URL('../community_bot/web/nora-game.js',import.met
 const begin=code.indexOf('  function createMusic()'),end=code.indexOf('\n  function close() {',begin);
 const nodes=[];
 const param=()=>({value:0,setTargetAtTime(value){this.value=value;},cancelScheduledValues(){},setValueAtTime(value){this.value=value;},linearRampToValueAtTime(value){this.value=value;}});
-function node(type){const n={type,outputs:[],connect(to){this.outputs.push(to);},disconnect(){},gain:param(),frequency:param(),pan:param(),Q:param(),playbackRate:param(),start(){},stop(){}};nodes.push(n);return n;}
+function node(type){const n={type,outputs:[],connect(to){this.outputs.push(to);},disconnect(){},gain:param(),frequency:param(),pan:param(),Q:param(),playbackRate:param(),start(when){this.startedAt=when;},stop(){this.stopped=true;}};nodes.push(n);return n;}
 class AudioContext {
   state='running';currentTime=0;destination=node('destination');
   createGain(){return node('gain');}createBiquadFilter(){return node('filter');}createStereoPanner(){return node('pan');}createBufferSource(){return node('source');}
@@ -51,6 +51,17 @@ const lobbySources=nodes.slice(beforeLobby).filter(n=>n.type==='source');
 assert.equal(lobbySources.length,1,'lobby record schedules one playback');
 lobbySources[0].onended();
 assert.equal(nodes.slice(beforeLobby).filter(n=>n.type==='source').length,1,'lobby record does not repeat');
+const requested=[];const beforeMemory=nodes.length;
+context.fetch=async url=>{requested.push(url);return {ok:true,arrayBuffer:async()=>new ArrayBuffer(1)};};
+await effects.memory(true);
+assert.deepEqual(requested,['/game/nora-memory-intro.mp3','/game/nora-memory-loop.mp3']);
+const [intro,loop]=nodes.slice(beforeMemory);
+assert.equal(intro.loop,false);
+assert.equal(loop.loop,true);
+assert.equal(loop.startedAt,intro.startedAt+intro.buffer.duration);
+assert.ok([intro,loop].every(source=>source.outputs[0]===musicBus),'both tracks respect the game music volume');
+await effects.memory(false);
+assert.ok([intro,loop].every(source=>source.stopped&&source.onended===null),'leaving cancels both tracks');
 await effects.record(null);
 let resolveFetch;
 context.fetch=()=>new Promise(resolve=>{resolveFetch=resolve;});
