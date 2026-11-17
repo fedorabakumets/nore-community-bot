@@ -112,20 +112,21 @@ async def answer_group_ephemeral(
     return sent
 
 
-def media_from_message(message: Message) -> tuple[str | None, str | None]:
-    if message.photo:
-        return "photo", message.photo[-1].file_id
-    if message.document:
-        return "document", message.document.file_id
-    if message.video:
-        return "video", message.video.file_id
-    if message.audio:
-        return "audio", message.audio.file_id
-    if message.voice:
-        return "voice", message.voice.file_id
-    if message.animation:
-        return "animation", message.animation.file_id
+def message_media(message: Message, *kinds: str):
+    for kind in kinds:
+        if media := getattr(message, kind, None):
+            return kind, media
+    if rich := getattr(message, "rich_message", None):
+        for block in rich.blocks:
+            kind = "voice" if block.type == "voice_note" else block.type
+            if kind in kinds:
+                return kind, getattr(block, block.type)
     return None, None
+
+
+def media_from_message(message: Message) -> tuple[str | None, str | None]:
+    kind, media = message_media(message, "photo", "document", "video", "audio", "voice", "animation")
+    return kind, ((media[-1] if kind == "photo" else media).file_id if media else None)
 
 
 async def safe_send(bot: Bot, chat_id: int, text: str, **kwargs: Any) -> bool:

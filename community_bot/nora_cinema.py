@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from aiohttp import web
 
-from community_bot.helpers import has_permission
+from community_bot.helpers import has_permission, message_media
 from community_bot.media_cache import _thread
 from community_bot.nora_game_api import LOBBY_TTL
 from community_bot.permissions import PERM_GAMES
@@ -179,7 +179,7 @@ class Cinema:
             client.put_object(Bucket=bucket, Key=key, Body=file, ContentType='video/mp4')
 
     async def import_clip(self, bot, message):
-        item = message.video or message.document
+        _, item = message_media(message, 'video', 'document')
         if message.has_protected_content or not item or item.mime_type != 'video/mp4':
             raise ValueError('Ответь на обычное видео MP4 в группе.')
         if not item.file_size or item.file_size > MAX_FILE:

@@ -106,6 +106,9 @@ async def answer_block(
 
 async def edit_block(message: Message, text: str, **kwargs: Any) -> Message | None:
     try:
+        rich = getattr(message, "rich_message", None)
+        if rich and any(block.type == "photo" for block in rich.blocks):
+            return await message.edit_caption(caption=text, **kwargs)
         if message.photo or message.caption is not None:
             if not fits_caption(text):
                 await message.edit_reply_markup(reply_markup=None)

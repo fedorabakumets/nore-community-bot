@@ -421,6 +421,7 @@ async def memory_cleanup_job(db: Database) -> None:
 def create_dispatcher() -> Dispatcher:
     from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
     from community_bot.private_rich import PrivateRichContextMiddleware
+    from community_bot.reply_rich import ReplyRichContextMiddleware
 
     dispatcher = Dispatcher()
     from community_bot.message_widgets import WidgetUpdateMiddleware
@@ -431,6 +432,9 @@ def create_dispatcher() -> Dispatcher:
     memory_middleware = CommunityMemoryMiddleware()
     dispatcher.message.outer_middleware(memory_middleware)
     dispatcher.edited_message.outer_middleware(memory_middleware)
+    reply_context = ReplyRichContextMiddleware()
+    dispatcher.message.outer_middleware(reply_context)
+    dispatcher.callback_query.outer_middleware(reply_context)
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
@@ -525,10 +529,12 @@ async def main() -> None:
     await run_requested_reset(db, settings, bot)
     from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
     from community_bot.private_rich import PrivateRichMiddleware
+    from community_bot.reply_rich import ReplyRichMiddleware
 
     bot.session.middleware.register(OnboardingKeyboardMiddleware())
     bot.session.middleware.register(PrivateRichMiddleware())
     patch_bot_ephemeral(bot)
+    bot.session.middleware.register(ReplyRichMiddleware())
     dispatcher = create_dispatcher()
     if settings.openrouter_api_key or settings.deepseek_api_key:
         dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)

@@ -124,6 +124,19 @@ function telegramStartParam() {
   return tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam') || '';
 }
 
+function botReplyRoute() {
+  if (history.state?.noraView) return null;
+  const param = telegramStartParam();
+  const screen = /^nora_to_(cookies|shop|pet|notices|games|mafia|rocket|events|community)$/.exec(param);
+  if (screen?.[1] === 'cookies') return {view: 'shop', category: '__cookies'};
+  if (screen) return {view: screen[1]};
+  const shop = /^nora_(cat|item)_([a-zA-Z0-9_-]{1,64})$/.exec(param);
+  if (!shop) return null;
+  if (shop[1] === 'cat') return {view: 'shop', category: shop[2]};
+  const item = data.products.find(product => product.sku === shop[2]);
+  return {view: 'shop', category: item?.category, sku: shop[2]};
+}
+
 function openLobbyFromLink() {
   if (telegramStartParam() !== 'nora_lobby') return;
   if (profileTabLocked('community')) {toast('Заполни профиль на 100%, чтобы открыть лобби');return}
@@ -163,11 +176,51 @@ async function openWidgetNoticeFromLink() {
   }
 }
 
-(async()=>{try{if(!auth){$('#app').innerHTML='<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';return}data=await api('me');const view=window.NoraShop?.route()?.view||'home';if(view==='admin'&&data.admin_available)tab='admin';else if(['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view))tab=view;else if(view==='shop'&&data.profile.fill_percent===100){tab='shop';window.NoraShop?.resume()}
-if(tab==='pet'&&!profileTabLocked(tab)&&history.state?.noraView!=='pet'){
-  window.NoraShop?.tabChanged(tab,'community');
-}
-render();loadAvatar();openLobbyFromLink();void openWidgetNoticeFromLink()}catch(e){window.NoraIntro?.finish(true);if(e.message.includes('Миниапка доступна участникам Норы')){showTesterAccess();return}$('#app').innerHTML=`<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;$('#retry').onclick=()=>location.reload()}finally{window.NoraIntro?.ready()}})();
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    if (!auth) {
+      $('#app').innerHTML = '<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';
+      return;
+    }
+    data = await api('me');
+    const linked = botReplyRoute();
+    const view = linked?.view || window.NoraShop?.route()?.view || 'home';
+    const blockedLink = linked && profileTabLocked(view);
+    const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
+    if (blockedLink) tab = 'lk';
+    else if (view === 'admin' && data.admin_available) tab = 'admin';
+    else if (['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view)) tab = view;
+    else if (view === 'shop' && data.profile.fill_percent === 100) {
+      tab = 'shop';
+      window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
+    }
+    if (tab === 'pet' && !profileTabLocked(tab) && history.state?.noraView !== 'pet') {
+      window.NoraShop?.tabChanged(tab, 'community');
+    } else if (linked && !blockedLink) {
+      window.NoraShop?.tabChanged(tab);
+    }
+    render();
+    loadAvatar();
+    if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+    else if (topupClosed) toast('Пополнение временно недоступно');
+    if (tab === 'shop' && linked?.sku) {
+      if (data.products.some(product => product.sku === linked.sku)) void product(linked.sku);
+      else toast('Товар больше недоступен');
+    }
+    openLobbyFromLink();
+    void openWidgetNoticeFromLink();
+  } catch (e) {
+    window.NoraIntro?.finish(true);
+    if (e.message.includes('Миниапка доступна участникам Норы')) {
+      showTesterAccess();
+      return;
+    }
+    $('#app').innerHTML = `<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;
+    $('#retry').onclick = () => location.reload();
+  } finally {
+    window.NoraIntro?.ready();
+  }
+}, {once: true});
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}

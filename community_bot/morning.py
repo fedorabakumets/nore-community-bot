@@ -1006,13 +1006,16 @@ async def weather_reply(now: datetime) -> str:
 
 
 async def publish_morning_digest(bot, db, settings, *, force: bool = False) -> bool:
+    from community_bot.reply_rich import bot_publication
+
     # The scheduler and the manual button share one Bot instance.
     lock = getattr(bot, "_morning_publish_lock", None)
     if lock is None:
         lock = asyncio.Lock()
         bot._morning_publish_lock = lock
     async with lock:
-        return await _publish_morning_digest(bot, db, settings, force=force)
+        with bot_publication():
+            return await _publish_morning_digest(bot, db, settings, force=force)
 
 
 async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> bool:

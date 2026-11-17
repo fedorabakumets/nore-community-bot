@@ -2742,6 +2742,7 @@ async def _admin_post_send(
         await callback.answer("ID чата сообщества не настроен.", show_alert=True)
         return
     from community_bot.posting import compose_post_markup, post_title, render_post, send_studio_poll, send_studio_post
+    from community_bot.reply_rich import bot_publication
 
     data = await state.get_data()
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
@@ -2755,14 +2756,15 @@ async def _admin_post_send(
     await state.update_data(post_event_id=event_id)
     try:
         if not sent_id and (html_text.strip() or data.get("post_file_id")):
-            sent = await send_studio_post(
-                bot,
-                settings.community_chat_id,
-                html_text or " ",
-                data.get("post_media_type"),
-                data.get("post_file_id"),
-                markup,
-            )
+            with bot_publication():
+                sent = await send_studio_post(
+                    bot,
+                    settings.community_chat_id,
+                    html_text or " ",
+                    data.get("post_media_type"),
+                    data.get("post_file_id"),
+                    markup,
+                )
             if data.get("post_template") == "event":
                 await db.set_bot_state("current_studio_event", event_id)
             sent_id = int(sent.message_id)

@@ -188,7 +188,7 @@ window.NoraShop=(()=>{
   function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
     window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
   function syncBack(){if(category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide()}
-  function resume(){category=route().category;syncBack()}
+  function resume(initialCategory=route().category){category=initialCategory;syncBack()}
   function tabChanged(next,previous){
     if(next==='pet'){
       if(previous&&previous!=='pet'){

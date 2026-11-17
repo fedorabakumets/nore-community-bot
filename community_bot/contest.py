@@ -129,8 +129,10 @@ async def publish_contest_post(
     media_type: str | None,
     media_file_id: str | None,
 ) -> Message | None:
+    from community_bot.reply_rich import bot_publication
+
     keyboard = contest_join_keyboard(contest_id, 0)
-    with keep_in_chat():
+    with keep_in_chat(), bot_publication():
         try:
             if media_type and media_file_id and len(text) <= CAPTION_LIMIT:
                 return await _send_media(

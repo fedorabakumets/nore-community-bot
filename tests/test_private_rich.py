@@ -10,7 +10,7 @@ import pytest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound, TelegramRetryAfter
-from aiogram.methods import EditMessageText, SendPhoto, SendRichMessage
+from aiogram.methods import EditMessageText, GetMe, SendPhoto, SendRichMessage
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -35,6 +35,7 @@ from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephem
 from community_bot.keyboards import YES_NO_KEYBOARD, flow_reply_keyboard, ibtn, main_private_keyboard
 from community_bot.navigation import CabinetNavigationMiddleware
 from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware, button_rows, text_blocks
+from community_bot.reply_rich import ReplyRichContextMiddleware, ReplyRichMiddleware, bot_publication
 
 
 def incoming(uid=7, text="/start", **kwargs):
@@ -65,6 +66,8 @@ class RecordingSession(BaseSession):
         if self.fail:
             error, self.fail = self.fail, None
             raise error
+        if isinstance(method, GetMe):
+            return User(id=bot.id, is_bot=True, first_name="Нора", username="test_nora_bot")
         if method.__api_method__ == "sendWidget" and not self.widgets:
             raise TelegramNotFound(method=method, message="Not Found")
         if method.__api_method__ in {"answerCallbackQuery", "answerWidgetQuery", "deleteMessage"}:
@@ -141,6 +144,137 @@ def content(call):
 def actions(call):
     return {button["callback_data"]: button for block in content(call) if block["type"] == "buttons"
             for button in block["buttons"] if button.get("callback_data")}
+
+
+@pytest.fixture
+def group_reply(setup, monkeypatch):
+    db, bot, session, _ = setup
+    monkeypatch.setattr(db, "remember_bot_message", AsyncMock())
+    return bot, session
+
+
+@pytest.mark.parametrize("restart", [False, True])
+async def test_group_reply_embeds_actions_and_preserves_photo_when_they_are_removed(group_reply, restart):
+    from community_bot.helpers import media_from_message
+
+    bot, session = group_reply
+    sender = ReplyRichMiddleware()
+    bot.session.middleware.register(sender)
+    event_context = ReplyRichContextMiddleware()
+    source = incoming(text="Нора купить печеньки").model_copy(update={
+        "chat": Chat(id=-100123, type="supergroup", is_forum=True),
+        "is_topic_message": True, "message_thread_id": 42,
+    }).as_(bot)
+
+    async def send(message, _data):
+        return await message.reply_photo(
+            "photo-id", caption="<b>Печеньки</b>\n\nВыберите сумму", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="100 🍪", callback_data="cookies:sbp:100")],
+                [InlineKeyboardButton(text="Закрыть", callback_data="shop:close")],
+            ]),
+        )
+
+    sent = await event_context(send, source, {})
+    request = session.calls[-1]
+    assert isinstance(request, SendRichMessage)
+    assert (request.reply_parameters.message_id, request.message_thread_id) == (source.message_id, 42)
+    assert request.reply_markup is None
+    assert sent.photo[-1].file_id == "photo-cached"
+    assert media_from_message(sent.model_copy(update={"photo": None})) == ("photo", "photo-cached")
+    assert set(actions(request)) == {"cookies:sbp:100", "shop:close"}
+    assert actions(request)["shop:close"]["style"] == "danger"
+    assert content(request)[-1]["buttons"][0] == {
+        "text": "Пополнить через Нору", "style": "primary",
+        "url": "https://t.me/test_nora_bot?startapp=nora_to_cookies",
+    }
+    assert content(request)[1]["text"][-1] == "\n\nВыберите сумму"
+    if restart:
+        bot.session.middleware.unregister(sender)
+        bot.session.middleware.register(ReplyRichMiddleware())
+    query = CallbackQuery(id="close", chat_instance="rich", from_user=source.from_user,
+                          data="cookies:sbp:100", message=sent).as_(bot)
+
+    async def remove(callback, _data):
+        return await callback.message.edit_reply_markup(reply_markup=None)
+
+    await event_context(remove, query, {})
+    edited = session.calls[-1]
+    assert isinstance(edited, EditMessageText)
+    assert edited.message_id == sent.message_id
+    assert not actions(edited)
+    assert edited.rich_message.blocks[0].photo.media == "photo-cached"
+    assert content(edited)[-1] == content(request)[-1]
+
+
+async def test_reply_scope_keeps_profile_publications_and_their_pins_in_place(group_reply):
+    bot, session = group_reply
+    bot.session.middleware.register(ReplyRichMiddleware())
+    context = ReplyRichContextMiddleware()
+    group = Chat(id=-100123, type="supergroup")
+
+    async def answer(message, _data):
+        return await message.answer("Текст", reply_markup=YES_NO_KEYBOARD)
+
+    source = incoming(text="Нора профиль").model_copy(update={"chat": group}).as_(bot)
+    await context(answer, source, {})
+    assert session.calls[-1].__api_method__ == "sendMessage"
+    source = source.model_copy(update={"text": "Нора магазин"})
+
+    async def publish(message, _data):
+        with bot_publication():
+            await answer(message, _data)
+        await bot.send_message(-100999, "Пост в другом чате")
+        return await answer(message, _data)
+
+    await context(publish, source, {})
+    assert [call.__api_method__ for call in session.calls[1:]] == [
+        "sendMessage", "sendMessage", "getMe", "sendRichMessage",
+    ]
+    assert content(session.calls[-1])[-1]["buttons"][0]["text"] == "Купить через Нору"
+
+    async def send_id(message, _data):
+        await bot.send_message(message.from_user.id, "Ваш Telegram ID")
+        await bot.send_message(99, "Служебное уведомление")
+
+    await context(send_id, source.model_copy(update={"text": "Нора айди"}), {})
+    assert [call.__api_method__ for call in session.calls[-2:]] == ["sendRichMessage", "sendMessage"]
+    assert content(session.calls[-2])[-1]["buttons"][0]["text"] == "Открыть в Норе"
+
+
+@pytest.mark.parametrize("reject", [True, False])
+async def test_rich_reply_retries_only_after_definitive_rejection(group_reply, reject):
+    bot, session = group_reply
+    await bot.me()
+    bot.session.middleware.register(ReplyRichMiddleware())
+    source = incoming(text="Вопрос").model_copy(update={
+        "chat": Chat(id=-100123, type="supergroup"),
+    }).as_(bot)
+    error = TelegramBadRequest if reject else TelegramNetworkError
+    session.fail = error(method=SendRichMessage(
+        chat_id=source.chat.id, rich_message=InputRichMessage(blocks=[InputRichBlockParagraph(text="Текст")]),
+    ), message="Ошибка")
+    if reject:
+        await source.reply("Ответ из очереди")
+        assert [call.__api_method__ for call in session.calls[1:]] == ["sendRichMessage", "sendMessage"]
+    else:
+        with pytest.raises(TelegramNetworkError):
+            await source.reply("Ответ из очереди")
+        assert [call.__api_method__ for call in session.calls[1:]] == ["sendRichMessage"]
+
+
+async def test_private_link_targets_wallet_and_skips_profile(setup, monkeypatch):
+    monkeypatch.setenv("MINIAPP_URL", "https://miniapp.example.test")
+    _, _, session, _ = setup
+
+    async def answer(message, _data):
+        await message.answer("<b>Экран</b>", parse_mode="HTML")
+
+    await turn(setup, answer, incoming(text="/balance"))
+    assert content(session.calls[-1])[-2]["buttons"][0]["url"].endswith("?startapp=nora_to_cookies")
+    await turn(setup, answer, incoming(text="/profile"))
+    assert not [button for block in content(session.calls[-1]) if block["type"] == "buttons"
+                for button in block["buttons"] if button.get("url")]
 
 
 def test_html_and_entities_are_preserved_and_user_text_is_not_markup():
@@ -1020,7 +1154,8 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
         event.message_id if from_welcome else None
     )
     assert send.message_thread_id == (42 if chat_id < 0 else None)
-    assert [block["type"] for block in content(send)] == ["photo", "paragraph", "buttons"]
+    assert [block["type"] for block in content(send)] == ["photo", "paragraph", "buttons", "buttons"]
+    assert content(send)[2]["buttons"][0]["url"] == "https://t.me/test_nora_bot?startapp=nora_lobby"
     assert send.rich_message.blocks[0].photo.media.path.is_file()
     assert actions(send)[CLOSE_COMMANDS_CARD]["style"] == "danger"
     assert actions(send)[CLOSE_COMMANDS_CARD]["text"] == "Закрыть"

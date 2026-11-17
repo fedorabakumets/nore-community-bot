@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -36,6 +37,7 @@ from aiogram.utils.text_decorations import html_decoration
 
 from community_bot.commands_guide import CLOSE_COMMANDS_CARD
 from community_bot.inline_style import button_style
+from community_bot.nora_links import nora_link_block, profile_reply
 
 _MEDIA = {
     "photo": "photo", "video": "video", "animation": "animation", "audio": "audio",
@@ -182,12 +184,12 @@ class RichHTML(HTMLParser):
         return result
 
 
-def text_blocks(text, parse_mode=None, entities=None):
+def text_blocks(text, parse_mode=None, entities=None, *, compact=True):
     if not text:
         return []
     if entities:
         text, parse_mode = html_decoration.unparse(text, entities), "HTML"
-    if not re.search(r"<(pre|code)\b", text, re.I):
+    if compact and not re.search(r"<(pre|code)\b", text, re.I):
         text = re.sub(r"(?m)^[ \t]*[━─═✦✧·•\-_=]{3,}[ \t]*\n?", "", text)
         text = re.sub(r"\n[ \t]*\n+", "\n", text).strip()
     if str(parse_mode).upper() == "HTML":
@@ -197,7 +199,7 @@ def text_blocks(text, parse_mode=None, entities=None):
     return [{"type": "paragraph", "text": text}]
 
 
-def button_rows(markup):
+def button_rows(markup, *, private=True):
     if not isinstance(markup, InlineKeyboardMarkup):
         return []
     result = []
@@ -208,7 +210,8 @@ def button_rows(markup):
             style = button_style(button) if button.callback_data else button.style
             fields["style"] = ((style if style in {"success", "danger"} else "link")
                                if button.callback_data else (style or "primary"))
-            if button.callback_data and (button.text.startswith(("↩", "←")) or "назад" in button.text.casefold()):
+            if (private and button.callback_data
+                    and (button.text.startswith(("↩", "←")) or "назад" in button.text.casefold())):
                 fields.update(text="← Назад", style="link")
             if button.icon_custom_emoji_id:
                 fields["text"] = [{"type": "custom_emoji", "alternative_text": "▫️",
@@ -303,7 +306,7 @@ def _mode(method, bot):
     return bot.default.parse_mode if isinstance(mode, Default) else mode
 
 
-def _content(method, bot):
+def _content(method, bot, *, compact=True):
     rich = getattr(method, "rich_message", None)
     if rich:
         if rich.blocks is not None:
@@ -319,18 +322,28 @@ def _content(method, bot):
         file = getattr(method, key, None) if media is None else (media.media if media.type == kind else None)
         if file is not None:
             fields = {"type": key if key != "voice" else "voice_note", "media": file}
-            for prop in ("duration", "width", "height", "performer", "title", "has_spoiler"):
+            for prop in ("duration", "width", "height", "performer", "title", "has_spoiler",
+                         "thumbnail", "cover", "start_timestamp", "supports_streaming",
+                         "disable_content_type_detection"):
                 value = getattr(source, prop, None)
                 if value is not None:
                     fields[prop] = value
             # Bot API accepts attach:// for voice notes, while aiogram types this field as str only.
             payload = (InputMediaVoiceNote.model_construct(**fields)
                        if kind == "voice_note" and isinstance(file, InputFile) else fields)
-            blocks.append({"type": kind, kind: payload})
+            block = {"type": kind, kind: payload}
+            above_media = getattr(source, "show_caption_above_media", None)
+            if isinstance(above_media, Default):
+                above_media = bot.default.show_caption_above_media
+            if above_media:
+                blocks.extend(text_blocks(getattr(source, "caption", None), _mode(source, bot),
+                                          getattr(source, "caption_entities", None), compact=compact))
+                return [*blocks, block]
+            blocks.append(block)
             break
     text = getattr(source, "text", None) or getattr(source, "caption", None)
     entities = getattr(source, "entities", None) or getattr(source, "caption_entities", None)
-    blocks.extend(text_blocks(text, _mode(source, bot), entities))
+    blocks.extend(text_blocks(text, _mode(source, bot), entities, compact=compact))
     if method.__api_method__ == "sendSticker":
         blocks.append({"type": "paragraph", "text": "✨ Стикеры Норы"})
         blocks.extend(button_rows(InlineKeyboardMarkup(inline_keyboard=[[{
@@ -507,6 +520,19 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             blocks = page.get("body", []) + blocks
         body = blocks + buttons
         footer = await navigation(bot, uid, body, current, page.get("back") if append or not personal_turn else None)
+        if personal_turn and not current and os.getenv("MINIAPP_URL", "").startswith("https://"):
+            from community_bot.access import miniapp_allowed
+            from community_bot.aliases import message_trigger
+
+            action = turn.action
+            if not action and (trigger := message_trigger(turn.source)):
+                action = trigger[0]
+            actions = _plain_buttons(body)
+            if not profile_reply(action, actions) and await miniapp_allowed(db, bot.community_settings, uid):
+                text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+                link = await nora_link_block(bot, action, actions, text)
+                if link:
+                    footer.insert(0, link.model_dump(exclude_none=True))
         widget = None
         from community_bot.message_widgets import PICKERS, picker
 
