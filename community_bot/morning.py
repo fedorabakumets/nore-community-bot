@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 SPB_LATITUDE = 59.9386
 SPB_LONGITUDE = 30.3141
-MORNING_HOUR = 9
+MORNING_HOUR = 8
 CATCHUP_MINUTES = 150
 CAPTION_LIMIT = 1000
 MORNING_LAYOUT = "nora-daily-v1"
@@ -1157,7 +1157,7 @@ CATCHUP_DAY = "2026-10-05"
 
 
 async def publish_missed_today(bot, db, settings) -> None:
-    """One catch-up for 5 October. Later days stay on the 09:00 schedule."""
+    """One catch-up for 5 October. Later days follow the regular schedule."""
     if await db.get_bot_state("morning_catchup_done") == CATCHUP_DAY:
         return
     timezone = ZoneInfo(settings.timezone)

@@ -56,8 +56,10 @@ def test_day_fact_and_schedule_window() -> None:
     nine = datetime(2026, 10, 5, 9, 5, tzinfo=ZoneInfo("Europe/Moscow"))
     assert due_morning(nine, None) is True
     assert due_morning(nine, "2026-10-05") is False
-    assert due_morning(nine.replace(hour=8), None) is False
-    assert due_morning(nine.replace(hour=12), None) is False
+    assert due_morning(nine.replace(hour=8, minute=0), None) is True
+    assert due_morning(nine.replace(hour=7, minute=59), None) is False
+    assert due_morning(nine.replace(hour=10, minute=30), None) is True
+    assert due_morning(nine.replace(hour=10, minute=31), None) is False
     from community_bot.morning import brief_title
 
     assert "Доброе утро" in brief_title(nine)

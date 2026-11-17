@@ -1120,7 +1120,7 @@ async def admin_morning(callback: CallbackQuery, db: Database, settings: Setting
         pinned = await publish_morning_digest(bot, db, settings, force=True)
     except Exception:
         logger.exception("Не удалось отправить утренний пост вручную")
-        await callback.message.answer("Сводку собрать не удалось. Повторю в 9:00.")
+        await callback.message.answer("Сводку собрать не удалось. Повторю в 8:00.")
         return
     await callback.message.answer(
         "Утренний пост отправлен в чат и закреплён." if pinned else
