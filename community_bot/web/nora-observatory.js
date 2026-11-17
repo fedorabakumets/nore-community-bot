@@ -80,7 +80,7 @@ window.NoraObservatory = (() => {
     const veil = new T.Mesh(geometry, veilMaterial);
     veil.position.set(0, 1.23, 0); veil.scale.set(1.86, 2.25, .08); portal.add(veil);
     materials.push(veilMaterial);
-    sign(portal, [0, 2.35, .32], ['ЗВЁЗДНАЯ', 'ОБСЕРВАТОРИЯ', `Первый финиш · ${reward} печенек`], 3.1);
+    sign(portal, [0, 2.35, .68], ['ЗВЁЗДНАЯ', 'ОБСЕРВАТОРИЯ', `Первый финиш · ${reward} печенек`], 2.85);
 
     const boxes = platforms.map(([x, z, y, w, d], i) => {
       const beacon = checkpoints.includes(i);
