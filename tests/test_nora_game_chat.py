@@ -44,9 +44,9 @@ async def test_chat_mirrors_only_allowed_group_text_and_keeps_private_ids_off_wi
     assert (first['author'], first['text'], first['source'], first['avatar']) == (
         'Маша Ли', 'Всем привет!', 'telegram', 'Masha',
     )
-    assert not first['mine'] and first['bubbleMs'] > 0
+    assert not first['mine'] and 0 < first['bubbleMs'] < first['previewMs'] <= 12_000
     assert 'user_id' not in first and 'telegram_id' not in first
-    assert old['bubbleMs'] == 0 and old['avatar'] is None
+    assert old['bubbleMs'] == old['previewMs'] == 0 and old['avatar'] is None
     assert chat.snapshot(42, result['revision'], presence, 'lobby', True) == {'revision': result['revision']}
 
 

@@ -113,7 +113,9 @@ window.NoraChat = (() => {
     const signal = (ms, ...extra) => AbortSignal.any?.([controls.signal, AbortSignal.timeout(ms), ...extra]) || controls.signal;
     const rows = new Map(), bubbles = new Map();
     let revision = '', timer, stopped = false, polling = false, online = false, sending = false;
-    let pollRequest;
+    let pollRequest, previewTimer;
+    let previewLines = [];
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let shownStatus = '', currentRoom = location(), telegram = false, view = 0, replyTo = null;
     title.textContent = roomNames[currentRoom];
     document.fonts?.load('15px NoraCraft').catch(() => {});
@@ -160,7 +162,7 @@ window.NoraChat = (() => {
     }
     listen(toggle, 'change', () => {
       showMini = toggle.checked;
-      preview.hidden = !showMini || !previewLog.children.length;
+      renderPreview();
       try { localStorage.setItem('nora-chat-preview', showMini ? 'on' : 'off'); } catch (_) {}
     });
     listen(viewport, 'resize', syncViewport);
@@ -217,17 +219,31 @@ window.NoraChat = (() => {
       return author;
     }
 
-    function updatePreview(messages) {
-      const latest = messages.slice(-3).map(line => {
+    function renderPreview() {
+      clearTimeout(previewTimer);
+      const now = Date.now();
+      previewLines = previewLines.filter(entry => entry.until > now);
+      const active = showMini ? previewLines : [];
+      const latest = active.map(({line, until}) => {
         const row = document.createElement('li');
         const message = document.createElement('span');
         message.dir = 'auto';
         message.textContent = line.text;
         row.append(authorName(line), ' · ', message);
+        if (!reducedMotion.matches) {
+          const remaining = until - now, fadeMs = 800;
+          row.animate?.([{opacity:Math.min(1, remaining / fadeMs)}, {opacity:0}], {
+            delay:Math.max(0, remaining - fadeMs), duration:Math.min(remaining, fadeMs), fill:'forwards',
+          });
+        }
         return row;
       });
       previewLog.replaceChildren(...latest);
-      preview.hidden = !showMini || !latest.length;
+      preview.hidden = !latest.length;
+      if (active.length) {
+        const expiry = Math.min(...active.map(entry => entry.until));
+        previewTimer = setTimeout(renderPreview, expiry - now);
+      }
     }
 
     function append(line) {
@@ -264,7 +280,10 @@ window.NoraChat = (() => {
     }
 
     function updateFeed(messages) {
-      updatePreview(messages);
+      const now = Date.now();
+      previewLines = messages.filter(line => line.previewMs > 0).slice(-3)
+        .map(line => ({line, until:now + line.previewMs}));
+      renderPreview();
       const bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 28;
       const first = [...log.children].find(row => row.offsetTop + row.offsetHeight > feed.scrollTop);
       const offset = first ? first.offsetTop - feed.scrollTop : 0;
@@ -335,7 +354,11 @@ window.NoraChat = (() => {
         }
       }
     }
-    listen(document, 'visibilitychange', () => {if (!document.hidden) void poll();});
+    listen(document, 'visibilitychange', () => {
+      if (document.hidden) return;
+      renderPreview();
+      void poll();
+    });
     void poll();
 
     return {
@@ -382,6 +405,7 @@ window.NoraChat = (() => {
       dispose() {
         stopped = true;
         clearTimeout(timer);
+        clearTimeout(previewTimer);
         controls.abort();
         if (dialog.open) dialog.close();
         for (const key of bubbles.keys()) clearBubble(key);

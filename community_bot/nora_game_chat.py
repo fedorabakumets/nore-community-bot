@@ -25,6 +25,7 @@ from community_bot.helpers import rank_of_user
 CHAT_TTL = 30 * 60
 CHAT_LENGTH = 240
 BUBBLE_LIFETIME = 7
+PREVIEW_LIFETIME = 12
 MEMBERSHIP_TTL = 30
 PLAYER_EMOJI = {
     'male': ('👱🏻‍♂️', '👨🏽‍🦲', '🧔🏼‍♂️', '🧔🏿', '👴', '👨🏾‍🦰'),
@@ -153,6 +154,7 @@ class GameChat:
                 'author': line.author, 'text': line.text, 'time': int(line.at * 1000),
                 'color': (line.user_id ^ (line.user_id >> 8)) % 10, 'mine': line.user_id == user_id,
                 'avatar': avatar if remaining else None, 'bubbleMs': int(remaining * 1000),
+                'previewMs': int(max(0, PREVIEW_LIFETIME - age) * 1000),
             }
             if line.quote and (telegram or not line.quote[2]):
                 message['quote'] = {'author': line.quote[0], 'text': line.quote[1]}
