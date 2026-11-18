@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 COOKIE_PAYMENT_URL = "https://finance.ozon.ru/apps/sbp/ozonbankpay/01a1cadc-413b-7ee6-9ba7-78da15aa5d4c"
 COOKIE_PAYMENT_QR = Path(__file__).resolve().parent.parent / "assets" / "payments" / "ozon-sbp.jpg"
+COOKIE_PAYMENT_MESSAGE_QR = COOKIE_PAYMENT_QR.with_name("nora-sbp.jpg")
 
 
 def _as_int(name: str, default: int = 0) -> int:

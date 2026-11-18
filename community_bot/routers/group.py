@@ -39,7 +39,7 @@ from community_bot.audit import (
 )
 from community_bot.blocks import answer_block, edit_block
 from community_bot.bot_identity import is_bot
-from community_bot.config import COOKIE_PAYMENT_QR, COOKIE_PAYMENT_URL, Settings
+from community_bot.config import COOKIE_PAYMENT_MESSAGE_QR, COOKIE_PAYMENT_URL, Settings
 from community_bot.database import Database
 from community_bot.domain import (
     cookies_phrase,
@@ -1210,7 +1210,7 @@ async def begin_sbp_purchase(callback: CallbackQuery, state: FSMContext, db: Dat
     await state.set_data({"amount": amount, "rubles": rubles})
     await callback.answer()
     await callback.message.answer_photo(
-        photo=FSInputFile(COOKIE_PAYMENT_QR),
+        photo=FSInputFile(COOKIE_PAYMENT_MESSAGE_QR),
         caption=(
             f"Вы выбрали <b>{cookies_phrase(amount, case='acc')}</b> ({amount} 🍪). "
             f"К оплате: <b>{format_rub(rubles)}</b>.\n\n"

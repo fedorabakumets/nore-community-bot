@@ -56,8 +56,9 @@ python3 -m venv .venv
 COMMUNITY_CHAT_ID имеет приоритет перед GROUP_ID. Секреты храните вне Git.
 
 До запуска настройте COMMUNITY_INVITE_URL. Для покупки печенек бот и Mini App
-используют ссылку Ozon Банка из `community_bot/config.py` и соответствующий QR-код
-из `assets/payments/ozon-sbp.jpg`. При смене получателя обновляйте их вместе.
+используют ссылку Ozon Банка из `community_bot/config.py`. QR-код для сообщения
+бота хранится в `assets/payments/nora-sbp.jpg`, для Mini App — в
+`assets/payments/ozon-sbp.jpg`. При смене получателя обновляйте ссылку и оба изображения.
 
 ```sh
 # Только после настройки отдельного тестового окружения:
