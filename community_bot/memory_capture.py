@@ -8,13 +8,12 @@ from typing import Any
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
-from community_bot.chat_memory import clean_author_name, clean_stored_text
+from community_bot.chat_memory import MEMORY_NOTICE_KEY, clean_author_name, clean_stored_text
 from community_bot.config import Settings
 from community_bot.database import Database
 
 logger = logging.getLogger(__name__)
 _CLEANUP_INTERVAL = 3600.0
-_NOTICE_KEY = "nora_memory_notice_v1"
 
 
 def _eligible(message: Message, settings: Settings) -> bool:
@@ -24,12 +23,12 @@ def _eligible(message: Message, settings: Settings) -> bool:
         and message.chat.type in {"group", "supergroup"}
         and message.from_user and not message.from_user.is_bot
         and not message.sender_chat and not message.forward_origin and not message.via_bot
-        and clean_stored_text(message.text)
+        and clean_stored_text(message.text or message.caption)
     )
 
 
 class CommunityMemoryMiddleware(BaseMiddleware):
-    """Save community text locally; never calls DeepSeek and never logs message text."""
+    """Save community text locally without sending it to a model or logging it."""
 
     def __init__(self) -> None:
         self._last_cleanup = 0.0
@@ -46,17 +45,21 @@ class CommunityMemoryMiddleware(BaseMiddleware):
         if isinstance(event, Message) and isinstance(db, Database) and isinstance(settings, Settings):
             try:
                 if not self._notice_confirmed:
-                    self._notice_confirmed = await db.get_bot_state(_NOTICE_KEY) == "1"
+                    self._notice_confirmed = await db.get_bot_state(MEMORY_NOTICE_KEY) == "1"
                 if not self._notice_confirmed:
                     return await handler(event, data)
                 if getattr(event, "edit_date", None):
-                    if settings.community_chat_id and event.chat.id == settings.community_chat_id and event.text:
-                        await db.update_community_message(event.chat.id, event.message_id, event.text)
+                    if settings.community_chat_id and event.chat.id == settings.community_chat_id:
+                        await db.update_community_message(
+                            event.chat.id, event.message_id, event.text or event.caption or "",
+                        )
                 elif _eligible(event, settings):
                     assert event.from_user is not None
+                    user = event.from_user
+                    author = f"{user.full_name} (@{user.username})" if user.username else user.full_name
                     await db.save_community_message(
                         event.chat.id, event.message_id, event.from_user.id,
-                        clean_author_name(event.from_user.full_name), event.text or "",
+                        clean_author_name(author), event.text or event.caption or "",
                         event.date.isoformat(),
                         event.message_thread_id if event.is_topic_message else None,
                     )

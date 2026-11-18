@@ -72,7 +72,8 @@ def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: st
         left = remaining_label(until, timezone)
         return (
             f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} — "
-            "одно сообщение в чат и в личку.\n\n"
+            "одно сообщение в чат и в личку. Можно вернуть питомца раньше без находки. "
+            "Потраченные сытость, вода и настроение не возвращаются.\n\n"
         )
     return ("🗺 Поход длится 24 часа. Сытость и вода должны быть не ниже 50. "
             "При отправке расходуется 60 сытости, 60 воды и 40 настроения. "
@@ -103,7 +104,7 @@ async def send_pet_card(
     text = pet_text(pet, timezone)
     photo = pet_photo(str(pet["species"]))
     sent: Message | None = None
-    markup = pet_keyboard(pet, timezone)
+    markup = pet_keyboard(pet)
     if photo:
         try:
             sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
@@ -132,7 +133,7 @@ async def refresh_pet_card(
     timezone = settings.timezone if settings else "Europe/Moscow"
     text = pet_text(pet, timezone)
     photo = pet_photo(str(pet["species"]))
-    markup = pet_keyboard(pet, timezone)
+    markup = pet_keyboard(pet)
     if photo:
         try:
             await target.edit_media(
@@ -333,6 +334,18 @@ async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settin
     await callback.answer("Питомец ушёл искать редкие вещи на 24 часа.")
     pet = await db.get_pet(callback.from_user.id, settle=False)
     if pet:
+        await refresh_pet_card(callback.message, pet, db, settings)
+
+
+@router.callback_query(F.data.startswith("pet:return:"))
+async def pet_return(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.data:
+        return
+    until = callback.data.removeprefix("pet:return:")
+    ok, message = await db.cancel_expedition(callback.from_user.id, until)
+    await callback.answer(message, show_alert=not ok)
+    pet = await db.get_pet(callback.from_user.id, settle=False)
+    if ok and pet:
         await refresh_pet_card(callback.message, pet, db, settings)
 
 

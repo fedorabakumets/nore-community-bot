@@ -2844,6 +2844,7 @@ class Database:
         self, chat_id: int, *, since: str, until: str | None = None,
         thread_id: int | None = None, limit: int = 50, same_thread: bool = False,
         before_message_id: int | None = None, near_message_id: int | None = None,
+        spread: bool = False,
     ) -> list[dict[str, Any]]:
         sql = (
             "SELECT chat_id, message_id, user_id, author_name, thread_id, text, sent_at "
@@ -2863,6 +2864,19 @@ class Database:
             sql += " ORDER BY ABS(message_id - ?), message_id DESC LIMIT ?"
             params.extend((near_message_id, max(1, min(limit, 100))))
             return await self.fetchall(sql, tuple(params))
+        if spread and until:
+            # Alternate between slices of the requested period so active hours can't crowd out the rest.
+            sql = f"""
+                WITH messages AS ({sql}), slices AS (
+                    SELECT *, MIN(7, CAST((julianday(sent_at) - julianday(?)) * 8
+                        / (julianday(?) - julianday(?)) AS INTEGER)) AS slice
+                    FROM messages
+                )
+                SELECT * FROM slices ORDER BY
+                    ROW_NUMBER() OVER (PARTITION BY slice ORDER BY sent_at DESC, message_id DESC),
+                    slice LIMIT ?
+            """
+            return await self.fetchall(sql, (*params, since, until, since, max(1, min(limit, 100))))
         sql += " ORDER BY sent_at DESC, message_id DESC LIMIT ?"
         params.append(max(1, min(limit, 100)))
         rows = await self.fetchall(sql, tuple(params))
@@ -4529,6 +4543,30 @@ class Database:
             await record(db, user_id, "expedition")
             await db.commit()
         return True, "ok", 0
+
+    async def cancel_expedition(
+        self, user_id: int, expected_until: str, *, intent_id: str | None = None,
+    ) -> tuple[bool, str]:
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            error = await self._consume_wallet_intent(db, intent_id, user_id, "pet_action", 1, user_id)
+            if error:
+                await db.rollback()
+                return False, error
+            now = utcnow()
+            cursor = await db.execute(
+                """
+                UPDATE pets SET expedition_until = NULL, expedition_reward = 0, expedition_loot = NULL,
+                    expedition_notice_sent = 1, last_tick_at = ?, updated_at = ?
+                WHERE user_id = ? AND expedition_until = ? AND expedition_until > ?
+                """,
+                (now, now, user_id, expected_until, now),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False, "Этот поход уже закончился. Откройте карточку питомца заново."
+            await db.commit()
+        return True, "Питомец вернулся из похода без награды."
 
     async def claim_expedition_notice(self, user_id: int) -> dict[str, Any] | None:
         now = utcnow()

@@ -179,18 +179,18 @@ async def log_community_permissions(bot: Bot, settings: Settings) -> None:
 
 
 async def send_memory_notice_once(bot: Bot, db: Database, settings: Settings) -> None:
-    from community_bot.chat_memory import MEMORY_NOTICE
+    from community_bot.chat_memory import MEMORY_NOTICE, MEMORY_NOTICE_KEY
 
     if not settings.community_chat_id:
         return
-    if await db.get_bot_state("nora_memory_notice_v1") == "1":
+    if await db.get_bot_state(MEMORY_NOTICE_KEY) == "1":
         return
     try:
         await bot.send_message(settings.community_chat_id, MEMORY_NOTICE)
     except Exception:
         logger.warning("Не удалось отправить уведомление о памяти сообщества")
         return
-    await db.set_bot_state("nora_memory_notice_v1", "1")
+    await db.set_bot_state(MEMORY_NOTICE_KEY, "1")
 
 
 async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> None:
@@ -430,7 +430,6 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.memory_capture import CommunityMemoryMiddleware
 
     memory_middleware = CommunityMemoryMiddleware()
-    dispatcher.message.outer_middleware(memory_middleware)
     dispatcher.edited_message.outer_middleware(memory_middleware)
     reply_context = ReplyRichContextMiddleware()
     dispatcher.message.outer_middleware(reply_context)
@@ -443,6 +442,7 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.routers.group import CommunityModerationMiddleware
 
     dispatcher.message.outer_middleware(CommunityModerationMiddleware())
+    dispatcher.message.outer_middleware(memory_middleware)
     game_chat_middleware = GameChatMiddleware()
     dispatcher.message.outer_middleware(game_chat_middleware)
     dispatcher.chat_member.outer_middleware(game_chat_middleware)

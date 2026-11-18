@@ -160,6 +160,7 @@ async def overview(request):
         'prefix': await prefix_for(db, settings, user['user_id']),
         'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
         'tier': tier.label, 'discount': tier.discount, 'daily_actions': tier.daily_actions,
+        'ai_daily_requests': tier.ai_daily_requests,
         'actions_used': used, 'actions_left': max(0, tier.daily_actions - used), 'can_minus': tier.can_minus,
         'role': await role_title(db, role), 'timezone': getattr(settings, 'timezone', 'Europe/Moscow'),
         'blocks': [{'title': label, 'filled': filled} for _, label, filled in profile_block_states(user)],
@@ -167,7 +168,8 @@ async def overview(request):
     from community_bot.domain import reputation_tier as tier_for
 
     levels = [{'label': label, 'range': span, 'discount': tier_for(value).discount,
-               'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus}
+               'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus,
+               'ai_daily_requests': tier_for(value).ai_daily_requests}
               for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
     history = await db.list_transactions(user['user_id'], 4)
     from community_bot.economy import describe_transactions

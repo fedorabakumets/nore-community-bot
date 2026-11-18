@@ -1,6 +1,8 @@
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Bot
@@ -78,6 +80,19 @@ async def test_request_is_free_and_contains_only_the_current_prompt(db, settings
     assert user == {"role": "user", "content": "Как настроение?"}
 
 
+async def test_release_answer_receives_public_details_and_dates(db, settings, monkeypatch):
+    _, post = fake_http(monkeypatch, payload={"choices": [{"message": {"content": "Вышел кинотеатр."}}]})
+    chat = openrouter_chat.OpenRouterChat(db, settings)
+    event = message("Нора, когда вышло обновление №22 и что в нём?", uid=7)
+    prompt = chat.prompt_for(event)
+    assert prompt is not None
+    assert await chat.answer(prompt, 7, message=event) == "Вышел кинотеатр."
+    system = post.call_args.kwargs["json"]["messages"][0]["content"]
+    assert "№22 · 2026-11-18 · В Норе кино" in system
+    assert "Выбрать видео" in system
+    assert "объекты префикса" not in system and "передаёт по каналу лобби" not in system
+
+
 @pytest.mark.parametrize("model", ["openrouter/auto", "vendor/model", "vendor/model:free"])
 async def test_model_env_allows_only_free_models(db, settings, monkeypatch, model):
     monkeypatch.setenv("OPENROUTER_MODEL", model)
@@ -116,17 +131,30 @@ async def test_parallel_calls_and_cooldowns(db, settings, clock, monkeypatch):
 
 
 async def test_daily_quota_survives_restart_and_counts_failures(db, settings, clock, monkeypatch):
-    monkeypatch.setattr(openrouter_chat, "_DAILY_LIMIT", 2)
+    clock.now = datetime(2026, 11, 18, 23, 59, 45, tzinfo=ZoneInfo(settings.timezone)).timestamp()
     _, post = fake_http(monkeypatch, error=TimeoutError("sensitive provider details"))
-    for _ in range(2):
+    for _ in range(5):
         chat = openrouter_chat.OpenRouterChat(db, settings)
         assert await chat.answer("обращение", 7) == openrouter_chat._UNAVAILABLE
     restarted = openrouter_chat.OpenRouterChat(db, settings)
-    assert await restarted.answer("бюджет исчерпан", 8) is None
-    assert post.call_count == 2
-    clock.now += 24 * 60 * 60
-    assert await restarted.answer("следующие сутки", 8) == openrouter_chat._UNAVAILABLE
-    assert post.call_count == 3
+    assert "5 на уровне" in await restarted.answer("лимит бронзы", 7)
+    assert post.call_count == 5
+    assert await restarted.answer("свой лимит", 8) == openrouter_chat._UNAVAILABLE
+    clock.now += 15
+    assert await restarted.answer("следующий день", 7) == openrouter_chat._UNAVAILABLE
+    assert post.call_count == 7
+
+
+@pytest.mark.parametrize("reputation,limit", [(69, 5), (70, 10), (90, 100)])
+async def test_reputation_sets_the_personal_ai_quota(db, settings, clock, reputation, limit):
+    await db.ensure_user(7)
+    await db.execute("UPDATE users SET reputation = ? WHERE user_id = 7", (reputation,))
+    day = datetime.fromtimestamp(clock.now, ZoneInfo(settings.timezone)).date().isoformat()
+    await db.set_bot_state("nora_ai_daily:7", f'{{"day":"{day}","used":{limit - 1}}}')
+    chat = openrouter_chat.OpenRouterChat(db, settings)
+    concurrent = await asyncio.gather(chat._reserve_request(7), chat._reserve_request(7))
+    assert concurrent.count(None) == 1
+    assert f"({limit} на уровне" in next(error for error in concurrent if error)
 
 
 @pytest.mark.parametrize("status, embedded, headers, seconds", [
@@ -177,6 +205,8 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
     chat = openrouter_chat.OpenRouterChat(db, settings)
     answer = AsyncMock(return_value="Нормально, <живём>.")
     monkeypatch.setattr(chat, "_request", answer)
+    group_answer = AsyncMock(return_value="Нормально, <живём>.")
+    monkeypatch.setattr(chat, "_request_history", group_answer)
     dispatcher["openrouter_chat"] = chat
 
     async def dispatch(text, *, uid=7, chat_id=-100123, **extra):
@@ -219,6 +249,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
         await dispatch("Нора, привет", chat_id=-100999)
         await dispatch("Нора, привет", forward_origin=MessageOriginHiddenUser(date=1, sender_user_name="Автор"))
         answer.assert_not_awaited()
+        group_answer.assert_not_awaited()
 
         event = await dispatch(
             "нОРа, как настроение?",
@@ -227,7 +258,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
             is_topic_message=True,
             message_thread_id=12,
         )
-        answer.assert_awaited_once_with("как настроение?")
+        assert group_answer.await_args.args == ([], "как настроение?")
         assert len(replies()) == 1
         reply = replies()[0]
         assert reply.text == "Нормально, <живём>." and reply.parse_mode is None

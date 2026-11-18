@@ -1,5 +1,7 @@
 """Short-lived chat between the NORA world and the configured Telegram group."""
 
+import logging
+import sqlite3
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -12,13 +14,14 @@ from aiogram.types import ChatMemberUpdated, LinkPreviewOptions, Message
 from aiohttp import web
 
 from community_bot.aliases import is_command_message
-from community_bot.chat_memory import clean_author_name, clean_stored_text
+from community_bot.chat_memory import MEMORY_NOTICE_KEY, clean_author_name, clean_stored_text
 from community_bot.helpers import rank_of_user
 
 CHAT_TTL = 30 * 60
 CHAT_LENGTH = 240
 BUBBLE_LIFETIME = 7
 MEMBERSHIP_TTL = 30
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +144,7 @@ class GameChat:
         except TelegramAPIError:
             raise ValueError('Telegram не подтвердил отправку сообщения.') from None
         self.append(sent.message_id, user_id, nickname, text, 'game')
+        return sent
 
 
 class GameChatMiddleware(BaseMiddleware):
@@ -199,5 +203,13 @@ async def send(request):
         )
         if blocked:
             raise ValueError(blocked)
-    await chat.send(user_id, profile['nickname'], text)
+    sent = await chat.send(user_id, profile['nickname'], text)
+    try:
+        if await db.get_bot_state(MEMORY_NOTICE_KEY) == '1':
+            await db.save_community_message(
+                chat.group_id, sent.message_id, user_id, f"{profile['nickname']} (из игры)",
+                text, sent.date.isoformat(),
+            )
+    except sqlite3.Error:
+        logger.warning('Не удалось добавить сообщение из игры в память сообщества')
     return web.json_response({'ok': True})

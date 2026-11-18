@@ -725,12 +725,10 @@ def pet_species_keyboard(intent_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def pet_keyboard(pet: dict[str, object] | None = None, timezone: str = "Europe/Moscow") -> InlineKeyboardMarkup:
+def pet_keyboard(pet: dict[str, object] | None = None) -> InlineKeyboardMarkup:
     until = str((pet or {}).get("expedition_until") or "")
     if until:
-        from community_bot.expedition import remaining_label
-
-        expedition = ibtn(f"🗺 В экспедиции · {remaining_label(until, timezone)}", "pet:expedition", STYLE_FUN)
+        expedition = ibtn("↩ Вернуть из похода", f"pet:return:{until}", STYLE_FUN)
     else:
         expedition = ibtn("🗺 Отправить в экспедицию", "pet:expedition", STYLE_GO)
     return InlineKeyboardMarkup(

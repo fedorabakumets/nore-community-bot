@@ -408,8 +408,10 @@ try {
   for(const species of ['cat','dog','fox','raccoon','dragon']) {
     let current={name:'<Друг>',species,species_label:species,hunger:72,thirst:83,enabled:true,expedition_until:null};
     const calls=[];
-    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='nora-game/pet/stroke')return {ok:true,message:'Настроение повысилось'};if(path==='pet/prepare')return {token:'owner-token'};
-      if(path==='pet/action'){current={...current,expedition_until:'2026-11-03T12:00:00Z'};return {ok:true,message:'В походе'};}
+    const until='2026-11-03T12:00:00Z';
+    let petAction;
+    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='nora-game/pet/stroke')return {ok:true,message:'Настроение повысилось'};if(path==='pet/prepare'){petAction=body;return {token:'owner-token'};}
+      if(path==='pet/action'){current={...current,expedition_until:petAction.action==='return'?null:until};return {ok:true,message:'Поход обновлён'};}
       return {pet:current};};
     const h=await setup(0,60,petApi);await flush();h.frames(1);
     const pet=h.scene().getObjectByName('nora-companion');assert.ok(pet,'existing '+species+' appears');
@@ -435,8 +437,15 @@ try {
     body.closest=()=>true;body.emit('click');body.emit('click');await flush();
     assert.equal(calls.filter(([path])=>path==='pet/action').length,1,'one expedition request');
     assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'away pet disappears');
-    panel.close();current={...current,expedition_until:null};h.frames(1900);await flush();h.frames(1);
-    assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns after server sync');
+    panel.close();h.frames(1);
+    assert.equal(actions.hidden,false,'pet panel remains accessible during expedition');
+    h.root.querySelector('.nora-pet-open').emit('click');await flush();
+    assert.ok(body.innerHTML.includes('Вернуть из похода'),'return available in panel');
+    body.emit('click');await flush();
+    assert.equal(petAction.action,'return');
+    assert.equal(petAction.expedition_until,until);
+    panel.close();h.frames(1);
+    assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns from expedition');
     h.player.position.x=0;goToIsland(h);
     h.player.position.set(0,.017,3.6);h.root.querySelector('.nora-world-action').emit('click');h.frames(1);
     assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');

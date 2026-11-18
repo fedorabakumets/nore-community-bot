@@ -134,7 +134,7 @@ class PetVideoQueue:
         if await level(self.db, user_id) < 3:
             return "Скачивание видео открывается на 3-м уровне питомца."
         if pet.get("expedition_until"):
-            return "Пока питомец в походе, скачивание видео недоступно. Дождись его возвращения."
+            return "Пока питомец в походе, скачивание видео недоступно. Его можно вернуть через «Питомец»."
         return None
 
     async def _delivery_error(self, user_id):

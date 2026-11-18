@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
-from community_bot.domain import transfer_commission_percent
+from community_bot.domain import ai_limits_text, transfer_commission_percent
 from community_bot.economy import (
     HISTORY_FILTERS,
     LOAN_DAYS,
@@ -73,7 +73,6 @@ async def pet_data(db, user, *, development=False):
     )
     if development:
         from community_bot.expedition import EXPEDITION_DURATION
-        from community_bot.openrouter_chat import _DAILY_LIMIT, _GLOBAL_INTERVAL
         from community_bot.shop_catalog import PET_SUPPLIES
 
         progress = await dashboard(db, user["user_id"])
@@ -81,7 +80,7 @@ async def pet_data(db, user, *, development=False):
             return None
         progress["rules"].update(
             expedition_hours=int(EXPEDITION_DURATION.total_seconds() // 3600),
-            ai_daily_limit=_DAILY_LIMIT, ai_interval=_GLOBAL_INTERVAL,
+            ai_limits=ai_limits_text(),
             meal_gain=PET_SUPPLIES["pet_meal"][1], drink_gain=PET_SUPPLIES["pet_drink"][1],
         )
         value["development"] = progress
@@ -92,12 +91,18 @@ async def pet_prepare(request):
     user, db = await actor(request), request.app["db"]
     body = await request.json()
     action = body.get("action") if isinstance(body, dict) else None
-    actions = {"food", "water", "expedition", "rename"} | {f"reward:{kind}" for kind in CONSUMABLES}
-    if action not in actions or not await db.feature_enabled("tamagotchi"):
+    actions = {"food", "water", "expedition", "return", "rename"} | {f"reward:{kind}" for kind in CONSUMABLES}
+    if action not in actions or (action != "return" and not await db.feature_enabled("tamagotchi")):
         raise ValueError("Это действие питомца сейчас недоступно")
-    if not await db.get_pet(user["user_id"], settle=False):
+    pet = await db.get_pet(user["user_id"], settle=False)
+    if not pet:
         raise ValueError("Сначала заведи питомца в магазине")
     payload = {"action": action}
+    if action == "return":
+        until = body.get("expedition_until")
+        if not until or until != pet["expedition_until"]:
+            raise ValueError("Этот поход уже закончился. Обнови карточку питомца")
+        payload["expedition_until"] = until
     if action == "rename":
         name = body.get("name")
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 24:
@@ -118,6 +123,10 @@ async def pet_action(request):
         if not intent or intent["item"] != "pet_action":
             return result(False, "Действие уже выполнено или устарело")
         action = intent["payload"]["action"]
+        if action == "return":
+            return result(*(await db.cancel_expedition(
+                user["user_id"], intent["payload"]["expedition_until"], intent_id=token,
+            )))
         if action.startswith("reward:") and action[7:] in CONSUMABLES:
             return result(*(await redeem(db, user["user_id"], action[7:], token)))
         if action == "expedition":

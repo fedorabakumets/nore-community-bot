@@ -22,7 +22,7 @@ from aiogram.types import (
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LEVELS
+from community_bot.domain import ROLE_LEVELS, ai_limits_text
 from community_bot.ephemeral import reply_ttl
 from community_bot.helpers import delete_later, rank_of_user
 from community_bot.nora_links import nora_link_block
@@ -62,6 +62,13 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
             "\nКинотеатр в лобби показывает YouTube, MP4 и ролики из группы."
             "\n«Нора, в кино» — ответом на видео MP4 до 20 МБ в группе."
             "\nПервое прохождение «Воспоминания» — 50 🍪 в кошелёк.",
+        ]),
+        InputRichBlockParagraph(text=[
+            RichTextBold(text="Нора ИИ"),
+            "\nВ основном чате спроси «Нора, что обсуждали за два дня?» "
+            "или «Нора, что вышло в обновлении №22?». "
+            f"Запросов в день по репутации: {ai_limits_text()}. "
+            "В походе ИИ на паузе. Чтобы вернуть питомца раньше, открой «Питомец».",
         ]),
         *([app] if app else []),
         InputRichBlockButtons(buttons=[

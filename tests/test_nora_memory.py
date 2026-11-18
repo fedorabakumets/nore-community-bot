@@ -171,14 +171,33 @@ async def test_memory_prompt_uses_only_community_thread(db, settings):
     await seed_yesterday(db)
     chat = openrouter_chat.OpenRouterChat(db, settings)
     event = message('Нора, что вчера обсуждали про кино?', uid=1, is_topic_message=True, message_thread_id=12)
+    event = event.model_copy(update={'message_id': 300})
     prompt = await chat.memory_prompt('что вчера обсуждали про кино?', event)
     assert prompt is not None
-    assert len(prompt) <= 2000
+    assert len(prompt) <= chat_memory.ARCHIVE_CONTEXT_CHARS
     assert 'кино про Петербург' in prompt
     assert 'другом чате' not in prompt
     assert 'другой теме' not in prompt
     private = message('Нора, что вчера обсуждали про кино?', uid=1, chat_id=1)
     assert await chat.memory_prompt('что вчера обсуждали про кино?', private) is None
+
+
+async def test_recap_covers_the_full_48_hours_and_never_reads_private_chat(db, settings):
+    now = datetime.now(UTC)
+    for mid, hour, text in (
+        (1, 49, 'За окном памяти'),
+        (2, 47, 'В начале обсуждали рисунок'),
+        (3, 28, 'Затем готовили выставку'),
+        (4, 1, 'Недавно выбрали дату'),
+    ):
+        await db.save_community_message(-100123, mid, 7, 'Анна', text, (now - timedelta(hours=hour)).isoformat())
+    chat = openrouter_chat.OpenRouterChat(db, settings)
+    event = message('Нора, что происходило за двое суток?', uid=7).model_copy(update={'message_id': 100})
+    prompt = await chat.memory_prompt('что происходило за двое суток?', event)
+    assert prompt
+    assert all(word in prompt for word in ('рисунок', 'выставку', 'выбрали дату', 'Анна'))
+    assert 'За окном памяти' not in prompt
+    assert await chat.memory_prompt('что происходило за двое суток?', message(event.text, uid=7, chat_id=7)) is None
 
 
 async def test_memory_prompt_returns_none_without_data(db, settings):
@@ -187,24 +206,24 @@ async def test_memory_prompt_returns_none_without_data(db, settings):
     assert await chat.memory_prompt('что позавчера обсуждали?', event) is None
 
 
-async def test_contextual_memory_in_general_chat_excludes_forum_topics(db, settings):
+async def test_context_includes_other_topics_from_general_chat(db, settings):
     sent_at = await seed_yesterday(db)
     chat = openrouter_chat.OpenRouterChat(db, settings)
     event = message('Нора, а чем всё закончилось?', uid=1).model_copy(update={'message_id': 300})
-    assert await chat.memory_prompt('а чем всё закончилось?', event, search_query='кино вчера') is None
+    assert 'кино про Петербург' in await chat.memory_prompt('а чем всё закончилось?', event, search_query='кино вчера')
     await db.save_community_message(-100123, 205, 7, 'Анна', 'Собираемся в кино вечером', sent_at)
     prompt = await chat.memory_prompt('а чем всё закончилось?', event, search_query='кино вчера')
     assert prompt and 'Собираемся в кино вечером' in prompt
-    assert 'кино про Петербург' not in prompt
+    assert 'кино про Петербург' in prompt
 
 
 async def test_today_recap_uses_chat_messages_instead_of_matching_itself(db, settings):
     now = datetime.now(UTC).replace(microsecond=0)
     body = 'че сегодня интересного в чате было?'
-    event = message(f'Нора, {body}', uid=1, is_topic_message=True, message_thread_id=12)
+    event = message(f'Нора, {body}', uid=7, is_topic_message=True, message_thread_id=12)
     event = event.model_copy(update={'date': now})
     chat = openrouter_chat.OpenRouterChat(db, settings)
-    await db.set_bot_state('nora_memory_notice_v1', '1')
+    await db.set_bot_state(chat_memory.MEMORY_NOTICE_KEY, '1')
 
     async def handler(message, data):
         return await chat.memory_prompt(body, message)
@@ -246,7 +265,7 @@ async def test_middleware_saves_only_community_text(db, settings):
     since = (recent - timedelta(hours=1)).isoformat()
     rows = await db.recent_community_messages(-100123, since=since)
     assert rows == []
-    await db.set_bot_state('nora_memory_notice_v1', '1')
+    await db.set_bot_state(chat_memory.MEMORY_NOTICE_KEY, '1')
     await feed('Привет, обсуждаем кино')
     since = (recent - timedelta(hours=1)).isoformat()
     rows = await db.recent_community_messages(-100123, since=since)
@@ -271,7 +290,7 @@ async def test_middleware_saves_only_community_text(db, settings):
 
 
 async def test_middleware_updates_edited_message(db, settings):
-    await db.set_bot_state('nora_memory_notice_v1', '1')
+    await db.set_bot_state(chat_memory.MEMORY_NOTICE_KEY, '1')
     middleware = CommunityMemoryMiddleware()
     async def handler(event, data):
         return 'handled'
@@ -359,13 +378,13 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         ai_id = session.message_id
         assert request.await_count == 1
         sent_prompt = request.await_args.args[0]
-        assert len(sent_prompt) <= 2000
+        assert len(sent_prompt) <= chat_memory.ARCHIVE_CONTEXT_CHARS
         assert 'кино про Петербург' in sent_prompt
         assert 'другом чате' not in sent_prompt
         clock.now += 6
         await dispatch('Нора, что вчера обсуждали про кино?', uid=7)
-        assert replies() and 'заведите питомца' in replies()[0].text
-        assert request.await_count == 1
+        assert replies() and replies()[0].text == 'Вчера обсуждали кино, выбрали комедию.'
+        assert request.await_count == 2
         clock.now += 6
         reply_msg = bot_message('Вчера обсуждали кино, выбрали комедию.', ai_id)
         await dispatch('а что вчера обсуждали про кино?', uid=1, reply_to_message=reply_msg)
@@ -377,7 +396,7 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         await dispatch('Нора, что позавчера обсуждали?', uid=1)
         assert replies()
         assert 'ничего не нашла' in replies()[0].text
-        assert request.await_count == 1
+        assert request.await_count == 2
         assert len(history_calls) == 1
 
         # DeepSeek can infer an archive query even when the wording has no history keywords.
@@ -396,9 +415,11 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         )
         original = message('Вчера обсуждали кино', uid=7).model_copy(update={'message_id': 201, 'date': earlier})
         await dispatch(
-            f'Нора, {body}', uid=1, is_topic_message=True, message_thread_id=12, reply_to_message=original,
+            f'Нора, {body}', uid=7, is_topic_message=True, message_thread_id=12, reply_to_message=original,
         )
         assert replies()[0].text == 'Выбрали комедию.'
+        quota = await db.get_bot_state("nora_ai_daily:7")
+        assert '"used": 2' in quota  # one earlier request plus this two-call archive lookup
         first, second = completion.await_args_list
         assert first.args == ([], body)
         assert '[[ПАМЯТЬ_ЧАТА]]' in first.kwargs['system']

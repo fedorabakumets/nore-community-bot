@@ -460,7 +460,7 @@ async def music_search(query: str) -> str:
 
 
 def _ai_ready(settings: object) -> str:
-    if getattr(settings, "openrouter_api_key", ""):
+    if getattr(settings, "openrouter_api_key", "") or getattr(settings, "deepseek_api_key", ""):
         return ""
     gemini = str(getattr(settings, "gemini_api_key", "") or "").strip()
     groq = str(getattr(settings, "groq_api_key", "") or "").strip()

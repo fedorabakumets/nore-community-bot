@@ -45,16 +45,21 @@ class ReputationTier:
     discount: int
     daily_actions: int
     can_minus: bool
+    ai_daily_requests: int
 
 
 def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier:
     if value < restricted_threshold:
-        return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False)
+        return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False, 0)
     if value >= 90:
-        return ReputationTier("gold", "🥇", "золото", 10, 5, True)
+        return ReputationTier("gold", "🥇", "золото", 10, 5, True, 100)
     if value >= 70:
-        return ReputationTier("silver", "🥈", "серебро", 5, 3, True)
-    return ReputationTier("bronze", "🥉", "бронза", 2, 1, False)
+        return ReputationTier("silver", "🥈", "серебро", 5, 3, True, 10)
+    return ReputationTier("bronze", "🥉", "бронза", 2, 1, False, 5)
+
+
+def ai_limits_text() -> str:
+    return ", ".join(f"{tier.label} — {tier.ai_daily_requests}" for tier in map(reputation_tier, (0, 70, 90)))
 
 
 def discounted_price(base_price: int, discount: int) -> int:

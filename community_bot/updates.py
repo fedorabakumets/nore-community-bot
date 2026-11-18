@@ -32,11 +32,13 @@ class BotUpdate:
     sticker_pack_url: str = ""
     invitation_text: str = ""
     cover: str = ""
+    journal_date: str = ""
 
 
 UPDATES: tuple[BotUpdate, ...] = (
     BotUpdate(
         number=1,
+        journal_date="2026-09-08",
         slug="colors-shelves",
         title="Цвета, полки и питомец",
         summary="Цветные кнопки, полки магазина и карточка профиля с приватностью.",
@@ -48,6 +50,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=2,
+        journal_date="2026-09-08",
         slug="roles-games-menu",
         title="Роли, игры и нижнее меню",
         summary="Свои роли в админке, блэкджек и кости на 🍪, кнопки «Профиль» и «Меню».",
@@ -60,6 +63,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=3,
+        journal_date="2026-09-08",
         slug="audit-commands-studio",
         title="Журнал, команды и студия",
         summary="Понятный журнал модерации, русские команды и расширенные посты в чат.",
@@ -72,6 +76,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=4,
+        journal_date="2026-09-08",
         slug="ephemeral-aliases-admin-updates",
         title="Стирание команд и админские обновления",
         summary="Команды в чате стираются сразу, бот понимает слова без «/», список новинок — только в админке.",
@@ -84,6 +89,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=5,
+        journal_date="2026-09-09",
         slug="wallet-alerts-studio-flags",
         title="Кошелёк, алерты игр и студия",
         summary="Кошелёк с кредитом, упоминания из мини-игр, голосования в студии и раздельные стикеры.",
@@ -97,6 +103,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=6,
+        journal_date="2026-09-10",
         slug="media-games-invite-fix",
         title="Медиа в чате, мини-игры и ссылка в заявке",
         summary="Стикеры, фото, ГС и кружки больше не стираются без фильтра. Мини-игры остаются, пока их не скроют.",
@@ -109,6 +116,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=7,
+        journal_date="2026-09-10",
         slug="living-nora",
         title="Репутация, магазин и тихий питомец",
         summary="Репутацию снова нужно заслуживать: новые входят серебром, золото — только за плюсы из чата.",
@@ -174,6 +182,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=8,
+        journal_date="2026-09-11",
         slug="living-room",
         title="Подарки, доска недели и живой чат",
         summary=(
@@ -285,6 +294,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=9,
+        journal_date="2026-09-11",
         slug="covers-games-moderation",
         title="Игры и обложки",
         summary=(
@@ -366,6 +376,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=10,
+        journal_date="2026-09-14",
         slug="cabinet-mafia-bunker",
         title="Личный кабинет, верификация, мафия и бункер",
         summary=(
@@ -459,6 +470,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=11,
+        journal_date="2026-09-14",
         slug="quiet-cabinet",
         title="Кабинет без шума",
         summary="Меню без дублей, профиль со шкалой на одном экране, уведомления только по подписке.",
@@ -523,6 +535,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=12,
+        journal_date="2026-09-15",
         slug="shop-pet-warns-events",
         title="Магазин, питомец, варны и мероприятия",
         summary=(
@@ -553,6 +566,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=13,
+        journal_date="2026-09-21",
         slug="talisman-expedition-shop-admin",
         title="Питомец, экспедиции и магазин",
         summary=(
@@ -582,6 +596,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=14,
+        journal_date="2026-10-05",
         slug="morning-petersburg",
         title="Утро Петербурга",
         summary=(
@@ -609,6 +624,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=15,
+        journal_date="2026-10-08",
         slug="nora-2",
         title="НОРА 2.0",
         telegraph_title="НОРА и ИИ",
@@ -703,6 +719,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=16,
+        journal_date="2026-10-26",
         slug="morning-city-quotes",
         title="Утро в Петербурге — короче и по делу",
         summary="Переделали ежедневный закреп: меньше текста на экране, больше смысла внутри раскрывающихся цитат.",
@@ -742,6 +759,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=17,
+        journal_date="2026-10-26",
         slug="cabinet-wallet-confirmations",
         title="Кабинет удобнее, покупки надёжнее",
         summary="Собрали нужное на главном экране и исправили повторные списания при покупках.",
@@ -783,6 +801,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=18,
+        journal_date="2026-10-26",
         slug="grandma-pixel-menu-covers",
         title="Нора сменила обложки",
         summary="Новые картинки меню: бабушка из логотипа, пиксельные заголовки и единый чёрно-бело-красный стиль.",
@@ -830,6 +849,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=19,
+        journal_date="2026-10-26",
         slug="studio-rsvp-participants",
         title="«Я буду» теперь работает",
         summary="Запись на события: счётчик на кнопке, понятная отмена и сохранённый список участников.",
@@ -863,6 +883,7 @@ UPDATES: tuple[BotUpdate, ...] = (
     ),
     BotUpdate(
         number=20,
+        journal_date="2026-10-26",
         slug="grandma-stickers-and-stories",
         title="Бабушка вышла в чат",
         summary="У Норы появились свои стикеры. Бабушка встречает утро, зовёт на тусу и первой узнаёт об обновлениях.",
@@ -933,6 +954,7 @@ UPDATES: tuple[BotUpdate, ...] = (
 UPDATES += (
     BotUpdate(
         number=21,
+        journal_date="2026-11-04",
         slug="nora-first",
         title="Сначала — Нора",
         summary="Обращайтесь к Норе по имени. А слова поддержки и несогласия "
@@ -983,6 +1005,7 @@ UPDATES += (
 UPDATES += (
     BotUpdate(
         number=22,
+        journal_date="2026-11-18",
         slug="nora-cinema",
         title="В Норе кино",
         summary="В общем лобби открыли кинотеатр. Зови своих, выбирайте, что посмотреть, и занимайте места.",

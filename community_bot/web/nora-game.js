@@ -8,7 +8,7 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"observatory", "nora-world":"lobby-cinema", "nora-scenery":"lobby-cinema",
+      const version = {"nora-companion":"ai-expedition", "nora-world":"lobby-cinema", "nora-scenery":"lobby-cinema",
         "nora-voxel":"lobby-cinema", "nora-observatory":"memory"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };

@@ -9,6 +9,7 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.types import Chat, Message, User
 
 from community_bot import nora_game_api, nora_game_chat
+from community_bot.chat_memory import MEMORY_NOTICE_KEY
 from community_bot.database import Database
 
 GROUP = -100123
@@ -58,7 +59,7 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
     bot = SimpleNamespace(
         get_chat_member=AsyncMock(return_value=member),
         get_chat=AsyncMock(return_value=SimpleNamespace(permissions=SimpleNamespace(can_send_messages=True))),
-        send_message=AsyncMock(return_value=SimpleNamespace(message_id=555)),
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=555, date=datetime.now(UTC))),
     )
     chat = nora_game_chat.GameChat(bot, GROUP)
     settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow')
@@ -89,6 +90,7 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
     bot.send_message.assert_not_called()
 
     member.status = ChatMemberStatus.ADMINISTRATOR
+    await db.set_bot_state(MEMORY_NOTICE_KEY, '1')
     assert json.loads((await nora_game_chat.send(request)).text) == {'ok': True}
     bot.send_message.assert_awaited_once()
     assert bot.send_message.call_args.args == (GROUP, '🎮 Pixel · из игры Норы\n<b>Привет</b>')
@@ -96,6 +98,8 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
     result = json.loads((await nora_game_chat.feed(request)).text)
     assert result['messages'][0]['mine']
     assert result['messages'][0]['source'] == 'game'
+    rows = await db.search_community_messages(GROUP, 'Привет')
+    assert [(row['author_name'], row['text']) for row in rows] == [('Pixel (из игры)', '<b>Привет</b>')]
     with pytest.raises(ValueError, match='Слишком часто'):
         await nora_game_chat.send(request)
     bot.send_message.assert_awaited_once()

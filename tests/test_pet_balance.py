@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from test_nora_game import content, request
@@ -7,6 +8,7 @@ from test_nora_game import content, request
 from community_bot import cabinet_api, expedition, nora_game_api, pet_progress
 from community_bot.database import Database
 from community_bot.helpers import pet_guard_reputation
+from community_bot.routers.nora import assistant_access_error
 
 
 @pytest.mark.asyncio
@@ -39,6 +41,41 @@ async def test_expedition_requires_both_stats_and_saves_departure_result(tmp_pat
     assert (await db.get_user(1))['cookies'] == before
     assert 'находок нет' in expedition.result_text(pet_name='Кот', species_words={},
                                                    loot=expedition.ExpeditionLoot(kind='cookies', amount=0))
+
+
+@pytest.mark.asyncio
+async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'pet.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pet_development SET stage=5,level=2 WHERE user_id=1')
+    settings = SimpleNamespace(owner_ids=set(), moderator_ids=set())
+    monkeypatch.setattr(expedition, 'roll_expedition_loot', lambda _: expedition.ExpeditionLoot('cookies', 10))
+    assert (await db.start_expedition(1))[0]
+    assert 'в походе' in await assistant_access_error(1, settings, db)
+    pet = await db.get_pet(1, settle=False)
+    balance = (await db.get_user(1))['cookies']
+    until = pet['expedition_until']
+    body = {'action': 'return', 'expedition_until': until}
+    token = content(await cabinet_api.pet_prepare(request(db, 1, body)))['token']
+    old_token = content(await cabinet_api.pet_prepare(request(db, 1, body)))['token']
+    calls = await asyncio.gather(
+        cabinet_api.pet_action(request(db, 1, {'token': token})),
+        cabinet_api.pet_action(request(db, 1, {'token': token})),
+    )
+    assert sorted(call.status for call in calls) == [200, 409]
+    assert await assistant_access_error(1, settings, db) is None
+    returned = await db.get_pet(1)
+    assert returned['expedition_until'] is None and returned['expedition_loot'] is None
+    assert all(returned[key] == pet[key] for key in ('hunger', 'thirst', 'mood'))
+    assert (await db.get_user(1))['cookies'] == balance
+    assert await db.claim_expedition_notice(1) is None
+    await db.execute('UPDATE pets SET hunger=100, thirst=100 WHERE user_id=1')
+    assert (await db.start_expedition(1))[0]
+    assert (await cabinet_api.pet_action(request(db, 1, {'token': old_token}))).status == 409
+    assert (await db.get_pet(1, settle=False))['expedition_until'] not in (None, until)
 
 
 @pytest.mark.asyncio

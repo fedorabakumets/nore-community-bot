@@ -8,14 +8,15 @@ from aiogram.filters import Filter, StateFilter
 from aiogram.types import LinkPreviewOptions, Message
 
 from community_bot.aliases import message_trigger, parse_trigger
-from community_bot.chat_memory import is_memory_question, retention_notice
+from community_bot.chat_memory import retention_notice
 from community_bot.command_registry import get_command, nora_enabled
 from community_bot.community_facts import community_fact
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import delete_user_command, reply_ttl
 from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_address
-from community_bot.openrouter_chat import NO_MEMORY_REPLY, OpenRouterChat
+from community_bot.nora_knowledge import is_nora_topic
+from community_bot.openrouter_chat import OpenRouterChat, archive_question
 from community_bot.pet_progress import level
 from community_bot.pet_video import PetVideoQueue, video_command
 
@@ -31,8 +32,10 @@ async def has_assistant_access(user_id: int, settings: Settings, db: Database | 
     return bool(db and await level(db, user_id) >= 2 and await db.feature_enabled("tamagotchi"))
 
 
-async def assistant_access_error(user_id: int, settings: Settings, db: Database | None) -> str | None:
-    if not await has_assistant_access(user_id, settings, db):
+async def assistant_access_error(
+    user_id: int, settings: Settings, db: Database | None, *, in_community: bool = False,
+) -> str | None:
+    if not in_community and not await has_assistant_access(user_id, settings, db):
         if db and not await db.feature_enabled("tamagotchi"):
             return "Нора ИИ сейчас недоступна: питомцы временно отключены."
         if db and not await db.get_pet(user_id, settle=False):
@@ -41,7 +44,7 @@ async def assistant_access_error(user_id: int, settings: Settings, db: Database 
     if db:
         pet = await db.get_pet(user_id)
         if pet and pet.get("expedition_until"):
-            return "Пока питомец в походе, Нора ИИ недоступна. Дождитесь его возвращения."
+            return "Пока питомец в походе, Нора ИИ недоступна. Верните питомца через «Питомец» или /pet."
     return None
 
 
@@ -49,7 +52,7 @@ def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    note = retention_notice(prompt, datetime.now(ZoneInfo(settings.timezone)))
+    note = retention_notice(prompt, datetime.now(ZoneInfo(settings.timezone))) if archive_question(prompt) else None
     return f"{note}\n\n{answer}" if note else answer
 
 
@@ -67,25 +70,10 @@ async def _respond_to_prompt(
     if fact is not None:
         await message.reply(fact, parse_mode=None, allow_sending_without_reply=True, link_preview_options=reply_options)
         return
-    model_prompt = prompt
-    if not chat.uses_contextual_memory(message) and is_memory_question(prompt):
-        if not chat.can_read_archive(message):
-            await message.reply("Архив переписки доступен только модерации.", parse_mode=None)
-            return
-        memory_prompt = await chat.memory_prompt(prompt, message)
-        if memory_prompt is None:
-            await message.reply(
-                NO_MEMORY_REPLY,
-                parse_mode=None,
-                allow_sending_without_reply=True,
-                link_preview_options=reply_options,
-            )
-            return
-        model_prompt = memory_prompt
     if history is None:
-        answer = await chat.answer(model_prompt, message.from_user.id, message=message)
+        answer = await chat.answer(prompt, message.from_user.id, message=message)
     else:
-        answer = await chat.answer_with_history(history, model_prompt, message.from_user.id, message=message)
+        answer = await chat.answer_with_history(history, prompt, message.from_user.id, message=message)
     if not answer:
         return
     sent = await message.reply(
@@ -123,13 +111,15 @@ async def nora_address(
     body = strip_address(text)
     if body is None:
         return
-    if openrouter_chat is not None and (rule_intent(body) is None or is_memory_question(body)):
+    if openrouter_chat is not None and (rule_intent(body) is None or archive_question(body) or is_nora_topic(body)):
         if not nora_enabled():
             return
         prompt = openrouter_chat.prompt_for(message)
         if not prompt:
             return
-        error = await assistant_access_error(message.from_user.id, settings, db)
+        error = await assistant_access_error(
+            message.from_user.id, settings, db, in_community=openrouter_chat.can_read_archive(message),
+        )
         if error:
             await message.reply(error, parse_mode=None)
             return
@@ -138,9 +128,7 @@ async def nora_address(
             if found is not None:
                 await _respond_to_prompt(message, settings, openrouter_chat, *found)
                 return
-        prompt = openrouter_chat.prompt_for(message)
-        if prompt:
-            await _respond_to_prompt(message, settings, openrouter_chat, prompt)
+        await _respond_to_prompt(message, settings, openrouter_chat, prompt)
         return
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -177,11 +165,14 @@ async def nora_reply_continuation(
     found = openrouter_chat.continuation_for(message)
     if found is None and openrouter_chat.continuation_for(message, allow_other_user=True) is None:
         return
-    error = await assistant_access_error(message.from_user.id, settings, db)
+    in_community = openrouter_chat.can_read_archive(message)
+    error = await assistant_access_error(message.from_user.id, settings, db, in_community=in_community)
     if error:
         await message.reply(error, parse_mode=None)
     elif found is not None:
         await _respond_to_prompt(message, settings, openrouter_chat, *found)
+    elif in_community:
+        await _respond_to_prompt(message, settings, openrouter_chat, message.text or "")
 
 
 @router.message(

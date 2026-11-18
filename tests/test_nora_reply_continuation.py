@@ -159,8 +159,8 @@ async def test_answer_with_history_sends_history_and_keeps_limits(db, settings, 
     assert await chat.answer_with_history(history, "а дальше?", 1) == "Продолжаю."
     payload = post.call_args.kwargs["json"]
     assert payload["model"] == "openrouter/free"
-    assert payload["messages"] == [
-        {"role": "system", "content": openrouter_chat._PERSONA},
+    assert payload["messages"][0]["content"].startswith(openrouter_chat._PERSONA)
+    assert payload["messages"][1:] == [
         {"role": "user", "content": "первый вопрос"},
         {"role": "assistant", "content": "первый ответ"},
         {"role": "user", "content": "а дальше?"},
@@ -183,12 +183,11 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         isolated.message.handlers.extend(source.message.handlers)
         dispatcher.include_router(isolated)
     chat = openrouter_chat.OpenRouterChat(db, settings)
-    monkeypatch.setattr(chat, "_request", AsyncMock(return_value="Привет, помню первый вопрос."))
     history_calls: list[tuple[list[dict[str, str]], str]] = []
 
-    async def fake_history(history, prompt):
+    async def fake_history(history, prompt, *, system=openrouter_chat._PERSONA):
         history_calls.append((list(history), prompt))
-        return "Продолжаю: помню контекст."
+        return "Продолжаю: помню контекст." if history else "Привет, помню первый вопрос."
 
     monkeypatch.setattr(chat, "_request_history", fake_history)
     owner = ChatMemberOwner(user=User(id=12, first_name="Владелец <чата>", is_bot=False), is_anonymous=False)
@@ -218,8 +217,8 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         event = await dispatch(
             "а что дальше?", uid=1, reply_to_message=bot_message("Привет, помню первый вопрос.", ai_message_id),
         )
-        assert len(history_calls) == 1
-        assert history_calls[0] == (
+        assert len(history_calls) == 2
+        assert history_calls[1] == (
             [
                 {"role": "user", "content": "как настроение?"},
                 {"role": "assistant", "content": "Привет, помню первый вопрос."},
@@ -233,19 +232,20 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         await dispatch(
             "а мне?", uid=7, reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id),
         )
-        assert len(history_calls) == 1
-        assert replies() and "заведите питомца" in replies()[0].text
+        assert len(history_calls) == 3
+        assert history_calls[-1] == ([], "а мне?")
+        assert replies() and replies()[0].text == "Привет, помню первый вопрос."
         clock.now += 6
         await dispatch(
             "продолжи", uid=1, reply_to_message=bot_message("Служебное сообщение", 999),
         )
-        assert len(history_calls) == 1
+        assert len(history_calls) == 3
         assert not replies()
         clock.now += 6
         await dispatch(
             "+реп", uid=1, reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id),
         )
-        assert len(history_calls) == 1
+        assert len(history_calls) == 3
         assert replies() and "Репутация ботов" in replies()[0].text
 
         # Facts come from Telegram, even while the provider is in a cooldown.
@@ -254,8 +254,9 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         assert replies()[0].text == "Чатом владеет Владелец <чата>." and replies()[0].parse_mode is None
         get_admins.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
         await dispatch("Нора, расскажи о сообществе", uid=7)
-        get_chat.assert_not_awaited()
-        assert replies() and "заведите питомца" in replies()[0].text
+        assert replies()[0].text == "Это «Нора». Петербургское сообщество"
+        get_chat.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
+        get_chat.reset_mock()
         await dispatch("Нора, расскажи о сообществе")
         assert replies()[0].text == "Это «Нора». Петербургское сообщество"
         get_chat.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
@@ -264,20 +265,18 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         assert replies()[0].text == "Владелец чата включил анонимность в Telegram."
         await dispatch("Отлично, кто я?", reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id))
         assert replies()[0].text == "В Telegram твоё имя — Участник 1."
-        assert chat._request.await_count == len(history_calls) == 1
+        assert len(history_calls) == 3
 
         await db.ensure_user(7)
         await db.add_cookies(7, 20, "test")
         assert (await db.purchase_pet(7, "cat", "Кот", 10))[0]
-        await dispatch("Нора, как дела?", uid=7)
-        assert "2 уровне" in replies()[0].text
-        await dispatch("а мне?", uid=7, reply_to_message=bot_message("ответ", continued_id))
+        await dispatch("Нора, как дела?", uid=7, chat_id=7)
         assert "2 уровне" in replies()[0].text
         await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=7")
         assert (await db.start_expedition(7))[0]
         await dispatch("Нора, как дела?", uid=7)
         assert "в походе" in replies()[0].text
-        assert chat._request.await_count == 1
+        assert len(history_calls) == 3
     finally:
         restore_defaults()
         await dispatcher.storage.close()
