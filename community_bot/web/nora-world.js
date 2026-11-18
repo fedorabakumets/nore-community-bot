@@ -368,6 +368,7 @@ window.NoraWorld = (() => {
     trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
     const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
+    let mousePosition=null;
     let wingBoostUsed=false;
     let pov=Number(root.dataset.pov ?? 100), actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
     let lobbyView=0, cinemaDistance=0;
@@ -384,8 +385,26 @@ window.NoraWorld = (() => {
     on(joystick,'pointerdown',e=>{if(joyId!==null)return;e.preventDefault();joyId=e.pointerId;joystick.setPointerCapture(joyId);joystickMove(e);});
     on(joystick,'pointermove',e=>{if(e.pointerId===joyId)joystickMove(e);});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
-    on(canvas,'pointerdown',e=>{if(inputPaused()||orbitId!==null)return;orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);});
-    on(canvas,'pointermove',e=>{if(e.pointerId!==orbitId)return;targetYaw-=(e.clientX-lastX)*.006;targetPitch=Math.max(inCinema?-.85:.15,Math.min(.85,targetPitch+(e.clientY-lastY)*.004));lastX=e.clientX;lastY=e.clientY;});
+    function turnCamera(dx,dy){
+      targetYaw-=dx*.006;
+      targetPitch=Math.max(inCinema?-.85:.15,Math.min(.85,targetPitch+dy*.004));
+    }
+    on(canvas,'pointerdown',e=>{
+      if(e.pointerType==='mouse'||inputPaused()||orbitId!==null)return;
+      mousePosition=null;
+      orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);
+    });
+    on(canvas,'pointermove',e=>{
+      if(e.pointerType==='mouse'){
+        if(orbitId!==null||inputPaused()){mousePosition=null;return;}
+        if(mousePosition)turnCamera(e.clientX-mousePosition.x,e.clientY-mousePosition.y);
+        mousePosition={x:e.clientX,y:e.clientY};
+      }else if(e.pointerId===orbitId){
+        if(!inputPaused())turnCamera(e.clientX-lastX,e.clientY-lastY);
+        lastX=e.clientX;lastY=e.clientY;
+      }
+    });
+    on(canvas,'pointerleave',e=>{if(e.pointerType==='mouse')mousePosition=null;});
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
     on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
     let grounded=true;
@@ -414,7 +433,7 @@ window.NoraWorld = (() => {
       if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
     });
     on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
-    function reset(){resetStick();keys.clear();orbitId=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
+    function reset(){resetStick();keys.clear();orbitId=null;mousePosition=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
     on(root,'nora-settings-open',reset);on(window,'blur',reset);on(document,'visibilitychange',reset);
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');

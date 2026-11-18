@@ -23,7 +23,11 @@ try {
   class Element extends EventTarget {
     open=false; dataset = {}; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
     children = new Map();
-    querySelector(selector) { if(selector==='.nora-settings[open]')return null; if (!this.children.has(selector)) this.children.set(selector, new Element()); return this.children.get(selector); }
+    querySelector(selector) {
+      if(selector==='.nora-settings[open]')return this.children.get('.nora-settings')?.open?this.children.get('.nora-settings'):null;
+      if(!this.children.has(selector))this.children.set(selector,new Element());
+      return this.children.get(selector);
+    }
     setAttribute() {} setPointerCapture() {} blur() {}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
@@ -219,6 +223,37 @@ try {
     assert.ok(length>.1, label+': moved');
     assert.ok((actual.x*x+actual.z*z)/(length*input)>.995, label+': screen direction');
   }
+  const mouseWorld=await setup(1);
+  function aim(){
+    mouseWorld.frames(120);
+    return mouseWorld.camera().getWorldDirection(new Three.Vector3());
+  }
+  const mouseMove=(clientX,clientY)=>mouseWorld.canvas.emit('pointermove',{
+    pointerId:1,pointerType:'mouse',buttons:0,clientX,clientY,
+  });
+  const startAim=aim();
+  mouseMove(60,60);
+  mouseMove(160,60);
+  const turned=aim();
+  assert.ok(turned.x>startAim.x+.4,'moving the mouse right turns the camera right without a button');
+  mouseMove(160,20);
+  const tilted=aim();
+  assert.ok(tilted.y>turned.y+.1,'moving the mouse up tilts the camera up');
+  mouseWorld.canvas.emit('pointerleave',{pointerType:'mouse'});
+  mouseMove(370,300);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'returning to the canvas starts from the new mouse position');
+  const settings=mouseWorld.root.querySelector('.nora-settings');
+  settings.open=true;
+  mouseWorld.root.emit('nora-settings-open');
+  mouseMove(80,80);
+  mouseMove(180,180);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'the camera stays still while settings are open');
+  settings.open=false;
+  mouseMove(180,210);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'the first movement after settings resets the reference position');
+  mouseMove(180,250);
+  assert.ok(aim().y<tilted.y-.1,'the mouse can turn the camera again after settings close');
+  mouseWorld.stop();
   // Sustained and repeated inputs must stay screen-relative, not merely move
   // in a fixed world direction while the camera swings away underneath them.
   for(const view of [0,1,2])for(const device of ['keyboard','touch']) {
@@ -257,9 +292,15 @@ try {
     aligned(screenDelta(h,h.delta(20)),x,z,'continuous joystick turn');
   }
   h.stick(-1,0);
-  h.canvas.emit('pointerdown',{pointerId:2,clientX:0,clientY:0});
-  h.canvas.emit('pointermove',{pointerId:2,clientX:200,clientY:0});
-  h.frames(40);aligned(screenDelta(h,h.delta(30)),-1,0,'left after manual camera turn while holding');
+  const beforeTouch=h.camera().position.clone().sub(h.player.position);
+  h.canvas.emit('pointermove',{pointerId:2,pointerType:'touch',clientX:200,clientY:0});
+  h.frames(40);
+  assert.ok(h.camera().position.clone().sub(h.player.position).distanceTo(beforeTouch)<.01,'touch movement needs a swipe start');
+  h.canvas.emit('pointerdown',{pointerId:2,pointerType:'touch',clientX:0,clientY:0});
+  h.canvas.emit('pointermove',{pointerId:2,pointerType:'touch',clientX:200,clientY:0});
+  h.frames(40);
+  assert.ok(h.camera().position.clone().sub(h.player.position).distanceTo(beforeTouch)>1,'touch swipe rotates the camera');
+  aligned(screenDelta(h,h.delta(30)),-1,0,'left after manual camera turn while holding');
   h.joystick.emit('pointercancel',{pointerId:1});h.frames(25);assert.ok(h.delta(30).length()<.001,'touch cancel stops');
   h.key('KeyW');h.frames(20);h.window.emit('blur');assert.ok(h.delta(30).length()<.001,'blur stops');
   h.key('Space');h.frames(10);assert.ok(h.player.position.y>.1,'jump');h.frames(60);assert.equal(h.player.position.y,.017,'lands');
