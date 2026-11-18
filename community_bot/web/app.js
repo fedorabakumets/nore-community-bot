@@ -88,7 +88,7 @@ function showApplication(application) {
     error.textContent = '';
     try {
       const result = await api('application', {...answers, ban_version: application.ban_version});
-      if (result.status === 'admitted') openApp(await api('me'));
+      if (result.status === 'admitted') await openApp(await api('me'));
       else showApplication(result);
     } catch (err) {
       error.textContent = err.message;
@@ -109,7 +109,7 @@ async function refreshApplication(button) {
   }
   try {
     const result = await api('me');
-    if (result.onboarding?.status !== applicationScreen) openApp(result);
+    if (result.onboarding?.status !== applicationScreen) await openApp(result);
     else if (button) message.textContent = applicationScreen === 'pending' ? 'Модераторы ещё проверяют анкету.' : 'Анкета пока недоступна.';
   } catch (err) {
     if (button) message.textContent = err.message;
@@ -288,11 +288,17 @@ async function openWidgetNoticeFromLink() {
   }
 }
 
-function openApp(result) {
+const memberScreensReady = new Promise(resolve => {
+  document.addEventListener('DOMContentLoaded', resolve, {once: true});
+});
+
+async function openApp(result) {
   if (result.onboarding) {
     showApplication(result.onboarding);
+    window.NoraIntro?.finish(true);
     return;
   }
+  await memberScreensReady;
   applicationScreen = '';
   data = result;
   tab = 'home';
@@ -325,13 +331,13 @@ function openApp(result) {
   void openGameProfileFromLink();
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function startApp() {
   try {
     if (!auth) {
       $('#app').innerHTML = '<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';
       return;
     }
-    openApp(await api('me'));
+    await openApp(await api('me'));
   } catch (e) {
     window.NoraIntro?.finish(true);
     $('#app').innerHTML = `<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;
@@ -339,7 +345,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   } finally {
     window.NoraIntro?.ready();
   }
-}, {once: true});
+}
+void startApp();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
