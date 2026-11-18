@@ -81,9 +81,12 @@ def test_settings_and_equal_deal_trump():
     for n in (5, 6):
         with pytest.raises(ValueError, match="не хватит"):
             game.settings({"deck": 24, "players": n})
-    for bad in ({"players": True}, {"stake": 99}, {"stake": 10001}, {"private": "false"}, {"winner": 2}):
+    for bad in ({"players": True}, {"stake": 4}, {"stake": 0}, {"stake": 10001}, {"private": "false"}, {"winner": 2}):
         with pytest.raises(ValueError):
             game.settings(bad)
+    assert game.settings({"stake": 5})["stake"] == 5
+    assert game.settings({"stake": 10_000})["stake"] == 10_000
+    assert game.settings({})["stake"] == 100
     g = game.deal(game.settings({"deck": 24, "players": 4}), rng=random.Random(9))
     assert g["trump"] in range(4) and game.public_view(g, 0)["bottom"] is None
     assert all(not game.beats(c, c, g["trump"]) for c in range(52))
