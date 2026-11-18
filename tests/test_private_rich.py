@@ -713,13 +713,16 @@ async def test_web_admin_ui_is_captured_before_rich_and_recipients_receive_rich(
 
 
 @pytest.mark.parametrize('cover', [False, True])
-async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatch, cover):
+@pytest.mark.parametrize('web_app', [False, True])
+async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatch, cover, web_app):
     from community_bot.routers.private import start
 
     db, bot, session, state = setup
     bot.community_settings.timezone = 'Europe/Moscow'
     bot.community_settings.welcome_cover = ''
     state.clear = AsyncMock()
+    if web_app:
+        monkeypatch.setenv("MINIAPP_URL", "https://nora.example")
     if not cover:
         monkeypatch.setattr('community_bot.menu_art.menu_cover', lambda name: None)
 
@@ -730,7 +733,13 @@ async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatc
     assert len(session.calls) == 1
     assert isinstance(session.calls[0], SendRichMessage)
     assert session.calls[0].reply_markup is None
-    assert 'start:apply' in actions(session.calls[0])
+    if web_app:
+        buttons = [button for block in content(session.calls[0]) if block["type"] == "buttons"
+                   for button in block["buttons"]]
+        assert [button["web_app"]["url"] for button in buttons if "web_app" in button] == ["https://nora.example"]
+        assert 'start:apply' not in actions(session.calls[0])
+    else:
+        assert 'start:apply' in actions(session.calls[0])
     await turn(setup, handler, incoming(uid=8))
     assert [c.__api_method__ for c in session.calls] == [
         'sendRichMessage', 'sendRichMessage', 'deleteMessage',
@@ -776,7 +785,7 @@ async def test_first_start_and_application_work_when_optional_telegram_requests_
         await dispatcher.feed_update(bot, Update(update_id=1, message=message), db=db, settings=settings)
         assert method_order == ["sendRichMessage", "sendMessage", "setChatMenuButton"]
         first = next(call for call in session.calls if isinstance(call, SendMessage))
-        assert first.reply_markup.inline_keyboard[0][0].callback_data == "start:apply"
+        assert first.reply_markup.inline_keyboard[0][0].web_app.url == "https://nora.example"
         assert await db.get_user(8)
         callback = CallbackQuery(
             id="apply", chat_instance="chat", from_user=message.from_user, data="start:apply",
@@ -784,7 +793,7 @@ async def test_first_start_and_application_work_when_optional_telegram_requests_
         )
         await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback), db=db, settings=settings)
         last = [call for call in session.calls if isinstance(call, SendMessage)][-1]
-        assert "Как тебя зовут?" in last.text
+        assert last.reply_markup.inline_keyboard[0][0].web_app.url == "https://nora.example"
     finally:
         await dispatcher.storage.close()
 

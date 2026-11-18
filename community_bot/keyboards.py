@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 from community_bot.permissions import PERMISSIONS, permission_label, role_has_permission
@@ -116,7 +119,18 @@ def private_menu_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def start_apply_keyboard() -> InlineKeyboardMarkup:
+def start_apply_keyboard(*, pending: bool = False) -> InlineKeyboardMarkup:
+    url = os.getenv("MINIAPP_URL", "").strip()
+    if url.startswith("https://"):
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Проверить статус анкеты" if pending else "📝 Заполнить анкету",
+                web_app=WebAppInfo(url=url),
+                style=STYLE_GO,
+            ),
+        ]])
+    if pending:
+        return InlineKeyboardMarkup(inline_keyboard=[])
     return InlineKeyboardMarkup(inline_keyboard=[[ibtn("📝 Заполнить анкету", "start:apply", STYLE_GO)]])
 
 

@@ -8,19 +8,16 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, User
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.helpers import application_block_reason, has_permission, render_profile
+from community_bot.helpers import has_permission, render_profile
 from community_bot.keyboards import (
     BTN_MENU,
     BTN_SHOP,
     BTN_TICKET,
     BTN_WALLET,
-    flow_reply_keyboard,
     private_menu_keyboard,
     profile_keyboard,
 )
 from community_bot.permissions import PERM_ADMIN_PANEL
-from community_bot.states import ApplicationForm
-from community_bot.texts import APPLICATION_INTRO
 
 router = Router(name="flows")
 
@@ -34,34 +31,19 @@ async def restore_private_menu(message: Message, db: Database, settings: Setting
     if message.chat.type != "private":
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
         return
-    from community_bot.access import private_allowed, private_keyboard
+    from community_bot.access import private_allowed
+    from community_bot.routers.private import private_menu_content
 
     uid = message.chat.id
-    allowed = await private_allowed(db, settings, uid)
-    if allowed:
+    if await private_allowed(db, settings, uid):
         await message.answer(
             "Выбери раздел.",
             reply_markup=private_menu_keyboard(await has_permission(db, settings, uid, PERM_ADMIN_PANEL),
                                                unread=await db.notify_unread_count(uid)),
         )
         return
-    await message.answer(
-        "Можно открыть профиль, магазин, кошелёк или написать тикет." if allowed
-        else "Дождись одобрения анкеты. Если нужна помощь — кнопка внизу.",
-        reply_markup=await private_keyboard(db, settings, uid),
-    )
-
-
-async def restart_application(message: Message, state: FSMContext, db: Database, user_id: int) -> None:
-    reason = await application_block_reason(db, user_id)
-    if reason:
-        await state.clear()
-        await message.answer(reason)
-        return
-    await state.set_state(ApplicationForm.name)
-    ban = await db.ban_reset_state(user_id)
-    await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
-    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    text, markup = await private_menu_content(db, settings, uid)
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 async def cancel_current_flow(
@@ -197,7 +179,9 @@ async def flow_callback_control(
     current = await state.get_state()
     await callback.answer()
     if callback.data == "flow:restart" and current and current.startswith("ApplicationForm:"):
-        await restart_application(callback.message, state, db, callback.from_user.id)
+        from community_bot.routers.private import _start_application
+
+        await _start_application(callback.message, state, db, callback.from_user)
         return
     if callback.data == "flow:restart":
         await callback.message.answer("Здесь можно только отменить.")

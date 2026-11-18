@@ -68,6 +68,8 @@ async def test_api_gate_denies_old_confirmations_until_complete(db):
     import hmac
     from urllib.parse import urlencode
 
+    application_id = await db.create_application(7, {})
+    await db.decide_application(application_id, 99, 'approved', None)
     payload = {'auth_date':str(int(time.time())), 'user':json.dumps({'id':7,'first_name':'Анна'})}
     secret = hmac.new(b'WebAppData', b'test-only', hashlib.sha256).digest()
     payload['hash'] = hmac.new(secret, '\n'.join(f'{k}={v}' for k,v in sorted(payload.items())).encode(),

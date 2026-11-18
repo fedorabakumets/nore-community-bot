@@ -18,7 +18,106 @@ function profileTabLocked(target) {
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 async function api(path,body,signal){const r=await fetch('/api/'+path,{signal,method:body?'POST':'GET',headers:{Authorization:'tma '+auth,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let j;try{j=await r.json()}catch{throw Error('Сервис пока недоступен. Попробуй ещё раз')}if(!r.ok)throw Error(j.error||j.message||'Не удалось выполнить действие');return j}
-function showTesterAccess(){data=null;$('#nav').innerHTML='';$('#app').innerHTML='<section class="tester-access"><img src="/home-art/tester-recruitment.jpg" alt="Открыт набор к бета-тестированию приложения Нора"><h1>Нора для участников</h1><p>Если ты уже в сообществе и Нора не открывается, напиши в поддержку.</p><button type="button" class="primary" id="tester-ticket">Написать в поддержку</button></section>';$('#tester-ticket').onclick=()=>{const url='https://t.me/nora_community_bot?start=idea';if(tg?.openTelegramLink)tg.openTelegramLink(url);else window.open(url,'_blank','noopener,noreferrer')}}
+let applicationScreen = '';
+
+function showApplication(application) {
+  applicationScreen = application.status;
+  data = null;
+  $('#nav').replaceChildren();
+  if ($('#sheet').open) $('#sheet').close();
+  tg?.BackButton?.hide?.();
+  const app = $('#app');
+  app.dataset.screen = 'application';
+  window.scrollTo(0, 0);
+
+  if (application.status !== 'form') {
+    const waiting = application.status === 'pending';
+    app.innerHTML = `<section class="application-panel card">
+      <h1>${waiting ? 'Анкета на проверке' : 'Анкета пока недоступна'}</h1>
+      <p>${waiting ? 'Мы получили твою анкету. Когда модераторы её рассмотрят, Нора напишет тебе в Telegram. Приложение можно закрыть.'
+        : 'Ты сможешь подать анкету после разбана.'}</p>
+      <button type="button" class="primary" id="application-close">Вернуться в чат</button>
+      <button type="button" class="secondary" id="application-check">Проверить статус</button>
+      <p class="application-error" id="application-error" role="status"></p>
+    </section>`;
+    $('#application-close').onclick = () => tg?.close?.();
+    $('#application-check').onclick = event => refreshApplication(event.currentTarget);
+    return;
+  }
+
+  const q = application.questions;
+  app.innerHTML = `<section class="application-panel card">
+    <h1>Анкета на вступление</h1>
+    <p>Ответь на вопросы, чтобы подать заявку в сообщество Норы.</p>
+    <form id="application-form">
+      <label>Как тебя зовут?
+        <input name="name" autocomplete="given-name" maxlength="50" required value="${esc(application.name)}">
+      </label>
+      <label>Дата рождения
+        <input name="birth_date" type="date" autocomplete="bday" required value="${esc(application.birth_date)}">
+      </label>
+      <label>${esc(q.referral)}
+        <input name="referral" maxlength="100" required>
+      </label>
+      <label>${esc(q.expectations)}
+        <textarea name="expectations" rows="3" maxlength="1000" required></textarea>
+      </label>
+      <label>${esc(q.bio)}
+        <textarea name="bio" rows="3" maxlength="1000" required></textarea>
+      </label>
+      <label>${esc(q.interview)}
+        <select name="interview" required>
+          <option value="">Выбери ответ</option>
+          <option value="yes">Да</option>
+          <option value="no">Нет</option>
+        </select>
+      </label>
+      <p class="application-error" id="application-error" role="alert"></p>
+      <button type="submit" class="primary">Отправить анкету</button>
+    </form>
+  </section>`;
+  const form = $('#application-form');
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy) return;
+    const submit = form.querySelector('[type=submit]');
+    const error = $('#application-error');
+    const answers = Object.fromEntries(new FormData(form));
+    busy = submit.disabled = true;
+    submit.textContent = 'Отправляем…';
+    error.textContent = '';
+    try {
+      const result = await api('application', {...answers, ban_version: application.ban_version});
+      if (result.status === 'admitted') openApp(await api('me'));
+      else showApplication(result);
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      busy = submit.disabled = false;
+      submit.textContent = 'Отправить анкету';
+    }
+  };
+}
+
+async function refreshApplication(button) {
+  if (busy) return;
+  busy = true;
+  const message = $('#application-error');
+  if (button) {
+    button.disabled = true;
+    message.textContent = '';
+  }
+  try {
+    const result = await api('me');
+    if (result.onboarding?.status !== applicationScreen) openApp(result);
+    else if (button) message.textContent = applicationScreen === 'pending' ? 'Модераторы ещё проверяют анкету.' : 'Анкета пока недоступна.';
+  } catch (err) {
+    if (button) message.textContent = err.message;
+  } finally {
+    busy = false;
+    if (button) button.disabled = false;
+  }
+}
 function toast(s){
   const notice=$('#toast');
   const dialog=$('#sheet');
@@ -34,7 +133,7 @@ function eventCard(e){return `<article class="card event"><span class="eyebrow">
 function navIcon(id){if(id==='interactive')return window.NoraInteractive?.icon('game')||'';const paths={community:'M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0 M3 17c-5-1 1-7 9-10s15-2 9 3S4 19 3 17',home:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',shop:'M4 8h16v13H4z M8 8V5a4 4 0 0 1 8 0v3',events:'M4 5h16v16H4z M4 10h16 M8 2v5 M16 2v5',wallet:'M3 6h17v15H3z M3 6V3h14 M15 12h6v5h-6z',pet:'M8 11c-2 0-4 3-4 5s2 3 4 2c2-1 2-1 4-1s2 0 4 1c2 1 4 0 4-2s-2-5-4-5c-2 0-2 1-4 1s-2-1-4-1z M5 5v2 M10 3v3 M15 3v3 M20 5v2',lk:'M5 21v-2a7 7 0 0 1 14 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="${paths[id]}"/></svg>`}
 const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4Z"/><path d="M26 56V37a6 6 0 0 1 12 0v19"/>',shop:'<rect x="11" y="24" width="42" height="33" rx="6"/><path d="M22 26v-7a10 10 0 0 1 20 0v7"/>',community:'<circle cx="32" cy="32" r="17"/><path d="M13.2 37.2C3 43.4 4.5 48 10.8 48.3c7.7.4 22.5-5.7 33.4-12.2C54.7 29.9 60 24.4 57 20.9c-2.4-2.8-8-1.9-14.7.7"/>',events:'<rect x="12" y="17" width="40" height="39" rx="6"/><path d="M22 10v14M42 10v14M12 29h40"/><circle cx="23" cy="40" r="2.5" fill="currentColor" stroke="none"/>'};
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
-function render(){if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
+function render(){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=window.NoraHome?.screen()||'';
 if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
@@ -189,46 +288,52 @@ async function openWidgetNoticeFromLink() {
   }
 }
 
+function openApp(result) {
+  if (result.onboarding) {
+    showApplication(result.onboarding);
+    return;
+  }
+  applicationScreen = '';
+  data = result;
+  tab = 'home';
+  const linked = botReplyRoute();
+  const view = linked?.view || window.NoraShop?.route()?.view || 'home';
+  const blockedLink = linked && profileTabLocked(view);
+  const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
+  if (blockedLink) tab = 'lk';
+  else if (view === 'admin' && data.admin_available) tab = 'admin';
+  else if (['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view)) tab = view;
+  else if (view === 'shop' && data.profile.fill_percent === 100) {
+    tab = 'shop';
+    window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
+  }
+  if (tab === 'pet' && !profileTabLocked(tab) && history.state?.noraView !== 'pet') {
+    window.NoraShop?.tabChanged(tab, 'community');
+  } else if (linked && !blockedLink) {
+    window.NoraShop?.tabChanged(tab);
+  }
+  render();
+  loadAvatar();
+  if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+  else if (topupClosed) toast('Пополнение временно недоступно');
+  if (tab === 'shop' && linked?.sku) {
+    if (data.products.some(product => product.sku === linked.sku)) void product(linked.sku);
+    else toast('Товар больше недоступен');
+  }
+  openLobbyFromLink();
+  void openWidgetNoticeFromLink();
+  void openGameProfileFromLink();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     if (!auth) {
       $('#app').innerHTML = '<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';
       return;
     }
-    data = await api('me');
-    const linked = botReplyRoute();
-    const view = linked?.view || window.NoraShop?.route()?.view || 'home';
-    const blockedLink = linked && profileTabLocked(view);
-    const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
-    if (blockedLink) tab = 'lk';
-    else if (view === 'admin' && data.admin_available) tab = 'admin';
-    else if (['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view)) tab = view;
-    else if (view === 'shop' && data.profile.fill_percent === 100) {
-      tab = 'shop';
-      window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
-    }
-    if (tab === 'pet' && !profileTabLocked(tab) && history.state?.noraView !== 'pet') {
-      window.NoraShop?.tabChanged(tab, 'community');
-    } else if (linked && !blockedLink) {
-      window.NoraShop?.tabChanged(tab);
-    }
-    render();
-    loadAvatar();
-    if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
-    else if (topupClosed) toast('Пополнение временно недоступно');
-    if (tab === 'shop' && linked?.sku) {
-      if (data.products.some(product => product.sku === linked.sku)) void product(linked.sku);
-      else toast('Товар больше недоступен');
-    }
-    openLobbyFromLink();
-    void openWidgetNoticeFromLink();
-    void openGameProfileFromLink();
+    openApp(await api('me'));
   } catch (e) {
     window.NoraIntro?.finish(true);
-    if (e.message.includes('Миниапка доступна участникам Норы')) {
-      showTesterAccess();
-      return;
-    }
     $('#app').innerHTML = `<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;
     $('#retry').onclick = () => location.reload();
   } finally {
@@ -254,7 +359,7 @@ async function loadAvatar(){
   finally{avatarLoading=false;if(data?.has_avatar&&!data.avatar_video&&data.revision!==key)queueMicrotask(loadAvatar)}
 }
 document.addEventListener('change',async e=>{if(e.target.id!=='avatar-file')return;const file=e.target.files?.[0];if(!file||busy)return;if(file.size>5*1024*1024){toast('Фото должно быть не больше 5 МБ');e.target.value='';return}if(!['image/jpeg','image/png','image/webp'].includes(file.type)){toast('Выбери JPG, PNG или WebP');return}busy=true;const b=$('#change-avatar');if(b){b.disabled=true;b.textContent='Загружаем фото…'}try{const r=await fetch('/api/profile/avatar',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type,'X-Profile-Revision':data.revision},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить фото');toast(j.message);data=await api('me');render()}catch(err){toast(err.message);if(b){b.disabled=false;b.textContent='Повторить загрузку фото'}}finally{busy=false}});
-async function refresh(){if(!auth||!data||busy||tab==='admin'||document.hidden||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();window.NoraCabinet?.refreshCurrent()}catch(e){if(e.message.includes('Миниапка доступна участникам Норы')){showTesterAccess()}else toast(e.message)}}
+async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.

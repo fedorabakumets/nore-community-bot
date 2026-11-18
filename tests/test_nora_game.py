@@ -426,7 +426,7 @@ async def test_lobby_socket_checks_access_and_caches_profile(monkeypatch, author
     read_profile = AsyncMock(return_value=profile)
     allowed = AsyncMock(return_value=authorized)
     monkeypatch.setattr(nora_game_api, '_player_profile', read_profile)
-    monkeypatch.setattr(access, 'miniapp_allowed', allowed)
+    monkeypatch.setattr(access, 'private_allowed', allowed)
     monkeypatch.setattr(miniapp, 'validate_init_data', lambda raw, token: {'id': 1})
     monkeypatch.setattr(nora_game_api, 'time', SimpleNamespace(monotonic=lambda: now))
     departed = AsyncMock()

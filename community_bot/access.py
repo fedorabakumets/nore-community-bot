@@ -19,7 +19,7 @@ from aiogram.types import (
 )
 
 from community_bot.helpers import rank_of_user
-from community_bot.keyboards import STYLE_CLOSE, ibtn, kbtn, main_private_keyboard
+from community_bot.keyboards import STYLE_CLOSE, ibtn, kbtn, main_private_keyboard, start_apply_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,14 @@ async def needs_reapplication(db, uid):
     return bool(await db.ban_reset_state(uid)) and not await db.has_approved_application(uid)
 
 
-async def private_allowed(db, settings, uid):
+async def private_allowed(db, settings, uid, *, ban=None):
+    if ban is None:
+        ban = await db.ban_reset_state(uid)
+    if db.ban_is_active(ban):
+        return False
     if await db.has_approved_application(uid):
         return True
-    return not await db.ban_reset_state(uid) and await rank_of_user(db, settings, uid) > 0
+    return not ban and await rank_of_user(db, settings, uid) > 0
 
 
 async def private_keyboard(db, settings, uid):
@@ -53,8 +57,10 @@ async def sync_menu(bot, db, settings, uid):
     if cache is None:
         cache = {}
         bot._nora_menu_access = cache
-    url = os.getenv('MINIAPP_URL', '')
-    allowed = url.startswith('https://') and await miniapp_allowed(db, settings, uid)
+    url = os.getenv('MINIAPP_URL', '').strip()
+    allowed = url.startswith('https://') and (
+        settings.is_owner(uid) or await db.get_user(uid) is not None
+    ) and not db.ban_is_active(await db.ban_reset_state(uid))
     signature = (allowed, url)
     if cache.get(uid) == signature:
         return
@@ -124,7 +130,7 @@ class PrivateAccessMiddleware(BaseMiddleware):
         if ban and state and (await state.get_state() or '').startswith('ApplicationForm:'):
             if (await state.get_data()).get('ban_version') != ban['version']:
                 await state.clear()
-        if await private_allowed(db, settings, uid):
+        if await private_allowed(db, settings, uid, ban=ban):
             return await handler(event, data)
         current = (await state.get_state() if state else '') or ''
         if isinstance(event, CallbackQuery):
@@ -142,11 +148,14 @@ class PrivateAccessMiddleware(BaseMiddleware):
             text = (event.text or '').strip().casefold()
             command = text.split('@', 1)[0].split(' ', 1)[0]
             if text in {'помощь', 'хелп'} or command in {'/help', '/commands'}:
+                pending = await db.has_pending_application(uid)
+                guide = 'Анкета на проверке. Решение придёт сюда.' if pending else (
+                    'Заполни анкету в Норе. После одобрения откроются остальные разделы.'
+                )
                 await event.answer(
-                    'Сначала заполни анкету. После одобрения откроются кабинет и магазин. '
-                    'Если нужна помощь, напиши поддержке.',
+                    f'{guide} Если нужна помощь, напиши поддержке.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [ibtn('📝 Заполнить анкету', 'start:apply')],
+                        *start_apply_keyboard(pending=pending).inline_keyboard,
                         [ibtn('Написать поддержке', 'menu:question', STYLE_CLOSE)],
                     ]),
                 )
@@ -164,12 +173,10 @@ class PrivateAccessMiddleware(BaseMiddleware):
         )
         pending = await db.has_pending_application(uid)
         body = 'Анкета на проверке. Решение придёт сюда.' if pending else 'Сначала заполни анкету — это вход в Нору.'
-        if not pending:
-            await answer(body, reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[ibtn('📝 Заполнить анкету', 'start:apply')]],
-            ))
-        await answer('Остальные разделы откроются после одобрения.' if not pending else body,
-                             reply_markup=guest_keyboard())
+        markup = start_apply_keyboard(pending=pending)
+        if markup.inline_keyboard:
+            await answer(body, reply_markup=markup)
+        await answer('Помощь всегда здесь.' if markup.inline_keyboard else body, reply_markup=guest_keyboard())
 
 
 class ProfileAccessMiddleware(BaseMiddleware):

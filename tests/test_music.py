@@ -198,7 +198,7 @@ async def test_music_and_records_require_signed_staff_identity(tmp_path, path):
     from unittest.mock import patch
 
     with patch.object(miniapp, 'validate_init_data', return_value={'id': 1}), \
-         patch.object(access, 'miniapp_allowed', AsyncMock(return_value=False)):
+         patch.object(access, 'private_allowed', AsyncMock(return_value=False)):
         assert (await miniapp.protection(req, handler)).status == 403
         handler.assert_not_awaited()
 

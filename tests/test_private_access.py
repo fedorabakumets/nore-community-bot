@@ -106,3 +106,9 @@ async def test_members_receive_miniapp_menu_and_unknown_users_do_not(setup, monk
     assert bot._nora_menu_access[7][0] is True
     await sync_menu(bot, db, settings, 8)
     assert bot.set_chat_menu_button.call_args.kwargs['menu_button'].type == 'commands'
+    await db.reset_banned_user(7, until=None)
+    await sync_menu(bot, db, settings, 7)
+    assert bot._nora_menu_access[7][0] is False
+    await db.release_ban_reset(7)
+    await sync_menu(bot, db, settings, 7)
+    assert bot._nora_menu_access[7][0] is True

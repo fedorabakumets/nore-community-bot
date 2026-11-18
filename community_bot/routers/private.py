@@ -12,7 +12,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -142,9 +142,10 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
 async def private_menu_content(db: Database, settings: Settings, user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     from community_bot.access import private_allowed
 
-    if db.ban_is_active(await db.ban_reset_state(user_id)):
+    ban = await db.ban_reset_state(user_id)
+    if db.ban_is_active(ban):
         return "Анкету можно заполнить после разбана.", InlineKeyboardMarkup(inline_keyboard=[])
-    if await private_allowed(db, settings, user_id):
+    if await private_allowed(db, settings, user_id, ban=ban):
         approved = await db.has_approved_application(user_id)
         markup = private_menu_keyboard(
             await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
@@ -152,9 +153,10 @@ async def private_menu_content(db: Database, settings: Settings, user_id: int) -
         )
         return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
     help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
-    if await db.has_pending_application(user_id):
-        return WELCOME_PENDING_TEXT, InlineKeyboardMarkup(inline_keyboard=[help_row])
-    return WELCOME_TEXT, InlineKeyboardMarkup(inline_keyboard=[*start_apply_keyboard().inline_keyboard, help_row])
+    pending = await db.has_pending_application(user_id)
+    markup = start_apply_keyboard(pending=pending)
+    return (WELCOME_PENDING_TEXT if pending else WELCOME_TEXT,
+            InlineKeyboardMarkup(inline_keyboard=[*markup.inline_keyboard, help_row]))
 
 
 async def _send_welcome(message: Message, db: Database, settings: Settings) -> None:
@@ -1206,9 +1208,19 @@ async def _start_application(message: Message, state: FSMContext, db: Database, 
     reason = await application_block_reason(db, user.id)
     if reason:
         await state.clear()
-        await message.answer(reason)
+        if await db.has_pending_application(user.id):
+            markup = start_apply_keyboard(pending=True)
+            await message.answer(reason, reply_markup=markup if markup.inline_keyboard else None)
+        else:
+            await message.answer(reason)
         return False
     await register_telegram_user(db, user)
+    markup = start_apply_keyboard()
+    if markup.inline_keyboard[0][0].web_app:
+        if (await state.get_state() or "").startswith("ApplicationForm:"):
+            await state.clear()
+        await message.answer("Открой анкету в Норе и ответь на все вопросы.", reply_markup=markup)
+        return True
     await state.set_state(ApplicationForm.name)
     ban = await db.ban_reset_state(user.id)
     await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
@@ -1339,15 +1351,27 @@ async def finish_application(
             callback.from_user.id,
             f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт отдельным сообщением.",
         )
-    text = _application_text(application_id, callback.from_user.id, callback.from_user.username, answers)
+    await notify_application_reviewers(
+        bot, settings, application_id, callback.from_user.id, callback.from_user.username, answers,
+    )
+
+
+async def notify_application_reviewers(
+    bot: Bot, settings: Settings, application_id: int, user_id: int,
+    username: str | None, answers: dict[str, Any],
+) -> None:
+    text = _application_text(application_id, user_id, username, answers)
     for reviewer_id in settings.reviewers:
-        await safe_send(
-            bot,
-            reviewer_id,
-            text,
-            parse_mode="HTML",
-            reply_markup=application_review_keyboard(application_id),
-        )
+        try:
+            await safe_send(
+                bot,
+                reviewer_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=application_review_keyboard(application_id),
+            )
+        except TelegramAPIError as error:
+            logger.warning("Application review notification failed (%s)", type(error).__name__)
 
 
 async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -> bool:
@@ -1387,12 +1411,11 @@ async def _notify_application_decision(
         )
         menu_text = "Выбери раздел."
     else:
-        markup = await _private_keyboard(user_id, db, settings)
-        menu_text = WELCOME_TEXT
+        menu_text, markup = await private_menu_content(db, settings, user_id)
     with standalone_rich_message():
         await safe_send(bot, user_id, f"{result}.{reason_text}{invite}", parse_mode="HTML")
     with fresh_private_panel(user_id):
-        await safe_send(bot, user_id, menu_text, reply_markup=markup)
+        await safe_send(bot, user_id, menu_text, parse_mode="HTML", reply_markup=markup)
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
     for reviewer_id in settings.reviewers - {moderator_id, user_id}:
         await safe_send(bot, reviewer_id, report, parse_mode="HTML")

@@ -61,16 +61,21 @@ async def protection(request, handler):
                     {'error': 'Откройте приложение из меню Норы в Telegram'},
                     status=401, headers={'Cache-Control': 'no-store'},
                 )
-            from community_bot.access import miniapp_allowed
+            from community_bot.access import private_allowed
 
             db, settings, uid = request.app['db'], request.app['settings'], request['actor']['id']
-            if not await miniapp_allowed(db, settings, uid):
-                return web.json_response({'error': 'Миниапка доступна участникам Норы'},
-                                         status=403, headers={'Cache-Control': 'no-store'})
             path = request.path
-            onboarding = path in {'/api/me', '/api/profile', '/api/profile/avatar', '/api/profile/privacy',
-                                  '/api/notices', '/api/admin'} or path.startswith(('/api/notices/', '/api/admin/'))
-            if not onboarding:
+            ban = await db.ban_reset_state(uid)
+            if not await private_allowed(db, settings, uid, ban=ban):
+                if path not in {'/api/me', '/api/application'}:
+                    return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
+                                             status=403, headers={'Cache-Control': 'no-store'})
+                request['application_ban'] = ban
+            profile_optional = path in {
+                '/api/me', '/api/application', '/api/profile', '/api/profile/avatar',
+                '/api/profile/privacy', '/api/notices', '/api/admin',
+            } or path.startswith(('/api/notices/', '/api/admin/'))
+            if not profile_optional:
                 from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
 
@@ -128,11 +133,78 @@ async def actor(request):
     return await request.app['db'].ensure_user(u['id'], u.get('username'), u.get('first_name', 'Участник'))
 
 
+async def application_status(db, uid, ban):
+    if db.ban_is_active(ban):
+        return 'blocked'
+    return 'pending' if await db.has_pending_application(uid) else 'form'
+
+
+async def submit_application(request):
+    from community_bot.profile_fields import validate_birth_date
+    from community_bot.routers.private import notify_application_reviewers
+
+    if 'application_ban' not in request:
+        return web.json_response({'status': 'admitted'})
+    db, settings = request.app['db'], request.app['settings']
+    uid = request['actor']['id']
+    ban = request['application_ban']
+    status = await application_status(db, uid, ban)
+    if status != 'form':
+        return web.json_response({'status': status})
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError('Проверь ответы в анкете.')
+        if body.get('ban_version') != ban.get('version'):
+            return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
+        answers = {}
+        for field, label, limit in (
+            ('name', 'имя', 50),
+            ('referral', 'откуда ты о нас узнал', 100),
+            ('expectations', 'ожидания от сообщества', 1000),
+            ('bio', 'рассказ о себе', 1000),
+        ):
+            value = body.get(field)
+            if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
+                raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
+            answers[field] = value.strip()
+        answers['birth_date'] = validate_birth_date(body.get('birth_date'))
+        if body.get('interview') != 'yes':
+            raise ValueError('Для вступления нужно согласие на онлайн-интервью.')
+    except (ValueError, TypeError) as error:
+        message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'
+        return web.json_response({'error': message}, status=400)
+
+    await actor(request)
+    application_id = await db.create_application(uid, answers, ban_version=ban.get('version'))
+    if not application_id:
+        # Another tab may already have submitted or a moderator may have changed access.
+        status = await application_status(db, uid, await db.ban_reset_state(uid))
+        if status != 'form':
+            return web.json_response({'status': status})
+        return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
+    await notify_application_reviewers(
+        request.app['bot'], settings, application_id, uid, request['actor'].get('username'), answers,
+    )
+    return web.json_response({'status': 'pending'})
+
+
 async def overview(request):
+    db, settings = request.app['db'], request.app['settings']
+    if 'application_ban' in request:
+        from community_bot.texts import APPLICATION_QUESTIONS
+
+        uid, ban = request['actor']['id'], request['application_ban']
+        onboarding = {'status': await application_status(db, uid, ban)}
+        if onboarding['status'] == 'form':
+            user = await db.get_user(uid) or {}
+            onboarding.update(ban_version=ban.get('version'), questions=APPLICATION_QUESTIONS,
+                              name=user.get('profile_name') or '', birth_date=user.get('birth_date') or '')
+        return web.json_response({'onboarding': onboarding})
     from community_bot.cabinet_api import pet_data, wallet_data
     from community_bot.shop_api import shop_data
 
-    db, settings = request.app['db'], request.app['settings']
     user = await actor(request)
     pet = await pet_data(db, user, development=True)
     user = await db.get_user(user['user_id'])
@@ -375,6 +447,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/admin/upload', admin_web.upload)
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
+    app.router.add_post('/api/application', submit_application)
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/privacy', profile_privacy)
     app.router.add_post('/api/profile/avatar', upload_avatar)

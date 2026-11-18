@@ -38,6 +38,7 @@ from aiogram.utils.text_decorations import html_decoration
 
 from community_bot.commands_guide import CLOSE_COMMANDS_CARD
 from community_bot.inline_style import button_style
+from community_bot.keyboards import start_apply_keyboard
 from community_bot.nora_links import nora_link_block, profile_reply
 
 logger = logging.getLogger(__name__)
@@ -288,24 +289,29 @@ async def navigation(bot, uid, body, current, previous_back=None):
         if row:
             rows.append(row)
         return [InputRichBlockButtons(buttons=row).model_dump(exclude_none=True) for row in rows]
-    if await private_allowed(db, settings, uid):
+    ban = await db.ban_reset_state(uid)
+    if db.ban_is_active(ban):
+        return []
+    if await private_allowed(db, settings, uid, ban=ban):
         if home:
             return []
         back = next((b for b in backs if b.get("callback_data") != "menu:home"), None)
         back = back or (backs[0] if backs else {"callback_data": previous_back or "menu:home"})
-        rows.append([RichMessageButton(text="← Назад", callback_data=back["callback_data"], style="link")])
-        choices = []
-    else:
-        choices = [[("🎫 Помощь", "menu:question")]]
-        if not await db.has_pending_application(uid) and not current:
-            choices.insert(0, [("📝 Заполнить анкету", "start:apply")])
-    for row in choices:
-        buttons = [RichMessageButton(text=text, callback_data=action,
-                                     style="success" if action == "start:apply" else "link")
-                   for text, action in row if action not in actions]
-        if buttons:
-            rows.append(buttons)
-    return [InputRichBlockButtons(buttons=row).model_dump(exclude_none=True) for row in rows]
+        return [InputRichBlockButtons(buttons=[
+            RichMessageButton(text="← Назад", callback_data=back["callback_data"], style="link"),
+        ]).model_dump(exclude_none=True)]
+    footer = []
+    has_application_button = "start:apply" in actions or any(
+        button.get("web_app") for block in body if block.get("type") == "buttons" for button in block["buttons"]
+    )
+    if not has_application_button:
+        pending = await db.has_pending_application(uid)
+        footer.extend(button_rows(start_apply_keyboard(pending=pending)))
+    if "menu:question" not in actions:
+        footer.append(InputRichBlockButtons(buttons=[
+            RichMessageButton(text="🎫 Помощь", callback_data="menu:question", style="link"),
+        ]).model_dump(exclude_none=True))
+    return footer
 
 
 def _mode(method, bot):
@@ -530,7 +536,11 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
             blocks = page.get("body", []) + blocks
         body = blocks + buttons
         footer = await navigation(bot, uid, body, current, page.get("back") if append or not personal_turn else None)
-        if personal_turn and not current and os.getenv("MINIAPP_URL", "").startswith("https://"):
+        has_web_app = any(
+            button.get("web_app")
+            for block in body + footer if block.get("type") == "buttons" for button in block["buttons"]
+        )
+        if personal_turn and not current and not has_web_app and os.getenv("MINIAPP_URL", "").startswith("https://"):
             from community_bot.access import miniapp_allowed
             from community_bot.aliases import message_trigger
 

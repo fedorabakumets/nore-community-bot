@@ -1166,7 +1166,30 @@ nav button .nav-profile-photo img,.person-avatar img[data-mini-avatar],.avatar i
 nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 
 /* Screen shown when the account has no Mini App access. */
-.tester-access{max-width:430px;margin:0 auto;text-align:center}.tester-access img{display:block;width:100%;height:auto;border-radius:22px;border:1px solid var(--line)}#app .tester-access h1{font-size:clamp(27px,7vw,36px);margin:22px 0 12px}.tester-access p{color:var(--muted);font-size:15px;line-height:1.6;margin:0 0 22px}.tester-access .primary{min-height:50px}
+#app[data-screen="application"] { padding-bottom: calc(24px + var(--safe-bottom)); }
+.application-panel.card {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: clamp(16px, 5vw, 28px);
+  background: var(--glass-panel);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--glass-radius);
+}
+#app .application-panel h1 {
+  font-size: clamp(24px, 6.7vw, 34px);
+  margin: 0 0 12px;
+}
+.application-panel p { color: var(--glass-muted); line-height: 1.55; }
+.application-panel label { line-height: 1.4; }
+.application-panel :is(input, textarea, select) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 7px;
+}
+.application-panel .secondary { margin-top: 10px; }
+.application-panel .application-error { color: var(--glass-link); font-size: 14px; }
+.application-error:empty { margin: 0; }
 
 /* Pet development */
 .nora-pixel-button{position:relative;font-family:NoraCraft,monospace;color:#ffe9d6;cursor:pointer}

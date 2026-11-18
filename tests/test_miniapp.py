@@ -1,13 +1,17 @@
+import asyncio
 import hashlib
 import hmac
 import json
+import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
+from aiohttp import web
 
 from community_bot.database import Database
-from community_bot.miniapp import confirm, overview, prepare, validate_init_data
+from community_bot.miniapp import confirm, overview, prepare, protection, submit_application, validate_init_data
 
 
 def signed(uid=7, date=1000, token='test-only'):
@@ -82,21 +86,20 @@ async def test_overview_exposes_only_allowlisted_own_fields(db, monkeypatch):
     assert data['home']['news'][0]['details'] == ['Возможности для участников']
 
 
-async def test_miniapp_gate_accepts_registered_members_and_rejects_unknown_users(db):
-    import time
-    from unittest.mock import AsyncMock
-
-    from aiohttp import web
-
-    from community_bot.miniapp import protection
-
+async def test_miniapp_gate_accepts_staff_and_approved_members(db):
     req = Request(db)
     req.path = '/api/profile'
     req.headers = {'Authorization': 'tma '+signed(date=int(time.time()))}
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
-    for role in ('member', 'admin', 'member'):
-        await db.set_role(7, role)
-        assert (await protection(req, handler)).status == 200
+    await db.execute("UPDATE users SET profile_name='Анна', birth_date='2000-01-01', hobbies='Кино',"
+                     "profile_bio='Описание', avatar_file_id='photo' WHERE user_id=7")
+    assert (await protection(req, handler)).status == 403
+    await db.set_role(7, 'admin')
+    assert (await protection(req, handler)).status == 200
+    await db.set_role(7, 'member')
+    application_id = await db.create_application(7, {})
+    await db.decide_application(application_id, 99, 'approved', None)
+    assert (await protection(req, handler)).status == 200
     handler.reset_mock()
     req.headers = {'Authorization': 'tma '+signed(uid=23, date=int(time.time()))}
     assert (await protection(req, handler)).status == 403
@@ -107,14 +110,64 @@ async def test_miniapp_gate_accepts_registered_members_and_rejects_unknown_users
     assert (await db.get_user(7))['cookies'] == 100
 
 
+async def test_web_application_uses_signed_identity_and_existing_review_queue(db):
+    bot = SimpleNamespace(send_message=AsyncMock())
+    answers = {
+        'name': '  Ника ', 'birth_date': '2000-01-01', 'referral': 'Из чата', 'expectations': 'Друзей',
+        'bio': 'Люблю музыку <3', 'interview': 'yes', 'user_id': 8, 'ban_version': None,
+    }
+
+    async def call(path, handler, body=None, *, signed_in=True):
+        req = Request(db, uid=42, body=body)
+        req.path = path
+        req.headers = {'Authorization': 'tma ' + signed(uid=42, date=int(time.time()))} if signed_in else {}
+        req.app.update(settings=SimpleNamespace(**vars(req.app['settings']), reviewers={99}), bot=bot)
+        response = await protection(req, handler)
+        return response.status, json.loads(response.body)
+
+    assert (await call('/api/application', submit_application, answers, signed_in=False))[0] == 401
+    status, home = await call('/api/me', overview)
+    assert status == 200 and set(home) == {'onboarding'}
+    assert home['onboarding']['status'] == 'form'
+    assert await db.get_user(42) is None
+    handler = AsyncMock(return_value=web.json_response({'ok': True}))
+    for path in ('/api/profile', '/api/profile/avatar', '/api/notices', '/api/nora-game/lobby'):
+        assert (await call(path, handler))[0] == 403
+    handler.assert_not_awaited()
+
+    for invalid in ({'name': ' '}, {'birth_date': '2025-01-01'}, {'interview': 'no'}, {'bio': 'x' * 1001}):
+        assert (await call('/api/application', submit_application, answers | invalid))[0] == 400
+    assert await db.get_user(42) is None
+    submissions = await asyncio.gather(*[call('/api/application', submit_application, answers) for _ in range(2)])
+    assert submissions == [(200, {'status': 'pending'})] * 2
+    (row,) = await db.pending_applications()
+    assert row['user_id'] == 42
+    application = await db.get_application(row['id'])
+    assert application['answers']['name'] == 'Ника'
+    assert 'user_id' not in application['answers']
+    assert (await db.get_user(42))['birth_date'] == '2000-01-01'
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.call_args.args[0] == 99
+    assert '&lt;3' in bot.send_message.call_args.args[1]
+    review = bot.send_message.call_args.kwargs['reply_markup']
+    assert review.inline_keyboard[0][0].callback_data == f"application:approve:{row['id']}"
+    assert (await call('/api/me', overview))[1] == {'onboarding': {'status': 'pending'}}
+    # Approving an existing row restores the same API access as accepting a chat application.
+    assert (await call('/api/profile', handler))[0] == 403
+    await db.decide_application(row['id'], 99, 'approved', None)
+    assert (await call('/api/profile', handler))[0] == 200
+
+    await db.reset_banned_user(42, until=None)
+    assert (await call('/api/me', overview))[1] == {'onboarding': {'status': 'blocked'}}
+    assert (await call('/api/application', submit_application, answers))[1] == {'status': 'blocked'}
+    await db.release_ban_reset(42)
+    status, home = await call('/api/me', overview)
+    assert status == 200 and home['onboarding']['status'] == 'form'
+    assert home['onboarding']['ban_version']
+    assert (await call('/api/application', submit_application, answers))[0] == 409
+
+
 async def test_current_role_badges_enrich_game_views_without_changing_seasonal_catalog(db):
-    import time
-    from unittest.mock import AsyncMock
-
-    from aiohttp import web
-
-    from community_bot.miniapp import protection
-
     await db.set_role(7, 'moderator')
     await db.execute("UPDATE users SET profile_name='Имя',birth_date='2000-01-01',"
                      "hobbies='Кино',profile_bio='Петербург',avatar_file_id='photo' WHERE user_id=7")

@@ -398,7 +398,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
 async def lobby_socket(request):
     # Browser WebSockets cannot set Authorization. Authenticate the first frame;
     # initData never appears in a URL, access log or response.
-    from community_bot.access import miniapp_allowed
+    from community_bot.access import private_allowed
     from community_bot.miniapp import validate_init_data
     from community_bot.profile_fill import profile_is_complete
 
@@ -421,7 +421,7 @@ async def lobby_socket(request):
                 # Also enforce initData expiry and role revocation on open sockets.
                 validate_init_data(credentials.get('auth', ''), request.app['settings'].bot_token)
                 db = request.app['db']
-                if not await miniapp_allowed(db, request.app['settings'], user_id):
+                if not await private_allowed(db, request.app['settings'], user_id):
                     raise ValueError('Доступ к миниапке закрыт')
                 if not profile_is_complete(await db.get_user(user_id) or {}):
                     raise ValueError('Заполни профиль на 100%')

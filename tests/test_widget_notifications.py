@@ -183,6 +183,8 @@ async def test_send_failure_does_not_duplicate_or_spam(runtime, failure, status)
 
 async def test_widget_detail_requires_current_miniapp_access_and_owner(runtime):
     bot, db, _, _ = runtime
+    application_id = await db.create_application(7, {})
+    await db.decide_application(application_id, 99, 'approved', None)
     await notices.send_admin_test(bot, db, 7, "test-details")
     row = await db.fetchone("SELECT id FROM widget_notifications")
     request = Request(db)

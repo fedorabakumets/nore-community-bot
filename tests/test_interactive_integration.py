@@ -19,6 +19,8 @@ async def env(tmp_path):
     db = Database(tmp_path / 'interactive-integration.db')
     await db.initialize()
     await db.ensure_user(7, username='test_anna', telegram_name='Анна')
+    application_id = await db.create_application(7, {})
+    await db.decide_application(application_id, 99, 'approved', None)
     await db.add_cookies(7, 30, 'fixture')
     settings = SimpleNamespace(bot_token='test-only', owner_ids=frozenset(),
                                is_owner=lambda uid: False, moderator_ids=frozenset(),
