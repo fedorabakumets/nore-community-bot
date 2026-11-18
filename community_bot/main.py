@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter, TelegramServerError
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
@@ -59,6 +60,21 @@ async def configure_commands(bot: Bot) -> None:
     for scope in (BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
         for language_code in (None, "ru"):
             await bot.set_my_commands(commands, scope=scope, language_code=language_code)
+
+
+async def retry_transient_telegram_setup(label: str, operation) -> object:
+    """A temporary Bot API failure must never terminate the entire NORA process."""
+    delay = 3
+    while True:
+        try:
+            return await operation()
+        except (TelegramNetworkError, TelegramServerError, TelegramRetryAfter) as error:
+            logger.warning(
+                "Telegram %s temporarily unavailable (%s); retrying in %s seconds",
+                label, type(error).__name__, delay,
+            )
+            await asyncio.sleep(delay)
+            delay = min(60, delay * 2)
 
 
 def _same_release(last: str | None, number: int) -> bool:
@@ -527,7 +543,10 @@ async def main() -> None:
     from community_bot.command_registry import load_registry
 
     await load_registry(db)
-    await configure_commands(bot)
+    command_setup_task = asyncio.create_task(
+        retry_transient_telegram_setup("command registration", lambda: configure_commands(bot)),
+        name="nora-telegram-command-registration",
+    )
     await log_community_permissions(bot, settings)
     await send_memory_notice_once(bot, db, settings)
     from community_bot.stickers import sticker_delivery_job, verify_sticker_pack
@@ -540,7 +559,6 @@ async def main() -> None:
             await safe_staff_event_notice(bot, staff_id)
         await db.set_bot_state("event_shop_fix_staff_notice_v1", "1")
     await publish_staff_guide(db)
-    await bot.delete_webhook(drop_pending_updates=False)
     emergency_stop = asyncio.Event()
     restart_stop = asyncio.Event()
     web_runner = None
@@ -551,6 +569,11 @@ async def main() -> None:
         dispatcher["nora_game_chat"] = web_runner.app["nora_game_chat"]
         dispatcher["nora_cinema"] = web_runner.app["nora_cinema"]
         logger.info("Nora Mini App HTTP server started")
+    # Serve Mini App even while the Telegram API is returning 502 during startup.
+    # Removing an old webhook is required before long polling, so retry that call.
+    await retry_transient_telegram_setup(
+        "webhook removal", lambda: bot.delete_webhook(drop_pending_updates=False),
+    )
     profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
     from community_bot.menu_recovery import recover_private_menus
 
@@ -589,6 +612,7 @@ async def main() -> None:
     finally:
         await pet_video_queue.close()
         for task in (
+            command_setup_task,
             profile_access_task,
             menu_recovery_task,
             reputation_task,
@@ -610,6 +634,7 @@ async def main() -> None:
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(
+                command_setup_task,
                 profile_access_task,
                 menu_recovery_task,
                 reputation_task,
