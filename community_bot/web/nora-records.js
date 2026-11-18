@@ -28,17 +28,15 @@ window.NoraRecords = (() => {
     return `<div class="nora-vinyl-art ${id==='standard'?'nora-vinyl-standard':''}" aria-hidden="true"><div class="nora-vinyl-sleeve">${id==='dedzytwo'?`<img data-record-cover src="${coverUrl}" alt="">`:'<span>STANDARD<br>MUSIC</span>'}</div><div class="nora-vinyl-disc"><i></i></div></div>`;
   }
   function mount(root, scenery, sounds, reset) {
-    let state=null, busy=false, disposed=false, nearShelf=false, nearPlayer=false, inLobby=false;
+    let state=null, busy=false, loading=false, disposed=false, nearShelf=false, nearPlayer=false, inLobby=false;
     let deck=null, nextSync=0, syncing=false, activeTrack, activeLobby;
     const controls=new AbortController();
-    const actions=document.createElement('div');actions.className='nora-record-actions';actions.hidden=true;
     const inventory=document.createElement('button');
     inventory.type='button';inventory.className='nora-world-outfit nora-world-inventory';
     inventory.textContent='Инвентарь';inventory.dataset.recordInventory='';
     root.querySelector('.nora-world-bar').append(inventory);
-    const held=document.createElement('p');held.className='nora-record-held';held.hidden=true;
     const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Пластинки и инвентарь');
-    (root.querySelector('.nora-world-context')||root).append(actions,held);root.append(panel);
+    root.append(panel);
     function track(){
       const id=inLobby?deck?.record:state?.player;
       if(id===activeTrack&&inLobby===activeLobby)return;
@@ -47,7 +45,7 @@ window.NoraRecords = (() => {
     function applyDeck(next){
       if(deck&&deck.revision>=next.revision)return;
       const returned=deck?.mine&&deck.record&&!next.record;
-      deck=next;scenery.setLobbyRecord(next.record);track();renderActions();
+      deck=next;scenery.setLobbyRecord(next.record);track();
       if(returned)load();
     }
     async function syncDeck(){
@@ -62,10 +60,10 @@ window.NoraRecords = (() => {
       state=next;scenery.setRecords?.(state);
       if(next.lobby_deck)applyDeck(next.lobby_deck);
       track();
-      held.textContent=state.hand?'В руках: '+catalog[state.hand].name:'';held.hidden=!state.hand;
-      renderActions();
     }
     async function load() {
+      if(loading||disposed)return;
+      loading=true;syncInventory();
       try {
         const next=await api('nora-game/records');if(disposed)return;apply(next);
         if(root.dataset.recordGift==='1'){
@@ -73,11 +71,12 @@ window.NoraRecords = (() => {
           if(!state.claimed)await change('claim');
           if(!disposed)showGift();
         }
-      }catch(error){if(!disposed){held.hidden=false;held.textContent=error.message;actions.hidden=false;actions.innerHTML='<button data-record-reload>Загрузить пластинки</button>';}}
+      }catch(error){if(!disposed)toast(error.message);}
+      finally{loading=false;if(!disposed)syncInventory();}
     }
     async function change(action,record,slot) {
       if(busy||!state)return false;
-      busy=true;panel.querySelectorAll('button').forEach(b=>b.disabled=true);renderActions();
+      busy=true;panel.querySelectorAll('button').forEach(b=>b.disabled=true);syncInventory();
       try {
         const next=await api('nora-game/records',{action,record,slot,revision:state.revision,deck_revision:deck?.revision});
         if(disposed)return false;apply(next);return true;
@@ -88,15 +87,15 @@ window.NoraRecords = (() => {
           if(panel.open&&panel.dataset.view==='inventory')showInventory();
           else if(panel.open&&action!=='claim')showShelf();
           const message=panel.open?panel.querySelector('[role="status"]'):null;
-          if(message)message.textContent=error.message;else {held.hidden=false;held.textContent=error.message;}
+          if(message)message.textContent=error.message;else toast(error.message);
         }
         return false;
       }finally{busy=false;if(!disposed){panel.querySelectorAll('button').forEach(b=>{
         if(b.hasAttribute('data-record-slot'))b.disabled=Boolean(state.inventory[Number(b.dataset.recordSlot)])===Boolean(state.hand);
         else b.disabled=b.hasAttribute('data-record-take')&&!!state?.hand;
-      });renderActions();}}
+      });syncInventory();}}
     }
-    function openPanel(html) {reset();panel.innerHTML=html;if(!panel.open)panel.showModal();renderActions();panel.querySelector('button')?.focus();}
+    function openPanel(html) {reset();panel.innerHTML=html;if(!panel.open)panel.showModal();panel.querySelector('button')?.focus();}
     function showGift() {
       panel.dataset.view='gift';
       const claimed=state?.claimed;
@@ -118,40 +117,41 @@ window.NoraRecords = (() => {
         <h2>Инвентарь</h2><p>${hint}</p><div class="nora-inventory-grid">${slots}</div>
         <p role="status"></p><button data-record-close>Закрыть</button>`);
     }
-    function renderActions() {
-      inventory.disabled=!state||busy;
-      actions.hidden=!state||panel.open||(!nearShelf&&!nearPlayer);
-      if(!state)return;
+    function syncInventory(){inventory.disabled=loading||busy;}
+    const shelfAction={id:'shelf',text:'Пластинки',run:showShelf};
+    function playerAction() {
+      if(!state||busy||panel.open||!nearPlayer)return null;
       const id=inLobby?deck?.record:state.player;
       const canInsert=state.hand&&(!inLobby||(deck&&!id));
       const canEject=id&&(inLobby?deck.mine&&(!state.hand||state.inventory.includes(null)):!state.hand);
-      actions.innerHTML=`${nearPlayer&&(id||inLobby)?`<small class="nora-record-now">${id?catalog[id].name:deck?'Проигрыватель свободен':'Загружаем проигрыватель…'}</small>`:''}${nearShelf?'<button data-record-shelf>Стеллаж · пластинки</button>':''}${nearPlayer&&canInsert?'<button data-record-insert>Вставить пластинку</button>':''}${nearPlayer&&canEject?'<button data-record-eject>Достать пластинку</button>':''}`;
-      actions.querySelectorAll('button').forEach(b=>b.disabled=busy);
+      if(canInsert)return {id:'insert',text:'Вставить пластинку',run:()=>change(inLobby?'lobby_insert':'insert')};
+      if(canEject)return {id:'eject',text:'Достать пластинку',run:()=>change(inLobby?'lobby_eject':'eject')};
+      return null;
     }
     async function click(e) {
       const button=e.target.closest('button');if(!button||busy)return;
-      if(button.hasAttribute('data-record-inventory')&&state){showInventory();return;}
+      if(button.hasAttribute('data-record-inventory')){
+        if(!state)await load();
+        if(!disposed&&state&&!panel.open)showInventory();
+        return;
+      }
       if(button.hasAttribute('data-record-slot')&&panel.open){
         const slot=Number(button.dataset.recordSlot);
         if(await change(state.hand?'pack':'unpack',undefined,slot)&&panel.open)showInventory();
         return;
       }
-      if(button.hasAttribute('data-record-close')){panel.close();reset();renderActions();return;}
-      if(button.hasAttribute('data-record-reload')){load();return;}
-      if(button.hasAttribute('data-record-shelf')&&nearShelf){showShelf();return;}
+      if(button.hasAttribute('data-record-close')){panel.close();reset();return;}
       let action=null,record;
       if(button.hasAttribute('data-record-claim'))action='claim';
       if(button.hasAttribute('data-record-take')&&nearShelf){action='take';record=button.dataset.recordTake;}
       if(button.hasAttribute('data-record-store')&&nearShelf)action='store';
-      if(button.hasAttribute('data-record-insert')&&nearPlayer)action=inLobby?'lobby_insert':'insert';
-      if(button.hasAttribute('data-record-eject')&&nearPlayer)action=inLobby?'lobby_eject':'eject';
       if(action&&await change(action,record)){
         if(action==='take'||action==='store'){panel.close();reset();}
         if(action==='claim')showGift();
       }
     }
     root.addEventListener('click',click,{signal:controls.signal});
-    panel.addEventListener('close',()=>{reset();renderActions();},{signal:controls.signal});
+    panel.addEventListener('close',reset,{signal:controls.signal});
     load();
     return {
       refresh:load,
@@ -160,17 +160,20 @@ window.NoraRecords = (() => {
       lobbyPlaying:()=>!!deck?.playing,
       canToggleLobby:()=>!!deck?.mine,
       toggleLobby:()=>change('lobby_toggle'),
+      shelfAction:()=>state&&!busy&&!panel.open&&nearShelf?shelfAction:null,
+      playerAction,
+      isBusy:()=>busy,
       update(inside,x,z,grounded,blocked,lobby,nearLobbyDeck) {
         if(inLobby!==lobby){
-          inLobby=lobby;nextSync=0;track();renderActions();
+          inLobby=lobby;nextSync=0;track();
         }
         if(inLobby&&Date.now()>=nextSync)syncDeck();
         const available=inside&&grounded&&!blocked;
         const shelf=available&&Math.hypot(x-.1,z+4.4)<1.9;
         const player=(available&&Math.hypot(x,z)<1.8)||(inLobby&&nearLobbyDeck&&!blocked);
-        if(shelf!==nearShelf||player!==nearPlayer){nearShelf=shelf;nearPlayer=player;renderActions();}
+        nearShelf=shelf;nearPlayer=player;
       },
-      dispose(){disposed=true;controls.abort();panel.remove();actions.remove();held.remove();inventory.remove();},
+      dispose(){disposed=true;controls.abort();panel.remove();inventory.remove();},
     };
   }
   return {mount,art,drawCover,giftIcon,catalog};

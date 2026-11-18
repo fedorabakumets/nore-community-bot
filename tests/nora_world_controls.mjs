@@ -16,7 +16,9 @@ try {
   const module = (await readFile(new URL('vendor/three.module.js', web), 'utf8')).replaceAll('./three.core.js', './three.core.mjs');
   await writeFile(join(temp, 'three.module.mjs'), module);
   const Three = await import(pathToFileURL(join(temp, 'three.module.mjs')).href);
-  const world = (await readFile(new URL('nora-world.js', web), 'utf8')).replace("await import('/vendor/three.module.js')", 'THREE');
+  const world = (await readFile(new URL('nora-world.js', web), 'utf8'))
+    .replace("await import('/vendor/three.module.js')", 'THREE')
+    .replace(/    return stop;\r?\n  }/, '    window.worldActions={nearbyAction,performAction,recordOptions,companion};\n    return stop;\n  }');
   const wings = await readFile(new URL('nora-wings.js', web), 'utf8');
   const voxel = await readFile(new URL('nora-voxel.js', web), 'utf8');
   const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
@@ -35,7 +37,8 @@ try {
       if(!this.children.has(selector))this.children.set(selector,new Element());
       return this.children.get(selector);
     }
-    setAttribute() {} setPointerCapture() {} blur() {} click(){this.emit('click');}
+    querySelectorAll(selector){return selector==='button'?[this.querySelector('button:first-child'),this.querySelector('button:last-child')]:[];}
+    setAttribute() {} setPointerCapture() {} focus() {} blur() {} click(){this.emit('click');}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
@@ -107,6 +110,7 @@ try {
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,warmup=30}={}) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
+    root.querySelector('.nora-aim-choices').hidden=true;
     document.createElement = () => new Element();
     window.matchMedia=query=>({matches:query==='(pointer:coarse)'&&mobile});window.devicePixelRatio=3;
     let resizeCallback;
@@ -145,11 +149,18 @@ try {
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
     return {window,document,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
+  function useNearby(world, label) {
+    const {nearbyAction,performAction}=world.window.worldActions;
+    const action=nearbyAction(()=>true);
+    assert.ok(action,'expected an interaction within reach');
+    if(label)assert.equal(action.text,label);
+    performAction(action);
+  }
   function goToIsland(world){
     const {x,z}=world.window.NoraScenery.tavernPortal;
     world.player.position.set(x,.017,z+1.15);
-    world.root.querySelector('.nora-world-action').emit('click');
-    world.root.querySelector('.nora-world-action').emit('click');
+    useNearby(world,'НОРА');
+    useNearby(world,'Выйти из таверны');
     world.frames(1);
   }
   const povWorld=await setup();
@@ -186,7 +197,7 @@ try {
   assert.equal(prompt.hidden,true,'a distant portal offers no interaction');
   desktopAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
   desktopAim.frames(1);
-  assert.equal(prompt.querySelector('span').textContent,'НОРА','the centered portal is actionable');
+  assert.equal(prompt.querySelector('.nora-aim-label').textContent,'НОРА','the centered portal is actionable');
   const aimPointer=x=>desktopAim.canvas.emit('pointermove',{pointerType:'mouse',pointerId:1,clientX:x,clientY:20});
   aimPointer(20);aimPointer(260);desktopAim.frames(50);
   assert.equal(prompt.hidden,true,'turning away hides the interaction within reach');
@@ -212,10 +223,36 @@ try {
   touchAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
   touchAim.frames(1);
   const touchPrompt=touchAim.root.querySelector('.nora-aim-action');
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,true,'third-person view hides the reticle on touch');
   assert.equal(touchPrompt.hidden,false,'aiming in third person works on touch');
   touchPrompt.click();touchAim.frames(12);
-  assert.equal(touchAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','tapping E performs the same interaction');
+  assert.equal(touchAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','tapping the prompt performs the same interaction');
+  touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,false,'first person has a reticle');
+  touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,true,'selfie view hides the reticle');
   touchAim.stop();
+  const petAim=await setup(0,60,async()=>({pet:{name:'Лис',species:'fox'}}));
+  const aimedPet=petAim.scene().getObjectByName('nora-companion');
+  aimedPet.position.set(petAim.player.position.x,.017,petAim.player.position.z-1.2);
+  petAim.frames(2);
+  const petPrompt=petAim.root.querySelector('.nora-aim-action');
+  assert.equal(petAim.root.querySelector('.nora-reticle').hidden,true,'desktop third person hides the reticle');
+  assert.equal(petPrompt.querySelector('.nora-aim-label').textContent,'Питомец');
+  petAim.key('KeyE');petAim.frames(12);
+  const choices=petAim.root.querySelector('.nora-aim-choices');
+  const [stroke,details]=choices.querySelectorAll('button');
+  assert.equal(petPrompt.hidden,true,'the prompt is replaced by choices');
+  assert.equal(choices.hidden,false);
+  assert.deepEqual([stroke.textContent,details.textContent],['Погладить','Открыть питомца']);
+  assert.equal(petAim.window.emit('keydown',{key:'Escape'}),false,'Escape closes the choices first');
+  petAim.frames(1);
+  assert.equal(choices.hidden,true);
+  petPrompt.click();petAim.frames(12);
+  details.click();await flush();
+  assert.equal(choices.hidden,true);
+  assert.equal(petAim.root.querySelector('.nora-pet-panel').open,true,'a specific choice opens the pet panel');
+  petAim.stop();
   console.log('NORA mobile rendering: Retina budget, resize deduplication, low-FPS adaptation, recovery and rotation passed.');
   for(const fps of [30,60,120]){
     const c=await setup(0,fps),meshes=[];c.player.traverse(m=>{if(m.isInstancedMesh)meshes.push(m);});
@@ -244,25 +281,23 @@ try {
   audioWorld.key('Space'); audioWorld.frames(60);
   assert.ok(soundEvents.some(e=>e[0]==='jump'&&!e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='land'&&!e[1]));
-  audioWorld.player.position.set(0,.017,3.6);audioWorld.root.querySelector('.nora-world-action').emit('click');
+  audioWorld.player.position.set(0,.017,3.6);useNearby(audioWorld);
   audioWorld.frames(2);audioWorld.key('Space');audioWorld.frames(60);
   assert.ok(soundEvents.some(e=>e[0]==='door'&&e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='update'&&e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='jump'&&e[1]));
   assert.ok(soundEvents.some(e=>e[0]==='land'&&e[1]));
-  const recordButton=audioWorld.root.querySelector('.nora-record-toggle');
-  assert.equal(recordButton.hidden,true,'record control hidden far away');
+  const recordOptions=audioWorld.window.worldActions.recordOptions;
+  assert.equal(recordOptions().length,0,'console is out of reach');
   audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
-  assert.equal(recordButton.hidden,false,'record control shown beside console');
-  recordButton.emit('click');assert.equal(recordButton.textContent,'Включить проигрыватель');
+  assert.equal(recordOptions()[0].text,'Выключить');
+  recordOptions()[0].run();
   assert.ok(soundEvents.some(e=>e[0]==='playing'&&e[1]===false));
-  audioWorld.player.position.set(0,.017,3.7);audioWorld.root.querySelector('.nora-world-action').emit('click');audioWorld.frames(2);
-  assert.equal(recordButton.hidden,true,'record control hidden outside');
-  const countPlaying=soundEvents.filter(e=>e[0]==='playing').length;
-  recordButton.emit('click');assert.equal(soundEvents.filter(e=>e[0]==='playing').length,countPlaying,'cannot toggle from outside');
-  audioWorld.root.querySelector('.nora-world-action').emit('click');audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
-  assert.equal(recordButton.textContent,'Включить проигрыватель','door transition preserves off state');
-  recordButton.emit('click');assert.equal(recordButton.textContent,'Выключить проигрыватель');
+  audioWorld.player.position.set(0,.017,3.7);useNearby(audioWorld);audioWorld.frames(2);
+  assert.equal(recordOptions().length,0,'console is unavailable outside');
+  useNearby(audioWorld);audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
+  assert.equal(recordOptions()[0].text,'Включить','door transition preserves off state');
+  recordOptions()[0].run();assert.equal(recordOptions()[0].text,'Выключить');
   audioWorld.stop();assert.equal(soundEvents.at(-1)[0],'stop');
   function screenDelta(h, delta) {
     const forward = h.camera().getWorldDirection(new Three.Vector3()); forward.y=0; forward.normalize();
@@ -470,7 +505,7 @@ try {
   const ceiling=await setup(0,60,undefined,undefined,false,true,'flame');
   goToIsland(ceiling);
   ceiling.player.position.set(0,.017,3.6+ceiling.window.NoraScenery.tavernOffset);
-  ceiling.root.querySelector('.nora-world-action').emit('click');
+  useNearby(ceiling);
   ceiling.key('Space');ceiling.frames(15);ceiling.key('Space');
   let indoorPeak=0;
   for(let i=0;i<120;i++){
@@ -507,7 +542,7 @@ try {
   env.setNow(Date.UTC(2026,10,2,9));env.frames(1);
   assert.equal(stars.visible,false,'no daytime stars');
   assert.ok(scene.children.find(o=>o.isHemisphereLight).intensity>nightLight,'day brighter, night remains playable');
-  env.player.position.set(0,.017,3.6);env.root.querySelector('.nora-world-action').emit('click');env.frames(1);
+  env.player.position.set(0,.017,3.6);useNearby(env);env.frames(1);
   assert.equal(leaves.visible,false,'no outdoor leaves in tavern');assert.equal(stars.visible,false);
   let disposed=0;
   stars.material.addEventListener('dispose',()=>disposed++);leaves.material.addEventListener('dispose',()=>disposed++);
@@ -567,8 +602,9 @@ try {
     const h=await setup(0,60,petApi);await flush();h.frames(1);
     const pet=h.scene().getObjectByName('nora-companion');assert.ok(pet,'existing '+species+' appears');
     assert.ok(pet.children[0].count<1500,'bounded voxel model');
-    const actions=h.root.querySelector('.nora-pet-actions');assert.equal(actions.hidden,false,'nearby actions');
-    h.root.querySelector('.nora-pet-stroke').emit('click');h.frames(1);
+    const buddy=h.window.worldActions.companion;
+    assert.ok(buddy.aimPosition(),'nearby pet is available for aiming');
+    buddy.actions[0].run();h.frames(1);
     await flush();assert.equal(calls.filter(([path])=>path==='nora-game/pet/stroke').length,1,'stroke reaches server');
     const hearts=h.scene().getObjectByName('nora-pet-hearts');assert.equal(hearts.visible,true,'petting hearts');
     const alpha=hearts.material.opacity;h.frames(40);assert.ok(hearts.material.opacity<alpha,'hearts fade');
@@ -581,7 +617,7 @@ try {
     }
     h.frames(300);assert.ok(pet.position.distanceTo(h.player.position)<3.5,`follows around corners: ${pet.position.toArray()} / ${h.player.position.toArray()}`);
     h.player.position.copy(pet.position);h.player.position.x-=.5;h.frames(1);
-    h.root.querySelector('.nora-pet-open').emit('click');await flush();
+    buddy.actions[1].run();await flush();
     const panel=h.root.querySelector('.nora-pet-panel'),body=panel.querySelector('.nora-pet-content');
     assert.ok(panel.open);assert.ok(body.innerHTML.includes('72 / 100'));assert.ok(body.innerHTML.includes('&lt;Друг>'),'name escaped');
     h.key('KeyW');assert.ok(h.delta(40).length()<.001,'panel blocks movement');
@@ -589,8 +625,9 @@ try {
     assert.equal(calls.filter(([path])=>path==='pet/action').length,1,'one expedition request');
     assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'away pet disappears');
     panel.close();h.frames(1);
-    assert.equal(actions.hidden,false,'pet panel remains accessible during expedition');
-    h.root.querySelector('.nora-pet-open').emit('click');await flush();
+    const away=h.root.querySelector('.nora-pet-away');
+    assert.equal(away.hidden,false,'pet panel remains accessible during expedition');
+    away.click();await flush();
     assert.ok(body.innerHTML.includes('Вернуть из похода'),'return available in panel');
     body.emit('click');await flush();
     assert.equal(petAction.action,'return');
@@ -598,7 +635,7 @@ try {
     panel.close();h.frames(1);
     assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns from expedition');
     h.player.position.x=0;goToIsland(h);
-    h.player.position.set(0,.017,3.6);h.root.querySelector('.nora-world-action').emit('click');h.frames(1);
+    h.player.position.set(0,.017,3.6);useNearby(h);h.frames(1);
     assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');
     h.stop();assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'pet disposed');
   }
@@ -630,8 +667,7 @@ try {
       x:2+remoteTime*.003+remoteOffset,y:.017+height,z:4,heading:remoteTime<750?3.13:-3.13,grounded:height===0,time:remoteTime,
     }]};
   },undefined,false,true,null,{warmup:0});
-  const lobbyAction=lobbyWorld.root.querySelector('.nora-world-action');
-  assert.equal(lobbyAction.hidden,true,'portal button only appears nearby');
+  assert.equal(lobbyWorld.root.querySelector('.nora-aim-action').hidden,true,'portal hint only appears nearby');
   assert.equal(lobbyWorld.scene().background.getHexString(),'171725','first frame has lobby lighting');
   assert.equal(lobbyWorld.root.querySelector('.nora-world-bar small').textContent,'ЛОББИ');
   const [firstPose]=exchanges;
@@ -678,16 +714,13 @@ try {
   assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
   const {x:noraX,z:noraZ}=lobbyWorld.window.NoraScenery.tavernPortal;
   lobbyWorld.player.position.set(noraX,.017,noraZ+1.15);lobbyWorld.frames(1);
-  assert.equal(lobbyAction.textContent,'НОРА');
-  lobbyAction.emit('click');await flush();
+  useNearby(lobbyWorld,'НОРА');await flush();
   assert.ok(exchanges.at(-1).leave,'entering the tavern leaves the shared lobby');
   lobbyWorld.frames(1);
-  assert.equal(lobbyAction.textContent,'Выйти из таверны');
-  lobbyAction.emit('click');
+  useNearby(lobbyWorld,'Выйти из таверны');
   assert.ok(!hasPeer(),'remote avatars are removed from the island');
   lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
-  assert.equal(lobbyAction.textContent,'ЛОББИ');assert.equal(lobbyAction.hidden,false);
-  lobbyAction.emit('click');lobbyWorld.frames(1);
+  useNearby(lobbyWorld,'ЛОББИ');lobbyWorld.frames(1);
   assert.equal(lobbyWorld.player.position.z,firstPose.z,'returning through the portal shares the initial spawn');
   lobbyWorld.stop();
   console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
@@ -745,7 +778,6 @@ try {
   const course=await setup(0,60,undefined,memorySounds,true,true,'raven',{observatory:memory});
   const {portal,safe,relics}=memory.layout;
   const courseHud=course.root.querySelector('.nora-observatory-hud');
-  const courseAction=course.root.querySelector('.nora-world-action');
   const veil=course.root.querySelector('.nora-memory-veil');
   const result=course.root.querySelector('.nora-memory-result');
   const level=course.scene().getObjectByName('nora-observatory');
@@ -777,8 +809,7 @@ try {
     }
   };
   course.player.position.set(portal.x,.017,portal.z+1.25);
-  course.frames(1);assert.equal(courseAction.textContent,'Воспоминание');
-  courseAction.emit('click');assert.equal(veil.dataset.phase,'enter');
+  course.frames(1);useNearby(course,'Воспоминание');assert.equal(veil.dataset.phase,'enter');
   course.frames(80);
   assert.equal(level.visible,true);assert.equal(courseHud.hidden,false);
   assert.deepEqual(course.player.position.toArray(),[safe[0][0],.017,safe[0][1]]);
@@ -788,8 +819,7 @@ try {
   assert.ok(level.getObjectByName('memory-gate-1').visible);
 
   course.player.position.set(relics.seal[0],.017,relics.seal[1]);
-  course.frames(4);assert.equal(courseAction.textContent,'Поднять печать');
-  courseAction.emit('click');course.frames(8);
+  course.frames(4);useNearby(course,'Поднять печать');course.frames(8);
   assert.deepEqual(used,['seal']);
   assert.equal(level.getObjectByName('memory-gate-1').visible,false,'a confirmed relic opens the first gate');
   reply={...reply,reset:true,notice:'Удар молнии'};
@@ -813,8 +843,8 @@ try {
       addEventListener(type,fn){listeners[type]=fn;},querySelectorAll(){return [];},
       querySelector(){return null;},showModal(){this.open=true;},close(){this.open=false;},remove(){}};
   }
-  const recordsRoot=widget(),recordsBar=widget(),recordsContext=widget();
-  recordsRoot.querySelector=selector=>selector==='.nora-world-bar'?recordsBar:recordsContext;
+  const recordsRoot=widget(),recordsBar=widget();
+  recordsRoot.querySelector=selector=>selector==='.nora-world-bar'?recordsBar:null;
   const collection={hand:'dedzytwo',player:'standard',shelf:[],inventory:Array(8).fill(null),revision:0};
   let shared={record:null,mine:false,playing:false,revision:0};
   const moves=[],tracks=[];
@@ -837,7 +867,7 @@ try {
   const recordsController=recordsWindow.NoraRecords.mount(recordsRoot,{setLobbyRecord(){}},
     {record:url=>tracks.push(url)},()=>{});
   await flush();
-  const inventoryPanel=recordsRoot.children[0],contextActions=recordsContext.children[0];
+  const inventoryPanel=recordsRoot.children[0];
   const recordClick=(attr,dataset={})=>recordsRoot.listeners.click({
     target:{closest:()=>({hasAttribute:key=>key===attr,dataset})},
   });
@@ -851,8 +881,8 @@ try {
   await recordClick('data-record-inventory');
   await recordClick('data-record-slot',{recordSlot:'2'});
   await recordClick('data-record-close');
-  assert.match(contextActions.innerHTML,/data-record-insert/);
-  await recordClick('data-record-insert');
+  assert.equal(recordsController.playerAction().id,'insert');
+  await recordsController.playerAction().run();
   assert.deepEqual(moves,['pack','unpack','lobby_insert']);
   assert.equal(tracks.at(-1),'/game/dedzytwo-s1.mp3');
   assert.ok(recordsController.lobbyPlaying());

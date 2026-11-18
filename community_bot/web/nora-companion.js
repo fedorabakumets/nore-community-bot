@@ -63,13 +63,13 @@ window.NoraCompanion = (() => {
 
   function mount(T,scene,geometry,root,player,move,getZone,resetInput) {
     const controls=new AbortController(),on=(el,type,fn)=>el.addEventListener(type,fn,{signal:controls.signal});
-    const actions=root.querySelector('.nora-pet-actions'),open=root.querySelector('.nora-pet-open'),stroke=root.querySelector('.nora-pet-stroke');
+    const awayButton=root.querySelector('.nora-pet-away');
     const panel=root.querySelector('.nora-pet-panel'),content=panel.querySelector('.nora-pet-content'),message=panel.querySelector('.nora-pet-message');
     let pet=null,model=null,disposed=false,pending=false,flight=null,valid=false,near=false,route=[],timer=0,following=false,wanderTarget=null,wanderWait=3,blockedFor=0,pettingHold=0;
     function reset(){if(!model)return;following=false;wanderTarget=null;wanderWait=3;blockedFor=0;pettingHold=0;model.clear();model.body.position.copy(player.position);model.body.position.y=.017;move(model.body.position,.65,0,getZone());route=[new T.Vector3(player.position.x,.017,player.position.z)];}
     function apply(value){
       const species=pet?.species;pet=value;
-      if(!pet||pet.expedition_until){model?.dispose();model=null;actions.hidden=true;near=false;return;}
+      if(!pet||pet.expedition_until){model?.dispose();model=null;near=false;return;}
       if(!model||species!==pet.species){model?.dispose();model=create(T,scene,geometry,pet.species);reset();}
     }
     function render(){
@@ -84,13 +84,23 @@ window.NoraCompanion = (() => {
         catch(error){if(!disposed){valid=false;message.textContent=error.message;}}
         finally{flight=null;if(!disposed)render();}})();return flight;
     }
-    on(open,'click',async()=>{if(disposed||(!near&&!pet?.expedition_until))return;resetInput();message.textContent='';valid=false;panel.showModal();render();await refresh();});
+    async function openPanel(){
+      if(disposed||panelOpen()||(!near&&!pet?.expedition_until))return;
+      resetInput();message.textContent='';valid=false;panel.showModal();render();await refresh();
+    }
+    on(awayButton,'click',()=>{if(pet?.expedition_until)openPanel();});
     on(panel.querySelector('.nora-pet-close'),'click',()=>panel.close());
     on(panel,'close',resetInput);
     on(panel,'cancel',e=>e.stopPropagation());
-    on(stroke,'click',async()=>{if(!near||!model||pending)return;pettingHold=1.6;wanderTarget=null;model.stroke();stroke.blur();pending=true;
+    async function stroke(){
+      if(!near||!model||pending)return;pettingHold=1.6;wanderTarget=null;model.stroke();pending=true;
       try{const result=await api('nora-game/pet/stroke',{});if(disposed)return;toast(result.message);if(result.ok)await refresh();}
-      catch(error){if(!disposed)toast(error.message);}finally{pending=false;}});
+      catch(error){if(!disposed)toast(error.message);}finally{pending=false;}
+    }
+    const actions=[
+      {id:'stroke',text:'Погладить',run:stroke},
+      {id:'pet',text:'Открыть питомца',run:openPanel},
+    ];
     on(content,'click',async event=>{
       if(!event.target.closest('.nora-pet-expedition')||pending||!valid||!pet)return;
       const until=pet.expedition_until;
@@ -130,11 +140,11 @@ window.NoraCompanion = (() => {
     if (root.dataset.playWithPet === '1') void showArrivalHint();
     else void refresh();
     function update(dt,camera,active=true){
-      if(!active){if(model)model.body.visible=false;actions.hidden=true;return;}
+      awayButton.hidden=!active||!pet?.expedition_until||panelOpen();
+      if(!active){if(model)model.body.visible=false;near=false;return;}
       if(model)model.body.visible=true;
       timer+=dt;if(timer>30){timer=0;if(!pending)refresh();}
-      stroke.hidden=!model;
-      if(!model){actions.hidden=!pet?.expedition_until||panelOpen();return;}
+      if(!model)return;
       const position=model.body.position,last=route[route.length-1];
       if(!last||Math.hypot(player.position.x-last.x,player.position.z-last.z)>.12)route.push(new T.Vector3(player.position.x,.017,player.position.z));
       if(route.length>160)route.shift();
@@ -182,11 +192,11 @@ window.NoraCompanion = (() => {
       near=Math.hypot(position.x-player.position.x,position.z-player.position.z)<1.8;
       // Do not offer interaction across walls/furniture.
       const probe=position.clone();move(probe,player.position.x-probe.x,player.position.z-probe.z,getZone());near=near&&Math.hypot(probe.x-player.position.x,probe.z-player.position.z)<.1;
-      actions.hidden=!near||panelOpen();model.animate(dt,distance,camera);
+      model.animate(dt,distance,camera);
     }
-    return {update,reset,panelOpen,
-      aimPosition:()=>!actions.hidden&&!pending?model?.body.position:null,
-      dispose(){disposed=true;controls.abort();hint?.remove();if(panel.open)panel.close();model?.dispose();actions.hidden=true;}
+    return {update,reset,panelOpen,actions,
+      aimPosition:()=>near&&!pending&&!panelOpen()?model?.body.position:null,
+      dispose(){disposed=true;controls.abort();hint?.remove();if(panel.open)panel.close();model?.dispose();awayButton.hidden=true;}
     };
   }
   return {create,mount};
