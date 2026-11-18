@@ -589,12 +589,13 @@ window.NoraWorld = (() => {
     syncLocation();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
-    const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset);
+    const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset,
+      ()=>inside?'tavern':inLobby||inChallenge?'lobby':'forest');
     const cinema=window.NoraCinema?.mount(root,reset,lobby.session,
       time=>lobby.serverSeconds(time)*1000,()=>chat?.panelOpen(),()=>{
         const {x,z}=window.NoraCinema.entrance;
         player.position.set(x,.017,z);
-      });
+      },chat?.preview);
     // Shorter renders during a film leave more GPU time for video decoding and composition.
     let nextCinemaFrame=0;
     function tick(time){

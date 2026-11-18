@@ -51,10 +51,20 @@ async def test_chat_mirrors_only_allowed_group_text_and_keeps_private_ids_off_wi
 
 
 @pytest.mark.asyncio
-async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictions(tmp_path):
+@pytest.mark.parametrize(
+    ('pose', 'username', 'identity', 'gender', 'location'),
+    [
+        ({'seat': 0}, 'pixel_tg', '@pixel_tg', 'female', 'Кинотеатр • 🎬'),
+        ({}, None, 'Имя <Норы>', 'male', 'ЛОББИ • 🌎'),
+    ],
+)
+async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictions(
+    tmp_path, pose, username, identity, gender, location,
+):
     db = Database(tmp_path / 'chat.db')
     await db.initialize()
     await db.ensure_user(42)
+    await db.update_profile(42, 'profile_name', 'Имя <Норы>')
     member = SimpleNamespace(status=ChatMemberStatus.MEMBER)
     bot = SimpleNamespace(
         get_chat_member=AsyncMock(return_value=member),
@@ -70,13 +80,15 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
         content_length = 64
         json = AsyncMock()
 
-    request = Request(actor={'id': 42})
+    request = Request(actor={'id': 42, 'username': username})
     request.json.return_value = {'nickname': 'Pixel'}
     await nora_game_api.register(request)
-    request.json.return_value = {'shirt': 'gray', 'pants': 'burgundy_wide', 'shoes': 'red_air'}
+    request.json.return_value = {
+        'shirt': 'gray', 'pants': 'burgundy_wide', 'shoes': 'red_air', 'gender': gender,
+    }
     await nora_game_api.save_outfit(request)
 
-    request.json.return_value = {'text': '<b>Привет</b>', 'author': 'быть другим', 'chat_id': 42}
+    request.json.return_value = {'text': '<b>Привет</b>', 'author': 'быть другим', 'chat_id': 42, 'location': 'cinema'}
     member.status = ChatMemberStatus.LEFT
     with pytest.raises(ValueError, match='участникам'):
         await nora_game_chat.feed(request)
@@ -91,9 +103,19 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
 
     member.status = ChatMemberStatus.ADMINISTRATOR
     await db.set_bot_state(MEMORY_NOTICE_KEY, '1')
+    request.app['nora_lobby'][42] = (time.monotonic(), 'session', {'nickname': 'Pixel', **pose})
     assert json.loads((await nora_game_chat.send(request)).text) == {'ok': True}
     bot.send_message.assert_awaited_once()
-    assert bot.send_message.call_args.args == (GROUP, '🎮 Pixel · из игры Норы\n<b>Привет</b>')
+    group_id, message = bot.send_message.call_args.args
+    heading, body = message.split('\n')
+    emoji, body = body.split(' ', 1)
+    assert group_id == GROUP
+    assert heading == f'👾NORA • {location}'
+    assert emoji in nora_game_chat.PLAYER_EMOJI[gender]
+    assert body == f'Pixel ({identity}) — <b>Привет</b>'
+    quote, = bot.send_message.call_args.kwargs['entities']
+    assert quote.type == 'blockquote' and quote.offset == 0
+    assert message.encode('utf-16-le')[:quote.length * 2].decode('utf-16-le') == heading
     assert bot.send_message.call_args.kwargs['parse_mode'] is None
     result = json.loads((await nora_game_chat.feed(request)).text)
     assert result['messages'][0]['mine']
@@ -121,10 +143,11 @@ async def test_game_chat_applies_link_filter_and_does_not_show_failed_delivery(t
     )
     chat = nora_game_chat.GameChat(bot, GROUP)
     settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow')
-    monkeypatch.setattr(nora_game_api, '_player_profile', AsyncMock(return_value={'nickname': 'Pixel', 'outfit': True}))
+    profile = {'nickname': 'Pixel', 'outfit': {'gender': 'male'}}
+    monkeypatch.setattr(nora_game_api, '_player_profile', AsyncMock(return_value=profile))
 
     class Request(dict):
-        app = {'db': db, 'settings': settings, 'nora_game_chat': chat}
+        app = {'db': db, 'settings': settings, 'nora_game_chat': chat, 'nora_lobby': {}}
         content_length = 64
         json = AsyncMock(return_value={'text': 'https://example.org'})
 

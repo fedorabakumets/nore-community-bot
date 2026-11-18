@@ -1479,3 +1479,89 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 @media (max-height: 540px) {
   .nora-cinema { width: min(100% - var(--hud-right) - var(--hud-left), 370px); }
 }
+
+/* Read-only preview beside the game HUD */
+.nora-chat-mini {
+  --chat-mini-top: calc(var(--nora-top) + 102px);
+  --chat-mini-clearance: calc(var(--control-row) + 78px);
+  position: absolute;
+  top: var(--chat-mini-top);
+  left: var(--hud-left);
+  width: min(260px, calc(100% - var(--hud-left) - var(--hud-right) - 116px));
+  max-height: max(0px, calc(100% - var(--chat-mini-top) - var(--chat-mini-clearance)));
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  border-left: 2px solid #b59a70;
+  background: #13161ccc;
+  color: #fff0da;
+  pointer-events: none;
+  font: 11px/1.45 NoraCraft, monospace;
+}
+.nora-chat-mini[hidden] { display: none; }
+.nora-chat-mini ol { flex: 1; min-width: 0; list-style: none; margin: 0; padding: 3px 6px; }
+.nora-chat-mini li {
+  margin: 0;
+  padding: 2px 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.nora-chat-mini li + li { border-top: 1px solid #af9a762b; }
+.nora-chat-mini :is(b, span) { unicode-bidi: isolate; }
+.nora-chat-mini b { margin-inline-end: 2px; }
+.nora-world:has(.nora-observatory-hud:not([hidden])) > .nora-chat-mini {
+  --chat-mini-top: calc(var(--nora-top) + 202px);
+}
+@media (orientation: portrait), (min-height: 601px) {
+  .nora-world:has(.nora-pet-actions:not([hidden])) > .nora-chat-mini {
+    --chat-mini-top: calc(var(--nora-top) + 176px);
+  }
+  .nora-world:has(.nora-world-context button:not([hidden])) > .nora-chat-mini {
+    --chat-mini-clearance: calc(var(--control-row) + 115px);
+  }
+  .nora-world:has(.nora-world-context button:not([hidden]) + button:not([hidden])) > .nora-chat-mini {
+    --chat-mini-clearance: calc(var(--control-row) + 168px);
+  }
+}
+@media (orientation: landscape) and (max-height: 460px) {
+  .nora-world > .nora-cinema-open,
+  .nora-world > .nora-chat-open,
+  .nora-world:has(.nora-observatory-hud:not([hidden])) > .nora-chat-open {
+    top: calc(var(--nora-top) + 50px);
+  }
+  .nora-world > .nora-chat-open { right: calc(var(--hud-right) + 96px); }
+  .nora-world-active .nora-game-body p.nora-world-help {
+    top: var(--nora-top);
+    bottom: auto;
+    left: max(calc(var(--hud-left) + 114px), calc(50% - 100px));
+    right: auto;
+    width: min(185px, calc(100% - var(--hud-left) - var(--hud-right) - 264px));
+    padding: 7px 35px 7px 8px;
+  }
+  .nora-world > .nora-chat-mini {
+    --chat-mini-clearance: calc(var(--hud-bottom) + 70px);
+    left: calc(var(--hud-left) + 108px);
+    width: min(260px, calc(100% - var(--hud-left) - var(--hud-right) - 224px));
+  }
+}
+.nora-cinema .nora-chat-mini {
+  position: static;
+  width: min(100%, 310px);
+  max-height: none;
+  margin-top: 9px;
+}
+.nora-settings .nora-settings-chat {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 8px 0;
+  padding: 0 10px;
+  min-height: 44px;
+  border: 2px solid #bc9b67;
+  background: #1c2d28;
+  cursor: pointer;
+}
+.nora-settings-chat input { accent-color: #e5b898; }

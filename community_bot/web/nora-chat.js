@@ -55,9 +55,10 @@ window.NoraChat = (() => {
     return sprite;
   }
 
-  function mount(root, T, player, findAvatar, reset) {
+  function mount(root, T, player, findAvatar, reset, location) {
     root.insertAdjacentHTML('beforeend', `
       <button type="button" class="nora-chat-open" aria-controls="nora-chat" aria-expanded="false">Чат<span hidden aria-hidden="true"></span></button>
+      <aside class="nora-chat-mini" aria-label="Последние сообщения" hidden><ol></ol></aside>
       <dialog class="nora-chat" id="nora-chat" aria-labelledby="nora-chat-title">
         <div class="nora-chat-panel">
           <div class="nora-chat-top">
@@ -79,6 +80,13 @@ window.NoraChat = (() => {
     const opener = root.querySelector('.nora-chat-open');
     const dot = opener.querySelector('span');
     const dialog = root.querySelector('.nora-chat');
+    const close = dialog.querySelector('.nora-chat-close');
+    const preview = root.querySelector('.nora-chat-mini');
+    const previewLog = preview.querySelector('ol');
+    const toggle = root.querySelector('#nora-chat-preview-setting');
+    let showMini = true;
+    try { showMini = localStorage.getItem('nora-chat-preview') !== 'off'; } catch (_) {}
+    if (toggle) toggle.checked = showMini;
     const feed = dialog.querySelector('.nora-chat-feed');
     const log = feed.querySelector('ol');
     const empty = feed.querySelector('.nora-chat-empty');
@@ -106,12 +114,18 @@ window.NoraChat = (() => {
       dialog.style.setProperty('--chat-viewport', viewport.height + 'px');
       dialog.style.setProperty('--chat-keyboard', Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) + 'px');
     }
+    listen(toggle, 'change', () => {
+      showMini = toggle.checked;
+      preview.hidden = !showMini || !previewLog.children.length;
+      try { localStorage.setItem('nora-chat-preview', showMini ? 'on' : 'off'); } catch (_) {}
+    });
     listen(viewport, 'resize', syncViewport);
     listen(viewport, 'scroll', syncViewport);
     listen(opener, 'click', () => {
       reset();
       syncViewport();
       dialog.showModal();
+      close.focus({preventScroll:true});
       opener.setAttribute('aria-expanded', 'true');
       dot.hidden = true;
       feed.scrollTop = feed.scrollHeight;
@@ -119,10 +133,13 @@ window.NoraChat = (() => {
     });
     listen(dialog, 'close', () => {
       opener.setAttribute('aria-expanded','false');
-      if (!stopped) opener.focus({preventScroll:true});
+      if (!stopped) {
+        const trigger = root.classList.contains('nora-cinema-active') ? root.querySelector('.nora-cinema [data-chat]') : opener;
+        trigger?.focus({preventScroll:true});
+      }
       reset();
     });
-    listen(dialog.querySelector('.nora-chat-close'), 'click', () => dialog.close());
+    listen(close, 'click', () => dialog.close());
     listen(input, 'input', () => {
       if (online) shownStatus = '';
       updateForm();
@@ -135,7 +152,7 @@ window.NoraChat = (() => {
       shownStatus = 'Отправляем…';
       updateForm();
       try {
-        await api('nora-game/chat', {text}, signal(15000));
+        await api('nora-game/chat', {text, location:location()}, signal(15000));
         if (input.value === draft) input.value = '';
         shownStatus = '';
         void poll();
@@ -147,17 +164,35 @@ window.NoraChat = (() => {
       }
     });
 
+    function authorName(line) {
+      const author = document.createElement('b');
+      author.textContent = line.author;
+      author.dir = 'auto';
+      author.style.color = colors[line.color];
+      return author;
+    }
+
+    function updatePreview(messages) {
+      const latest = messages.slice(-3).map(line => {
+        const row = document.createElement('li');
+        const message = document.createElement('span');
+        message.dir = 'auto';
+        message.textContent = line.text;
+        row.append(authorName(line), ' · ', message);
+        return row;
+      });
+      previewLog.replaceChildren(...latest);
+      preview.hidden = !showMini || !latest.length;
+    }
+
     function append(line) {
       const row = document.createElement('li');
       const meta = document.createElement('div');
-      const author = document.createElement('b');
+      const author = authorName(line);
       const origin = document.createElement('small');
       const time = document.createElement('time');
       const message = document.createElement('p');
       const date = new Date(line.time);
-      author.textContent = line.author;
-      author.dir = 'auto';
-      author.style.color = colors[line.color];
       origin.textContent = line.source === 'game' ? 'Игра' : 'Telegram';
       origin.dataset.source = line.source;
       time.dateTime = date.toISOString();
@@ -171,6 +206,7 @@ window.NoraChat = (() => {
     }
 
     function updateFeed(messages) {
+      updatePreview(messages);
       const bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 28;
       const first = [...log.children].find(row => row.offsetTop + row.offsetHeight > feed.scrollTop);
       const offset = first ? first.offsetTop - feed.scrollTop : 0;
@@ -239,6 +275,7 @@ window.NoraChat = (() => {
     void poll();
 
     return {
+      preview,
       panelOpen: () => dialog.open,
       update(now) {
         for (const [key, bubble] of bubbles) {
@@ -265,6 +302,7 @@ window.NoraChat = (() => {
         for (const key of bubbles.keys()) clearBubble(key);
         dialog.remove();
         opener.remove();
+        preview.remove();
       },
     };
   }

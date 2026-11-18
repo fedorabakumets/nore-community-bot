@@ -1,16 +1,18 @@
 """Short-lived chat between the NORA world and the configured Telegram group."""
 
 import logging
+import re
 import sqlite3
 import time
 from collections import deque
 from dataclasses import dataclass
+from random import choice
 from uuid import uuid4
 
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
-from aiogram.types import ChatMemberUpdated, LinkPreviewOptions, Message
+from aiogram.types import ChatMemberUpdated, LinkPreviewOptions, Message, MessageEntity
 from aiohttp import web
 
 from community_bot.aliases import is_command_message
@@ -21,6 +23,11 @@ CHAT_TTL = 30 * 60
 CHAT_LENGTH = 240
 BUBBLE_LIFETIME = 7
 MEMBERSHIP_TTL = 30
+PLAYER_EMOJI = {
+    'male': ('👱🏻‍♂️', '👨🏽‍🦲', '🧔🏼‍♂️', '🧔🏿', '👴', '👨🏾‍🦰'),
+    'female': ('👩🏼', '👩🏽‍🦰', '👩🏾‍🦱', '👱🏽‍♀️', '👵🏽', '🧔🏿‍♀️'),
+}
+SOLO_LOCATIONS = {'tavern': 'Таверна • 🍺', 'forest': 'Лесная поляна • 🌲'}
 logger = logging.getLogger(__name__)
 
 
@@ -123,7 +130,7 @@ class GameChat:
             })
         return result
 
-    async def send(self, user_id, nickname, text):
+    async def send(self, user_id, nickname, text, *, location, gender, identity):
         now = time.monotonic()
         while self.sent and now - self.sent[0][0] >= 60:
             self.sent.popleft()
@@ -133,10 +140,13 @@ class GameChat:
             raise ValueError('Слишком часто. Подожди немного перед отправкой.')
         self.sent.append((now, user_id))
         self.next_send = now + 1.1
+        heading = f'👾NORA • {location}'
+        emoji = choice(PLAYER_EMOJI[gender])
+        quote = MessageEntity(type='blockquote', offset=0, length=len(heading.encode('utf-16-le')) // 2)
         try:
             sent = await self.bot.send_message(
-                self.group_id, f'🎮 {nickname} · из игры Норы\n{text}', parse_mode=None,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                self.group_id, f'{heading}\n{emoji} {nickname} ({identity}) — {text}',
+                parse_mode=None, entities=[quote], link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
         except TelegramRetryAfter as error:
             self.next_send = max(self.next_send, time.monotonic() + error.retry_after)
@@ -163,6 +173,28 @@ async def feed(request):
     user_id = request['actor']['id']
     await chat.member(user_id)
     return web.json_response(chat.snapshot(user_id, request.query.get('after'), request.app['nora_lobby']))
+
+
+def _location(presence, requested):
+    from community_bot.nora_game_api import LOBBY_TTL
+
+    if presence and time.monotonic() - presence[0] < LOBBY_TTL:
+        pose = presence[2]
+        if pose.get('seat') is not None:
+            return 'Кинотеатр • 🎬'
+        if pose.get('room'):
+            return 'Воспоминание • ⚡'
+    if isinstance(requested, str) and requested in SOLO_LOCATIONS:
+        return SOLO_LOCATIONS[requested]
+    return 'ЛОББИ • 🌎'
+
+
+async def _identity(db, actor):
+    username = actor.get('username')
+    if isinstance(username, str) and re.fullmatch(r'[A-Za-z0-9_]{1,32}', username):
+        return f'@{username}'
+    user = await db.get_user(actor['id']) or {}
+    return clean_author_name(user.get('profile_name') or actor.get('first_name'))
 
 
 async def send(request):
@@ -203,7 +235,12 @@ async def send(request):
         )
         if blocked:
             raise ValueError(blocked)
-    sent = await chat.send(user_id, profile['nickname'], text)
+    sent = await chat.send(
+        user_id, profile['nickname'], text,
+        location=_location(request.app['nora_lobby'].get(user_id), body.get('location')),
+        gender=profile['outfit'].get('gender', 'male'),
+        identity=await _identity(db, request['actor']),
+    )
     try:
         if await db.get_bot_state(MEMORY_NOTICE_KEY) == '1':
             await db.save_community_message(

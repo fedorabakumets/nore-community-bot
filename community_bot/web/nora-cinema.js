@@ -33,7 +33,7 @@ window.NoraCinema = (() => {
     return youtubePromise;
   }
 
-  function mount(root, reset, sessionId, clock, chatOpen, onExit) {
+  function mount(root, reset, sessionId, clock, chatOpen, onExit, chatPreview) {
     root.insertAdjacentHTML('beforeend',
       '<button type="button" class="nora-cinema-open" hidden>Кинотеатр</button>' +
       '<section class="nora-cinema" aria-label="Кинотеатр" hidden>' +
@@ -344,6 +344,7 @@ window.NoraCinema = (() => {
       form.reset();
       clearPlayer();
       panel.hidden = true;
+      if (chatPreview) root.append(chatPreview);
       root.classList?.remove('nora-cinema-active');
       reset();
     }
@@ -352,6 +353,7 @@ window.NoraCinema = (() => {
       if (active || opener.hidden) return;
       active = true;
       panel.hidden = false;
+      if (chatPreview) panel.append(chatPreview);
       root.classList?.add('nora-cinema-active');
       reset();
       render();
