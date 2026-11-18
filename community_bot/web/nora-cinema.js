@@ -443,11 +443,11 @@ window.NoraCinema = (() => {
       seat: () => seats[seat],
       requestSeat(index) {requestedSeat = index;},
       movementLocked: () => seat !== null || requestedSeat !== seat,
-      nearbySeat(position) {
+      nearbySeat(position, accepts = () => true) {
         let best = null, distance = seatReach;
         for (const [index, [x, z]] of seats.entries()) {
           const gap = Math.hypot(x - position.x, z - position.z);
-          if (gap < distance && !occupied.includes(index)) {
+          if (gap < distance && !occupied.includes(index) && accepts(index)) {
             best = index;
             distance = gap;
           }

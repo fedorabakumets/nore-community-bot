@@ -457,15 +457,23 @@ window.NoraWorld = (() => {
     on(jumpButton,'keydown',e=>{if(e.repeat&&['Enter',' '].includes(e.key))e.preventDefault();});
     on(window,'keydown',e=>{
       if(inputPaused()||cinema?.movementLocked())return;
-      if(!['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
+      if(!['KeyW','KeyA','KeyS','KeyD','KeyE','Space','ShiftLeft','ShiftRight'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
       if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+      if(e.code==='KeyE'){
+        if(!e.repeat&&pressAimAction())e.preventDefault();
+        return;
+      }
       if(e.code==='Space'&&e.target?.closest?.('button'))return;
       e.preventDefault();
       if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
     });
     on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
     function reset(){resetStick();keys.clear();orbitId=null;mousePosition=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
-    function resetAndReleaseMouse(){releaseMouse();reset();}
+    function resetAndReleaseMouse(){
+      releaseMouse();reset();
+      aimed=pressedAim=handledAim=null;aimButton.hidden=true;
+      aimButton.classList.remove('is-pressed');
+    }
     on(root,'nora-settings-open',resetAndReleaseMouse);
     on(window,'blur',resetAndReleaseMouse);
     on(document,'visibilitychange',resetAndReleaseMouse);
@@ -478,6 +486,9 @@ window.NoraWorld = (() => {
     },{capture:true,signal:controls.signal});
     const action=root.querySelector('.nora-world-action');
     const recordButton=root.querySelector('.nora-record-toggle');
+    const reticle=root.querySelector('.nora-reticle'), aimButton=root.querySelector('.nora-aim-action');
+    const aimLabel=aimButton.querySelector('span');
+    let aimed=null, pressedAim=null, handledAim=null, pressUntil=0;
     const challengeHud=challenge&&root.querySelector('.nora-observatory-hud');
     const challengeProgress=challengeHud?.querySelector('.nora-observatory-progress');
     const challengeHint=challengeHud?.querySelector('.nora-observatory-hint');
@@ -624,39 +635,56 @@ window.NoraWorld = (() => {
       reset();companion.reset();
       action.blur();
     }
-    function nearbyAction(){
-      if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return '';
-      if(inChallenge)return interaction?'':challenge.actionAt(player.position,challengeState.checkpoint)?.text||'';
-      const {x,z}=player.position;
-      if(inside)return Math.abs(x)<1.5&&z>3.3?'Выйти из таверны':'';
-      if(inCinema){
-        if(cinema.seat())return 'Встать';
-        if(cinema.movementLocked())return '';
-        const exit=cinemaLayout.exit;
-        if(Math.hypot(x-exit.x,z-exit.z)<1.62)return 'В лобби';
-        return cinema.nearbySeat(player.position)===null?'':'Сесть';
-      }
-      if(inLobby){
-        const portal=cinemaLayout?.portal;
-        if(portal&&Math.hypot(x-portal.x,z-portal.z)<1.62)return cinemaModule.title;
-        if(Math.hypot(x-tavernPortal.x,z-tavernPortal.z)<1.62)return 'НОРА';
-        if(challenge&&Math.hypot(x-challenge.entrance.x,z-challenge.entrance.z)<1.62)return observatory.title;
-        return '';
-      }
-      if(Math.abs(x)<1.65&&Math.abs(z-portalZ.home)<1.85)return 'ЛОББИ';
-      return !inLobby&&Math.abs(x)<1.5&&z-tavernOffset>2.55&&z-tavernOffset<4.8?'Войти в таверну':'';
+    function aimBounds(x,z,halfWidth,height,halfDepth,bottom=0){
+      return [x-halfWidth,x+halfWidth,bottom,height,z-halfDepth,z+halfDepth];
     }
-    on(action,'click',()=>{
-      const label=nearbyAction();
-      if(!label)return;
+    function gateTarget(text,position,scale=.76){
+      return {text, position, box:aimBounds(position.x,position.z,1.3*scale,2.94*scale,.39*scale)};
+    }
+    const lobbyTargets=[
+      cinemaLayout&&gateTarget(cinemaModule.title,cinemaLayout.portal),
+      gateTarget('НОРА',tavernPortal),
+      challenge&&gateTarget(observatory.title,challenge.entrance),
+    ].filter(Boolean);
+    const islandPortal=gateTarget('ЛОББИ',{x:0,z:portalZ.home},1);
+    const tavernEntry={text:'Войти в таверну',box:aimBounds(0,tavernOffset+2.47,.76,2.18,.18)};
+    const tavernExit={text:'Выйти из таверны',box:aimBounds(0,4.99,.8,2.25,.2)};
+    const cinemaExit=cinemaLayout&&gateTarget('В лобби',cinemaLayout.exit);
+    const cinemaSeats=cinemaLayout?.seats.map(([x,z],seat)=>({text:'Сесть',seat,box:aimBounds(x,z,.56,1.15,.55)}));
+    const standUp={text:'Встать'};
+    const acceptAny=()=>true;
+    function nearbyAction(accepts=acceptAny){
+      if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return null;
+      const {x,z}=player.position;
       if(inChallenge){
-        interaction={id:challenge.actionAt(player.position,challengeState.checkpoint).id,serial:++interactionSerial};
+        const relic=!interaction&&challenge.actionAt(player.position,challengeState.checkpoint);
+        if(!relic)return null;
+        const target={...relic,box:aimBounds(relic.x,relic.z,.6,1.82,.5)};
+        return accepts(target)?target:null;
+      }
+      if(inside)return Math.abs(x)<1.5&&z>3.3&&accepts(tavernExit)?tavernExit:null;
+      if(inCinema){
+        if(cinema.seat())return accepts(standUp)?standUp:null;
+        if(cinema.movementLocked())return null;
+        const exit=cinemaExit.position;
+        if(Math.hypot(x-exit.x,z-exit.z)<1.62&&accepts(cinemaExit))return cinemaExit;
+        const seat=cinema.nearbySeat(player.position,index=>accepts(cinemaSeats[index]));
+        return cinemaSeats[seat]??null;
+      }
+      if(inLobby)return lobbyTargets.find(target=>Math.hypot(x-target.position.x,z-target.position.z)<1.62&&accepts(target))??null;
+      if(Math.abs(x)<1.65&&Math.abs(z-portalZ.home)<1.85&&accepts(islandPortal))return islandPortal;
+      return Math.abs(x)<1.5&&z-tavernOffset>2.55&&z-tavernOffset<4.8&&accepts(tavernEntry)?tavernEntry:null;
+    }
+    function performAction(selected){
+      const label=selected.text;
+      if(inChallenge){
+        interaction={id:selected.id,serial:++interactionSerial};
         action.hidden=true;action.blur();return;
       }
       if(label===cinemaModule?.title){switchCinema(true);return;}
       if(inCinema){
         if(label==='В лобби')switchCinema(false);
-        else cinema.requestSeat(label==='Встать'?null:cinema.nearbySeat(player.position));
+        else cinema.requestSeat(selected.seat??null);
         return;
       }
       if(label===observatory?.title){beginTransition(true);return;}
@@ -673,6 +701,10 @@ window.NoraWorld = (() => {
       syncLocation();
       jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;action.hidden=true;action.blur();
       for(const g of gusts)g.age=1;companion.reset();reset();
+    }
+    on(action,'click',()=>{
+      const selected=nearbyAction();
+      if(selected)performAction(selected);
     });
     on(document,'visibilitychange',()=>{if(document.hidden&&!inChallenge&&!inCinema)lobby.leave();});
     function resize(){
@@ -711,6 +743,11 @@ window.NoraWorld = (() => {
     syncLocation();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
+    const recordActions=records&&root.querySelector('.nora-record-actions');
+    const strokeButton=root.querySelector('.nora-pet-stroke');
+    const recordBounds=aimBounds(0,0,.75,1.22,.57);
+    const lobbyRecordBounds=aimBounds(lobbyDeck.x,lobbyDeck.z,.75,1.22,.57);
+    const shelfBounds=aimBounds(.1,-4.5,1.42,2.98,.55);
     const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset,
       ()=>inCinema?'cinema':inChallenge?'observatory':inside?'tavern':inLobby?'lobby':'forest');
     const cinema=cinemaLayout&&cinemaModule.mount(root,T,cinemaLayout,{
@@ -729,6 +766,70 @@ window.NoraWorld = (() => {
         reset();
       },
     });
+    const aimRay=new T.Ray(), aimBox=new T.Box3(), aimHit=new T.Vector3();
+    function hitDistance([minX,maxX,minY,maxY,minZ,maxZ]){
+      aimBox.min.set(minX,minY,minZ);aimBox.max.set(maxX,maxY,maxZ);
+      return aimRay.intersectBox(aimBox,aimHit)?aimRay.origin.distanceTo(aimHit):Infinity;
+    }
+    function visibleHit(box){
+      if(!box)return Infinity;
+      const distance=hitDistance(box);
+      if(!Number.isFinite(distance))return distance;
+      return zone.cameraBoxes.some(bounds=>hitDistance(bounds)<distance-.1)?Infinity:distance;
+    }
+    function targetInSight(){
+      aimRay.origin.copy(camera.position);
+      aimRay.direction.set(0,0,-1).applyQuaternion(camera.quaternion);
+      const selected=nearbyAction(item=>Number.isFinite(visibleHit(item.box)));
+      let best=selected?{key:selected.id??selected.seat??selected.text,text:selected.text,selected}:null;
+      let bestDistance=selected?visibleHit(selected.box):Infinity;
+      function consider(key,box,button){
+        if(!button||button.hidden||button.disabled)return;
+        const distance=visibleHit(box);
+        if(distance>=bestDistance)return;
+        bestDistance=distance;
+        best={key,text:button.textContent.trim(),button};
+      }
+      if(recordActions&&!recordActions.hidden){
+        consider('record-shelf',shelfBounds,recordActions.querySelector('[data-record-shelf]'));
+      }
+      if(inLobby||inside){
+        const playerButton=recordActions&&!recordActions.hidden?
+          recordActions.querySelector('[data-record-insert], [data-record-eject]'):null;
+        consider('record-player',inLobby?lobbyRecordBounds:recordBounds,recordButton.hidden?playerButton:recordButton);
+      }
+      const petPosition=companion.aimPosition();
+      if(petPosition)consider('pet',aimBounds(petPosition.x,petPosition.z,.51,.92,.51),strokeButton);
+      return best;
+    }
+    function pressAimAction(){
+      if(!aimed||aimButton.hidden||pressedAim||inputPaused())return false;
+      pressedAim=aimed;
+      pressUntil=performance.now()+150;
+      aimButton.classList.add('is-pressed');
+      aimButton.blur();
+      return true;
+    }
+    on(aimButton,'click',pressAimAction);
+    function syncAim(time){
+      reticle.hidden=inputPaused()||!!cinema?.seat();
+      aimed=reticle.hidden?null:targetInSight();
+      if(pressedAim){
+        if(!reticle.hidden&&time<pressUntil)return;
+        handledAim=pressedAim.key;
+        pressedAim=null;aimButton.hidden=true;
+        aimButton.classList.remove('is-pressed');
+        if(aimed?.key===handledAim){
+          if(aimed.selected)performAction(aimed.selected);
+          else aimed.button.click();
+        }
+      }
+      if(aimed?.key!==handledAim)handledAim=null;
+      const show=!!aimed&&aimed.key!==handledAim;
+      aimButton.hidden=!show;
+      reticle.classList.toggle('is-aimed',show);
+      if(show&&aimLabel.textContent!==aimed.text)aimLabel.textContent=aimed.text;
+    }
     // Render at display cadence during movement, and pace idle hall frames independently of the film.
     let nextCinemaFrame=0;
     function tick(time){
@@ -831,7 +932,7 @@ window.NoraWorld = (() => {
         }
         records?.update(inside,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen(),inLobby,nearLobbyDeck());
         syncRecordButton();
-        const actionText=nearbyAction();
+        const actionText=nearbyAction()?.text;
         if(action.hidden!==!actionText)action.hidden=!actionText;
         if(actionText&&action.textContent!==actionText){
           action.textContent=actionText;
@@ -880,6 +981,7 @@ window.NoraWorld = (() => {
           renderer.render(scene,camera);
         }
         if(inCinema)cinema.sync(time);
+        syncAim(time);
       }
       raf=requestAnimationFrame(tick);
     }tick(0);

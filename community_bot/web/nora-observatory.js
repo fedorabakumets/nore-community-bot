@@ -260,7 +260,7 @@ window.NoraObservatory = (() => {
         const available = checkpoint === 0 ? ['seal'] : checkpoint === 1 ? layout.bellOrder : checkpoint === 2 ? ['lantern'] : [];
         for (const id of available) {
           const [x, z, text] = relics[id];
-          if (Math.hypot(position.x - x, position.z - z) < 1.35) return {id, text};
+          if (Math.hypot(position.x - x, position.z - z) < 1.35) return {id, text, x, z};
         }
         return null;
       },

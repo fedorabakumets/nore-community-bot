@@ -184,7 +184,10 @@ window.NoraCompanion = (() => {
       const probe=position.clone();move(probe,player.position.x-probe.x,player.position.z-probe.z,getZone());near=near&&Math.hypot(probe.x-player.position.x,probe.z-player.position.z)<.1;
       actions.hidden=!near||panelOpen();model.animate(dt,distance,camera);
     }
-    return {update,reset,panelOpen,dispose(){disposed=true;controls.abort();hint?.remove();if(panel.open)panel.close();model?.dispose();actions.hidden=true;}};
+    return {update,reset,panelOpen,
+      aimPosition:()=>!actions.hidden&&!pending?model?.body.position:null,
+      dispose(){disposed=true;controls.abort();hint?.remove();if(panel.open)panel.close();model?.dispose();actions.hidden=true;}
+    };
   }
   return {create,mount};
 })();

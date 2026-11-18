@@ -8,8 +8,8 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"ai-expedition", "nora-world":"pointer-lock", "nora-chat":"preview-expiry", "nora-cinema":"cinema-screen", "nora-scenery":"lobby-portals",
-        "nora-voxel":"lobby-cinema", "nora-observatory":"memory"}[name];
+      const version = {"nora-companion":"reticle-hud", "nora-world":"reticle-hud", "nora-chat":"preview-expiry", "nora-cinema":"reticle-hud", "nora-scenery":"lobby-portals",
+        "nora-voxel":"lobby-cinema", "nora-observatory":"reticle-hud"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
       document.head.appendChild(script);
@@ -22,7 +22,24 @@
   }
   let helpDismissed = false;
   let music = null, entry = null, petTrigger = null;
-  const settings = {pov: 100, music: 100, effects: 100};
+  const touchControls = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const videoSettingsKey = 'nora-game-video-' + (touchControls ? 'touch' : 'desktop');
+  const limits = {pov:[0,180], hud:[75,130], music:[0,100], effects:[0,100]};
+  const settings = {pov: touchControls ? 125 : 100, hud: 100, music: 100, effects: 100};
+  function clampSetting(kind, value) {
+    const [min,max] = limits[kind];
+    return Math.max(min, Math.min(max, Math.round(value)));
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(videoSettingsKey));
+    for (const kind of ['pov','hud']) {
+      if (Number.isFinite(saved?.[kind])) settings[kind] = clampSetting(kind, saved[kind]);
+    }
+  } catch (_) {}
+  function saveVideoSettings() {
+    try { localStorage.setItem(videoSettingsKey, JSON.stringify({pov:settings.pov,hud:settings.hud})); }
+    catch (_) {}
+  }
   const logo = '<span class="nora-game-logo">N<span>O</span>RA</span>';
   function createMusic() {
     let context = null, master = null, buffer = null, muted = false, closed = false, blocked = false;
@@ -267,30 +284,77 @@
   async function world(nickname) {
     let cameraHelp = '';
     if (matchMedia('(any-pointer: fine)').matches) {
-      cameraHelp = document.exitPointerLock ? ' · Клик по сцене — захват мыши · Esc — вернуть курсор' : ' · Мышь — камера';
+      cameraHelp = document.exitPointerLock ? ' · Клик — захват мыши · Esc — курсор · E — действие' : ' · Мышь — камера · E — действие';
     }
     frame(`<div class="nora-world"><canvas aria-label="Общее лобби Норы"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛОББИ</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок${cameraHelp}</span><button class="nora-world-help-close" type="button" aria-label="Закрыть инструкцию движения">×</button></p><div class="nora-world-context"><button class="nora-world-action" type="button" hidden>Войти в таверну</button><button class="nora-world-action nora-record-toggle" type="button" aria-pressed="true" hidden>Выключить проигрыватель</button></div><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><div class="nora-pet-actions" hidden><button type="button" class="nora-pet-open">Питомец</button><button type="button" class="nora-pet-stroke"><span aria-hidden="true">♥</span> Погладить <span aria-hidden="true">♥</span></button></div><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
-    root.insertAdjacentHTML('beforeend', `<section class="nora-observatory-hud" aria-label="Воспоминание" hidden>
+    root.insertAdjacentHTML('beforeend', `<div class="nora-reticle" aria-hidden="true" hidden></div>
+    <button type="button" class="nora-aim-action" aria-keyshortcuts="E" hidden>
+      <kbd aria-hidden="true">E</kbd><span></span>
+    </button>
+    <section class="nora-observatory-hud" aria-label="Воспоминание" hidden>
       <div role="status"><strong class="nora-observatory-progress"></strong><span class="nora-observatory-hint"></span></div>
       <button type="button">В лобби</button>
     </section><div class="nora-memory-veil" aria-hidden="true"><span></span></div>
     <p class="nora-memory-result" role="status" hidden></p>`);
     const back = overlay.querySelector('.nora-game-back');
-    back.textContent='⚙ Настройки'; back.setAttribute('aria-label','Настройки игры');
+    back.innerHTML='<span aria-hidden="true">⚙</span> <span class="nora-settings-caption">Настройки</span>';
+    back.setAttribute('aria-label','Настройки игры');
     const dialog=document.createElement('dialog'); dialog.className='nora-settings'; dialog.setAttribute('aria-label','Настройки игры');
-    dialog.innerHTML=`<h2>Настройки</h2><div class="nora-settings-menu"><button type="button" data-section="video">Видео</button><button type="button" data-section="sounds">Звуки</button><label class="nora-settings-chat"><input type="checkbox" id="nora-chat-preview-setting" checked>Мини-чат на экране</label><button type="button" class="nora-settings-continue">Продолжить</button><button type="button" class="nora-settings-exit">Вылезти из норы</button></div><div data-settings-section="video" hidden><h3>Видео</h3><label>Перспектива <span>1-е лицо — 3-е лицо</span><div class="nora-settings-control"><input type="range" min="0" max="100" step="1" data-setting="pov" aria-label="Перспектива"><input type="number" min="0" max="100" step="1" data-number="pov" aria-label="Значение перспективы"></div></label><button type="button" data-settings-back>Назад</button></div><div data-settings-section="sounds" hidden><h3>Звуки</h3><label>Музыка <output data-output="music"></output><input type="range" min="0" max="100" step="1" data-setting="music" aria-label="Громкость музыки"></label><label>Эффекты игры <output data-output="effects"></output><input type="range" min="0" max="100" step="1" data-setting="effects" aria-label="Громкость эффектов игры"></label><button type="button" data-settings-back>Назад</button></div>`;
+    function videoControl(kind,label,hint) {
+      const [min,max] = limits[kind];
+      return `<label>${label}<span>${hint}</span><div class="nora-settings-control">
+        <input type="range" min="${min}" max="${max}" step="1" data-setting="${kind}" aria-label="${label}">
+        <input type="number" min="${min}" max="${max}" step="1" data-number="${kind}" aria-label="${label}, в процентах">
+      </div></label>`;
+    }
+    dialog.innerHTML=`<h2>Настройки</h2>
+      <div class="nora-settings-menu">
+        <button type="button" data-section="video">Видео</button><button type="button" data-section="sounds">Звуки</button>
+        <label class="nora-settings-chat"><input type="checkbox" id="nora-chat-preview-setting" checked>Мини-чат на экране</label>
+        <button type="button" class="nora-settings-continue">Продолжить</button><button type="button" class="nora-settings-exit">Вылезти из норы</button>
+      </div>
+      <div data-settings-section="video" hidden><h3>Видео</h3>
+        ${videoControl('pov','Дальность камеры','0% — от первого лица, 180% — дальше всего')}
+        ${videoControl('hud','Масштаб интерфейса','Размер кнопок и подсказок в игре')}
+        <button type="button" data-settings-back>Назад</button>
+      </div>
+      <div data-settings-section="sounds" hidden><h3>Звуки</h3>
+        <label>Музыка <output data-output="music"></output><input type="range" min="0" max="100" step="1" data-setting="music" aria-label="Громкость музыки"></label>
+        <label>Эффекты игры <output data-output="effects"></output><input type="range" min="0" max="100" step="1" data-setting="effects" aria-label="Громкость эффектов игры"></label>
+        <button type="button" data-settings-back>Назад</button>
+      </div>`;
     root.appendChild(dialog);
     function showSection(name){dialog.querySelector('.nora-settings-menu').hidden=!!name;dialog.querySelectorAll('[data-settings-section]').forEach(el=>{el.hidden=el.dataset.settingsSection!==name;});}
-    function updateSetting(kind,value){if(!Number.isFinite(value))return;value=Math.max(0,Math.min(100,Math.round(value)));settings[kind]=value;dialog.querySelector(`[data-setting="${kind}"]`).value=value;const number=dialog.querySelector(`[data-number="${kind}"]`),output=dialog.querySelector(`[data-output="${kind}"]`);if(number)number.value=value;if(output)output.textContent=value+'%';if(kind==='pov')root.dispatchEvent(new CustomEvent('nora-pov',{detail:value}));else music?.setLevel(kind,value);}
-    for(const kind of ['pov','music','effects'])updateSetting(kind,settings[kind]);
-    root.addEventListener('nora-view-pov',e=>{settings.pov=e.detail;dialog.querySelector('[data-setting="pov"]').value=e.detail;dialog.querySelector('[data-number="pov"]').value=e.detail;});
+    function updateSetting(kind,value,fromView=false) {
+      if (!Number.isFinite(value)) return;
+      value = clampSetting(kind,value);
+      settings[kind]=value;
+      dialog.querySelector(`[data-setting="${kind}"]`).value=value;
+      const number=dialog.querySelector(`[data-number="${kind}"]`), output=dialog.querySelector(`[data-output="${kind}"]`);
+      if(number)number.value=value;
+      if(output)output.textContent=value+'%';
+      if(kind==='pov'){
+        root.dataset.pov=String(value);
+        if(!fromView)root.dispatchEvent(new CustomEvent('nora-pov',{detail:value}));
+      }else if(kind==='hud'){
+        overlay.style.setProperty('--hud-scale',value/100);
+      }else{
+        music?.setLevel(kind,value);
+      }
+    }
+    for(const kind of Object.keys(settings))updateSetting(kind,settings[kind]);
+    root.addEventListener('nora-view-pov',e=>{updateSetting('pov',e.detail,true);saveVideoSettings();});
     dialog.addEventListener('input',e=>{if(e.target.dataset.setting)updateSetting(e.target.dataset.setting,Number(e.target.value));});
-    dialog.addEventListener('change',e=>{if(e.target.dataset.number)updateSetting(e.target.dataset.number,e.target.value===''?settings.pov:Number(e.target.value));});
+    dialog.addEventListener('change',e=>{
+      const {number,setting}=e.target.dataset;
+      if(number)updateSetting(number,e.target.value===''?settings[number]:Number(e.target.value));
+      if(['pov','hud'].includes(number||setting))saveVideoSettings();
+    });
     dialog.querySelectorAll('[data-section]').forEach(button=>button.onclick=()=>showSection(button.dataset.section));
     dialog.querySelectorAll('[data-settings-back]').forEach(button=>button.onclick=()=>showSection(null));
     dialog.querySelector('.nora-settings-continue').onclick=()=>dialog.close(); dialog.querySelector('.nora-settings-exit').onclick=close;
-    back.onclick=()=>{showSection(null);root.dispatchEvent(new Event('nora-settings-open'));dialog.showModal();}; root.dataset.pov=String(settings.pov);
+    back.onclick=()=>{showSection(null);root.dispatchEvent(new Event('nora-settings-open'));dialog.showModal();};
     root.dataset.recordGift = entry === 'record' ? '1' : '';
     root.dataset.playWithPet = entry === 'pet' ? '1' : '';
     entry = null;

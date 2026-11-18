@@ -23,12 +23,19 @@ try {
   class Element extends EventTarget {
     open=false; dataset = {}; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
     children = new Map();
+    classes = new Set();
+    classList = {
+      add: name=>this.classes.add(name),
+      remove: name=>this.classes.delete(name),
+      toggle: (name,force)=>force?this.classes.add(name):this.classes.delete(name),
+      contains: name=>this.classes.has(name),
+    };
     querySelector(selector) {
       if(selector==='.nora-settings[open]')return this.children.get('.nora-settings')?.open?this.children.get('.nora-settings'):null;
       if(!this.children.has(selector))this.children.set(selector,new Element());
       return this.children.get(selector);
     }
-    setAttribute() {} setPointerCapture() {} blur() {}
+    setAttribute() {} setPointerCapture() {} blur() {} click(){this.emit('click');}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
@@ -164,7 +171,51 @@ try {
   mobileWorld.canvas.clientWidth=780;mobileWorld.canvas.clientHeight=390;mobileWorld.resize();
   mobileWorld.frames(1);assert.equal(mobileWorld.camera().aspect,2,'rotation updates projection');
   assert.ok(r.width*r.height*r.ratio**2<=420001,'landscape retains mobile pixel budget');
+  mobileWorld.canvas.clientWidth=390;mobileWorld.canvas.clientHeight=780;mobileWorld.resize();
+  mobileWorld.frames(240);
+  const previousMobileDistance=mobileWorld.camera().position.distanceTo(mobileWorld.player.position);
+  mobileWorld.root.emit('nora-pov',{detail:180});mobileWorld.frames(400);
+  assert.ok(mobileWorld.camera().position.distanceTo(mobileWorld.player.position)>previousMobileDistance*1.65,
+    'the extended slider keeps the mobile camera farther back');
   mobileWorld.stop();
+  const desktopAim=await setup(1);
+  const prompt=desktopAim.root.querySelector('.nora-aim-action');
+  const marker=desktopAim.root.querySelector('.nora-reticle');
+  const aimPortal=desktopAim.window.NoraScenery.tavernPortal;
+  assert.equal(marker.hidden,false,'reticle is visible while exploring');
+  assert.equal(prompt.hidden,true,'a distant portal offers no interaction');
+  desktopAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
+  desktopAim.frames(1);
+  assert.equal(prompt.querySelector('span').textContent,'НОРА','the centered portal is actionable');
+  const aimPointer=x=>desktopAim.canvas.emit('pointermove',{pointerType:'mouse',pointerId:1,clientX:x,clientY:20});
+  aimPointer(20);aimPointer(260);desktopAim.frames(50);
+  assert.equal(prompt.hidden,true,'turning away hides the interaction within reach');
+  aimPointer(20);desktopAim.frames(70);
+  desktopAim.zone.cameraBoxes.push([-.55,.55,0,3,aimPortal.z+.7,aimPortal.z+.85]);
+  desktopAim.frames(1);
+  assert.equal(prompt.hidden,true,'a wall blocks the reticle from selecting through it');
+  desktopAim.zone.cameraBoxes.pop();desktopAim.frames(1);
+  assert.equal(prompt.hidden,false);
+  desktopAim.window.emit('keydown',{code:'KeyE',repeat:true});desktopAim.frames(12);
+  assert.equal(prompt.classList.contains('is-pressed'),false,'holding E does not retrigger');
+  desktopAim.key('KeyE');desktopAim.frames(4);
+  assert.equal(prompt.classList.contains('is-pressed'),true,'E shows the pressed state');
+  desktopAim.player.position.z=aimPortal.z+3;
+  desktopAim.frames(12);
+  assert.equal(prompt.hidden,true,'walking out of reach cancels an unfinished interaction');
+  desktopAim.player.position.z=aimPortal.z+1.35;desktopAim.frames(1);
+  desktopAim.key('KeyE');desktopAim.frames(12);
+  assert.equal(prompt.hidden,true,'the prompt disappears after interaction');
+  assert.equal(desktopAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','E opens the aimed portal');
+  desktopAim.stop();
+  const touchAim=await setup(0,60,undefined,undefined,true);
+  touchAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
+  touchAim.frames(1);
+  const touchPrompt=touchAim.root.querySelector('.nora-aim-action');
+  assert.equal(touchPrompt.hidden,false,'aiming in third person works on touch');
+  touchPrompt.click();touchAim.frames(12);
+  assert.equal(touchAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','tapping E performs the same interaction');
+  touchAim.stop();
   console.log('NORA mobile rendering: Retina budget, resize deduplication, low-FPS adaptation, recovery and rotation passed.');
   for(const fps of [30,60,120]){
     const c=await setup(0,fps),meshes=[];c.player.traverse(m=>{if(m.isInstancedMesh)meshes.push(m);});
