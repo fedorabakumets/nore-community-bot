@@ -14,6 +14,7 @@ from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -28,7 +29,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from community_bot.access import needs_reapplication
-from community_bot.aliases import command_or_alias, is_command_message, remainder_args
+from community_bot.aliases import command_or_alias, is_command_message, remainder_args, strip_command_address
 from community_bot.audit import (
     SYSTEM_ACTOR_ID,
     duration_label,
@@ -48,7 +49,7 @@ from community_bot.domain import (
     transfer_amount,
     transfer_commission_percent,
 )
-from community_bot.ephemeral import keep_in_chat
+from community_bot.ephemeral import delete_user_command, keep_in_chat
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -427,9 +428,17 @@ async def question_in_group(message: Message) -> None:
 
 
 @router.message(command_or_alias("commands", "help"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text, Command("commands", magic=~F.args))
 async def group_commands(message: Message, bot: Bot) -> None:
     from community_bot.commands_guide import send_commands_card
 
+    if strip_command_address(message.text or message.caption or "") is None:
+        from community_bot.command_registry import get_command
+
+        view = get_command("commands")
+        if view and (not view.enabled or not view.allows(message.chat.type)):
+            return
+        await delete_user_command(message, bot)
     await send_commands_card(message, bot)
 
 
@@ -1799,8 +1808,6 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
     F.text, F.reply_to_message | F.text.contains("@") | F.entities, F.chat.type.in_({"group", "supergroup"}),
 )
 async def group_reply_actions(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
-    from community_bot.aliases import strip_command_address
-
     addressed = strip_command_address(message.text or "")
     amount = transfer_amount(addressed) if addressed is not None and message.reply_to_message else None
     interaction = reputation_interaction(message)

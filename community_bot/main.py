@@ -55,29 +55,10 @@ logger = logging.getLogger(__name__)
 
 
 async def configure_commands(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="apply", description="Заполнить анкету"),
-            BotCommand(command="question", description="Задать вопрос"),
-            BotCommand(command="profile", description="Мой профиль"),
-            BotCommand(command="balance", description="Кошелёк"),
-            BotCommand(command="shop", description="Магазин"),
-            BotCommand(command="pet", description="Мой питомец"),
-            BotCommand(command="buycookies", description="Купить печеньки через СБП"),
-            BotCommand(command="mail", description="Анонимное письмо в чат"),
-            BotCommand(command="help", description="Помощь"),
-            BotCommand(command="pogoda", description="Погода в Петербурге"),
-            BotCommand(command="stickers", description="Стикеры Норы"),
-        ],
-        scope=BotCommandScopeAllPrivateChats(),
-        language_code="ru",
-    )
-    await bot.set_my_commands(
-        [],
-        scope=BotCommandScopeAllGroupChats(),
-        language_code="ru",
-    )
+    commands = [BotCommand(command="commands", description="Нора команды")]
+    for scope in (BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
+        for language_code in (None, "ru"):
+            await bot.set_my_commands(commands, scope=scope, language_code=language_code)
 
 
 def _same_release(last: str | None, number: int) -> bool:

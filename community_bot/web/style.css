@@ -1682,5 +1682,18 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .commands-guide dl > div + div { border-top: 1px solid var(--line); }
 .commands-guide dt { color: var(--poster-ink); font-weight: 650; overflow-wrap: anywhere; }
 .commands-guide dt code { font: inherit; user-select: text; }
+.commands-guide-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.commands-guide-line + .commands-guide-line { margin-top: 4px; }
+.commands-guide-line code { min-width: 0; }
+.commands-guide-line button {
+  flex: none;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--poster-rule);
+  border-radius: 10px;
+  background: var(--poster-raised);
+  color: var(--poster-ink);
+  font-size: 12px;
+}
 .commands-guide dd { margin: 4px 0 0; color: var(--poster-muted); font-size: 14px; line-height: 1.5; }
 .commands-guide .card .sub { margin: 8px 0 0; }

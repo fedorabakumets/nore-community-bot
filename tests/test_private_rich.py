@@ -1187,11 +1187,14 @@ async def test_widget_transport_selects_beta_and_poll_recovers_on_stable(monkeyp
     ]
 
 
-@pytest.mark.parametrize("chat_id,closer,from_welcome", [
-    (7, 7, False), (-100123, 7, False), (-100123, 8, False), (-100123, 9, False),
-    (-100123, None, False), (-100123, 7, True),
+@pytest.mark.parametrize("chat_id,closer,from_welcome,command", [
+    (7, 7, False, "команды"), (7, 7, False, "/commands"),
+    (-100123, 7, False, "Нора команды"), (-100123, 8, False, "Нора команды"),
+    (-100123, 9, False, "Нора команды"), (-100123, None, False, "Нора команды"),
+    (-100123, 7, True, "Нора команды"), (-100123, 7, False, "/commands"),
+    (-100123, 7, False, "/commands@test_nora_bot"),
 ])
-async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, chat_id, closer, from_welcome):
+async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, chat_id, closer, from_welcome, command):
     from community_bot.commands_guide import CLOSE_COMMANDS_CARD, OPEN_COMMANDS_CARD, router
     from community_bot.helpers import delete_later
     from community_bot.routers import group, private
@@ -1235,12 +1238,19 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
         await turn(setup, open_panel)
     saved_panel = await db.get_bot_state("private_rich_panel:7")
     session.calls.clear()
-    event = incoming(text="команды")
+    event = incoming(text=command)
     if chat_id < 0:
         event = event.model_copy(update={
             "chat": Chat(id=chat_id, type="supergroup", is_forum=True),
-            "is_topic_message": True, "message_thread_id": 42, "text": "Нора команды",
+            "is_topic_message": True, "message_thread_id": 42,
         })
+    if command == "/commands@test_nora_bot":
+        await bot.me()
+        session.calls.clear()
+        for wrong in ("/commands@other_bot", "/commands extra", "/profile"):
+            wrong_event = event.model_copy(update={"text": wrong})
+            await dp.feed_update(bot, Update(update_id=0, message=wrong_event), **context)
+            assert not session.calls
 
     if from_welcome:
         query = CallbackQuery(
@@ -1260,6 +1270,9 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
         event.message_id if from_welcome else None
     )
     assert send.message_thread_id == (42 if chat_id < 0 else None)
+    command_deletes = [call for call in session.calls if call.__api_method__ == "deleteMessage"]
+    expected_deletes = [event.message_id] if chat_id < 0 and not from_welcome else []
+    assert [call.message_id for call in command_deletes] == expected_deletes
     blocks = content(send)
     assert [block["type"] for block in blocks] == ["photo", "buttons", "buttons"]
     guide_button = blocks[1]["buttons"][0]

@@ -25,6 +25,20 @@ def message(text, uid=7, chat_id=-100123, **extra):
     )
 
 
+async def test_command_menu_contains_only_the_guide():
+    from community_bot.main import configure_commands
+
+    bot = SimpleNamespace(set_my_commands=AsyncMock())
+    await configure_commands(bot)
+    calls = bot.set_my_commands.await_args_list
+    assert {(call.kwargs["scope"].type, call.kwargs["language_code"]) for call in calls} == {
+        ("all_private_chats", None), ("all_private_chats", "ru"),
+        ("all_group_chats", None), ("all_group_chats", "ru"),
+    }
+    for call in calls:
+        assert [(command.command, command.description) for command in call.args[0]] == [("commands", "Нора команды")]
+
+
 @pytest.mark.parametrize('prefix', ['Нора ', 'нора ', 'Нора, ', 'нора,', 'НОРА, '])
 async def test_addressed_commands_route_past_assistant(prefix):
     restore_defaults()
