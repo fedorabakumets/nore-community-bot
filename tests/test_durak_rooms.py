@@ -104,6 +104,26 @@ async def amounts_as_list(db, rid):
     return [r["amount"] for r in await amounts(db, rid)]
 
 
+async def test_minimum_stake_reserve_refund_and_win(db):
+    waiting = await run(db, 1, "create", config={"players": 3, "stake": 5})
+    await run(db, 2, "join", room=waiting)
+    assert await balance(db, 1) == await balance(db, 2) == 995
+    v = await api.snapshot(db, waiting, 1)
+    await run(db, 1, "cancel", room=waiting, rev=v["rev"])
+    assert await amounts_as_list(db, waiting) == [-5, -5, 5, 5]
+    assert await balance(db, 1) == await balance(db, 2) == 1000
+
+    playing = await run(db, 1, "create", config={"stake": 5})
+    await run(db, 2, "join", room=playing)
+    v = await api.snapshot(db, playing, 2)
+    await run(db, 2, "leave", room=playing, rev=v["rev"])
+    final = await api.snapshot(db, playing, 1)
+    assert final["status"] == "finished"
+    assert await amounts_as_list(db, playing) == [-5, -5, 10]
+    assert await balance(db, 1) == 1005
+    assert await balance(db, 2) == 995
+
+
 async def test_poor_player_disabled_games_and_cancel_before_start(db):
     await db.execute("UPDATE users SET cookies=99 WHERE user_id=3")
     with pytest.raises(ValueError, match="Для ставки"):
