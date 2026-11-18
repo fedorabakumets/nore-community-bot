@@ -251,6 +251,9 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
         answer.assert_not_awaited()
         group_answer.assert_not_awaited()
 
+        await db.add_cookies(settings.owner_id, 20, "test")
+        assert (await db.purchase_pet(settings.owner_id, "cat", "Кот", 10))[0]
+        await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=?", (settings.owner_id,))
         event = await dispatch(
             "нОРа, как настроение?",
             uid=settings.owner_id,

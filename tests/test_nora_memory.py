@@ -343,6 +343,10 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
     for uid in (1, 2, 7, 8):
         await db.ensure_user(uid, telegram_name=f'Участник {uid}')
     await db.execute('UPDATE users SET reputation = 80 WHERE user_id IN (1, 8)')
+    for uid in (1, 7):
+        await db.add_cookies(uid, 20, 'test')
+        assert (await db.purchase_pet(uid, 'cat', 'Кот', 10))[0]
+    await db.execute('UPDATE pet_development SET stage=5, level=2 WHERE user_id=1')
     await seed_yesterday(db)
     session = TelegramSession()
     bot = Bot(settings.bot_token, session=session)
@@ -383,7 +387,12 @@ async def test_memory_question_in_dispatcher(db, settings, clock, monkeypatch):
         assert 'другом чате' not in sent_prompt
         clock.now += 6
         await dispatch('Нора, что вчера обсуждали про кино?', uid=7)
-        assert replies() and replies()[0].text == 'Вчера обсуждали кино, выбрали комедию.'
+        assert '2 уровне' in replies()[0].text
+        assert request.await_count == 1
+        assert await db.get_bot_state('nora_ai_daily:7') is None
+        await db.execute('UPDATE pet_development SET stage=5, level=2 WHERE user_id=7')
+        await dispatch('Нора, что вчера обсуждали про кино?', uid=7)
+        assert replies()[0].text == 'Вчера обсуждали кино, выбрали комедию.'
         assert request.await_count == 2
         clock.now += 6
         reply_msg = bot_message('Вчера обсуждали кино, выбрали комедию.', ai_id)

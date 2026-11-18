@@ -1,6 +1,5 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
 from test_nora_game import content, request
@@ -51,10 +50,9 @@ async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, 
     await db.add_cookies(1, 10, 'test')
     await db.purchase_pet(1, 'cat', 'Кот', 1)
     await db.execute('UPDATE pet_development SET stage=5,level=2 WHERE user_id=1')
-    settings = SimpleNamespace(owner_ids=set(), moderator_ids=set())
     monkeypatch.setattr(expedition, 'roll_expedition_loot', lambda _: expedition.ExpeditionLoot('cookies', 10))
     assert (await db.start_expedition(1))[0]
-    assert 'в походе' in await assistant_access_error(1, settings, db)
+    assert 'в походе' in await assistant_access_error(1, db)
     pet = await db.get_pet(1, settle=False)
     balance = (await db.get_user(1))['cookies']
     until = pet['expedition_until']
@@ -66,7 +64,7 @@ async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, 
         cabinet_api.pet_action(request(db, 1, {'token': token})),
     )
     assert sorted(call.status for call in calls) == [200, 409]
-    assert await assistant_access_error(1, settings, db) is None
+    assert await assistant_access_error(1, db) is None
     returned = await db.get_pet(1)
     assert returned['expedition_until'] is None and returned['expedition_loot'] is None
     assert all(returned[key] == pet[key] for key in ('hunger', 'thirst', 'mood'))

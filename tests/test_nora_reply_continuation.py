@@ -172,6 +172,10 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
     for uid in (1, 2, 7, 8):
         await db.ensure_user(uid, telegram_name=f"Участник {uid}")
     await db.execute("UPDATE users SET reputation = 80 WHERE user_id IN (1, 8)")
+    for uid in (1, 7, 8):
+        await db.add_cookies(uid, 20, "test")
+        assert (await db.purchase_pet(uid, "cat", "Кот", 10))[0]
+    await db.execute("UPDATE pet_development SET stage=5, level=2 WHERE user_id IN (1, 8)")
     session = TelegramSession()
     bot = Bot(settings.bot_token, session=session)
     monkeypatch.setattr(bot, "get_chat_member", AsyncMock(return_value=SimpleNamespace(status="member")))
@@ -209,6 +213,10 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         return [call for call in session.calls if isinstance(call, SendMessage)]
 
     try:
+        await dispatch("Нора, как настроение?", uid=2)
+        assert "заведите питомца" in replies()[0].text
+        assert not history_calls
+
         event = await dispatch("Нора, как настроение?", uid=1)
         assert replies() and replies()[0].text == "Привет, помню первый вопрос."
         ai_message_id = session.message_id
@@ -229,9 +237,12 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         assert replies()[0].reply_parameters.message_id == event.message_id
         continued_id = session.message_id
         clock.now += 6
-        await dispatch(
-            "а мне?", uid=7, reply_to_message=bot_message("Продолжаю: помню контекст.", continued_id),
-        )
+        other_dialogue = bot_message("Продолжаю: помню контекст.", continued_id)
+        await dispatch("а мне?", uid=7, reply_to_message=other_dialogue)
+        assert "2 уровне" in replies()[0].text
+        assert len(history_calls) == 2
+        assert await db.get_bot_state("nora_ai_daily:7") is None
+        await dispatch("а мне?", uid=8, reply_to_message=other_dialogue)
         assert len(history_calls) == 3
         assert history_calls[-1] == ([], "а мне?")
         assert replies() and replies()[0].text == "Привет, помню первый вопрос."
@@ -253,7 +264,7 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         await dispatch("Нора, а кто тут главный?")
         assert replies()[0].text == "Чатом владеет Владелец <чата>." and replies()[0].parse_mode is None
         get_admins.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
-        await dispatch("Нора, расскажи о сообществе", uid=7)
+        await dispatch("Нора, расскажи о сообществе", uid=8)
         assert replies()[0].text == "Это «Нора». Петербургское сообщество"
         get_chat.assert_awaited_once_with(settings.community_chat_id, request_timeout=5)
         get_chat.reset_mock()
@@ -267,11 +278,9 @@ async def test_reply_continues_dialogue_through_isolated_dispatcher(db, settings
         assert replies()[0].text == "В Telegram твоё имя — Участник 1."
         assert len(history_calls) == 3
 
-        await db.ensure_user(7)
-        await db.add_cookies(7, 20, "test")
-        assert (await db.purchase_pet(7, "cat", "Кот", 10))[0]
-        await dispatch("Нора, как дела?", uid=7, chat_id=7)
-        assert "2 уровне" in replies()[0].text
+        for chat_id in (settings.community_chat_id, 7):
+            await dispatch("Нора, как дела?", uid=7, chat_id=chat_id)
+            assert "2 уровне" in replies()[0].text
         await db.execute("UPDATE pet_development SET stage=5,level=2 WHERE user_id=7")
         assert (await db.start_expedition(7))[0]
         await dispatch("Нора, как дела?", uid=7)

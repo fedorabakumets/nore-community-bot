@@ -26,25 +26,17 @@ assistant_router = Router(name="nora_assistant")
 _NORA = re.compile(r"(?i)^\s*нора\b")
 
 
-async def has_assistant_access(user_id: int, settings: Settings, db: Database | None) -> bool:
-    if user_id in settings.owner_ids | settings.moderator_ids:
-        return True
-    return bool(db and await level(db, user_id) >= 2 and await db.feature_enabled("tamagotchi"))
-
-
-async def assistant_access_error(
-    user_id: int, settings: Settings, db: Database | None, *, in_community: bool = False,
-) -> str | None:
-    if not in_community and not await has_assistant_access(user_id, settings, db):
-        if db and not await db.feature_enabled("tamagotchi"):
-            return "Нора ИИ сейчас недоступна: питомцы временно отключены."
-        if db and not await db.get_pet(user_id, settle=False):
-            return "Чтобы общаться с Норой ИИ, сначала заведите питомца и достигните 2 уровня."
+async def assistant_access_error(user_id: int, db: Database | None) -> str | None:
+    if db is None or not await db.feature_enabled("tamagotchi"):
+        return "Нора ИИ сейчас недоступна: питомцы временно отключены."
+    pet_level = await level(db, user_id)
+    pet = await db.get_pet(user_id, settle=pet_level >= 2)
+    if not pet:
+        return "Чтобы общаться с Норой ИИ, сначала заведите питомца и достигните 2 уровня."
+    if pet_level < 2:
         return "Нора ИИ открывается на 2 уровне питомца."
-    if db:
-        pet = await db.get_pet(user_id)
-        if pet and pet.get("expedition_until"):
-            return "Пока питомец в походе, Нора ИИ недоступна. Верните питомца через «Питомец» или /pet."
+    if pet.get("expedition_until"):
+        return "Пока питомец в походе, Нора ИИ недоступна. Верните питомца через «Питомец» или /pet."
     return None
 
 
@@ -117,9 +109,7 @@ async def nora_address(
         prompt = openrouter_chat.prompt_for(message)
         if not prompt:
             return
-        error = await assistant_access_error(
-            message.from_user.id, settings, db, in_community=openrouter_chat.can_read_archive(message),
-        )
+        error = await assistant_access_error(message.from_user.id, db)
         if error:
             await message.reply(error, parse_mode=None)
             return
@@ -165,13 +155,12 @@ async def nora_reply_continuation(
     found = openrouter_chat.continuation_for(message)
     if found is None and openrouter_chat.continuation_for(message, allow_other_user=True) is None:
         return
-    in_community = openrouter_chat.can_read_archive(message)
-    error = await assistant_access_error(message.from_user.id, settings, db, in_community=in_community)
+    error = await assistant_access_error(message.from_user.id, db)
     if error:
         await message.reply(error, parse_mode=None)
     elif found is not None:
         await _respond_to_prompt(message, settings, openrouter_chat, *found)
-    elif in_community:
+    elif openrouter_chat.can_read_archive(message):
         await _respond_to_prompt(message, settings, openrouter_chat, message.text or "")
 
 
