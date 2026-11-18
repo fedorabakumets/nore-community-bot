@@ -32,7 +32,7 @@ try {
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
-    emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); this.dispatchEvent(e); }
+    emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); return this.dispatchEvent(e); }
   }
   const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
   const sceneryWindow={matchMedia:()=>({matches:false})};
@@ -136,7 +136,7 @@ try {
     const joystick = root.querySelector('.nora-world-joystick');
     const stick = (x,z,down=false) => joystick.emit(down?'pointerdown':'pointermove',{pointerId:1,clientX:60+x*36,clientY:60+z*36});
     const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
-    return {window,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
+    return {window,document,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
   }
   function goToIsland(world){
     const {x,z}=world.window.NoraScenery.tavernPortal;
@@ -253,7 +253,55 @@ try {
   assert.ok(aim().distanceTo(tilted)<1e-5,'the first movement after settings resets the reference position');
   mouseMove(180,250);
   assert.ok(aim().y<tilted.y-.1,'the mouse can turn the camera again after settings close');
+  const {canvas:mouseCanvas,document:mouseDocument}=mouseWorld;
+  let lockRequests=0;
+  const clickScene=(button=0)=>mouseCanvas.emit('pointerdown',{pointerType:'mouse',pointerId:1,button});
+  const changeLock=element=>{
+    mouseDocument.pointerLockElement=element;
+    mouseDocument.emit('pointerlockchange');
+  };
+  mouseCanvas.requestPointerLock=()=>{lockRequests++;};
+  mouseDocument.exitPointerLock=()=>changeLock(null);
+  clickScene(2);
+  assert.equal(lockRequests,0,'right click leaves the cursor free');
+  clickScene();
+  clickScene();
+  assert.equal(lockRequests,1,'left click requests lock once until resolved');
+  changeLock(mouseCanvas);
+  const beforeLockTurn=aim();
+  for(let i=0;i<8;i++){
+    mouseCanvas.emit('mousemove',{movementX:100,movementY:0,clientX:195,clientY:200});
+  }
+  const afterLockTurn=aim();
+  assert.ok(afterLockTurn.distanceTo(beforeLockTurn)>1,'relative input turns past the canvas width with fixed cursor coordinates');
+  mouseMove(10,40);mouseMove(200,200);
+  assert.ok(aim().distanceTo(afterLockTurn)<1e-5,'pointermove does not rotate a second time while locked');
+  assert.equal(mouseWorld.window.emit('keydown',{key:'Escape'}),false,'Escape releases the mouse before the game can close');
+  assert.equal(mouseDocument.pointerLockElement,null);
+  mouseMove(10,40);mouseMove(200,200);
+  assert.ok(aim().distanceTo(afterLockTurn)<1e-5,'the freed mouse can reach HUD buttons without turning');
+  clickScene();
+  changeLock(mouseCanvas);
+  assert.equal(mouseWorld.window.emit('keydown',{key:'Tab'}),true,'Tab keeps normal keyboard focus navigation');
+  assert.equal(mouseDocument.pointerLockElement,null);
+  clickScene();
+  changeLock(mouseCanvas);
+  mouseWorld.root.emit('nora-settings-open');
+  assert.equal(mouseDocument.pointerLockElement,null,'settings release the mouse');
+  clickScene();
+  mouseWorld.window.emit('blur');
+  changeLock(mouseCanvas);
+  assert.equal(mouseDocument.pointerLockElement,null,'a lock acquired after blur is released');
+  mouseCanvas.requestPointerLock=()=>Promise.reject(new Error('Pointer lock denied'));
+  clickScene();
+  await flush();
+  mouseMove(10,40);mouseMove(110,40);
+  assert.ok(aim().distanceTo(afterLockTurn)>.4,'a denied request falls back to mouse look');
+  mouseCanvas.requestPointerLock=()=>{lockRequests++;};
+  clickScene();
+  changeLock(mouseCanvas);
   mouseWorld.stop();
+  assert.equal(mouseDocument.pointerLockElement,null,'closing the world releases the mouse');
   // Sustained and repeated inputs must stay screen-relative, not merely move
   // in a fixed world direction while the camera swings away underneath them.
   for(const view of [0,1,2])for(const device of ['keyboard','touch']) {
