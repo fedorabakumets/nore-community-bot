@@ -123,7 +123,9 @@ async function main(){
     }
     await choose(a,'deck',24);assert.ok(await a.locator('[data-option=players][data-value="5"]').isDisabled());
     await choose(a,'speed','fast');await choose(a,'variant','transfer');await choose(a,'honesty','cheats');
-    await a.locator('#dk-stake').fill('5');await shot(a,'durak-create');
+    await a.locator('#dk-stake').fill('0');
+    assert.equal(await a.locator('#dk-stake').getAttribute('aria-valuetext'),'5 печенек');
+    await a.locator('#dk-stake').fill('10');await shot(a,'durak-create');
     await a.locator('#dk-private').check();await clicks(a,'create');await ready(a,'[data-dk=friends]');
     const privateId=await tableId(a),waiting=await state(a,privateId);
     assert.equal(waiting.config.stake,250);assert.ok(waiting.config.private);
