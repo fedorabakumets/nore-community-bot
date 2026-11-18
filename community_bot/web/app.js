@@ -350,6 +350,19 @@ void startApp();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
+const AVATAR_MAX_MB = 40;
+async function uploadProfilePhoto(file, revision) {
+  if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw Error(`Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw Error('Выбери JPG, PNG или WebP');
+  const response = await fetch('/api/profile/avatar', {
+    method: 'POST',
+    headers: {Authorization: 'tma ' + auth, 'Content-Type': file.type, 'X-Profile-Revision': revision},
+    body: file,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(result.error || 'Не удалось загрузить фото');
+  return result;
+}
 let avatarURL=null,avatarKey='',avatarLoading=false;
 function paintOwnAvatar(){if(!avatarURL)return;document.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="Фото профиля">`})}
 async function loadAvatar(){
@@ -365,7 +378,27 @@ async function loadAvatar(){
   }catch{ /* A failed photo request leaves a usable initial in the circle. */ }
   finally{avatarLoading=false;if(data?.has_avatar&&!data.avatar_video&&data.revision!==key)queueMicrotask(loadAvatar)}
 }
-document.addEventListener('change',async e=>{if(e.target.id!=='avatar-file')return;const file=e.target.files?.[0];if(!file||busy)return;if(file.size>5*1024*1024){toast('Фото должно быть не больше 5 МБ');e.target.value='';return}if(!['image/jpeg','image/png','image/webp'].includes(file.type)){toast('Выбери JPG, PNG или WebP');return}busy=true;const b=$('#change-avatar');if(b){b.disabled=true;b.textContent='Загружаем фото…'}try{const r=await fetch('/api/profile/avatar',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type,'X-Profile-Revision':data.revision},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить фото');toast(j.message);data=await api('me');render()}catch(err){toast(err.message);if(b){b.disabled=false;b.textContent='Повторить загрузку фото'}}finally{busy=false}});
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'avatar-file') return;
+  const file = e.target.files?.[0];
+  if (!file || busy) return;
+  e.target.value = '';
+  const button = $('#change-avatar');
+  busy = true;
+  if (button) button.disabled = true;
+  try {
+    toast('Загружаем фото…');
+    const result = await uploadProfilePhoto(file, data.revision);
+    toast(result.message);
+    data = await api('me');
+    render();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    if (button) button.disabled = false;
+    busy = false;
+  }
+});
 async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 

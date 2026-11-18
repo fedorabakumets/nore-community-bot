@@ -52,14 +52,20 @@ function profileWizard(index){
   if(index===undefined)index=Math.max(0,data.profile.blocks.findIndex(b=>!b.filled));
   if(index>=steps.length){if(data.profile.fill_percent!==100){profileWizard();return}sheet('<h2>Профиль заполнен!</h2><p>Комьюнити, магазин, события и игры доступны. Добро пожаловать в Нору.</p><button class="primary" data-wizard-done>Готово</button>');return}
   const [key,label,max]=steps[index],photo=index===4,revision=data.revision;
-  sheet(`<span class="eyebrow">Шаг ${index+1} из 5</span><h2>${label}</h2><progress max="5" value="${index}" aria-label="Прогресс заполнения"></progress><form id="wizard-form">${photo?`<p class="sub">Добавь фото JPG, PNG или WebP до 5 МБ.${data.has_avatar?' Аватар уже установлен — можно продолжить.':''}</p><input aria-label="Фото профиля" type="file" accept="image/jpeg,image/png,image/webp" ${data.has_avatar?'':'required'}>`:`<label>${label}${index>1?`<textarea required name="value" maxlength="${max}" rows="4">${esc(data.user[key]||'')}</textarea>`:`<input name="value" required ${index===1?'type="date"':`maxlength="${max}"`} value="${esc(data.user[key]||'')}">`}</label>`}<p class="sub">Каждый шаг сохраняется отдельно. Если закроешь окно, продолжишь с незаполненного поля.</p><button class="primary" type="submit">${photo?'Завершить':'Сохранить и продолжить'}</button>${index?'<button class="secondary" type="button" data-wizard-back>Назад</button>':''}</form>`);
+  sheet(`<span class="eyebrow">Шаг ${index+1} из 5</span><h2>${label}</h2><progress max="5" value="${index}" aria-label="Прогресс заполнения"></progress><form id="wizard-form">${photo?`<p class="sub">Добавь фото JPG, PNG или WebP до ${AVATAR_MAX_MB} МБ.${data.has_avatar?' Аватар уже установлен — можно продолжить.':''}</p><input aria-label="Фото профиля" type="file" accept="image/jpeg,image/png,image/webp" ${data.has_avatar?'':'required'}>`:`<label>${label}${index>1?`<textarea required name="value" maxlength="${max}" rows="4">${esc(data.user[key]||'')}</textarea>`:`<input name="value" required ${index===1?'type="date"':`maxlength="${max}"`} value="${esc(data.user[key]||'')}">`}</label>`}<p class="sub">Каждый шаг сохраняется отдельно. Если закроешь окно, продолжишь с незаполненного поля.</p><button class="primary" type="submit">${photo?'Завершить':'Сохранить и продолжить'}</button>${index?'<button class="secondary" type="button" data-wizard-back>Назад</button>':''}</form>`);
   const form=$('#wizard-form');form.querySelector('[data-wizard-back]')?.addEventListener('click',()=>profileWizard(index-1));
   form.onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const button=form.querySelector('[type=submit]');button.disabled=true;
     try{
-      if(photo){const file=form.querySelector('input').files[0];if(file){if(file.size>5*1024*1024)throw Error('Фото должно быть не больше 5 МБ');const r=await fetch('/api/profile/avatar',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type,'X-Profile-Revision':revision},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить фото')}}
+      if(photo){
+        const file=form.querySelector('input').files[0];
+        if(file){
+          button.textContent='Загружаем фото…';
+          await uploadProfilePhoto(file,revision);
+        }
+      }
       else {const value=form.elements.value.value.trim();await api('profile',{fields:{[key]:value},revision})}
       data=await api('me');render();if($('#sheet').open&&$('#wizard-form')===form)profileWizard(index+1);
-    }catch(err){toast(err.message);button.disabled=false}finally{busy=false}
+    }catch(err){toast(err.message);if(photo)button.textContent='Завершить';button.disabled=false}finally{busy=false}
   };
 }
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-profile-wizard'))profileWizard();if(b.hasAttribute('data-wizard-done'))$('#sheet').close()});

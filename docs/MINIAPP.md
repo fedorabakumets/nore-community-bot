@@ -84,7 +84,7 @@ POST /api/profile принимает только fields и revision. Все п�
 новой схемы/копии профилей нет. При открытой форме автообновление её не перезаписывает;
 после закрытия, возврата в приложение и каждые30секунд видимый экран обновляется.
 
-POST /api/profile/avatar принимает JPG/PNG/WebP до5МБ с X-Profile-Revision.
+POST /api/profile/avatar принимает JPG/PNG/WebP до 40 МБ с X-Profile-Revision.
 Pillow проверяет изображение (до20Мп), удаляет метаданные и уменьшает до1600px.
 Фото отправляется владельцу в личку без звука, Telegram file_id сохраняется
 в общих avatar_file_id/avatar_media_type. GET того же адреса с подписанной

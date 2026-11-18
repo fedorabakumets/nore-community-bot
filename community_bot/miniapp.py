@@ -22,6 +22,8 @@ from community_bot.database import Database
 
 ROOT = Path(__file__).parent / 'web'
 ASSETS = Path(__file__).parent.parent / 'assets'
+AVATAR_MAX_MB = 40
+AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
 
 
 
@@ -96,10 +98,12 @@ async def protection(request, handler):
             payload = await decorate_game_people(request.app['db'], request.app['settings'], json.loads(response.body))
             response.body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     except web.HTTPRequestEntityTooLarge:
-        large = request.path.startswith(('/api/admin', '/api/events/upload'))
-        limit = 'Файл должен быть не больше 20 МБ' if large else (
-            'Фотография должна быть не больше 5 МБ'
-        )
+        if request.path == '/api/profile/avatar':
+            limit = f'Фотография должна быть не больше {AVATAR_MAX_MB} МБ'
+        elif request.path.startswith(('/api/admin', '/api/events/upload')):
+            limit = 'Файл должен быть не больше 20 МБ'
+        else:
+            limit = 'Слишком большой запрос'
         response = web.json_response({'error': limit}, status=413)
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
@@ -109,7 +113,7 @@ async def protection(request, handler):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
-            {'error': 'Проверь поля профиля, формат и размер фотографии (до 5 МБ)'}, status=400,
+            {'error': 'Проверь поля профиля'}, status=400,
         )
     except (KeyError, TypeError, json.JSONDecodeError):
         response = web.json_response({'error': 'Проверьте данные запроса'}, status=400)
@@ -378,13 +382,17 @@ async def upload_avatar(request):
     if revision != profile_revision(user):
         return web.json_response({'error': 'Профиль изменился. Обнови ЛК и повтори загрузку'}, status=409)
     if request.content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
-        raise ValueError('Выбери фотографию JPG, PNG или WebP')
-    raw = await request.read()
-    if not raw or len(raw) > 5 * 1024 * 1024:
-        raise ValueError('Фотография должна быть не больше 5 МБ')
+        return web.json_response({'error': 'Выбери фотографию JPG, PNG или WebP'}, status=400)
+    # Older aiohttp versions reject bodies equal to client_max_size.
+    raw = await request.clone(client_max_size=AVATAR_MAX_BYTES + 1).read()
+    if len(raw) > AVATAR_MAX_BYTES:
+        raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, len(raw))
     from community_bot.media_cache import images
 
-    photo = await images(request).normalize(raw)
+    try:
+        photo = await images(request).normalize(raw)
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
     try:
         sent = await request.app['bot'].send_photo(
             user['user_id'], BufferedInputFile(photo, filename='nora-avatar.jpg'),
