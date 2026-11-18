@@ -8,7 +8,7 @@ const ranks = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
 const suits = ['♣','♦','♥','♠'];
 // Equal distances on the slider span the same ratio. Both decades use the same convenient stops.
 const firstDecade=[100,125,150,175,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950];
-const values=[...firstDecade,...firstDecade.map(n=>n*10),10000];
+const values=[5,10,25,50,75,...firstDecade,...firstDecade.map(n=>n*10),10000];
 const face = c => '/durak-cards/'+ranks[c>>2]+'CDHS'[c%4]+'.svg';
 const faceName = c => (ranks[c>>2]==='T'?'10':ranks[c>>2])+suits[c%4];
 const chips = n => number(n)+' 🍪';
@@ -80,7 +80,7 @@ function createScreen(){
   const range=Math.max(0,values.findIndex(n=>n>=config.stake));
   return `${header('Создание игры')}<div class="dk-panel"><div class="dk-stake"><label for="dk-stake">Твоя ставка</label><span>${chips(config.stake)}</span></div>
     <input id="dk-stake" type="range" min="0" max="${values.length-1}" step="1" value="${range}" aria-valuetext="${config.stake} печенек">
-    <div class="dk-ends"><small>100</small><small>1 000</small><small>10 000 🍪</small></div>
+    <div class="dk-ends"><small>5</small><small>1 000</small><small>10 000 🍪</small></div>
     <small class="dk-muted">Баланс ${chips(list?.balance||0)}</small></div>
     <div class="dk-panel dk-setup">${group('players','Игроки')}<div class="dk-deck-speed">${group('deck','Колода')}${group('speed','Скорость')}</div>
     ${config.deck===24||config.players>4?'<small class="dk-muted">Колода на 24 карты вмещает до четырёх игроков.</small>':''}
