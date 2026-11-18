@@ -37,10 +37,11 @@ window.NoraRecords = (() => {
     root.querySelector('.nora-world-bar').append(inventory);
     const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Пластинки и инвентарь');
     root.append(panel);
+    let homeTrack, visiting=false;
     function track(){
-      const id=inLobby?deck?.record:state?.player;
+      const id=inLobby?deck?.record:homeTrack||(visiting?null:state?.player);
       if(id===activeTrack&&inLobby===activeLobby)return;
-      activeTrack=id;activeLobby=inLobby;sounds?.record?.(id?catalog[id].url:null,inLobby);
+      activeTrack=id;activeLobby=inLobby;sounds?.record?.(id?(catalog[id]?.url||homeTrack):null,inLobby);
     }
     function applyDeck(next){
       if(deck&&deck.revision>=next.revision)return;
@@ -155,6 +156,7 @@ window.NoraRecords = (() => {
     load();
     return {
       refresh:load,
+      homeMusic(url,guest){homeTrack=url;visiting=guest;track();},
       panelOpen:()=>panel.open,
       hasRecord:()=>!!state?.player,
       lobbyPlaying:()=>!!deck?.playing,

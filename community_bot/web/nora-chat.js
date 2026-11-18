@@ -58,7 +58,7 @@ window.NoraChat = (() => {
     return sprite;
   }
 
-  function mount(root, T, player, findAvatar, reset, location) {
+  function mount(root, T, player, findAvatar, reset, location, visitAction) {
     root.insertAdjacentHTML('beforeend', `
       <button type="button" class="nora-chat-open" aria-controls="nora-chat" aria-expanded="false">Чат<span hidden aria-hidden="true"></span></button>
       <aside class="nora-chat-mini" aria-label="Последние сообщения" hidden><ol></ol></aside>
@@ -72,7 +72,7 @@ window.NoraChat = (() => {
             <button type="button" class="nora-chat-close" aria-label="Закрыть чат" autofocus>×</button></div>
           </div>
           <div class="nora-chat-feed" role="log" aria-label="Сообщения" tabindex="0">
-            <ol></ol><div class="nora-chat-empty">Загрузка сообщений…</div>
+            <ol></ol><section class="nora-visit-messages" aria-label="Личные сообщения системы"></section><div class="nora-chat-empty">Загрузка сообщений…</div>
           </div>
           <form class="nora-chat-form">
             <div class="nora-chat-draft-quote" hidden>
@@ -114,12 +114,48 @@ window.NoraChat = (() => {
     const rows = new Map(), bubbles = new Map();
     let revision = '', timer, stopped = false, polling = false, online = false, sending = false;
     let pollRequest, previewTimer;
-    let previewLines = [];
+    let previewLines = [], visitPreview = null;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let shownStatus = '', currentRoom = location(), telegram = false, view = 0, replyTo = null;
-    title.textContent = roomNames[currentRoom];
+    title.textContent = roomNames[currentRoom] || 'Нора · '+currentRoom.slice(7);
     document.fonts?.load('15px NoraCraft').catch(() => {});
 
+    const system=dialog.querySelector('.nora-visit-messages');
+    let visitRevision='';
+    const visitText=n=>n.other+({request:' просится к тебе в нору.',invite:' приглашает тебя в свою нору.',
+      allowed:' открыл для тебя нору.',declined:' отклонил запрос на визит.'}[n.kind]||'');
+    function visits(notes){
+      const revision=notes.map(n=>n.id).join();
+      if(visitRevision===revision)return;
+      const fresh=notes.filter(n=>!system.querySelector('[data-note="'+n.id+'"]')).at(-1);
+      visitRevision=revision;system.replaceChildren();
+      if(fresh&&!dialog.open){
+        dot.hidden=false;opener.setAttribute('aria-label','Чат · личное сообщение от Норы');
+        visitPreview={id:fresh.id,line:{author:'[NORA]',text:visitText(fresh),color:7},until:Date.now()+12000};
+      }
+      if(!notes.some(n=>n.id===visitPreview?.id))visitPreview=null;
+      renderPreview();
+      for(const n of notes){
+        const card=document.createElement('article');card.dataset.note=n.id;
+        const name=document.createElement('strong');name.textContent='[NORA]';
+        const msg=document.createElement('p');msg.textContent=visitText(n);
+        card.append(name,msg);system.append(card);
+        const options=n.kind==='request'?[['accept','Впустить'],['decline','Отказать']]:
+          n.kind==='invite'?[['accept','В гости'],['decline','Отказать']]:
+          n.kind==='allowed'?[['enter','Залезть в нору'],['dismiss','Закрыть']]:[['dismiss','Закрыть']];
+        for(const [action,label] of options){
+          const b=document.createElement('button');b.textContent=label;
+          b.onclick=async()=>{
+            const buttons=card.querySelectorAll('button');buttons.forEach(x=>x.disabled=true);
+            try{await visitAction(n,action);card.remove();if(action==='enter'||(n.kind==='invite'&&action==='accept'))dialog.close();void poll();}
+            catch(error){shownStatus=error.message;updateForm();buttons.forEach(x=>x.disabled=false);}
+          };
+          card.append(b);
+        }
+      }
+      empty.hidden=rows.size>0||notes.length>0;
+      if(dialog.open&&fresh)feed.scrollTop=feed.scrollHeight;
+    }
     function updateForm() {
       input.disabled = !online;
       send.disabled = !online || sending || !input.value.trim();
@@ -138,7 +174,7 @@ window.NoraChat = (() => {
       revision = '';
       online = false;
       shownStatus = '';
-      title.textContent = roomNames[currentRoom];
+      title.textContent = roomNames[currentRoom] || 'Нора · '+currentRoom.slice(7);
       dot.hidden = true;
       updateFeed([]);
       for (const key of bubbles.keys()) clearBubble(key);
@@ -173,6 +209,7 @@ window.NoraChat = (() => {
       dialog.showModal();
       close.focus({preventScroll:true});
       opener.setAttribute('aria-expanded', 'true');
+      opener.setAttribute('aria-label','Чат');
       dot.hidden = true;
       feed.scrollTop = feed.scrollHeight;
       if (!online) void poll();
@@ -223,7 +260,7 @@ window.NoraChat = (() => {
       clearTimeout(previewTimer);
       const now = Date.now();
       previewLines = previewLines.filter(entry => entry.until > now);
-      const active = showMini ? previewLines : [];
+      const active = showMini ? [...previewLines,...(visitPreview?.until>now?[visitPreview]:[])].slice(-3) : [];
       const latest = active.map(({line, until}) => {
         const row = document.createElement('li');
         const message = document.createElement('span');
@@ -306,7 +343,7 @@ window.NoraChat = (() => {
       }
       if (bottom) feed.scrollTop = feed.scrollHeight;
       else if (first?.isConnected) feed.scrollTop = first.offsetTop - offset;
-      empty.hidden = rows.size > 0;
+      empty.hidden = rows.size > 0 || !!system.children.length;
       empty.textContent = 'Здесь появятся сообщения этого чата.';
     }
 
@@ -335,6 +372,7 @@ window.NoraChat = (() => {
         online = true;
         revision = result.revision;
         if (result.messages) updateFeed(result.messages);
+        if(result.visits)visits(result.visits);
       } catch (error) {
         if (stopped || polledView !== view) return;
         revision = '';

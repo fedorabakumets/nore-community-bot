@@ -8,8 +8,8 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"aim-actions", "nora-world":"aim-actions", "nora-chat":"preview-expiry", "nora-cinema":"reticle-hud", "nora-scenery":"lobby-portals",
-        "nora-voxel":"lobby-cinema", "nora-observatory":"reticle-hud"}[name];
+      const version = {"nora-companion":"aim-actions", "nora-world":"burrows", "nora-chat":"burrows", "nora-cinema":"burrows", "nora-scenery":"burrows", "nora-burrow":"burrows", "nora-burrow-models":"burrows",
+        "nora-voxel":"burrows", "nora-observatory":"reticle-hud"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
       document.head.appendChild(script);
@@ -17,7 +17,7 @@
     return scripts.get(name);
   }
   async function loadGame() {
-    for (const name of ["nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-chat", "nora-cinema", "nora-world"]) await loadScript(name);
+    for (const name of ["nora-burrow-models", "nora-burrow", "nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-chat", "nora-cinema", "nora-world"]) await loadScript(name);
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;
@@ -368,7 +368,7 @@
     };
     const sounds = music?.worldAudio();
     try {
-      const stop = await window.NoraWorld.mount(root.querySelector('canvas'), root, outfit, sounds);
+      const stop = await window.NoraWorld.mount(root.querySelector('canvas'), root, outfit, sounds, nickname);
       if (root.isConnected) sceneStop = stop; else stop();
     } catch (_) {
       sounds?.stop();
@@ -489,7 +489,7 @@
       const version = active;
       try {
         const result = await api('nora-game/outfit', {...outfit});
-        if (version === active && root.isConnected) { outfit={...defaults,...result.outfit,wings:wingState.equipped}; world(nickname); }
+        if (version === active && root.isConnected) { outfit={...defaults,...result.outfit,wear:outfit.wear,wings:wingState.equipped}; world(nickname); }
       } catch (error) {
         if (version === active && root.isConnected) {
           root.querySelector('.nora-game-error').textContent = error.message;

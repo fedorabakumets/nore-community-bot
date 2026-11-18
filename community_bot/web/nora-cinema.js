@@ -72,8 +72,13 @@ window.NoraCinema = (() => {
     const life = new AbortController();
     const on = (target, name, handler) => target.addEventListener(name, handler, {signal: life.signal});
     const {screen, seats, seatReach} = layout;
-    const plane = new T.Matrix4().makeScale(screen.width / surfaceWidth, -screen.height / surfaceHeight, 1)
-      .setPosition(screen.x - screen.width / 2, screen.y + screen.height / 2, screen.z);
+    const plane = new T.Matrix4();
+    let homeRoom=null, homeOwner=false;
+    function setScreen(surface){
+      plane.makeScale(surface.width/surfaceWidth,-surface.height/surfaceHeight,1)
+        .setPosition(surface.x-surface.width/2,surface.y+surface.height/2,surface.z);
+      projectedWidth=0;
+    }
     const transform = new T.Matrix4();
     const lastTransform = new T.Matrix4();
     let projectedWidth = 0, projectedHeight = 0;
@@ -87,7 +92,7 @@ window.NoraCinema = (() => {
     }
 
     function request(params = {}) {
-      const query = new URLSearchParams({session: sessionId() || '', ...params});
+      const query = new URLSearchParams({session: sessionId() || '', ...(homeRoom?{room:homeRoom}:{}), ...params});
       return api('nora-game/cinema?' + query, undefined, AbortSignal.timeout(7000));
     }
 
@@ -114,8 +119,8 @@ window.NoraCinema = (() => {
 
     function render() {
       const connected = revision !== '?';
-      const leading = !!show && (show.host || moderator);
-      picker.hidden = !connected || !!show && !leading;
+      const leading = !!show && (homeRoom ? homeOwner : show.host || moderator);
+      picker.hidden = !connected || (homeRoom && !homeOwner) || !!show && !leading;
       controls.hidden = !connected || !leading;
       toggle.textContent = show?.playing ? 'Пауза для всех' : 'Продолжить для всех';
       retry.hidden = !playerError;
@@ -159,7 +164,7 @@ window.NoraCinema = (() => {
       const session = sessionId();
       const sentRevision = revision;
       try {
-        await api('nora-game/cinema', {session, revision, action, ...fields}, AbortSignal.timeout(7000));
+        await api('nora-game/cinema', {session, revision, action, ...(homeRoom?{room:homeRoom}:{}), ...fields}, AbortSignal.timeout(7000));
         if (!active || session !== sessionId()) return;
         if (action === 'start') {
           picker.open = false;
@@ -287,7 +292,7 @@ window.NoraCinema = (() => {
         range.max = String(Math.ceil(duration));
         range.value = String(at);
       }
-      if (ended && show.host && !warned) {
+      if (ended && (homeRoom?homeOwner:show.host) && !warned) {
         warned = true;
         void command('stop');
       }
@@ -373,13 +378,18 @@ window.NoraCinema = (() => {
       if (panel.open) panel.close();
       clearPlayer();
       tools.hidden = true;
-      root.classList.remove('nora-cinema-room', 'nora-cinema-seated');
+      root.classList.remove('nora-cinema-room', 'nora-cinema-seated','nora-tv-room');
+      homeRoom=null;homeOwner=false;opener.hidden=false;
     }
 
-    function enter() {
+    function enter(room=null,surface=screen,owner=false) {
+      homeRoom=room;homeOwner=owner;setScreen(surface);
+      opener.hidden=!!room;
+      panel.querySelector('h2').textContent=room?'Телевизор':'Проектор';
+      panel.setAttribute('aria-label',room?'Домашний телевизор':'Проектор кинотеатра');
       active = true;
       tools.hidden = false;
-      root.classList.add('nora-cinema-room');
+      root.classList.add(room?'nora-tv-room':'nora-cinema-room');
       render();
     }
 
@@ -456,7 +466,7 @@ window.NoraCinema = (() => {
       },
       panelOpen: () => panel.open,
       packet: () => ({cinema: revision, seat: requestedSeat}),
-      enter, leave, receive, project, sync,
+      openPanel:()=>opener.click(), enter, leave, receive, project, sync,
       dispose() {
         leave();
         life.abort();

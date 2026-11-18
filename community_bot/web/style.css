@@ -1732,3 +1732,38 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 }
 .commands-guide dd { margin: 4px 0 0; color: var(--poster-muted); font-size: 14px; line-height: 1.5; }
 .commands-guide .card .sub { margin: 8px 0 0; }
+
+/* Burrow workshop and private visit cards */
+.nora-burrow {
+  width:min(34rem,94vw); max-height:82dvh; padding:16px; color:#f5e9d7;
+  border:2px solid #a98162; border-radius:10px; background:#28202a;
+  box-shadow:0 8px 0 #130f19,0 16px 60px #0009;
+}
+.nora-burrow[open]{display:flex;flex-direction:column;gap:12px}
+.nora-burrow::backdrop{background:#110d17a8}
+.nora-burrow header,.nora-burrow .burrow-tabs,.nora-burrow form,.burrow-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.nora-burrow header{justify-content:space-between}
+.nora-burrow h2,.nora-visit-messages strong{font:1.05rem NoraCraft,monospace;color:#ffdfa9;margin:0}
+.nora-burrow header small{color:#f2c77c}
+.nora-burrow .burrow-tabs{border-bottom:1px solid #654953;padding-bottom:8px}
+.nora-burrow :is(button,select,input),.nora-visit-messages button{
+  font:inherit;font-size:.85rem;background:#43323d;border:1px solid #856458;color:#fff0df;
+  border-radius:6px;min-height:36px;padding:5px 10px;max-width:100%;
+}
+.nora-burrow button[aria-pressed=true],.nora-visit-messages button:first-of-type{background:#733e50;border-color:#dfaa81}
+.burrow-list{overflow:auto;min-height:0;overscroll-behavior:contain;scrollbar-color:#9d756e #30252e}
+.burrow-list article{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 4px;border-bottom:1px solid #523e48}
+.burrow-list canvas{width:52px;height:52px;position:static;flex:none;border:1px solid #5c454b;background:#312832;image-rendering:pixelated}
+.burrow-list article>div:first-of-type{flex:1;min-width:130px}
+.burrow-list article small{display:block;color:#dfcbbd;line-height:1.35;margin-top:4px}
+.burrow-actions select{min-width:0}
+.nora-burrow p{margin:0;font-size:.85rem}
+.nora-burrow button:disabled{opacity:.65}
+.nora-world-bar .burrow-manage{top:calc(var(--hud-tool-size) + 4px);right:calc(90 * var(--hud-px))}
+.burrow-manage[hidden]{display:none}
+.nora-tv-room .nora-cinema-tools{top:calc(var(--nora-top) + 2 * var(--hud-tool-size) + 10px)}
+.nora-visit-messages article{padding:9px;border-left:3px solid #e6b672;background:#3c2838;margin:6px 0}
+.nora-visit-messages p{margin:5px 0;color:#fff1dd}
+.nora-visit-messages button{margin-right:6px}
+.nora-tv-room{isolation:isolate;background:#291f24}
+@media(max-width:480px){.burrow-actions:has(select){width:100%}.nora-burrow{padding:11px}.burrow-actions select{max-width:100%}}

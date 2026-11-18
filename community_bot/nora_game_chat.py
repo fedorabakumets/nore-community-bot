@@ -223,13 +223,14 @@ def _room(presence, user_id, location):
 
     if location in SOLO_LOCATIONS:
         return f'home:{user_id}', SOLO_LOCATIONS[location]
-    if location not in ROOM_LABELS:
+    home = isinstance(location, str) and re.fullmatch(r'burrow:[A-Za-z]{3,16}', location)
+    if not home and location not in ROOM_LABELS:
         raise ValueError('Неизвестная локация чата.')
     if location != 'lobby':
         pose = presence.get(user_id)
         if not pose or time.monotonic() - pose[0] >= LOBBY_TTL or pose[2].get('room') != location:
             raise ValueError('Подключаем чат локации. Попробуй через секунду.')
-    return location, ROOM_LABELS[location]
+    return location, f'Нора · {location[7:]}' if home else ROOM_LABELS[location]
 
 
 async def feed(request):
@@ -240,7 +241,17 @@ async def feed(request):
     telegram = request.query.get('telegram') == '1'
     if telegram:
         await chat.member(user_id)
-    return web.json_response(chat.snapshot(user_id, request.query.get('after'), presence, room, telegram))
+    result = chat.snapshot(user_id, request.query.get('after'), presence, room, telegram)
+    visits = request.app.get('nora_visits')
+    if visits:
+        nickname = (presence.get(user_id) or (None, None, {}))[2].get('nickname')
+        if not nickname and visits.notes:
+            async with request.app['db'].connect() as db:
+                row = await (await db.execute('SELECT nickname FROM nora_game_players WHERE telegram_id=?',
+                                              (user_id,))).fetchone()
+                nickname = row[0] if row else None
+        result['visits'] = visits.inbox(nickname)
+    return web.json_response(result)
 
 
 def _profile_signature(nickname, secret):

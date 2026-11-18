@@ -262,6 +262,7 @@ window.NoraVoxel = (() => {
       for(const side of [-1,1])for(let y=12;y<=14;y++)for(let z=-2;z<=2;z++)for(let x=-2;x<=2;x++)dot(side*4+x,y,z,pant,'thigh'+(side<0?'Left':'Right'));
       for(const side of [-1,1])for(let y=7;y<=8;y++)for(let z=-1;z<=1;z++)for(let x=-2;x<=2;x++)dot(side*4+x,y,z,pant,'thigh'+(side<0?'Left':'Right'));
       for(const side of [-1,1])for(let y=19;y<=20;y++)for(let z=-1;z<=1;z++)for(let x=-1;x<=1;x++)dot(side*10+x,y,z,'skin','arm'+(side<0?'Left':'Right'));
+      window.NoraBurrowModels?.apparel(outfit.wear,box);
       const temp=new T.Object3D(),tint=new T.Color(),batches=new Map();
       // Cull only cubes enclosed by their own joint; keep articulated seam caps.
       const neighbors=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
@@ -381,7 +382,19 @@ window.NoraVoxel = (() => {
     }
     build();
     setWings(outfit.wings);
+    let sparks;
+    function syncSparks(){
+      if(outfit.wear!=='halo'){if(sparks){sparks.removeFromParent();sparks.dispose();sparks=null;}return;}
+      if(sparks)return;
+      sparks=new T.InstancedMesh(cube,material,5);
+      const pixel=new T.Object3D(),gold=new T.Color('#ffdc88');
+      for(let i=0;i<5;i++){pixel.position.set(Math.sin(i*1.26)*1.4,5.45+(i%2)*.15,Math.cos(i*1.26)*1.2);pixel.updateMatrix();sparks.setMatrixAt(i,pixel.matrix);sparks.setColorAt(i,gold);}
+      pivot.add(sparks);
+    }
+    syncSparks();
     return {
+      setWear(id){if(outfit.wear!==id){outfit.wear=id;build();syncSparks();}},
+      animateWear(dt){if(sparks)sparks.rotation.y+=dt;},
       group:pivot, rebuild:build, animateMotion, animateSeated, setWings, animateWings, setArmor,
       setOpacity(value) {
         material.opacity=Math.max(0,Math.min(1,value));
@@ -393,7 +406,7 @@ window.NoraVoxel = (() => {
         wings?.dispose();
         for(const mesh of meshes)mesh.dispose();
         for(const mesh of armorMeshes)mesh.dispose();
-        material.dispose();cube.dispose();
+        sparks?.dispose();material.dispose();cube.dispose();
       },
     };
   }

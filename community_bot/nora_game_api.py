@@ -9,7 +9,7 @@ import time
 
 from aiohttp import WSMsgType, web
 
-from community_bot import music_api, nora_observatory
+from community_bot import music_api, nora_burrows, nora_observatory
 from community_bot.database import utcnow
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,8 @@ async def _player_profile(database, telegram_id, *, private=False):
         if row and row['shirt'] is not None:
             outfit = {key: row[key] for key in ('shirt', 'pants', 'shoes')}
             outfit.update(await _appearance(db, telegram_id))
+            if wear := (await nora_burrows.inventory(db, telegram_id))['wear']:
+                outfit['wear'] = wear
         wings = await _wings(db, telegram_id) if private and row else None
         if outfit and wings and wings['equipped']:
             outfit['wings'] = wings['equipped']
@@ -288,12 +290,15 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     room = body.get('room')
     in_memory = room == nora_observatory.ROOM
     in_cinema = room == CINEMA_ROOM and cinema is not None
-    if room is not None and not (in_memory or in_cinema):
+    home = nora_burrows.ROOM.fullmatch(room) if isinstance(room, str) else None
+    if room is not None and not (in_memory or in_cinema or home):
         raise ValueError('Проверь локацию игрока')
     bounds = LOBBY_BOUNDS
     if in_memory:
         limits = nora_observatory.LAYOUT['bounds']
         bounds = {**bounds, 'x': (-limits['x'], limits['x']), 'z': (-limits['z'], limits['z'])}
+    if home:
+        bounds = {**bounds, 'x': (-4.25, 4.25), 'z': (-4.55, 4.55)}
     if in_cinema:
         from community_bot.nora_cinema import LAYOUT, SEATS
 
@@ -321,11 +326,22 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if not supplied_profile:
         async with app['db'].connect() as db:
             equipped = (await _wings(db, user_id))['equipped']
+            wear = (await nora_burrows.inventory(db, user_id))['wear']
+            profile = {**profile, 'outfit': dict(profile['outfit'] or {})}
+            if wear:
+                profile['outfit']['wear'] = wear
+            else:
+                profile['outfit'].pop('wear', None)
     if not profile['nickname'] or not profile['outfit']:
         raise ValueError('Сначала создай персонажа')
+    visits = app.get('nora_visits')
+    if home and (not visits or not visits.allowed(profile['nickname'], home[1])):
+        raise ValueError('Сначала получи приглашение хозяина.')
     height = body.get('y')
     maximum = LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT
     minimum = 0
+    if home:
+        maximum += 3.5  # Room furniture can be stood on.
     if in_memory:
         minimum, maximum = limits['minY'], limits['maxY']
     if type(height) not in (int, float) or not minimum <= height <= maximum:
@@ -336,7 +352,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
             if type(body[key]) is not bool:
                 raise ValueError('Проверь данные игрока')
             pose[key] = body[key]
-    if pose.get('boosting') and (not equipped or room):
+    if pose.get('boosting') and (not equipped or in_memory or in_cinema):
         pose['boosting'] = False
     outfit = dict(profile['outfit'])
     if equipped:
@@ -373,6 +389,15 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         if not was_in_cinema:
             cinema.refresh(presence, now)
         seat = cinema.apply_seat(presence, user_id, current, session, pose, requested_seat, now)
+    previous_room = current[2].get('room') if current else None
+    if home and home[1] != profile['nickname']:
+        visits.passes[profile['nickname'], home[1]] = now + 600
+        if previous_room != room:
+            for note in visits.inbox(profile['nickname']):
+                if note['kind'] == 'allowed' and note['other'] == home[1]:
+                    visits.notes.pop(note['id'], None)
+    if visits and previous_room and previous_room != room and previous_room.startswith('burrow:'):
+        visits.passes.pop((profile['nickname'], previous_room[7:]), None)
     presence[user_id] = (now, session, {**profile, **pose})
     if in_cinema:
         cinema_state = {
@@ -392,6 +417,9 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         **({'room': room} if room else {}),
         **({'challenge': challenge} if in_memory else {}),
         **({'cinema': cinema_state} if in_cinema else {}),
+        **({'cinema': visits.sets[home[1]].snapshot(presence, user_id, body.get('cinema'), now)}
+           if home and home[1] in visits.sets else {}),
+        **({'burst': visits.bursts[home[1]]} if home and now-visits.bursts.get(home[1], -10) < 2 else {}),
     }
 
 

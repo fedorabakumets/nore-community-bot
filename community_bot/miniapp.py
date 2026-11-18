@@ -518,15 +518,19 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
-    from community_bot import lobby_widget, music_api, nora_cinema, nora_game_api, nora_game_chat
+    from community_bot import lobby_widget, music_api, nora_burrows, nora_cinema, nora_game_api, nora_game_chat
 
     app.router.add_get('/api/community/music', music_api.delivery_status)
     app.router.add_post('/api/community/music', music_api.send_track)
     app.router.add_get('/api/nora-game/records', music_api.collection)
     app.router.add_post('/api/nora-game/records', music_api.record_action)
-    for name in ('dedzytwo-s1.mp3', 'dedzytwo-cover.png'):
+    for name in ('dedzytwo-s1.mp3', 'dedzytwo-02.mp3', 'dedzytwo-03.mp3', 'dedzytwo-04.mp3',
+                 'dedzytwo-06.mp3', 'dedzytwo-cover.png'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app['nora_lobby'] = {}
+    app['nora_visits'] = nora_burrows.Visits()
+    app.router.add_get('/api/nora-game/burrow', nora_burrows.api)
+    app.router.add_post('/api/nora-game/burrow', nora_burrows.api)
     app['nora_cinema'] = nora_cinema.Cinema(app['media_images'])
     app.router.add_get('/api/nora-game/cinema', nora_cinema.cinema_api)
     app.router.add_post('/api/nora-game/cinema', nora_cinema.cinema_api)
@@ -583,6 +587,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
+                 'nora-burrow.js', 'nora-burrow-models.js', 'nora-burrow-items.json',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'avatars.js', 'commands.js',

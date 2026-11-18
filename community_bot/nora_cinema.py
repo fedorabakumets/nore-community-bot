@@ -82,17 +82,17 @@ class Show:
 
 
 class Cinema:
-    def __init__(self, storage):
+    def __init__(self, storage, room=CINEMA_ROOM):
+        self.room = room
         self.storage = storage
         self.show = None
         self.clips = {}
         self.import_lock = asyncio.Lock()
         self.next_import = 0.0
 
-    @staticmethod
-    def occupants(presence, now):
+    def occupants(self, presence, now):
         return [uid for uid, (seen, _, pose) in presence.items()
-                if now - seen < LOBBY_TTL and pose.get('room') == CINEMA_ROOM]
+                if now - seen < LOBBY_TTL and pose.get('room') == self.room]
 
     @staticmethod
     def occupied(presence, now, exclude=None):
@@ -265,13 +265,22 @@ async def cinema_api(request):
             raise ValueError('Проверь данные сеанса.')
         session = body.get('session')
         moderator = False
-        if cinema.show and cinema.show.host != uid:
-            moderator = await has_permission(request.app['db'], request.app['settings'], uid, PERM_GAMES)
+
     current = presence.get(uid)
     now = time.monotonic()
-    if (not current or now - current[0] >= LOBBY_TTL or current[1] != session
-        or current[2].get('room') != CINEMA_ROOM):
+    target = body.get('room') if request.method == 'POST' else request.query.get('room')
+    if target and isinstance(target, str) and target.startswith('burrow:'):
+        cinema = request.app['nora_visits'].sets.get(target[7:])
+    if (not cinema or not current or now - current[0] >= LOBBY_TTL or current[1] != session
+        or current[2].get('room') != cinema.room):
         raise ValueError('Сначала зайди в кинотеатр.')
+    if cinema.room != CINEMA_ROOM:
+        moderator = current[2]['nickname'] == cinema.room[7:]
+        if request.method == 'POST' and not moderator:
+            raise ValueError('Телевизором управляет хозяин норы.')
+    elif ((request.method == 'POST' and cinema.show and cinema.show.host != uid)
+          or (request.method == 'GET' and not request.query.get('show'))):
+        moderator = await has_permission(request.app['db'], request.app['settings'], uid, PERM_GAMES)
     cinema.refresh(presence, now)
     if request.method == 'POST':
         cinema.update(presence, uid, body, moderator, now)
@@ -283,5 +292,5 @@ async def cinema_api(request):
         return web.json_response({'url': await cinema.signed_source(show)})
     return web.json_response({
         'clips': cinema.clip_list(),
-        'moderator': await has_permission(request.app['db'], request.app['settings'], uid, PERM_GAMES),
+        'moderator': moderator,
     })

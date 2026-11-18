@@ -121,16 +121,6 @@ window.NoraScenery = (() => {
     for(let z=-4;z<=4;z+=2)box(0,3.38,z,9.4,.22,.25,'#513a2d');
     for(const x of [-4.45,4.45])for(let y=.25;y<=3.25;y+=.5)box(x,y,0,.12,.07,10,'#816548');
     function furniture(x,y,z,w,h,d,color){box(x,y,z,w,h,d,color);solid(x,y,z,w,h,d,y+h/2);}
-    function barrel(x,z){for(let y=0;y<4;y++){box(x,.13+y*.26,z,y===0||y===3?.65:.78,.26,y===0||y===3?.65:.78,'#91613b');}for(const y of [.25,.78])box(x,y,z,.81,.08,.81,'#55504a');solid(x,.52,z,.81,1.04,.81,1.04);}
-    function chair(x,z){cameraOnly(x,.6,z,.65,1.2,.65);furniture(x,.38,z,.55,.14,.55,'#7c5035');furniture(x,.8,z-.23,.55,.8,.12,'#6c482f');for(const a of [-.2,.2])for(const b of [-.2,.2])box(x+a,.18,z+b,.1,.36,.1,'#62412d');}
-    for(const [x,z] of [[-2.2,1.5],[2.25,.5],[1.9,-2.7]]){
-      furniture(x,.85,z,1.6,.18,1.25,'#855a37');for(const a of [-.6,.6])for(const b of [-.45,.45])box(x+a,.4,z+b,.16,.8,.16,'#69482f');
-      chair(x-.25,z+1.1);chair(x+.25,z-1.1);
-      box(x-.35,1,z+.15,.24,.16,.24,'#d8be8c');box(x+.35,1,z-.25,.16,.3,.16,'#5b7541');box(x+.25,.97,z+.22,.4,.06,.3,'#c89d67');
-    }
-    box(-3.1,.65,-2.6,1.25,1.3,3.6,'#765033');furniture(-3.1,1.34,-2.6,1.55,.15,3.8,'#ab7a48');
-    for(let z=-4;z<=-1;z+=.45)box(-3.1,1.57,z,.16,.32,.16,z%1?'#64805a':'#b8915b');
-    for(const [x,z] of [[-3.6,4],[3.6,3.8],[-3.7,-4.4],[3.6,-4.4]])barrel(x,z);
     // Collection rack replaces the fireplace: records below, trophies and finds above.
     box(.1,1.42,-4.78,2.7,2.84,.38,'#49372d');solid(.1,1.42,-4.78,2.7,2.84,.38);
     for(const x of [-1.25,1.45])box(x,1.42,-4.45,.14,2.84,.64,'#b08a56');
@@ -138,10 +128,6 @@ window.NoraScenery = (() => {
     for(const x of [-.6,.8])box(x,1.45,-4.5,.08,.65,.45,'#765339');
     box(.1,2.88,-4.52,2.9,.16,.78,'#c09b65');
     for(const x of [-3.8,3.8]){box(x,2.3,-4.95,1.2,.12,.35,'#65452e');for(let i=0;i<4;i++)box(x-.4+i*.25,2.5,-4.88,.14,.32,.14,['#748352','#b16f4e','#d0ac72','#577373'][i]);}
-    // Scattered sacks, books, crates and rugs retain a clear center aisle.
-    box(3.7,.3,-2.2,.7,.6,.7,'#9a7044');furniture(3.7,.64,-2.2,.75,.1,.75,'#6b4c34');
-    for(const [x,z] of [[-4,2.5],[3.7,2],[-2.2,-4.4]]){box(x,.22,z,.55,.44,.45,'#baa57c');box(x,.47,z,.24,.1,.24,'#8d7958');solid(x,.26,z,.55,.52,.45,.52);}
-    box(0,.012,1.2,1.2,.02,3.8,'#923f43');for(let z=-.5;z<=3;z+=.3)box(0,.027,z,1.1,.01,.05,'#c7a26c');
     box(0,1.1,5.02,1.5,2.2,.08,'#76503a');box(.45,1,4.95,.12,.12,.12,'#d9ad5f');
     // Record console on four feet in the middle of the room.
     function consoleAt(x,z){
@@ -288,6 +274,7 @@ window.NoraScenery = (() => {
       flame.position.set(lx,2.1,z);flame.scale.set(.29,.42,.29);lanterns.add(flame);
       const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
     }
+    window.NoraBurrowModels?.merchant(box,solid);
     consoleAt(lobbyDeck.x,lobbyDeck.z);
     const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes);lobby.visible=false;
 
@@ -335,6 +322,8 @@ window.NoraScenery = (() => {
       screenFace.position.set(screen.x,screen.y,screen.z-.015);
       screenFace.scale.set(screen.width,screen.height,.025);cinemaHall.add(screenFace);
     }
+    const television=screenFace?.clone();
+    if(television){television.name='nora-home-screen';television.visible=false;indoor.add(television);}
     const portal=new T.Group();
     portal.name='nora-world-portal';
     // Stepped stone surround and brass inlays from the NORA cover.
@@ -401,17 +390,21 @@ window.NoraScenery = (() => {
           if(object.isPointLight)object.color.set(lightColor);
         }
       }
+      addSign(area,label,position.x,position.z+.88*direction,palette?.[4]);
+      addCollider(zone,position.x,position.z,.76);
+    }
+    function addSign(area,label,x,z,color){
       const canvas=document.createElement('canvas');canvas.width=384;canvas.height=88;
       const ctx=canvas.getContext('2d');
       ctx.fillStyle='rgba(24,18,28,.68)';ctx.fillRect(0,0,384,88);
-      ctx.fillStyle=palette?.[4]||'#eed7b3';ctx.font='bold 44px monospace';
+      ctx.fillStyle=color||'#eed7b3';ctx.font='bold 44px monospace';
       ctx.textAlign='center';ctx.fillText(label,192,58,357);
       const map=new T.CanvasTexture(canvas);map.colorSpace=T.SRGBColorSpace;
       const sprite=new T.Sprite(new T.SpriteMaterial({map,transparent:true,depthWrite:false,opacity:.8}));
       sprite.name='nora-portal-label';sprite.scale.set(1.64,.38,1);
-      sprite.position.set(position.x,2.46,position.z+.88*direction);area.add(sprite);gateLabels.push(sprite);
-      addCollider(zone,position.x,position.z,.76);
+      sprite.position.set(x,2.46,z);area.add(sprite);gateLabels.push(sprite);
     }
+    if(window.NoraBurrowModels){const {x,z}=window.NoraBurrowModels.stall;addSign(lobby,'ЛАВКА',x,z+1.12);}
     lobbyGate(tavernPortal,'НОРА','nora-tavern-portal');
     if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ','nora-observatory-portal',{
       palette:['#332239','#66476f','#c7a0d3','#936cac','#e5c3e6'],
@@ -435,7 +428,18 @@ window.NoraScenery = (() => {
       for(let i=2;i<gateMaterials.length;i+=3)gateMaterials[i].opacity=highlightMaterial.opacity;
     }
     return {outdoor,indoor,lobby,lobbyZone,cinemaHall,cinemaZone,updatePortal,outdoorZone,indoorZone,
-      update,setRecords,setLobbyRecord,carriedRecord,setCinemaScreen(open){
+      update,setRecords,setLobbyRecord,carriedRecord,
+      homeScreen(screen,open=false){
+        if(!television)return;
+        television.visible=!!screen;
+        if(screen){
+          television.position.set(screen.x,screen.y,screen.z);
+          television.scale.set(screen.width,screen.height,.008);
+          television.material=open?screenCutout:screenMaterial;
+        }
+      },
+      privateCollection(own){for(const item of [record,...Object.values(shelfRecords)])item.traverse(part=>part.layers.set(own?0:1));},
+      setCinemaScreen(open){
         if(screenFace)screenFace.material=open?screenCutout:screenMaterial;
       },dispose(){
       recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();
