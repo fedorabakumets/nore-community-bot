@@ -28,8 +28,8 @@ def settings(values):
     for key, value in config.items():
         if type(value) is not type(DEFAULTS[key]) or (key in CHOICES and value not in CHOICES[key]):
             raise ValueError("Проверь настройки партии")
-    if not 100 <= config["stake"] <= 10_000:
-        raise ValueError("Ставка должна быть от 100 до 10 000 печенек")
+    if not 5 <= config["stake"] <= 10_000:
+        raise ValueError("Ставка должна быть от 5 до 10 000 печенек")
     if config["players"] * 6 > config["deck"]:
         raise ValueError("В колоде не хватит шести карт каждому. Выбери больше карт или меньше игроков")
     return config
