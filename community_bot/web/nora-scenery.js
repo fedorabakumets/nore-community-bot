@@ -1,8 +1,8 @@
 'use strict';
 window.NoraScenery = (() => {
   const tavernOffset=-4.95, portalZ={home:6.75};
-  const lobbyDeck={x:0,z:-3};
-  const lobbySpawn={x:0,z:6.8}, tavernPortal={x:-1.64,z:.6};
+  const lobbyDeck={x:0,z:9.5};
+  const lobbySpawn={x:0,z:6.8}, tavernPortal={x:0,z:-3.4};
   function create(T, geometry, material, memoryPortal, cinemaLayout) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};

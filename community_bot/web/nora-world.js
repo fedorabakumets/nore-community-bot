@@ -483,6 +483,7 @@ window.NoraWorld = (() => {
       locationLabel.textContent=inCinema?'КИНОТЕАТР':inChallenge?'ВОСПОМИНАНИЕ':inside?'ТАВЕРНА':inLobby?'ЛОББИ':'ЛЕСНАЯ ПОЛЯНА';
       canvas.setAttribute('aria-label',inCinema?'Зал кинотеатра Норы':inChallenge?observatory.title:inside?'Таверна Норы':inLobby?'Общее лобби Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
       lightingAt=-Infinity;updateLighting(Date.now());
+      resize();
     }
     function switchChallenge(entering){
       inChallenge=entering;inLobby=!entering;challengeState=null;interaction=null;
@@ -559,7 +560,7 @@ window.NoraWorld = (() => {
       character.setWings(entering?null:outfit.wings);
       if(entering)cinema.enter();
       else{cinema.leave();records?.refresh();}
-      syncLocation();resize();
+      syncLocation();
       reset();companion.reset();
       action.blur();
     }
@@ -624,6 +625,9 @@ window.NoraWorld = (() => {
         const halfSize=Math.max(height*(w>h&&w>=450?1.35:1),width*h/w)*.54;
         const fit=2*Math.atan2(halfSize,cinemaDistance)*180/Math.PI;
         fov=Math.min(100,Math.max(30,fit,Math.min(58,58*h/480)));
+      }else if(inLobby){
+        // Keep the full portal row in view from spawn on narrow screens.
+        fov=Math.max(fov,Math.min(85,2*Math.atan2(.325*h,w)*180/Math.PI));
       }
       if(w===renderWidth&&h===renderHeight&&Math.abs(ratio-renderRatio)<.001&&camera.fov===fov)return;
       renderWidth=w;renderHeight=h;renderRatio=ratio;
@@ -631,7 +635,7 @@ window.NoraWorld = (() => {
       camera.aspect=w/h;camera.fov=fov;camera.updateProjectionMatrix();
       frameTotal=frameCount=0;qualityAt=0;
     }
-    const observer=new ResizeObserver(resize);observer.observe(canvas);resize();
+    const observer=new ResizeObserver(resize);observer.observe(canvas);
     const windMaterial=new T.MeshBasicMaterial({color:'#d5e4df',transparent:true,opacity:.09,depthWrite:false});
     const wind=new T.InstancedMesh(geometry,windMaterial,24);wind.frustumCulled=false;scene.add(wind);
     const gusts=Array.from({length:24},()=>({age:1,x:0,y:0,z:0,heading:0}));let gustIndex=0,gustTimer=0;

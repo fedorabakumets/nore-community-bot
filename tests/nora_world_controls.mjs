@@ -33,8 +33,17 @@ try {
   const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
   const sceneryWindow={matchMedia:()=>({matches:false})};
   vm.runInNewContext(sceneryCode,{window:sceneryWindow,document:{createElement:()=>new Element()}});
+  const memoryLayout=JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8'));
+  const cinemaLayout=JSON.parse(await readFile(new URL('nora-cinema.json',web),'utf8'));
   const sharedGeometry=new Three.BoxGeometry(),sharedMaterial=new Three.MeshLambertMaterial();
-  const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial);
+  const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial,memoryLayout.portal,cinemaLayout);
+  const [cinemaGate,noraGate,memoryGate]=['cinema','tavern','observatory'].map(name=>
+    tavern.lobby.getObjectByName('nora-'+name+'-portal').position);
+  assert.equal(cinemaGate.z,noraGate.z);
+  assert.equal(memoryGate.z,noraGate.z);
+  assert.equal(noraGate.x,sceneryWindow.NoraScenery.lobbySpawn.x);
+  assert.equal(cinemaGate.x-noraGate.x,noraGate.x-memoryGate.x);
+  assert.ok(memoryGate.x-noraGate.x>3.24,'neighboring portal prompts do not overlap');
   const record=tavern.indoor.getObjectByName('nora-record'),notes=tavern.indoor.getObjectByName('nora-music-notes');
   assert.ok(record&&notes,'record player and notes are present');
   assert.equal(tavern.outdoor.getObjectByName('nora-tavern-windows').count,8,'windows on all four facades');
@@ -70,9 +79,10 @@ try {
   tavern.setLobbyRecord(null);
   assert.equal(lobbyRecord.visible,false,'ejecting clears the lobby deck');
   const lobbyDeckPosition=sceneryWindow.NoraScenery.lobbyDeck;
-  const lobbyDeckApproach={x:lobbyDeckPosition.x,z:lobbyDeckPosition.z+1.5};
-  acousticContext.window.NoraWorld.move(lobbyDeckApproach,0,-2,tavern.lobbyZone);
-  assert.ok(lobbyDeckApproach.z>lobbyDeckPosition.z+.5,'the duplicated cabinet blocks walking through it');
+  const lobbyDeckApproach={...sceneryWindow.NoraScenery.lobbySpawn};
+  assert.ok(lobbyDeckPosition.z>lobbyDeckApproach.z,'the lobby deck is behind the spawn');
+  acousticContext.window.NoraWorld.move(lobbyDeckApproach,0,4,tavern.lobbyZone);
+  assert.ok(lobbyDeckApproach.z<lobbyDeckPosition.z-.5,'the relocated cabinet blocks walking through it');
   const acoustics=acousticContext.window.NoraWorld.tavernAcoustics;
   const doorway=acoustics(false,0,3.6),rear=acoustics(false,0,-3.6),far=acoustics(false,0,7);
   assert.ok(doorway.gain>far.gain&&far.gain>rear.gain,'doorway louder than distance and back wall');
@@ -93,7 +103,8 @@ try {
     const renderer = {ratio:1,resizes:0,setPixelRatio(value){this.ratio=value;}, setSize(w,h){this.width=w;this.height=h;this.resizes++;}, dispose(){}, render(s,c){camera=c;scene=s;}};
     const zone = {limit:100, boxes:[], cameraBoxes:[]};
     window.NoraScenery = {
-      portalZ:{home:6.75}, lobbyDeck:{x:0,z:-3}, lobbySpawn:{x:0,z:6.8}, tavernPortal:{x:-1.64,z:.6},
+      ...sceneryWindow.NoraScenery,
+      tavernOffset:0,
       create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), lobby:new Three.Group(),
         outdoorZone:zone, indoorZone:zone, lobbyZone:zone, updatePortal(){}, dispose(){}}),
     };
@@ -525,7 +536,8 @@ try {
   const peer=hasPeer();
   const remoteSplit=peer.getObjectByName('thighRight').rotation.x-peer.getObjectByName('thighLeft').rotation.x;
   assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
-  lobbyWorld.player.position.set(-1.64,.017,1.75);lobbyWorld.frames(1);
+  const {x:noraX,z:noraZ}=lobbyWorld.window.NoraScenery.tavernPortal;
+  lobbyWorld.player.position.set(noraX,.017,noraZ+1.15);lobbyWorld.frames(1);
   assert.equal(lobbyAction.textContent,'НОРА');
   lobbyAction.emit('click');await flush();
   assert.ok(exchanges.at(-1).leave,'entering the tavern leaves the shared lobby');
@@ -586,7 +598,7 @@ try {
 
   const memory={
     code:await readFile(new URL('nora-observatory.js',web),'utf8'),
-    layout:JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8')),
+    layout:memoryLayout,
   };
   const audioChanges=[];
   const memorySounds={memory:value=>audioChanges.push(value),playing(){},spatial(){},update(){},stop(){}};
