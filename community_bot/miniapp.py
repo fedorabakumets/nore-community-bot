@@ -1,6 +1,7 @@
 """Same-process Mini App: Telegram-signed identity, shared economy, no browser secrets."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -10,11 +11,11 @@ import time
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryFile
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import BufferedInputFile
 from aiohttp import web
 
 from community_bot.config import COOKIE_PAYMENT_QR
@@ -22,7 +23,7 @@ from community_bot.database import Database
 
 ROOT = Path(__file__).parent / 'web'
 ASSETS = Path(__file__).parent.parent / 'assets'
-AVATAR_MAX_MB = 40
+AVATAR_MAX_MB = 64
 AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
 
 
@@ -334,19 +335,52 @@ async def join_event(request):
 
 
 def normalized_photo(raw: bytes) -> bytes:
+    return _normalized_photo(BytesIO(raw), profile_upload=False)
+
+
+def normalized_profile_photo(source) -> bytes:
+    return _normalized_photo(source, profile_upload=True)
+
+
+def _normalized_photo(source, *, profile_upload: bool) -> bytes:
     from PIL import Image, ImageOps, UnidentifiedImageError
 
+    formats = ['JPEG', 'PNG', 'WEBP']
+    if profile_upload:
+        from pillow_heif import is_supported, register_heif_opener
+
+        formats += ['AVIF', 'GIF', 'BMP', 'TIFF']
+        if is_supported(source.read(16)):
+            register_heif_opener()
+            formats.append('HEIF')
     try:
-        with Image.open(BytesIO(raw)) as image:
-            if image.format not in {'JPEG', 'PNG', 'WEBP'} or image.width * image.height > 20_000_000:
+        with Image.open(source, formats=formats if profile_upload else None) as image:
+            pixels = image.width * image.height
+            if not profile_upload and (image.format not in formats or pixels > 20_000_000):
                 raise ValueError('Нужна фотография JPG, PNG или WebP до 20 мегапикселей')
+            if profile_upload and pixels > (160_000_000 if image.format == 'JPEG' else 64_000_000):
+                raise ValueError('У фото слишком высокое разрешение. Попробуй уменьшить его')
             image.draft('RGB', (1600, 1600))
             image.thumbnail((1600, 1600))
-            image = ImageOps.exif_transpose(image).convert('RGB')
+            result = ImageOps.exif_transpose(image)
+            if profile_upload and ('A' in result.getbands() or 'transparency' in result.info):
+                rgba = result.convert('RGBA')
+                result = Image.new('RGB', rgba.size, 'white')
+                result.paste(rgba, mask=rgba.getchannel('A'))
+            width, height = result.size
+            if profile_upload and max(width, height) > 20 * min(width, height):
+                minimum = (max(width, height) + 19) // 20
+                result = ImageOps.pad(result, (max(width, minimum), max(height, minimum)), color='white')
             output = BytesIO()
-            image.save(output, 'JPEG', quality=88)
+            result.convert('RGB').save(output, 'JPEG', quality=88)
             return output.getvalue()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+    except UnidentifiedImageError as error:
+        if profile_upload:
+            raise ValueError('Выбери фото JPG, PNG, WebP, HEIC, AVIF, GIF, BMP или TIFF') from error
+        raise ValueError('Не удалось прочитать фотографию') from error
+    except Image.DecompressionBombError as error:
+        raise ValueError('У фото слишком высокое разрешение. Попробуй уменьшить его') from error
+    except (OSError, SyntaxError, EOFError) as error:
         raise ValueError('Не удалось прочитать фотографию') from error
 
 
@@ -377,32 +411,28 @@ async def upload_avatar(request):
     from community_bot.profile_fields import profile_revision
 
     user = await actor(request)
-    # Check the version before sending media; repeat atomically before writing the file_id.
+    # Check the version before reading the body, then again in the save transaction.
     revision = request.headers.get('X-Profile-Revision', '')
     if revision != profile_revision(user):
         return web.json_response({'error': 'Профиль изменился. Обнови ЛК и повтори загрузку'}, status=409)
-    if request.content_type not in {'image/jpeg', 'image/png', 'image/webp'}:
-        return web.json_response({'error': 'Выбери фотографию JPG, PNG или WebP'}, status=400)
-    # Older aiohttp versions reject bodies equal to client_max_size.
-    raw = await request.clone(client_max_size=AVATAR_MAX_BYTES + 1).read()
-    if len(raw) > AVATAR_MAX_BYTES:
-        raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, len(raw))
+    if request.content_length is not None and request.content_length > AVATAR_MAX_BYTES:
+        raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, request.content_length)
     from community_bot.media_cache import images
 
-    try:
-        photo = await images(request).normalize(raw)
-    except ValueError as error:
-        return web.json_response({'error': str(error)}, status=400)
-    try:
-        sent = await request.app['bot'].send_photo(
-            user['user_id'], BufferedInputFile(photo, filename='nora-avatar.jpg'),
-            caption='Фото для профиля из миниапки.', disable_notification=True,
-        )
-    except TelegramAPIError:
-        return web.json_response({'error': 'Не удалось загрузить фото в Telegram. Открой диалог с ботом и повтори'},
-                                 status=502)
-    values = {'avatar_file_id': sent.photo[-1].file_id, 'avatar_media_type': 'photo'}
-    if not await request.app['db'].save_self_profile(user['user_id'], values, revision, avatar=True):
+    async with request.app['avatar_uploads']:
+        with TemporaryFile('w+b') as source:
+            size = 0
+            async for chunk in request.content.iter_chunked(256 * 1024):
+                size += len(chunk)
+                if size > AVATAR_MAX_BYTES:
+                    raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, size)
+                source.write(chunk)
+            source.seek(0)
+            try:
+                photo = await images(request).normalize(source, profile=True)
+            except ValueError as error:
+                return web.json_response({'error': str(error)}, status=400)
+    if not await request.app['db'].save_self_profile(user['user_id'], {}, revision, photo=photo):
         return web.json_response({'error': 'Профиль изменился во время загрузки. Обнови ЛК и повтори'}, status=409)
     return web.json_response({'ok': True, 'message': 'Фото профиля обновлено в миниапке и боте'})
 
@@ -415,7 +445,7 @@ async def avatar(request):
     if not file_id or user.get('avatar_media_type') == 'video':
         raise web.HTTPNotFound()
     try:
-        photo = await images(request).photo(file_id)
+        photo = await images(request).avatar(file_id)
     except (TelegramAPIError, ValueError):
         raise web.HTTPNotFound() from None
     return web.Response(body=photo, content_type='image/jpeg')
@@ -427,10 +457,10 @@ async def index(request):
 
 def create_app(db: Database, settings, bot, admin_runtime=None):
     app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
-    app.update(db=db, settings=settings, bot=bot)
+    app.update(db=db, settings=settings, bot=bot, avatar_uploads=asyncio.Semaphore(2))
     from community_bot.media_cache import MediaImages
 
-    app['media_images'] = MediaImages(bot)
+    app['media_images'] = MediaImages(bot, db)
     async def close_media(_):
         await app['media_images'].close()
     app.on_cleanup.append(close_media)

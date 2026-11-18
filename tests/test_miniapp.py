@@ -214,59 +214,78 @@ async def test_profile_save_is_atomic_validated_and_protects_bot_edits(db):
     assert (await db.get_user(7))['profile_name'] == 'Изменено в боте'
 
 
-async def test_avatar_upload_uses_telegram_file_id_and_is_visible_to_bot(db):
+def avatar_request(app, user, *chunks, content_type='application/octet-stream', content_length=None):
+    from aiohttp.test_utils import make_mocked_request
+
+    from community_bot.profile_fields import profile_revision
+
+    async def iter_chunked(size):
+        for chunk in chunks:
+            for offset in range(0, len(chunk), size):
+                yield chunk[offset:offset + size]
+
+    headers = {
+        'Authorization': 'tma ' + signed(uid=user['user_id'], date=int(time.time())),
+        'Content-Type': content_type,
+        'X-Profile-Revision': profile_revision(user),
+    }
+    if content_length is not None:
+        headers['Content-Length'] = str(content_length)
+    return make_mocked_request('POST', '/api/profile/avatar', headers=headers, app=app,
+                               payload=SimpleNamespace(iter_chunked=iter_chunked))
+
+
+async def test_avatar_upload_works_without_bot_dm_and_is_visible_to_bot(db):
     from io import BytesIO
-    from unittest.mock import AsyncMock
 
     from PIL import Image
 
-    from community_bot.miniapp import avatar, upload_avatar
-    from community_bot.profile_fields import profile_revision
+    from community_bot.miniapp import avatar, create_app, upload_avatar
+    from community_bot.routers.profile import send_profile_card
 
     raw = BytesIO()
-    Image.new('RGB', (800, 600), 'red').save(raw, 'PNG')
-    req = Request(db)
-    req.headers = {'X-Profile-Revision': profile_revision(await db.get_user(7))}
-    req.content_type = 'image/png'
-    req.clone = lambda **kwargs: req
-    req.read = AsyncMock(return_value=raw.getvalue())
-    bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(
-        photo=[SimpleNamespace(file_id='telegram-avatar-file-id')],
-    )))
-    req.app['bot'] = bot
-    assert (await upload_avatar(req)).status == 200
+    Image.new('RGBA', (800, 600), (0, 0, 0, 0)).save(raw, 'PNG')
+    await db.set_role(7, 'admin')
+    app = create_app(db, Request(db).app['settings'], bot=None)
+    before = await db.get_user(7)
+    req = avatar_request(app, before, raw.getvalue(), content_type='image/x-png')
+    replacement = avatar_request(app, before, raw.getvalue())
+    responses = await asyncio.gather(protection(req, upload_avatar), protection(replacement, upload_avatar))
+    assert sorted(response.status for response in responses) == [200, 409]
     user = await db.get_user(7)
-    assert user['avatar_file_id'] == 'telegram-avatar-file-id'
     assert user['avatar_media_type'] == 'photo'
-    assert bot.send_photo.call_args.args[0] == 7
+    assert len(await db.fetchall("SELECT key FROM bot_state WHERE key GLOB 'nora-avatar:*'")) == 1
     assert (await db.get_user(8))['avatar_file_id'] is None
-    # A stale browser must not overwrite a photo changed in the bot.
-    bot.send_photo.reset_mock()
-    assert (await upload_avatar(req)).status == 409
-    bot.send_photo.assert_not_awaited()
-    req.headers = {'X-Profile-Revision': profile_revision(user)}
-    req.read = AsyncMock(return_value=b'<svg>not a photograph</svg>')
-    assert (await upload_avatar(req)).status == 400
-    bot.send_photo.assert_not_awaited()
+    assert (await protection(avatar_request(app, before), upload_avatar)).status == 409
+    invalid = avatar_request(app, user, b'<svg>not a photograph</svg>', content_type='image/png')
+    assert (await protection(invalid, upload_avatar)).status == 400
 
-    async def download(file_id, destination):
-        assert file_id == 'telegram-avatar-file-id'
-        destination.write(raw.getvalue())
-    bot.download = download
-    result = await avatar(req)
+    result = await protection(req, avatar)
     assert result.status == 200
     assert result.content_type == 'image/jpeg'
-    assert Image.open(BytesIO(result.body)).size == (800, 600)
+    with Image.open(BytesIO(result.body)) as jpeg:
+        assert jpeg.size == (800, 600)
+        assert jpeg.getpixel((0, 0)) == (255, 255, 255)
+    message = SimpleNamespace(chat=SimpleNamespace(type='private'), from_user=None, answer_photo=AsyncMock())
+    await send_profile_card(message, user, app['settings'], editable=True, text='Профиль', db=db)
+    assert message.answer_photo.await_args.args[0].data == result.body
+
+    # Replacing it in Telegram removes the stored copy and keeps the old Telegram file_id path.
+    await db.update_profile(7, 'avatar_file_id', 'telegram-avatar-file-id')
+    assert await db.stored_profile_photo(user['avatar_file_id']) is None
+    bot = SimpleNamespace(download=AsyncMock(side_effect=lambda file_id, destination: destination.write(result.body)))
+    legacy_app = create_app(db, Request(db).app['settings'], bot=None)
+    legacy_app['media_images'].bot = bot
+    assert (await protection(avatar_request(legacy_app, user), avatar)).status == 200
+    assert bot.download.await_args.args == ('telegram-avatar-file-id',)
 
 
-async def test_avatar_upload_accepts_40_mb_and_completes_profile(db):
+async def test_avatar_upload_accepts_64_mb_and_48_megapixels_and_completes_profile(db):
     from io import BytesIO
 
-    from aiohttp.test_utils import make_mocked_request
     from PIL import Image
 
-    from community_bot.miniapp import create_app, upload_avatar
-    from community_bot.profile_fields import profile_revision
+    from community_bot.miniapp import AVATAR_MAX_BYTES, avatar, create_app, upload_avatar
     from community_bot.profile_fill import profile_fill_percent
 
     await db.set_role(7, 'admin')
@@ -275,46 +294,25 @@ async def test_avatar_upload_accepts_40_mb_and_completes_profile(db):
     user = await db.get_user(7)
     assert profile_fill_percent(user) == 80
 
-    bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(
-        photo=[SimpleNamespace(file_id='large-photo-file-id')],
-    )))
-    bot._nora_admin_capture = True
-    app = create_app(db, Request(db).app['settings'], bot)
+    app = create_app(db, Request(db).app['settings'], bot=None)
     png = BytesIO()
-    Image.new('RGB', (3700, 3700), 'red').save(png, 'PNG', compress_level=0)
+    Image.new('RGB', (8000, 6000), 'red').save(png, 'PNG')
     # Pad the valid PNG to exercise the exact byte boundary.
-    limit = 40 * 1024 * 1024
-    raw = png.getvalue().ljust(limit, b'\0')
-    assert 20 * 1024 * 1024 + 1024 < png.tell() <= len(raw) == limit
+    raw = png.getvalue().ljust(AVATAR_MAX_BYTES, b'\0')
     png.close()
-    headers = {
-        'Authorization': 'tma ' + signed(date=int(time.time())),
-        'Content-Type': 'image/png',
-        'X-Profile-Revision': profile_revision(user),
-    }
-
-    def request_for(*chunks):
-        payload = SimpleNamespace(readany=AsyncMock(side_effect=[*chunks, b'']),
-                                  set_read_chunk_size=lambda size: None)
-        return make_mocked_request('POST', '/api/profile/avatar', headers=headers, app=app,
-                                   client_max_size=app._client_max_size, payload=payload)
-
-    rejected = await protection(request_for(raw, b'!'), upload_avatar)
+    rejected = await protection(avatar_request(app, user, content_length=AVATAR_MAX_BYTES + 1), upload_avatar)
     assert rejected.status == 413
-    assert '40 МБ' in json.loads(rejected.body)['error']
-    bot.send_photo.assert_not_awaited()
+    assert '64 МБ' in json.loads(rejected.body)['error']
+    assert (await protection(avatar_request(app, user, raw, b'!'), upload_avatar)).status == 413
     assert (await db.get_user(7))['avatar_file_id'] is None
 
-    accepted = await protection(request_for(raw), upload_avatar)
-    assert accepted.status == 200
-    bot.send_photo.assert_awaited_once()
-    photo = bot.send_photo.call_args.args[1].data
-    assert len(photo) < 10 * 1024 * 1024
+    req = avatar_request(app, user, raw, content_length=len(raw))
+    assert (await protection(req, upload_avatar)).status == 200
+    photo = (await protection(req, avatar)).body
     with Image.open(BytesIO(photo)) as jpeg:
         assert jpeg.format == 'JPEG'
-        assert jpeg.size == (1600, 1600)
+        assert jpeg.size == (1600, 1200)
     user = await db.get_user(7)
-    assert user['avatar_file_id'] == 'large-photo-file-id'
     assert profile_fill_percent(user) == 100
 
 

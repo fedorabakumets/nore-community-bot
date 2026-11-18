@@ -10,6 +10,7 @@ from PIL import Image
 from community_bot.cabinet_api import wallet_confirm, wallet_prepare
 from community_bot.database import Database
 from community_bot.friends_api import mutate, snapshot
+from community_bot.profile_fields import profile_revision
 from community_bot.social_profiles import avatar, heartbeat, presence_map, profile, update
 
 
@@ -48,6 +49,22 @@ class Request(dict):
 
     async def json(self):
         return self.body
+
+
+async def test_stored_photo_has_a_thumbnail_and_obeys_profile_privacy(env):
+    output = BytesIO()
+    with Image.new('RGB', (300, 150), 'blue') as image:
+        image.save(output, 'JPEG')
+    user = await env.db.get_user(9)
+    assert await env.db.save_self_profile(9, {}, profile_revision(user), photo=output.getvalue())
+    request = Request(env)
+    request.query['size'] = 'thumb'
+    result = await avatar(request)
+    with Image.open(BytesIO(result.body)) as image:
+        assert image.size == (96, 48)
+    await env.db.update_profile(9, 'profile_private', 1)
+    with pytest.raises(web.HTTPForbidden):
+        await avatar(request)
 
 
 async def befriend(env, a=7, b=8):

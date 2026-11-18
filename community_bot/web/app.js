@@ -351,16 +351,20 @@ void startApp();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
-const AVATAR_MAX_MB = 40;
+const AVATAR_MAX_MB = 64;
+const AVATAR_ACCEPT = 'image/*,.heic,.heif';
 async function uploadProfilePhoto(file, revision) {
+  if (!file.size) throw Error('Файл пустой. Выбери другое фото');
   if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw Error(`Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw Error('Выбери JPG, PNG или WebP');
   const response = await fetch('/api/profile/avatar', {
     method: 'POST',
-    headers: {Authorization: 'tma ' + auth, 'Content-Type': file.type, 'X-Profile-Revision': revision},
+    headers: {Authorization: 'tma ' + auth, 'Content-Type': 'application/octet-stream', 'X-Profile-Revision': revision},
     body: file,
+  }).catch(() => {
+    throw Error('Не удалось отправить фото. Проверь интернет и попробуй ещё раз');
   });
   const result = await response.json().catch(() => ({}));
+  if (response.status === 413) throw Error(result.error || `Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
   if (!response.ok) throw Error(result.error || 'Не удалось загрузить фото');
   return result;
 }

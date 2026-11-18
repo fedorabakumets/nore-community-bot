@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 
+PROFILE_PHOTO_PREFIX = "nora-avatar:"
+
 SCHEMA = """
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -1540,10 +1542,16 @@ class Database:
             from community_bot.profile_fields import validate_birth_date
 
             value = validate_birth_date(value)
-        await self.execute(
-            f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?",
-            (value, utcnow(), user_id),
-        )
+        sql = f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?"
+        params = (value, utcnow(), user_id)
+        if field == "avatar_file_id":
+            async with self.connect() as connection:
+                await connection.execute("BEGIN IMMEDIATE")
+                await self.remove_stored_profile_photo(connection, user_id)
+                await connection.execute(sql, params)
+                await connection.commit()
+        else:
+            await self.execute(sql, params)
         if field in {"profile_bio", "profile_name", "birth_date", "hobbies", "avatar_file_id"}:
             if field == "profile_bio":
                 await self.sync_bio_auto_warn(user_id)
@@ -1560,13 +1568,26 @@ class Database:
 
         await self.reward_complete_profile(user_id)
 
-    async def save_self_profile(self, user_id: int, values: dict, revision: str, *, avatar: bool = False) -> bool:
+    async def stored_profile_photo(self, file_id: str) -> bytes | None:
+        if not file_id.startswith(PROFILE_PHOTO_PREFIX):
+            return None
+        row = await self.fetchone("SELECT value FROM bot_state WHERE key=?", (file_id,))
+        return row["value"] if row else None
+
+    @staticmethod
+    async def remove_stored_profile_photo(connection, user_id: int) -> None:
+        await connection.execute(
+            "DELETE FROM bot_state WHERE key GLOB ? AND key=(SELECT avatar_file_id FROM users WHERE user_id=?)",
+            (PROFILE_PHOTO_PREFIX + "*", user_id),
+        )
+
+    async def save_self_profile(self, user_id: int, values: dict, revision: str, *, photo: bytes | None = None) -> bool:
         from community_bot.profile_fields import profile_revision, validate_profile_fields
         from community_bot.profile_fill import reputation_cap
 
-        if avatar:
-            if set(values) != {"avatar_file_id", "avatar_media_type"} or values["avatar_media_type"] != "photo":
-                raise ValueError("Некорректный аватар")
+        if photo is not None:
+            file_id = PROFILE_PHOTO_PREFIX + secrets.token_hex(16)
+            values = {"avatar_file_id": file_id, "avatar_media_type": "photo"}
         else:
             values = validate_profile_fields(values)
         async with self.connect() as connection:
@@ -1575,6 +1596,9 @@ class Database:
             if not row or profile_revision(dict(row)) != revision:
                 await connection.rollback()
                 return False
+            if photo is not None:
+                await self.remove_stored_profile_photo(connection, user_id)
+                await connection.execute("INSERT INTO bot_state(key,value) VALUES(?,?)", (file_id, photo))
             updated = dict(row) | values
             reputation = min(int(row["reputation"]), reputation_cap(updated))
             assignments = ", ".join(f"{key} = ?" for key in values)
@@ -1651,6 +1675,7 @@ class Database:
                    SELECT user_id, -cookies, 'ban_reset', ? FROM users WHERE user_id=? AND cookies>0""",
                 (now, user_id),
             )
+            await self.remove_stored_profile_photo(db, user_id)
             await db.execute(
                 """UPDATE users SET profile_name=NULL, age=NULL, birth_date=NULL, hobbies=NULL, profile_bio='',
                    avatar_file_id=NULL, avatar_media_type='photo', role='member', custom_status=NULL,
@@ -2390,6 +2415,7 @@ class Database:
                 await db.rollback()
                 return False, error
             if item == "video_avatar":
+                await self.remove_stored_profile_photo(db, beneficiary)
                 await db.execute(
                     "UPDATE users SET avatar_file_id = ?, avatar_media_type = 'video' WHERE user_id = ?",
                     (profile_value, beneficiary),

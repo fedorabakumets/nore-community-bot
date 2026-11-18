@@ -195,13 +195,15 @@ async def avatar(request):
     target = await target_for(request)
     if not await can_view_profile(request.app["db"], request.app["settings"], request["actor"]["id"], target):
         raise web.HTTPForbidden()
-    if not target["avatar_file_id"] or target["avatar_media_type"] != "photo" or request.app["bot"] is None:
+    if not target["avatar_file_id"] or target["avatar_media_type"] != "photo":
         raise web.HTTPNotFound()
     try:
-        photo = await images(request).photo(target["avatar_file_id"], thumb=request.query.get("size") == "thumb")
+        photo = await images(request).avatar(target["avatar_file_id"], thumb=request.query.get("size") == "thumb")
         fresh = await target_for(request)
         if not await can_view_profile(request.app["db"], request.app["settings"], request["actor"]["id"], fresh):
             raise web.HTTPForbidden()
+        if fresh["avatar_file_id"] != target["avatar_file_id"] or fresh["avatar_media_type"] != "photo":
+            raise web.HTTPNotFound()
     except (TelegramAPIError, ValueError):
         raise web.HTTPNotFound() from None
     return web.Response(body=photo, content_type="image/jpeg")

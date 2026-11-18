@@ -12,7 +12,8 @@ dependencies = [
   "aiogram>=3.31,<4",
   "aiosqlite>=0.21,<1",
   "python-dotenv>=1.1,<2",
-  "Pillow>=11,<12",
+  "Pillow>=11.3,<12",
+  "pillow-heif>=1.8.1,<1.9",
   "boto3>=1.40,<2",
   "yt-dlp[default]==2026.10.26",
 ]

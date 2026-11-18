@@ -24,6 +24,7 @@ from community_bot.keyboards import (
     profile_keyboard,
     public_profile_keyboard,
 )
+from community_bot.media_cache import profile_photo_input
 from community_bot.profile_fields import parse_birth_date
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
@@ -68,12 +69,10 @@ async def send_profile_card(
                     reply_markup=markup,
                 )
             else:
-                sent = await message.answer_photo(
-                    str(user["avatar_file_id"]),
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=markup,
-                )
+                file_id = str(user["avatar_file_id"])
+                photo = await profile_photo_input(db, file_id) if db is not None else file_id
+                if photo is not None:
+                    sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
         except TelegramBadRequest:
             sent = None
     if sent is None:

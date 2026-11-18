@@ -5,10 +5,11 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from PIL import Image
 
 from community_bot.media_cache import MediaImages
-from community_bot.miniapp import normalized_photo
+from community_bot.miniapp import normalized_photo, normalized_profile_photo
 
 
 def photo():
@@ -88,6 +89,23 @@ def test_large_jpeg_is_reduced_and_exif_orientation_preserved():
         assert image.mode == 'RGB'
 
 
+@pytest.mark.parametrize('format', ['JPEG', 'HEIF', 'AVIF', 'GIF', 'BMP', 'TIFF', 'WEBP'])
+def test_profile_photo_accepts_camera_and_export_formats(format):
+    source = BytesIO()
+    with Image.new('RGB', (2100, 96), '#ce120d') as image:
+        if format == 'HEIF':
+            from pillow_heif import from_pillow
+
+            from_pillow(image).save(source)
+        else:
+            image.save(source, format=format)
+    source.seek(0)
+    with Image.open(BytesIO(normalized_profile_photo(source))) as photo:
+        assert photo.format == 'JPEG'
+        assert photo.size == (1600, 80)  # The narrow panorama fits Telegram's display limits.
+        assert photo.getpixel((800, 40))[0] > 170
+
+
 def test_s3_sdk_requests_and_missing_key():
     from botocore.response import StreamingBody
     from botocore.stub import Stubber
@@ -120,9 +138,9 @@ async def test_cancellation_waits_for_decoder_before_releasing_slot(monkeypatch)
         started.set()
         finish.wait(timeout=2)
         return raw
-    monkeypatch.setattr(miniapp, 'normalized_photo', decode)
+    monkeypatch.setattr(miniapp, 'normalized_profile_photo', decode)
     service = MediaImages(None)
-    task = asyncio.create_task(service.normalize(b'image'))
+    task = asyncio.create_task(service.normalize(b'image', profile=True))
     assert await asyncio.to_thread(started.wait, 2)
     task.cancel()
     await asyncio.sleep(.01)

@@ -17,6 +17,7 @@ from community_bot.keyboards import (
     private_menu_keyboard,
     profile_keyboard,
 )
+from community_bot.media_cache import profile_photo_input
 from community_bot.permissions import PERM_ADMIN_PANEL
 
 router = Router(name="flows")
@@ -75,8 +76,10 @@ async def _show_own_profile(message: Message, db: Database, settings: Settings) 
             if user.get("avatar_media_type") == "video":
                 await message.answer_video(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            await message.answer_photo(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
-            return
+            photo = await profile_photo_input(db, user["avatar_file_id"])
+            if photo is not None:
+                await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
+                return
         except Exception:
             pass
     await message.answer(text, parse_mode="HTML", reply_markup=markup)

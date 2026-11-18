@@ -89,6 +89,7 @@ async def reset_profile(db, settings, bot, raw):
             raise ValueError('Target identity changed before reset; nothing changed')
         balances = (old['cookies'], old['cookie_debt'])
         now = utcnow()
+        await db.remove_stored_profile_photo(conn, uid)
         await conn.execute(
             'UPDATE users SET '+', '.join(f'{key}=?' for key in DEFAULTS)+', updated_at=? WHERE user_id=?',
             (*DEFAULTS.values(), now, uid),
