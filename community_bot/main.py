@@ -601,13 +601,17 @@ async def main() -> None:
     pet_video_queue.start()
     dispatcher["pet_video_queue"] = pet_video_queue
     try:
-        await dispatcher.start_polling(
-            bot,
-            allowed_updates=[*dispatcher.resolve_used_update_types(), "widget_query"],
-            db=db,
-            settings=settings,
-            emergency_stop=emergency_stop,
-            restart_stop=restart_stop,
+        await retry_transient_telegram_setup(
+            "polling",
+            lambda: dispatcher.start_polling(
+                bot,
+                allowed_updates=[*dispatcher.resolve_used_update_types(), "widget_query"],
+                db=db,
+                settings=settings,
+                emergency_stop=emergency_stop,
+                restart_stop=restart_stop,
+                close_bot_session=False,
+            ),
         )
     finally:
         await pet_video_queue.close()
