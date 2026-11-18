@@ -54,7 +54,7 @@ async def test_chat_mirrors_only_allowed_group_text_and_keeps_private_ids_off_wi
 @pytest.mark.parametrize(
     ('pose', 'username', 'identity', 'gender', 'location'),
     [
-        ({'seat': 0}, 'pixel_tg', '@pixel_tg', 'female', 'Кинотеатр • 🎬'),
+        ({'room': 'cinema'}, 'pixel_tg', '@pixel_tg', 'female', 'Кинотеатр • 🎬'),
         ({}, None, 'Имя <Норы>', 'male', 'ЛОББИ • 🌎'),
     ],
 )

@@ -1394,24 +1394,25 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   .nora-chat[open] { animation: none; }
 }
 
-/* The cinema keeps its video above the 3D seats and the room controls outside the player. */
+/* Cinema projector and perspective-aligned media wall */
 .nora-cinema {
-  position: absolute;
-  z-index: 4;
+  position: fixed;
   inset: var(--nora-top) var(--hud-right) auto var(--hud-left);
-  width: min(100% - var(--hud-right) - var(--hud-left), 570px);
+  width: min(100% - var(--hud-right) - var(--hud-left), 520px);
   max-height: calc(100dvh - var(--nora-top) - 16px - var(--safe-bottom));
   box-sizing: border-box;
   overflow: auto;
-  margin-inline: auto;
-  padding: 10px;
+  margin: 0 auto;
+  padding: 12px;
   border: 2px solid #b7838d;
   background: #221823f2;
   box-shadow: 4px 4px #130c16;
   color: #ffedcf;
   font-size: 12px;
 }
-.nora-cinema[hidden], .nora-cinema [hidden] { display: none; }
+.nora-cinema::backdrop { background: #130b16b3; }
+.nora-cinema [hidden], .nora-cinema-room [hidden].nora-cinema-media, .nora-cinema-tools[hidden],
+.nora-cinema-tools [hidden] { display: none; }
 .nora-cinema header, .nora-cinema-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .nora-cinema header { min-height: 36px; margin: 0; padding: 0; }
 .nora-cinema h2 { margin: 0 auto 0 0; font-size: 15px; }
@@ -1438,31 +1439,52 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .nora-cinema details, .nora-cinema-controls { margin-block-start: 8px; }
 .nora-cinema form { display: grid; gap: 6px; padding-top: 8px; }
 .nora-cinema form label { display: grid; gap: 4px; }
-.nora-cinema-media {
-  display: grid;
+.nora-cinema [data-note] { margin: 12px 0; padding: 0; font-size: 11px; line-height: 1.45; }
+.nora-cinema input[type=range] { min-width: 75px; flex: 1; accent-color: #d8839d; }
+.nora-cinema :focus-visible, .nora-cinema-tools button:focus-visible { outline: 2px solid #ffd39d; outline-offset: 2px; }
+
+.nora-cinema-room {
+  --cinema-scene-top: calc(var(--nora-top) + 52px);
+  isolation: isolate;
+  background: #1c1422;
+}
+.nora-cinema-room > canvas, .nora-cinema-viewport {
+  position: absolute;
+  top: var(--cinema-scene-top);
+  left: 0;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  min-height: 200px;
-  margin-block-start: 6px;
+  height: calc(100% - var(--cinema-scene-top));
+}
+.nora-cinema-viewport { overflow: hidden; pointer-events: none; z-index: 1; }
+.nora-cinema-viewport:not(:has(.is-youtube)) { z-index: -1; }
+.nora-cinema-viewport .nora-cinema-media {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 960px;
+  height: 540px;
+  transform-origin: 0 0;
+  visibility: hidden;
   background: #09080c;
 }
-.nora-cinema-media :is(iframe, video) {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 200px;
-  border: 0;
+.nora-cinema-media :is(iframe, video) { display: block; width: 100%; height: 100%; border: 0; }
+.nora-cinema-media iframe { pointer-events: auto; }
+.nora-cinema-room > .nora-world-bar,
+.nora-cinema-room > .nora-world-help,
+.nora-cinema-seated > :is(.nora-world-joystick, .nora-world-sprint, .nora-world-jump),
+.nora-world-active:has(.nora-cinema-room) :is(.nora-game-music, .nora-game-mixer, .nora-game-back) {
+  visibility: hidden;
 }
-.nora-cinema [data-note] { margin: 7px 0; padding: 0; font-size: 11px; line-height: 1.45; }
-.nora-cinema [data-watch] { background: #853952; }
-.nora-cinema input[type=range] { min-width: 75px; flex: 1; accent-color: #d8839d; }
-.nora-cinema :focus-visible { outline: 2px solid #ffd39d; outline-offset: 2px; }
-.nora-cinema-open {
+.nora-cinema-tools {
   position: absolute;
-  top: calc(var(--nora-top) + 154px);
+  top: var(--nora-top);
   right: var(--hud-right);
+  display: flex;
+  gap: 5px;
+}
+.nora-cinema-tools button {
   min-height: 44px;
-  padding: 0 9px;
+  padding: 0 6px;
   border: 2px solid #b7838d;
   box-shadow: 3px 3px #130c16;
   background: #40273c;
@@ -1470,15 +1492,26 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   font-size: 10px;
   cursor: pointer;
 }
-.nora-cinema-active :is(.nora-cinema-open, .nora-world-bar, .nora-world-context, .nora-world-help, .nora-world-view,
-  .nora-world-jump, .nora-world-sprint, .nora-world-joystick, .nora-pet-actions, .nora-chat-open) {
-  visibility: hidden;
+.nora-cinema-tools button[aria-pressed=true] { border-color: #efb489; }
+.nora-world.nora-cinema-room > .nora-chat-open {
+  top: var(--nora-top);
+  right: auto;
+  left: var(--hud-left);
+  width: 64px;
+  justify-content: center;
+  padding-inline: 5px;
+  gap: 6px;
 }
-.nora-world-active:has(.nora-cinema-active) :is(.nora-game-music, .nora-game-mixer, .nora-game-back),
-.nora-cinema-active:has(.nora-chat[open]) .nora-cinema-media { visibility: hidden; }
-@media (max-height: 540px) {
-  .nora-cinema { width: min(100% - var(--hud-right) - var(--hud-left), 370px); }
+.nora-cinema-room > .nora-chat-open span { position: absolute; top: 5px; right: 5px; }
+.nora-world.nora-cinema-room > .nora-world-context {
+  top: var(--nora-top);
+  bottom: auto;
+  left: calc(var(--hud-left) + 68px);
+  right: auto;
+  width: min(88px, calc(100% - var(--hud-left) - var(--hud-right) - 180px));
+  margin: 0;
 }
+.nora-cinema-room .nora-world-action { padding: 6px 3px; }
 
 /* Read-only preview beside the game HUD */
 .nora-chat-mini {
@@ -1527,7 +1560,6 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   }
 }
 @media (orientation: landscape) and (max-height: 460px) {
-  .nora-world > .nora-cinema-open,
   .nora-world > .nora-chat-open,
   .nora-world:has(.nora-observatory-hud:not([hidden])) > .nora-chat-open {
     top: calc(var(--nora-top) + 50px);
@@ -1546,12 +1578,6 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
     left: calc(var(--hud-left) + 108px);
     width: min(260px, calc(100% - var(--hud-left) - var(--hud-right) - 224px));
   }
-}
-.nora-cinema .nora-chat-mini {
-  position: static;
-  width: min(100%, 310px);
-  max-height: none;
-  margin-top: 9px;
 }
 .nora-settings .nora-settings-chat {
   display: flex;

@@ -9,7 +9,7 @@ import pytest
 
 from community_bot.aliases import is_command_message
 from community_bot.database import Database
-from community_bot.nora_cinema import ENTRANCE, MAX_FILE, Cinema, cinema_api, source_from_url
+from community_bot.nora_cinema import LAYOUT, MAX_FILE, SEATS, Cinema, cinema_api, source_from_url
 from community_bot.nora_game_api import lobby_snapshot, register, save_outfit
 
 VIDEO = 'https://youtu.be/M7lc1UVf-VE'
@@ -45,10 +45,11 @@ async def test_seats_and_shared_playback(tmp_path, monkeypatch):
     now = 1040.0
     monkeypatch.setattr('community_bot.nora_game_api.time', SimpleNamespace(monotonic=lambda: now))
 
-    async def frame(uid, rev='?', entrance=True):
-        x, z = ENTRANCE if entrance else (0, 0)
+    async def frame(uid, rev='?', *, seat=None, near=None, room='cinema'):
+        x, z = SEATS[near] if near is not None else (LAYOUT['spawn']['x'], LAYOUT['spawn']['z'])
         return await lobby_snapshot(app, uid, {
-            'session': sessions[uid], 'x': x, 'z': z, 'y': .017, 'heading': 0, 'cinema': rev,
+            'session': sessions[uid], 'x': x, 'z': z, 'y': .017, 'heading': 0,
+            'room': room, 'seat': seat, 'cinema': rev,
         })
 
     class GameRequest(dict):
@@ -64,15 +65,21 @@ async def test_seats_and_shared_playback(tmp_path, monkeypatch):
         request.body = {'shirt': 'white', 'pants': 'blue_slim', 'shoes': 'white_stripes'}
         await save_outfit(request)
 
-    assert (await frame(101, entrance=False))['cinema']['seat'] is None
-    first = (await frame(101))['cinema']
-    assert first == {'seat': 0, 'revision': '', 'show': None}
+    assert (await frame(101, seat=0))['cinema']['seat'] is None
+    first = (await frame(101, seat=2, near=2))['cinema']
+    assert first == {'seat': 2, 'requestedSeat': 2, 'occupied': [], 'revision': '', 'show': None}
     cinema.update(presence, 101, {'action': 'start', 'revision': '', 'url': VIDEO}, False, now)
     now += 5
-    payload = await frame(102)
+    assert (await frame(102, room=None))['players'] == []
+    payload = await frame(102, seat=2, near=2)
     second = payload['cinema']
-    assert second['seat'] == 1
-    assert payload['players'][0]['seat'] == 0
+    assert second['seat'] is None and second['occupied'] == [2]
+    assert payload['players'][0]['seat'] == 2
+    assert (await frame(102, seat=3, near=3))['cinema']['seat'] == 3
+    assert (await frame(102))['cinema']['seat'] is None
+    assert presence[102][2]['z'] == SEATS[3][1] - LAYOUT['standOffset']
+    with pytest.raises(ValueError, match='номер места'):
+        await frame(102, seat=len(SEATS))
     assert second['show']['source'] == 'M7lc1UVf-VE'
     assert not second['show']['host']
     assert (payload['time'] - second['show']['changed']) / 1000 == 5
@@ -80,20 +87,24 @@ async def test_seats_and_shared_playback(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='ведущего'):
         cinema.update(presence, 102, {'action': 'toggle', 'revision': revision}, False, now)
     cinema.update(presence, 101, {'action': 'toggle', 'revision': revision}, False, now)
-    paused = (await frame(101, revision))['cinema']
+    paused = (await frame(101, revision, seat=2))['cinema']
     assert paused['show']['position'] == 5 and not paused['show']['playing']
-    assert (await frame(101, paused['revision']))['cinema'] == {'seat': 0}
+    assert (await frame(101, paused['revision'], seat=2))['cinema'] == {
+        'seat': 2, 'requestedSeat': 2, 'occupied': [],
+    }
     with pytest.raises(ValueError, match='Сеанс изменился'):
         cinema.update(presence, 101, {'action': 'seek', 'revision': revision, 'position': 3}, False, now)
     cinema.update(presence, 101, {'action': 'seek', 'revision': paused['revision'], 'position': 12}, False, now)
-    await lobby_snapshot(app, 101, {'session': sessions[101], 'leave': True})
+    await frame(101)
+    assert cinema.show.host == 101
+    await frame(101, room=None)
     handoff = (await frame(102))['cinema']
     assert handoff['show']['host'] and handoff['show']['position'] == 12
     await lobby_snapshot(app, 102, {'session': sessions[102], 'leave': True})
     assert cinema.show is None
 
 
-async def test_telegram_import_has_one_upload_and_seated_signed_requests(monkeypatch):
+async def test_telegram_import_has_one_upload_and_signs_for_standing_viewers(monkeypatch):
     assert is_command_message('Нора, в кино')
     storage = SimpleNamespace(config={'BUCKET': 'fixture'})
     cinema = Cinema(storage)
@@ -120,7 +131,7 @@ async def test_telegram_import_has_one_upload_and_seated_signed_requests(monkeyp
         await cinema.import_clip(bot, message)
 
     now = time.monotonic()
-    presence = {101: (now, 'seated', {'seat': 0})}
+    presence = {101: (now, 'viewer', {'room': 'cinema'})}
     cinema.update(presence, 101, {'action': 'start', 'revision': '', 'clip': key}, False, now)
     snapshot = cinema.snapshot(presence, 101, '', now)
     assert snapshot['show']['source'] == ''
@@ -129,7 +140,7 @@ async def test_telegram_import_has_one_upload_and_seated_signed_requests(monkeyp
     class Request:
         method = 'GET'
         app = {'nora_cinema': cinema, 'nora_lobby': presence}
-        query = {'session': 'seated', 'show': cinema.show.id}
+        query = {'session': 'viewer', 'show': cinema.show.id}
 
         def __getitem__(self, _):
             return {'id': 101}

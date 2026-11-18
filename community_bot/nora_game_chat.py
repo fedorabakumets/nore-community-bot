@@ -176,11 +176,11 @@ async def feed(request):
 
 
 def _location(presence, requested):
-    from community_bot.nora_game_api import LOBBY_TTL
+    from community_bot.nora_game_api import CINEMA_ROOM, LOBBY_TTL
 
     if presence and time.monotonic() - presence[0] < LOBBY_TTL:
         pose = presence[2]
-        if pose.get('seat') is not None:
+        if pose.get('room') == CINEMA_ROOM:
             return 'Кинотеатр • 🎬'
         if pose.get('room'):
             return 'Воспоминание • ⚡'

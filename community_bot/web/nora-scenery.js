@@ -3,7 +3,7 @@ window.NoraScenery = (() => {
   const tavernOffset=-4.95, portalZ={home:6.75};
   const lobbyDeck={x:0,z:-3};
   const lobbySpawn={x:0,z:6.8}, tavernPortal={x:-1.64,z:.6};
-  function create(T, geometry, material, memoryPortal) {
+  function create(T, geometry, material, memoryPortal, cinemaLayout) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
     function box(x,y,z,w,h,d,color){blocks.push([x,y,z,w,h,d,color]);}
@@ -274,7 +274,6 @@ window.NoraScenery = (() => {
     const flameMaterial=new T.MeshBasicMaterial({color:'#ffd18a'});
     const lanterns=new T.Group();
     for(const x of [-12,-4,4,12])for(const z of [-5,5]){
-      if(x===12&&z===-5&&window.NoraCinema)continue;
       box(x,.39,z,2.25,.15,.65,'#624943');
       box(x,.67,z-.28,2.25,.48,.12,'#59454a');
       for(const dx of [-.85,.85])box(x+dx,.16,z,.18,.32,.53,'#797282');
@@ -289,43 +288,52 @@ window.NoraScenery = (() => {
       flame.position.set(lx,2.1,z);flame.scale.set(.29,.42,.29);lanterns.add(flame);
       const light=new T.PointLight('#ffc082',7,4.5);light.position.copy(flame.position);lanterns.add(light);
     }
-    if(window.NoraCinema){
-      const {entrance,seats}=window.NoraCinema;
-      box(10.8,.035,-4.85,7.7,.07,9.5,'#492738');
-      box(10.8,2.35,-9.48,7.6,4.7,.35,'#3d283d');
-      solid(10.8,2.35,-9.48,7.6,4.7,.35);
-      box(10.8,2.56,-9.23,6.9,3.88,.18,'#ba6d7a');
-      box(10.8,2.56,-9.1,6.64,3.74,.18,'#a293ad');
-      for(const side of [-1,1]){
-        const x=10.8+side*3.75;
-        box(x,.52,-5.8,.32,1.04,7.25,'#432d43');
-        solid(x,.52,-5.8,.32,1.04,7.25,1.04);
-        for(const z of [-8.7,-6.3,-3.9]){
-          box(x,1.07,z,.36,.14,.34,'#c48569');
-        }
-      }
-      for(const {x,z} of seats){
-        box(x,.21,z,1.04,.42,.87,'#682b42');
-        box(x,.47,z,1.02,.15,.84,'#963d55');
-        box(x,.52,z+.43,1.03,1.04,.21,'#763248');
-        for(const side of [-1,1])box(x+side*.51,.6,z,.11,.34,.81,'#af596b');
-      }
-      box(entrance.x,.065,entrance.z,2.4,.08,.62,'#ae677c');
-    }
     consoleAt(lobbyDeck.x,lobbyDeck.z);
     const lobby=mesh();lobby.add(lanterns,lobbyRecord,lobbyNotes);lobby.visible=false;
-    let cinemaSign=null;
-    if(window.NoraCinema){
-      const canvas=document.createElement('canvas');canvas.width=320;canvas.height=72;
-      const ctx=canvas.getContext('2d');
-      ctx.fillStyle='#422637';ctx.fillRect(0,0,320,72);
-      ctx.strokeStyle='#d6998d';ctx.lineWidth=5;ctx.strokeRect(5,5,310,62);
-      ctx.fillStyle='#ffe3b5';ctx.font='bold 36px monospace';ctx.textAlign='center';
-      ctx.fillText('КИНОТЕАТР',160,48);
-      const texture=new T.CanvasTexture(canvas);texture.colorSpace=T.SRGBColorSpace;
-      cinemaSign=new T.Sprite(new T.SpriteMaterial({map:texture}));
-      cinemaSign.position.set(10.8,2.5,-.52);cinemaSign.scale.set(3.3,.75,1);
-      lobby.add(cinemaSign);
+
+    let cinemaHall=null,cinemaZone=null,screenFace=null,screenMaterial=null,screenCutout=null;
+    if(cinemaLayout){
+      const {screen,seats,bounds}=cinemaLayout;
+      blocks=[];solids=[];cameraBoxes=[];
+      cinemaZone={limitX:bounds.x[1],limitZ:bounds.z[1],boxes:solids,cameraBoxes};
+      box(0,-.23,0,18,.46,20.5,'#362637');
+      box(0,.013,.45,2.17,.025,17,'#813a51');
+      for(const side of [-1,1]){
+        const x=8.65*side;
+        box(x,4.6,0,.65,9.2,20.15,'#422938');
+        solid(x,4.6,0,.65,9.2,20.15);
+        box(side*7.57,.015,.35,1.13,.028,17,'#613343');
+        for(const z of [-7,-3,1,5,8]){
+          box(side*8.21,4.5,z,.4,9,.48,'#65394d');
+          box(side*8.0,2.52,z,.18,.35,.31,'#efb489');
+          box(side*7.25,.045,z,.19,.07,.22,'#d79374');
+        }
+      }
+      box(0,4.7,-9.97,17,9.4,.5,'#422c3e');
+      solid(0,4.7,-9.97,17,9.4,.5);
+      box(0,4.5,9.84,17,9,.53,'#32263c');
+      solid(0,4.5,9.84,17,9,.53);
+      box(0,9.25,0,17.6,.38,20.5,'#403044');
+      box(screen.x,screen.y,screen.z-.18,screen.width+.62,screen.height+.62,.28,'#815060');
+      box(screen.x,screen.y,screen.z-.09,screen.width+.18,screen.height+.18,.10,'#d58c8f');
+      box(0,.22,-8.55,15.3,.44,2.04,'#503044');
+      solid(0,.22,-8.55,15.3,.44,2.04,.44);
+      for(const [x,z] of seats){
+        box(x,.21,z,1.04,.42,.87,'#682b42');
+        box(x,.47,z,1.02,.15,.84,'#a84c68');
+        box(x,.52,z+.43,1.03,1.04,.21,'#9a425f');
+        for(const side of [-1,1])box(x+side*.51,.6,z,.11,.34,.81,'#c16f82');
+        solid(x,.51,z+.04,1.04,1.04,.87,1.04);
+      }
+      cinemaHall=mesh();cinemaHall.name='nora-cinema-hall';cinemaHall.visible=false;
+      screenMaterial=new T.MeshBasicMaterial({color:'#1c1523',fog:false});
+      // The screen opening writes transparency only where the film is not occluded by 3D objects.
+      screenCutout=new T.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,fog:false,
+        blending:T.CustomBlending,blendSrc:T.ZeroFactor,blendDst:T.ZeroFactor});
+      screenFace=new T.Mesh(geometry,screenMaterial);screenFace.name='nora-cinema-screen';
+      screenFace.renderOrder=-1;
+      screenFace.position.set(screen.x,screen.y,screen.z-.015);
+      screenFace.scale.set(screen.width,screen.height,.025);cinemaHall.add(screenFace);
     }
     const portal=new T.Group();
     portal.name='nora-world-portal';
@@ -375,35 +383,44 @@ window.NoraScenery = (() => {
       zone.boxes.push([x-width,x+width,z-depth,z+depth]);
       zone.cameraBoxes.push([x-width,x+width,0,2.94*scale,z-depth,z+depth]);
     }
-    function lobbyGate(position, label, tint){
+    function lobbyGate(position, label, name, {area=lobby, zone=lobbyZone, palette, direction=1}={}){
       const gate=portal.clone(), frame=portalStone.clone();
       gateMeshes.push(frame);gate.add(frame);
-      gate.name=tint?'nora-observatory-portal':'nora-tavern-portal';
-      gate.position.set(position.x,0,position.z);gate.scale.setScalar(.76);lobby.add(gate);
-      if(tint){
+      gate.name=name;
+      gate.position.set(position.x,0,position.z);gate.rotation.y=direction<0?Math.PI:0;
+      gate.scale.setScalar(.76);area.add(gate);
+      if(palette){
+        const [rimColor,coreColor,detailColor,lightColor]=palette;
         const rim=rimMaterial.clone(), core=coreMaterial.clone(), detail=highlightMaterial.clone();
-        rim.color.set('#332239');core.color.set('#66476f');detail.color.set('#c7a0d3');
+        rim.color.set(rimColor);core.color.set(coreColor);detail.color.set(detailColor);
         gateMaterials.push(rim,core,detail);
         for(const object of gate.children){
           if(object.material===rimMaterial)object.material=rim;
           if(object.material===coreMaterial)object.material=core;
           if(object.material===highlightMaterial)object.material=detail;
-          if(object.isPointLight)object.color.set('#936cac');
+          if(object.isPointLight)object.color.set(lightColor);
         }
       }
       const canvas=document.createElement('canvas');canvas.width=384;canvas.height=88;
       const ctx=canvas.getContext('2d');
       ctx.fillStyle='rgba(24,18,28,.68)';ctx.fillRect(0,0,384,88);
-      ctx.fillStyle=tint?'#e5c3e6':'#eed7b3';ctx.font='bold 44px monospace';
+      ctx.fillStyle=palette?.[4]||'#eed7b3';ctx.font='bold 44px monospace';
       ctx.textAlign='center';ctx.fillText(label,192,58,357);
       const map=new T.CanvasTexture(canvas);map.colorSpace=T.SRGBColorSpace;
       const sprite=new T.Sprite(new T.SpriteMaterial({map,transparent:true,depthWrite:false,opacity:.8}));
       sprite.name='nora-portal-label';sprite.scale.set(1.64,.38,1);
-      sprite.position.set(position.x,2.46,position.z+.88);lobby.add(sprite);gateLabels.push(sprite);
-      addCollider(lobbyZone,position.x,position.z,.76);
+      sprite.position.set(position.x,2.46,position.z+.88*direction);area.add(sprite);gateLabels.push(sprite);
+      addCollider(zone,position.x,position.z,.76);
     }
-    lobbyGate(tavernPortal,'НОРА',false);
-    if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ',true);
+    lobbyGate(tavernPortal,'НОРА','nora-tavern-portal');
+    if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ','nora-observatory-portal',{
+      palette:['#332239','#66476f','#c7a0d3','#936cac','#e5c3e6'],
+    });
+    if(cinemaHall){
+      const palette=['#513034','#996043','#ffcb8e','#e99d73','#ffe1b5'];
+      lobbyGate(cinemaLayout.portal,'КИНОТЕАТР','nora-cinema-portal',{palette});
+      lobbyGate(cinemaLayout.exit,'В ЛОББИ','nora-cinema-exit',{area:cinemaHall,zone:cinemaZone,palette,direction:-1});
+    }
     portal.add(portalStone);portal.position.z=portalZ.home;outdoor.add(portal);
     addCollider(outdoorZone,0,portalZ.home);
     let portalTime=0;
@@ -415,14 +432,15 @@ window.NoraScenery = (() => {
         sprite.position.y=2.46+.09*Math.sin(portalTime*1.7+i*.8);
         sprite.material.opacity=.75+.06*Math.sin(portalTime*1.1+i);
       }
-      if(gateMaterials.length)gateMaterials[2].opacity=highlightMaterial.opacity;
+      for(let i=2;i<gateMaterials.length;i+=3)gateMaterials[i].opacity=highlightMaterial.opacity;
     }
-    return {outdoor,indoor,lobby,lobbyZone,updatePortal,outdoorZone,indoorZone,update,setRecords,setLobbyRecord,carriedRecord,setCinemaOpen(open){
-      if(cinemaSign)cinemaSign.visible=!open;
-    },dispose(){
+    return {outdoor,indoor,lobby,lobbyZone,cinemaHall,cinemaZone,updatePortal,outdoorZone,indoorZone,
+      update,setRecords,setLobbyRecord,carriedRecord,setCinemaScreen(open){
+        if(screenFace)screenFace.material=open?screenCutout:screenMaterial;
+      },dispose(){
       recordsDisposed=true;coverTexture?.dispose();coverMaterial.dispose();recordFaceGeometry.dispose();sleeveGeometry.dispose();faceGeometry.dispose();
       outdoor.dispose();indoor.dispose();lobby.dispose();flameMaterial.dispose();portalStone.dispose();rimMaterial.dispose();coreMaterial.dispose();highlightMaterial.dispose();glow.dispose();windowMaterial.dispose();notes.dispose();lobbyNotes.dispose();noteMaterial.dispose();discGeometry.dispose();discMaterial.dispose();labelGeometry.dispose();labelMaterial.dispose();
-      if(cinemaSign){cinemaSign.material.map.dispose();cinemaSign.material.dispose();}
+      cinemaHall?.dispose();screenMaterial?.dispose();screenCutout?.dispose();
       for(const mesh of gateMeshes)mesh.dispose();
       for(const material of gateMaterials)material.dispose();
       for(const label of gateLabels){label.material.map.dispose();label.material.dispose();}

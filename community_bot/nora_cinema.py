@@ -2,12 +2,14 @@
 import asyncio
 import hashlib
 import ipaddress
+import json
 import logging
 import math
 import re
 import tempfile
 import time
 from dataclasses import dataclass, replace
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
@@ -15,12 +17,12 @@ from aiohttp import web
 
 from community_bot.helpers import has_permission, message_media
 from community_bot.media_cache import _thread
-from community_bot.nora_game_api import LOBBY_TTL
+from community_bot.nora_game_api import CINEMA_ROOM, LOBBY_TTL
 from community_bot.permissions import PERM_GAMES
 
 logger = logging.getLogger(__name__)
-SEATS = tuple((x, z) for z in (-4.0, -2.3) for x in (10.8, 9.5, 12.1, 8.2, 13.4))
-ENTRANCE = (10.8, -.3)
+LAYOUT = json.loads((Path(__file__).with_name('web') / 'nora-cinema.json').read_text(encoding='utf-8'))
+SEATS = LAYOUT['seats']
 MAX_FILE = 20 * 1024 * 1024
 MAX_CLIPS = 20
 SHOW_TTL = 4 * 3600
@@ -87,23 +89,43 @@ class Cinema:
         self.import_lock = asyncio.Lock()
         self.next_import = 0.0
 
-    def seat(self, presence, uid, current, session, pose, now):
-        if current and current[1] == session and 'seat' in current[2]:
-            return current[2]['seat']
-        if math.hypot(pose['x'] - ENTRANCE[0], pose['z'] - ENTRANCE[1]) > 2:
+    @staticmethod
+    def occupants(presence, now):
+        return [uid for uid, (seen, _, pose) in presence.items()
+                if now - seen < LOBBY_TTL and pose.get('room') == CINEMA_ROOM]
+
+    @staticmethod
+    def occupied(presence, now, exclude=None):
+        return {pose['seat'] for uid, (seen, _, pose) in presence.items()
+                if uid != exclude and now - seen < LOBBY_TTL and pose.get('room') == CINEMA_ROOM
+                and 'seat' in pose}
+
+    def apply_seat(self, presence, uid, current, session, pose, requested, now):
+        previous = current[2].get('seat') if current and current[1] == session else None
+        if requested is None:
+            if previous is not None:
+                x, z = SEATS[previous]
+                pose.update(x=x, z=z - LAYOUT['standOffset'], y=.017, grounded=True, boosting=False)
             return None
-        occupied = {p.get('seat') for seen, _, p in presence.values() if now - seen < LOBBY_TTL}
-        return next((index for index in range(len(SEATS)) if index not in occupied), None)
+        x, z = SEATS[requested]
+        if previous != requested and (
+            pose['y'] > .08 or math.hypot(pose['x'] - x, pose['z'] - z) > LAYOUT['seatReach']
+            or requested in self.occupied(presence, now, exclude=uid)
+        ):
+            return None
+        pose.update(seat=requested, x=x, z=z, y=.017, heading=math.pi,
+                    grounded=True, sprinting=False, boosting=False)
+        return requested
 
     def refresh(self, presence, now):
         show = self.show
         if show is None:
             return
-        seated = [uid for uid, (seen, _, pose) in presence.items() if now - seen < LOBBY_TTL and 'seat' in pose]
-        if not seated or now - show.since >= SHOW_TTL:
+        viewers = self.occupants(presence, now)
+        if not viewers or now - show.since >= SHOW_TTL:
             self.show = None
-        elif show.host not in seated:
-            self.show = replace(show, host=seated[0], revision=uuid4().hex)
+        elif show.host not in viewers:
+            self.show = replace(show, host=viewers[0], revision=uuid4().hex)
 
     def snapshot(self, presence, uid, revision, now):
         self.refresh(presence, now)
@@ -247,7 +269,8 @@ async def cinema_api(request):
             moderator = await has_permission(request.app['db'], request.app['settings'], uid, PERM_GAMES)
     current = presence.get(uid)
     now = time.monotonic()
-    if not current or now - current[0] >= LOBBY_TTL or current[1] != session or 'seat' not in current[2]:
+    if (not current or now - current[0] >= LOBBY_TTL or current[1] != session
+        or current[2].get('room') != CINEMA_ROOM):
         raise ValueError('Сначала зайди в кинотеатр.')
     cinema.refresh(presence, now)
     if request.method == 'POST':

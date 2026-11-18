@@ -220,6 +220,7 @@ async def change_wings(request):
 
 # Lobby presence expires automatically when a client closes or loses its connection.
 LOBBY_TTL = 8
+CINEMA_ROOM = "cinema"
 LOBBY_BOUNDS = {'x': (-16.35, 16.35), 'z': (-11.35, 11.35), 'heading': (-math.pi, math.pi)}
 # Ground offset plus the ordinary apex and, with wings, the 6.8-speed second launch.
 LOBBY_HEIGHT = .8
@@ -280,17 +281,26 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if body.get('leave') is True:
         if current and current[1] == session:
             del presence[user_id]
-            if cinema and 'seat' in current[2]:
+            if cinema and current[2].get('room') == CINEMA_ROOM:
                 cinema.refresh(presence, now)
             await music_api.return_departed_record(app['db'], user_id, session)
         return {'players': []}
     room = body.get('room')
-    if room not in (None, nora_observatory.ROOM):
+    in_memory = room == nora_observatory.ROOM
+    in_cinema = room == CINEMA_ROOM and cinema is not None
+    if room is not None and not (in_memory or in_cinema):
         raise ValueError('Проверь локацию игрока')
     bounds = LOBBY_BOUNDS
-    if room:
+    if in_memory:
         limits = nora_observatory.LAYOUT['bounds']
         bounds = {**bounds, 'x': (-limits['x'], limits['x']), 'z': (-limits['z'], limits['z'])}
+    if in_cinema:
+        from community_bot.nora_cinema import LAYOUT, SEATS
+
+        bounds = {**bounds, **LAYOUT['bounds']}
+        requested_seat = body.get('seat')
+        if requested_seat is not None and (type(requested_seat) is not int or not 0 <= requested_seat < len(SEATS)):
+            raise ValueError('Проверь номер места')
     pose = {}
     for key, (minimum, maximum) in bounds.items():
         value = body.get(key)
@@ -316,7 +326,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     height = body.get('y')
     maximum = LOBBY_WING_HEIGHT if equipped else LOBBY_HEIGHT
     minimum = 0
-    if room:
+    if in_memory:
         minimum, maximum = limits['minY'], limits['maxY']
     if type(height) not in (int, float) or not minimum <= height <= maximum:
         raise ValueError('Проверь высоту прыжка')
@@ -338,6 +348,7 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     challenge = None
     if room:
         pose['room'] = room
+    if in_memory:
         interaction = body.get('interaction')
         if interaction is not None and (
             not isinstance(interaction, dict)
@@ -355,25 +366,20 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         attempts = app.get('nora_observatory')
         if attempts and user_id in attempts and attempts[user_id].session == session:
             del attempts[user_id]
-    wants_seat = cinema and not room and isinstance(body.get('cinema'), str)
+    current = presence.get(user_id)
+    was_in_cinema = current and current[2].get('room') == CINEMA_ROOM
     seat = None
-    if wants_seat:
-        from community_bot.nora_cinema import SEATS
-
-        if not current or 'seat' not in current[2]:
+    if in_cinema:
+        if not was_in_cinema:
             cinema.refresh(presence, now)
-        seat = cinema.seat(presence, user_id, current, session, pose, now)
-        if seat is not None:
-            x, z = SEATS[seat]
-            pose.update(seat=seat, x=x, z=z, y=.017, heading=math.pi,
-                        grounded=True, sprinting=False, boosting=False)
+        seat = cinema.apply_seat(presence, user_id, current, session, pose, requested_seat, now)
     presence[user_id] = (now, session, {**profile, **pose})
-    cinema_state = {}
-    if wants_seat:
-        cinema_state = {'seat': seat}
-        if seat is not None:
-            cinema_state.update(cinema.snapshot(presence, user_id, body['cinema'], now))
-    elif cinema and current and 'seat' in current[2]:
+    if in_cinema:
+        cinema_state = {
+            'seat': seat, 'requestedSeat': requested_seat, 'occupied': sorted(cinema.occupied(presence, now, user_id)),
+            **cinema.snapshot(presence, user_id, body.get('cinema'), now),
+        }
+    elif cinema and was_in_cinema:
         cinema.refresh(presence, now)
     others = [
         (seen, player) for key, (seen, _, player) in presence.items()
@@ -383,8 +389,9 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     return {
         'time': now * 1000,
         'players': [{**player, 'time': seen * 1000} for seen, player in others[:20]],
-        **({'room': room, 'challenge': challenge} if room else {}),
-        **({'cinema': cinema_state} if wants_seat else {}),
+        **({'room': room} if room else {}),
+        **({'challenge': challenge} if in_memory else {}),
+        **({'cinema': cinema_state} if in_cinema else {}),
     }
 
 
@@ -433,9 +440,9 @@ async def lobby_socket(request):
     finally:
         if session is not None:
             current = request.app['nora_lobby'].get(user_id)
-            # A seated client may continue on the HTTP fallback with the same session.
+            # A cinema visitor may continue on the HTTP fallback with the same session.
             # Explicit leave still releases immediately, and stale seats expire with presence.
-            if not current or 'seat' not in current[2]:
+            if not current or current[2].get('room') != CINEMA_ROOM:
                 await lobby_snapshot(request.app, user_id, {'session': session, 'leave': True})
         await socket.close()
     return socket

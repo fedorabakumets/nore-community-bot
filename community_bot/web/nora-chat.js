@@ -133,10 +133,7 @@ window.NoraChat = (() => {
     });
     listen(dialog, 'close', () => {
       opener.setAttribute('aria-expanded','false');
-      if (!stopped) {
-        const trigger = root.classList.contains('nora-cinema-active') ? root.querySelector('.nora-cinema [data-chat]') : opener;
-        trigger?.focus({preventScroll:true});
-      }
+      if (!stopped) opener.focus({preventScroll:true});
       reset();
     });
     listen(close, 'click', () => dialog.close());
