@@ -370,6 +370,7 @@ window.NoraWorld = (() => {
     let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
     let wingBoostUsed=false;
     let pov=Number(root.dataset.pov ?? 100), actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
+    let lobbyView=0, cinemaDistance=0;
     const viewButton=root.querySelector('.nora-world-view');
     const views=['За спиной','От первого лица','Селфи'];
     function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
@@ -535,18 +536,30 @@ window.NoraWorld = (() => {
     if(challenge)on(challengeHud.querySelector('button'),'click',()=>{
       if(inChallenge)beginTransition(false);
     });
+    function faceCinemaScreen(x,z,eyeHeight){
+      const screen=cinemaLayout.screen;
+      cinemaDistance=Math.max(1,Math.hypot(x-screen.x,z-screen.z)-.22);
+      yaw=targetYaw=Math.atan2(x-screen.x,z-screen.z);
+      pitch=targetPitch=-Math.atan2(screen.y-eyeHeight,cinemaDistance);
+    }
     function switchCinema(entering){
       inCinema=entering;inLobby=!entering;
       lobby.setRoom(entering?cinemaModule.room:null);
       const {x,z}=entering?cinemaLayout.spawn:cinemaLayout.portal;
       player.position.set(x,.017,entering?z:z+1.8);
       player.rotation.y=entering?Math.PI:0;
-      yaw=targetYaw=entering?0:Math.PI;pitch=targetPitch=entering?-.24:.32;
+      if(entering){
+        lobbyView=view;view=1;
+        faceCinemaScreen(x,z,1.51);
+      }else{
+        view=lobbyView;yaw=targetYaw=Math.PI;pitch=targetPitch=.32;
+      }
+      syncView();
       jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
       character.setWings(entering?null:outfit.wings);
       if(entering)cinema.enter();
       else{cinema.leave();records?.refresh();}
-      syncLocation();
+      syncLocation();resize();
       reset();companion.reset();
       action.blur();
     }
@@ -605,7 +618,13 @@ window.NoraWorld = (() => {
       const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
       // Bound fill rate independently of orientation / Retina density. CSS stays full resolution.
       const ratio=Math.min(window.devicePixelRatio||1,mobile?1.25:1.5,Math.sqrt((mobile?420000:1600000)/(w*h)))*quality;
-      const fov=inCinema?Math.max(30,Math.min(58,58*h/480)):58;
+      let fov=58;
+      if(inCinema){
+        const {width,height}=cinemaLayout.screen;
+        const halfSize=Math.max(height*(w>h&&w>=450?1.35:1),width*h/w)*.54;
+        const fit=2*Math.atan2(halfSize,cinemaDistance)*180/Math.PI;
+        fov=Math.min(100,Math.max(30,fit,Math.min(58,58*h/480)));
+      }
       if(w===renderWidth&&h===renderHeight&&Math.abs(ratio-renderRatio)<.001&&camera.fov===fov)return;
       renderWidth=w;renderHeight=h;renderRatio=ratio;
       renderer.setPixelRatio(ratio);renderer.setSize(w,h,false);
@@ -632,15 +651,13 @@ window.NoraWorld = (() => {
       ()=>inCinema?'cinema':inChallenge?'observatory':inside?'tavern':inLobby?'lobby':'forest');
     const cinema=cinemaLayout&&cinemaModule.mount(root,T,cinemaLayout,{
       reset,sessionId:lobby.session,clock:time=>lobby.serverSeconds(time)*1000,
-      dialogOpen:()=>chat?.panelOpen()||companion.panelOpen()||records?.panelOpen()||
-        !!root.querySelector('.nora-settings[open]'),
       onSeatChange(previous,seat){
         if(seat){
           const [x,z]=seat;
           player.position.set(x,.017,z);
           player.rotation.y=Math.PI;
-          yaw=targetYaw=Math.atan2(x-cinemaLayout.screen.x,z-cinemaLayout.screen.z);
-          pitch=targetPitch=-.24;
+          faceCinemaScreen(x,z,1.19);
+          resize();
         }else if(previous){
           player.position.set(previous[0],.017,previous[1]-cinemaLayout.standOffset);
         }
@@ -648,7 +665,7 @@ window.NoraWorld = (() => {
         reset();
       },
     });
-    // Shorter renders during a film leave more GPU time for video decoding and composition.
+    // Render at display cadence during movement, and pace idle hall frames independently of the film.
     let nextCinemaFrame=0;
     function tick(time){
       if(disposed)return;const previousFrame=previous;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
@@ -762,7 +779,8 @@ window.NoraWorld = (() => {
           sunlight.intensity=.79+storm.light*.39;
           if(storm.thunder)sounds?.thunder?.();
         }
-        updateWind(dt,sprinting&&travelled>.001);
+        wind.visible=!inCinema;
+        if(!inCinema)updateWind(dt,sprinting&&travelled>.001);
         const daylight=updateLighting(Date.now());
         const audioYaw=yaw+(view===2?Math.PI:0);
         const playing=inCinema||inChallenge||transition?.entering?false:inLobby?!!records?.lobbyPlaying():recordPlaying;
@@ -780,16 +798,18 @@ window.NoraWorld = (() => {
             player.position.z-(inside?0:tavernOffset),audioYaw));
           if(!inside)scenery.updatePortal?.(dt);
         }
-        scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
+        if(!inCinema)scenery.update?.(dt,inside,daylight,camera,playing&&(inLobby||!records||records.hasRecord()),inLobby);
         sounds?.update(inside||inChallenge||inCinema,daylight,travelled,grounded);
         atmosphere.update(dt,daylight,inside||inLobby||inChallenge||inCinema);
         companion.update(dt,camera,!inChallenge&&!inCinema);
         chat?.update(time);
-        if(!inCinema||time>=nextCinemaFrame){
+        const movingCamera=travelled>.0001||!grounded||Math.abs(targetYaw-yaw)+Math.abs(targetPitch-pitch)>.0005;
+        if(!inCinema||movingCamera||time>=nextCinemaFrame){
           if(inCinema){
             camera.updateMatrixWorld();
             scenery.setCinemaScreen(cinema.project(camera,renderWidth,renderHeight));
-            nextCinemaFrame=time+1000/30;
+            const interval=1000/30;
+            if(time>=nextCinemaFrame)nextCinemaFrame=time+interval-(time-nextCinemaFrame)%interval;
           }
           renderer.render(scene,camera);
         }

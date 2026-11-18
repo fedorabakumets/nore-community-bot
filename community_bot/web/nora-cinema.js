@@ -1,7 +1,7 @@
 'use strict';
 window.NoraCinema = (() => {
   const room = 'cinema', title = 'Кинотеатр';
-  const surfaceWidth = 960, surfaceHeight = 540;
+  const surfaceWidth = 640, surfaceHeight = 360;
   let youtubePromise;
 
   async function load() {
@@ -37,8 +37,8 @@ window.NoraCinema = (() => {
     return youtubePromise;
   }
 
-  function mount(root, T, layout, {reset, sessionId, clock, dialogOpen, onSeatChange}) {
-    root.insertAdjacentHTML('beforeend', '<div class="nora-cinema-viewport"><div class="nora-cinema-media" hidden></div></div>' +
+  function mount(root, T, layout, {reset, sessionId, clock, onSeatChange}) {
+    root.insertAdjacentHTML('beforeend', '<div class="nora-cinema-viewport" inert aria-hidden="true"><div class="nora-cinema-media" hidden></div></div>' +
       '<div class="nora-cinema-tools" hidden><button type="button" data-projector>Проектор</button>' +
       '<button type="button" data-audio hidden>Включить звук</button></div>' +
       '<dialog class="nora-cinema" aria-label="Проектор кинотеатра"><header><h2>Проектор</h2>' +
@@ -75,13 +75,12 @@ window.NoraCinema = (() => {
     const plane = new T.Matrix4().makeScale(screen.width / surfaceWidth, -screen.height / surfaceHeight, 1)
       .setPosition(screen.x - screen.width / 2, screen.y + screen.height / 2, screen.z);
     const transform = new T.Matrix4();
-    const corners = [[0, 0], [surfaceWidth, 0], [surfaceWidth, surfaceHeight], [0, surfaceHeight]];
-    const projected = corners.map(() => new T.Vector4());
-    const crossing = new T.Vector4();
+    const lastTransform = new T.Matrix4();
+    let projectedWidth = 0, projectedHeight = 0;
     let active = false, seat = null, requestedSeat = null, occupied = [], revision = '?', show = null;
     let moderator = false, soundEnabled = false, autoplayBlocked = false, playerError = '', busy = false, seeking = false;
     let video = null, youtube = null, ready = false, version = 0, lastSync = 0, lastReply = 0, loadAt = 0;
-    let pendingRevision = null, warned = false, visible = false, autoplayVisible = false, masked = false;
+    let pendingRevision = null, warned = false;
 
     function desired(now) {
       return show ? show.position + (show.playing ? Math.max(0, (clock(now) - show.changed) / 1000) : 0) : 0;
@@ -109,7 +108,7 @@ window.NoraCinema = (() => {
       autoplayBlocked = false;
       playerError = '';
       warned = false;
-      visible = autoplayVisible = false;
+      projectedWidth = 0;
       range.disabled = true;
     }
 
@@ -186,7 +185,6 @@ window.NoraCinema = (() => {
       loadAt = performance.now();
       const current = version;
       const {kind, id, source} = show;
-      media.classList.toggle('is-youtube', kind === 'youtube');
       media.hidden = false;
       render();
       try {
@@ -194,10 +192,10 @@ window.NoraCinema = (() => {
           const YT = await loadYouTube();
           if (current !== version) return;
           const iframe = document.createElement('iframe');
-          const params = new URLSearchParams({enablejsapi: '1', playsinline: '1', origin: location.origin});
+          const params = new URLSearchParams({enablejsapi: '1', playsinline: '1', controls: '0', disablekb: '1', fs: '0', origin: location.origin});
           iframe.title = 'Плеер YouTube на экране зала';
-          iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
-          iframe.allowFullscreen = true;
+          iframe.tabIndex = -1;
+          iframe.allow = 'autoplay; encrypted-media';
           iframe.referrerPolicy = 'strict-origin-when-cross-origin';
           iframe.src = 'https://www.youtube.com/embed/' + source + '?' + params;
           media.replaceChildren(iframe);
@@ -213,14 +211,14 @@ window.NoraCinema = (() => {
                 autoplayBlocked = false;
                 render();
               }
-              if (!show?.playing || !visible || masked) event.target.pauseVideo();
+              if (!show?.playing || document.hidden) event.target.pauseVideo();
             },
             onAutoplayBlocked() {
               if (current !== version) return;
               if (soundEnabled) {
                 soundEnabled = false;
                 youtube.mute();
-                if (autoplayVisible && !masked) youtube.playVideo();
+                if (show?.playing && !document.hidden) youtube.playVideo();
               } else autoplayBlocked = true;
               render();
             },
@@ -284,18 +282,14 @@ window.NoraCinema = (() => {
       const validDuration = Number.isFinite(duration) && duration > 0;
       const at = validDuration ? Math.min(duration, desired(now)) : desired(now);
       const ended = validDuration && at >= duration;
-      range.disabled = !validDuration;
-      if (validDuration && !seeking && document.activeElement !== range) {
+      if (range.disabled === validDuration) range.disabled = !validDuration;
+      if (panel.open && validDuration && !seeking && document.activeElement !== range) {
         range.max = String(Math.ceil(duration));
         range.value = String(at);
       }
       if (ended && show.host && !warned) {
         warned = true;
         void command('stop');
-      }
-      if (youtube && (!visible || masked)) {
-        pauseLocal();
-        return;
       }
       const playing = show.playing && !ended;
       const position = video?.currentTime ?? youtube.getCurrentTime();
@@ -305,59 +299,38 @@ window.NoraCinema = (() => {
       }
       const tolerance = force ? .12 : playing ? (video ? .65 : 2) : .25;
       const playerState = youtube?.getPlayerState();
-      const canScriptYouTube = autoplayVisible || playerState === 1 || playerState === 2;
       if (!autoplayBlocked && Math.abs(position - at) > tolerance) {
         if (video) video.currentTime = at;
-        else if (canScriptYouTube) youtube.seekTo(at, true);
+        else youtube.seekTo(at, true);
       }
       if (playing && !autoplayBlocked) {
         if (video?.paused) playVideo();
-        if (youtube && autoplayVisible && playerState !== 1) youtube.playVideo();
+        if (youtube && playerState !== 1) youtube.playVideo();
       } else if (!playing) pauseLocal();
     }
 
-    // Keep the browser's video plane coplanar with the wall, including perspective and roll.
+    // The 3D wall masks this native media layer, including chairs and avatars in front.
+    // Only the camera changes its projection. Decoded frames never pass through JavaScript.
     function project(camera, width, height) {
-      if (!active || media.hidden) return;
-      masked = panel.open || dialogOpen();
-      media.style.visibility = 'hidden';
-      visible = autoplayVisible = false;
-      if (masked || camera.position.z <= screen.z || !width || !height) return;
-
+      if (!active || media.hidden || !width || !height) return false;
+      const showing = !playerError && (video ? video.readyState >= 2 : ready);
+      if (!showing) return false;
       transform.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(plane);
-      for (const [index, [x, y]] of corners.entries()) {
-        projected[index].set(x, y, 0, 1).applyMatrix4(transform);
-      }
-      let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
-      function measure(point) {
-        const px = (1 + point.x / point.w) * width / 2;
-        const py = (1 - point.y / point.w) * height / 2;
-        left = Math.min(left, px); right = Math.max(right, px);
-        top = Math.min(top, py); bottom = Math.max(bottom, py);
-      }
-      // Keep the visible part when turning close to the wall and one edge crosses the camera.
-      const near = .1;
-      for (const [index, point] of projected.entries()) {
-        const next = projected[(index + 1) % projected.length];
-        if (point.w > near) measure(point);
-        if ((point.w > near) !== (next.w > near)) {
-          measure(crossing.copy(point).lerp(next, (near - point.w) / (next.w - point.w)));
-        }
-      }
-      if (right <= 0 || left >= width || bottom <= 0 || top >= height) return;
-      const exposed = (Math.min(right, width) - Math.max(0, left)) *
-        (Math.min(bottom, height) - Math.max(0, top));
-      visible = true;
-      autoplayVisible = exposed >= (right - left) * (bottom - top) * .55;
       const m = transform.elements;
+      const previous = lastTransform.elements;
+      if (width === projectedWidth && height === projectedHeight &&
+          m.every((value, i) => Math.abs(value - previous[i]) < 0.000001)) return true;
+
+      projectedWidth = width;
+      projectedHeight = height;
+      lastTransform.copy(transform);
       const css = [];
       for (const i of [0, 4, 8, 12]) {
         if (i === 8) css.push(0, 0, 1, 0);
         else css.push((m[i] + m[i + 3]) * width / 2, (m[i + 3] - m[i + 1]) * height / 2, 0, m[i + 3]);
       }
       media.style.transform = 'matrix3d(' + css.join(',') + ')';
-      media.style.visibility = 'visible';
-      return !!video && video.readyState >= 2 && !playerError;
+      return true;
     }
 
     function receive(payload) {
@@ -431,7 +404,7 @@ window.NoraCinema = (() => {
       if (ready && youtube) {
         if (soundEnabled) youtube.unMute();
         else youtube.mute();
-        if (show?.playing && visible) youtube.playVideo();
+        if (show?.playing) youtube.playVideo();
       }
       render();
     });

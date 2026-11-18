@@ -1444,31 +1444,26 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .nora-cinema :focus-visible, .nora-cinema-tools button:focus-visible { outline: 2px solid #ffd39d; outline-offset: 2px; }
 
 .nora-cinema-room {
-  --cinema-scene-top: calc(var(--nora-top) + 52px);
   isolation: isolate;
   background: #1c1422;
 }
-.nora-cinema-room > canvas, .nora-cinema-viewport {
+.nora-cinema-viewport {
   position: absolute;
-  top: var(--cinema-scene-top);
-  left: 0;
-  width: 100%;
-  height: calc(100% - var(--cinema-scene-top));
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
 }
-.nora-cinema-viewport { overflow: hidden; pointer-events: none; z-index: 1; }
-.nora-cinema-viewport:not(:has(.is-youtube)) { z-index: -1; }
 .nora-cinema-viewport .nora-cinema-media {
   position: absolute;
   top: 0;
   left: 0;
-  width: 960px;
-  height: 540px;
+  width: 640px;
+  height: 360px;
   transform-origin: 0 0;
-  visibility: hidden;
   background: #09080c;
 }
 .nora-cinema-media :is(iframe, video) { display: block; width: 100%; height: 100%; border: 0; }
-.nora-cinema-media iframe { pointer-events: auto; }
 .nora-cinema-room > .nora-world-bar,
 .nora-cinema-room > .nora-world-help,
 .nora-cinema-seated > :is(.nora-world-joystick, .nora-world-sprint, .nora-world-jump),
@@ -1512,6 +1507,20 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   margin: 0;
 }
 .nora-cinema-room .nora-world-action { padding: 6px 3px; }
+
+@media (orientation: landscape) and (min-width: 450px) {
+  .nora-world.nora-cinema-seated > :is(.nora-cinema-tools, .nora-chat-open, .nora-world-context, .nora-world-view) {
+    top: auto;
+    bottom: max(5px, var(--safe-bottom));
+  }
+  .nora-cinema-seated > .nora-world-view {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: 88px;
+    padding: 0;
+  }
+}
 
 /* Read-only preview beside the game HUD */
 .nora-chat-mini {
