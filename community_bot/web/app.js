@@ -12,7 +12,7 @@ if (tg) {
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function profileTabLocked(target) {
-  return data.profile.fill_percent < 100 && !['home','lk','notices','admin','reputation'].includes(target)
+  return data.profile.fill_percent < 100 && !['home','commands','lk','notices','admin','reputation'].includes(target)
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
@@ -135,6 +135,7 @@ const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
 function render(){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=window.NoraHome?.screen()||'';
+if(tab==='commands')content=NoraCommands.screen();
 if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
 if(tab==='lk')content=profileScreen(u);
@@ -156,7 +157,7 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
 
 // Keep the dock mounted: polling must not restart the travelling selection.
@@ -226,7 +227,7 @@ function telegramStartParam() {
 function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
-  const screen = /^nora_to_(cookies|shop|pet|notices|games|mafia|rocket|events|community)$/.exec(param);
+  const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community)$/.exec(param);
   if (screen?.[1] === 'cookies') return {view: 'shop', category: '__cookies'};
   if (screen) return {view: screen[1]};
   const shop = /^nora_(cat|item)_([a-zA-Z0-9_-]{1,64})$/.exec(param);
@@ -308,7 +309,7 @@ async function openApp(result) {
   const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
-  else if (['pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view)) tab = view;
+  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','friends','community','events'].includes(view)) tab = view;
   else if (view === 'shop' && data.profile.fill_percent === 100) {
     tab = 'shop';
     window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);

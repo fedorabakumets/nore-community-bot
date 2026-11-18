@@ -1674,3 +1674,13 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .nora-chat-draft-quote { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
 .nora-chat-draft-quote[hidden] { display: none; }
 .nora-chat .nora-chat-draft-quote button { min-height: 28px; min-width: 30px; background: #3d3848; }
+
+.home-commands-link { grid-column: 1 / -1; }
+.commands-guide > .sub { margin-bottom: 20px; }
+.commands-guide dl { margin: 0; }
+.commands-guide dl > div { padding: 12px 0; }
+.commands-guide dl > div + div { border-top: 1px solid var(--line); }
+.commands-guide dt { color: var(--poster-ink); font-weight: 650; overflow-wrap: anywhere; }
+.commands-guide dt code { font: inherit; user-select: text; }
+.commands-guide dd { margin: 4px 0 0; color: var(--poster-muted); font-size: 14px; line-height: 1.5; }
+.commands-guide .card .sub { margin: 8px 0 0; }

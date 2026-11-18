@@ -1261,9 +1261,10 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
     )
     assert send.message_thread_id == (42 if chat_id < 0 else None)
     blocks = content(send)
-    assert [block["type"] for block in blocks] == ["photo", "paragraph", "paragraph", "buttons", "buttons"]
-    assert "Нора ИИ" in str(blocks[2]) and "золото — 100" in str(blocks[2])
-    assert blocks[3]["buttons"][0]["url"] == "https://t.me/test_nora_bot?startapp=nora_lobby"
+    assert [block["type"] for block in blocks] == ["photo", "buttons", "buttons"]
+    guide_button = blocks[1]["buttons"][0]
+    assert guide_button["text"] == "гайд по командам"
+    assert guide_button["url"] == "https://t.me/test_nora_bot?startapp=nora_to_commands"
     assert send.rich_message.blocks[0].photo.media.path.is_file()
     assert actions(send)[CLOSE_COMMANDS_CARD]["style"] == "danger"
     assert actions(send)[CLOSE_COMMANDS_CARD]["text"] == "Закрыть"

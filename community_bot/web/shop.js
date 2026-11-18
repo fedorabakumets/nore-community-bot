@@ -186,7 +186,7 @@ window.NoraShop=(()=>{
   function writeRoute(next,push=false,petFrom=null){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next,petFrom},'',u)}
   function navigate(next,push=true){category=next;tab='shop';writeRoute(tab,push);render();window.scrollTo(0,0);syncBack()}
   function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
-    window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
+    (tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
   function syncBack(){if(category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide()}
   function resume(initialCategory=route().category){category=initialCategory;syncBack()}
   function tabChanged(next,previous){
@@ -253,7 +253,7 @@ window.NoraShop=(()=>{
     backPending=false;
     if(!data)return;
     const next=route();
-    tab=['home','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea'].includes(next.view)?next.view:'home';
+    tab=['home','commands','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea'].includes(next.view)?next.view:'home';
     category=tab==='shop'?next.category:null;
     if($('#sheet').open)$('#sheet').close();
     render();

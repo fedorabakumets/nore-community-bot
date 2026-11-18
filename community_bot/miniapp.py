@@ -555,7 +555,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
-                 'community.js', 'avatars.js',
+                 'community.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):

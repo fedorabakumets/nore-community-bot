@@ -39,6 +39,8 @@ def reply_destination(action: str, buttons: set[str], text: str) -> tuple[str, s
         return "Купить через Нору", "nora_to_shop"
     if action == "cinema":
         return "Открыть в Норе", "nora_lobby"
+    if action == "commands_guide":
+        return "гайд по командам", "nora_to_commands"
     screen = _SCREENS.get(action)
     if action.startswith("pet:"):
         screen = "pet"

@@ -11,18 +11,16 @@ from aiogram.types import (
     FSInputFile,
     InputMediaPhoto,
     InputRichBlockButtons,
-    InputRichBlockParagraph,
     InputRichBlockPhoto,
     InputRichMessage,
     Message,
     ReplyParameters,
     RichMessageButton,
-    RichTextBold,
 )
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LEVELS, ai_limits_text
+from community_bot.domain import ROLE_LEVELS
 from community_bot.ephemeral import reply_ttl
 from community_bot.helpers import delete_later, rank_of_user
 from community_bot.nora_links import nora_link_block
@@ -53,23 +51,9 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
         reply = ReplyParameters(message_id=message.message_id, allow_sending_without_reply=True)
     from community_bot.private_rich import standalone_rich_message
 
-    app = await nora_link_block(bot, "cinema", set(), "")
+    app = await nora_link_block(bot, "commands_guide", set(), "")
     rich_message = InputRichMessage(blocks=[
         InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(COMMANDS_ART))),
-        InputRichBlockParagraph(text=[
-            RichTextBold(text="3D-игра Норы"),
-            "\nЧат под инвентарём связывает игру и Telegram."
-            "\nПортал «Кинотеатр» в лобби ведёт в зал. Ссылки и ролики из группы добавляются через «Проектор»."
-            "\n«Нора, в кино» — ответом на видео MP4 до 20 МБ в группе."
-            "\nПервое прохождение «Воспоминания» — 50 🍪 в кошелёк.",
-        ]),
-        InputRichBlockParagraph(text=[
-            RichTextBold(text="Нора ИИ"),
-            "\nВ основном чате спроси «Нора, что обсуждали за два дня?» "
-            "или «Нора, что вышло в обновлении №22?». "
-            f"Запросов в день по репутации: {ai_limits_text()}. "
-            "В походе ИИ на паузе. Чтобы вернуть питомца раньше, открой «Питомец».",
-        ]),
         *([app] if app else []),
         InputRichBlockButtons(buttons=[
             RichMessageButton(text="Закрыть", style="danger", callback_data=CLOSE_COMMANDS_CARD),
