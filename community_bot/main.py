@@ -480,9 +480,10 @@ async def main() -> None:
     await prepare_reset(db)
     await verify_requested_release_backup(db)
     await verify_widget_notification_backup(db)
-    from community_bot.release_backup import verify_pet_development_backup
+    from community_bot.release_backup import verify_durak_backup, verify_pet_development_backup
 
     await verify_pet_development_backup(db)
+    await verify_durak_backup(db)
     await db.initialize()
     await apply_reset(db, settings)
     await apply_wallet_reset_release(db)

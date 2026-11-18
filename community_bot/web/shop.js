@@ -181,12 +181,12 @@ window.NoraShop=(()=>{
   async function seasonalPrepare(id){if(seasonalPending)return;seasonalPending=true;try{const q=await api('seasonal/draw/prepare',{id});sheet(`<span class="eyebrow">Подтверждение итогов</span><h2>${esc(q.title)}</h2><p class="sub">Среди ${number(q.count)} участников сервер случайно выберет победителя. Повторный выбор невозможен.</p><button class="primary" id="seasonal-confirm-draw">Завершить и выбрать победителя</button>`);document.querySelector('#seasonal-confirm-draw').onclick=async()=>{if(seasonalPending)return;seasonalPending=true;try{const result=await api('seasonal/draw/confirm',{token:q.token,id});updateSeasonalItems((await api('seasonal/items')).items);document.querySelector('#sheet').close();render();toast(result.message)}catch(e){toast(e.message)}finally{seasonalPending=false}}}catch(e){toast(e.message)}finally{seasonalPending=false}}
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-seasonal-new'))seasonalEdit(null);if(b.hasAttribute('data-seasonal-edit'))seasonalEdit(b.dataset.seasonalEdit);if(b.hasAttribute('data-seasonal-action'))seasonalAction(b.dataset.seasonalAction);if(b.hasAttribute('data-seasonal-manage'))seasonalManage(b.dataset.seasonalManage,Number(b.dataset.offset||0))});
 
-  function route(){const u=new URL(location.href),view=u.searchParams.get('view');if(view)return {view,category:u.searchParams.get('category')};try{if(location.hash.startsWith('#shop/'))return {view:'shop',category:decodeURIComponent(location.hash.slice(6))};const legacy=location.hash.match(/^#(home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:[&?]|$)/);return {view:legacy?.[1]||'home',category:null}}catch{return {view:'home',category:null}}}
+  function route(){const u=new URL(location.href),view=u.searchParams.get('view');if(view)return {view,category:u.searchParams.get('category')};try{if(location.hash.startsWith('#shop/'))return {view:'shop',category:decodeURIComponent(location.hash.slice(6))};const legacy=location.hash.match(/^#(home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea|durak)(?:[&?]|$)/);return {view:legacy?.[1]||'home',category:null}}catch{return {view:'home',category:null}}}
   let backPending=false;
-  function writeRoute(next,push=false,petFrom=null){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next,petFrom},'',u)}
+  function writeRoute(next,push=false,petFrom=null){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea|durak)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next,petFrom},'',u)}
   function navigate(next,push=true){category=next;tab='shop';writeRoute(tab,push);render();window.scrollTo(0,0);syncBack()}
   function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
-    (tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
+    (tab==='durak'&&'games')||(tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
   function syncBack(){if(category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide()}
   function resume(initialCategory=route().category){category=initialCategory;syncBack()}
   function tabChanged(next,previous){
@@ -253,7 +253,7 @@ window.NoraShop=(()=>{
     backPending=false;
     if(!data)return;
     const next=route();
-    tab=['home','commands','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea'].includes(next.view)?next.view:'home';
+    tab=['home','commands','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea','durak'].includes(next.view)?next.view:'home';
     category=tab==='shop'?next.category:null;
     if($('#sheet').open)$('#sheet').close();
     render();
@@ -261,6 +261,7 @@ window.NoraShop=(()=>{
   tg?.BackButton?.onClick?.(()=>{
     if(!data||backPending)return;
     if($('#sheet').open){$('#sheet').close();return}
+    if(tab==='durak'&&window.NoraDurak?.back())return;
     if(tab==='pet'&&history.state?.petFrom){
       backPending=true;
       history.back();

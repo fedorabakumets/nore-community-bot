@@ -609,6 +609,7 @@ class Database:
             await connection.close()
 
     async def initialize(self) -> None:
+        from community_bot.durak_rooms import SCHEMA as durak_schema
         from community_bot.friends_api import SCHEMA as friends_schema
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.nora_game_api import SCHEMA as nora_game_schema
@@ -624,7 +625,7 @@ class Database:
             await db.executescript(SCHEMA)
             # Additive, independent game tables: existing balances, party games and pets stay shared.
             await db.executescript(
-                friends_schema + mafia_schema + rocket_schema + sea_schema
+                friends_schema + mafia_schema + rocket_schema + sea_schema + durak_schema
                 + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
             )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
@@ -1653,7 +1654,7 @@ class Database:
         return bool(state) and (until is None or until > datetime.now(UTC).timestamp())
 
     async def reset_banned_user(self, user_id: int, until: float | None) -> None:
-        from community_bot import mafia_api, sea_api
+        from community_bot import durak_rooms, mafia_api, sea_api
 
         now = utcnow()
         async with self.connect() as db:
@@ -1661,6 +1662,7 @@ class Database:
             timestamp = datetime.fromisoformat(now).timestamp()
             await mafia_api.leave_on_account_reset(db, user_id, timestamp)
             await sea_api.leave_on_account_reset(db, user_id, timestamp)
+            await durak_rooms.leave_on_account_reset(db, user_id, timestamp)
             games = await (await db.execute(
                 """SELECT * FROM party_games g WHERE status IN ('lobby', 'active') AND
                    (creator_id=? OR EXISTS (

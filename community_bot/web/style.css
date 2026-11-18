@@ -1767,3 +1767,9 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .nora-visit-messages button{margin-right:6px}
 .nora-tv-room{isolation:isolate;background:#291f24}
 @media(max-width:480px){.burrow-actions:has(select){width:100%}.nora-burrow{padding:11px}.burrow-actions select{max-width:100%}}
+
+/* Games catalogue artwork; the playable table loads its own stylesheet on entry. */
+.play-hero.durak-hero { background: radial-gradient(ellipse at 90% 100%,#64233a,#251b22 64%); }
+.play-hero .durak-hero-art { display:grid; place-items:center; color:#fff3df; opacity:1; }
+.durak-hero-art i { position:absolute; width:62px; height:86px; display:grid; place-items:center; font:44px Georgia,serif; background:#f1dfcf; color:#281c24; border-radius:8px; transform:translateX(-13px) rotate(-17deg); }
+.durak-hero-art i+i { color:#b51f42; transform:translate(17px,6px) rotate(15deg); }

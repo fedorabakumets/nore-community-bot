@@ -163,3 +163,9 @@ async def verify_pet_development_backup(db: Database) -> bool:
     if not await asyncio.to_thread(_needs_schema_backup, db.path, "pet_development"):
         return False
     return await verify_requested_release_backup(db, request="pet-development-v2")
+
+
+async def verify_durak_backup(db: Database) -> bool:
+    if not await asyncio.to_thread(_needs_schema_backup, db.path, "durak_rooms"):
+        return False
+    return await verify_requested_release_backup(db, request="durak-v1")

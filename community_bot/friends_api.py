@@ -128,6 +128,9 @@ async def deliver_notice(bot, db, inbox_id: int, uid: int, text: str, *, reply_m
 
 
 async def _revoke_invites(connection, uid: int, other: int) -> None:
+    if await _one(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='durak_invites'"):
+        await connection.execute("DELETE FROM durak_invites WHERE (sender=? AND uid=?) OR (sender=? AND uid=?)",
+                                 (uid, other, other, uid))
     for table in ("mini_mafia_invites", "mini_sea_invites"):
         exists = await _one(connection, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,))
         if exists:

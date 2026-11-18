@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +26,20 @@ async def settle(db):
 async def lifecycle(app):
     """Restore persisted deadlines before HTTP serves; stop gracefully with aiohttp."""
     await settle(app['db'])
+    durak = app.get('durak_updates')
+    if durak:
+        await durak.restore(app['db'], time.time())
+        await durak.tick(app['db'])
 
     async def run():
         while True:
             await asyncio.sleep(1)
             await settle(app['db'])
+            if durak:
+                try:
+                    await durak.tick(app['db'])
+                except Exception:
+                    logger.exception('Durak deadline settlement failed')
 
     task = asyncio.create_task(run(), name='nora-interactive-deadlines')
     logger.info('Interactive games ready: persisted deadlines and payouts restored')

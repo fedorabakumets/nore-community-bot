@@ -122,7 +122,8 @@ async def _one(connection, sql: str, params=()) -> dict | None:
     return dict(row) if row else None
 
 
-async def _reason(connection, user: dict | None) -> str:
+async def stake_restriction(connection, user: dict | None, *,
+                            age_message="Ракетка со ставками доступна с 18 лет. Мафия остаётся бесплатной") -> str:
     if not user:
         return "Сначала открой личный кабинет Норы"
     flag = await _one(connection, "SELECT enabled FROM feature_flags WHERE key='games'")
@@ -131,7 +132,7 @@ async def _reason(connection, user: dict | None) -> str:
     if not profile_is_complete(user):
         return "Заполни профиль на 100% в ЛК, чтобы открыть игру со ставками"
     if (profile_age(user) or 0) < 18:
-        return "Ракетка со ставками доступна с 18 лет. Мафия остаётся бесплатной"
+        return age_message
     if int(user.get("cookie_debt") or 0) > 0:
         return "Сначала верни просроченный долг по печенькам"
     active_loan = await _one(
@@ -144,7 +145,7 @@ async def _reason(connection, user: dict | None) -> str:
 
 async def _require_eligible(connection, uid: int) -> dict:
     user = await _one(connection, "SELECT * FROM users WHERE user_id=?", (uid,))
-    reason = await _reason(connection, user)
+    reason = await stake_restriction(connection, user)
     if reason:
         raise ValueError(reason)
     return user
@@ -257,7 +258,7 @@ async def get_status(db: Database, uid: int, *, now: float | None = None) -> dic
         stamp = _now(now)
         await _settle_user(connection, uid, stamp)
         user = await _one(connection, "SELECT * FROM users WHERE user_id=?", (uid,))
-        reason = await _reason(connection, user)
+        reason = await stake_restriction(connection, user)
         active = await _one(
             connection, "SELECT * FROM mini_rocket_rounds WHERE user_id=? AND status='active'", (uid,),
         )
