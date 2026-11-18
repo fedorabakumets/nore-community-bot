@@ -101,9 +101,16 @@ class PrivateAccessMiddleware(BaseMiddleware):
         message = event.message if isinstance(event, CallbackQuery) else event
         if not getattr(message, 'chat', None) or message.chat.type != 'private' or not event.from_user:
             return await handler(event, data)
-        db, settings, state = data['db'], data['settings'], data.get('state')
         uid = event.from_user.id
-        await sync_menu(data['bot'], db, settings, uid)
+        result = await self._dispatch(handler, event, data, message, uid)
+        try:
+            await sync_menu(data['bot'], data['db'], data['settings'], uid)
+        except TelegramAPIError as error:
+            logger.warning("Private menu button refresh failed (%s)", type(error).__name__)
+        return result
+
+    async def _dispatch(self, handler, event, data, message, uid):
+        db, settings, state = data['db'], data['settings'], data.get('state')
         ban = await db.ban_reset_state(uid)
         if db.ban_is_active(ban):
             if state:

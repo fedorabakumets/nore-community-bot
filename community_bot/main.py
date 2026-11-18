@@ -568,6 +568,9 @@ async def main() -> None:
         dispatcher["nora_cinema"] = web_runner.app["nora_cinema"]
         logger.info("Nora Mini App HTTP server started")
     profile_access_task = asyncio.create_task(configure_private_menus(bot, db, settings))
+    from community_bot.menu_recovery import recover_private_menus
+
+    menu_recovery_task = asyncio.create_task(recover_private_menus(bot, db, settings, dispatcher.fsm))
     reputation_task = asyncio.create_task(daily_reputation_job(db, settings, bot))
     scheduled_task = asyncio.create_task(scheduled_messages_job(db, settings, bot))
     pet_task = asyncio.create_task(pet_notifications_job(db, bot, settings))
@@ -603,6 +606,7 @@ async def main() -> None:
         await pet_video_queue.close()
         for task in (
             profile_access_task,
+            menu_recovery_task,
             reputation_task,
             scheduled_task,
             pet_task,
@@ -623,6 +627,7 @@ async def main() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(
                 profile_access_task,
+                menu_recovery_task,
                 reputation_task,
                 scheduled_task,
                 pet_task,

@@ -139,31 +139,41 @@ async def _panel_markup(db: Database, settings: Settings, user_id: int):
     return admin_panel_keyboard(await user_permissions(db, settings, user_id), await db.dashboard_stats())
 
 
-async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
+async def private_menu_content(db: Database, settings: Settings, user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    from community_bot.access import private_allowed
+
+    if db.ban_is_active(await db.ban_reset_state(user_id)):
+        return "Анкету можно заполнить после разбана.", InlineKeyboardMarkup(inline_keyboard=[])
+    if await private_allowed(db, settings, user_id):
+        approved = await db.has_approved_application(user_id)
+        markup = private_menu_keyboard(
+            await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
+            unread=await db.notify_unread_count(user_id),
+        )
+        return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
+    help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
+    if await db.has_pending_application(user_id):
+        return WELCOME_PENDING_TEXT, InlineKeyboardMarkup(inline_keyboard=[help_row])
+    return WELCOME_TEXT, InlineKeyboardMarkup(inline_keyboard=[*start_apply_keyboard().inline_keyboard, help_row])
+
+
+async def _send_welcome(message: Message, db: Database, settings: Settings) -> None:
     from community_bot.menu_art import menu_cover
 
     bundled = menu_cover("welcome")
     cover = str(bundled) if bundled else settings.welcome_cover
     user_id = message.from_user.id if message.from_user else 0
-    apply_markup = None
-    if await db.has_approved_application(user_id):
-        text = WELCOME_MEMBER_TEXT
-    elif await db.has_pending_application(user_id):
-        text = WELCOME_PENDING_TEXT
-    else:
-        apply_markup = start_apply_keyboard()
-        text = WELCOME_TEXT + "\n\nЭто анкета вступления. Отвечай по одному вопросу — решение придёт сюда."
-    first_markup = apply_markup or reply_markup
+    text, markup = await private_menu_content(db, settings, user_id)
     if not cover:
-        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
         source = FSInputFile(cover)
     try:
-        await message.answer_photo(source, caption=text, reply_markup=first_markup, parse_mode="HTML")
+        await message.answer_photo(source, caption=text, reply_markup=markup, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
-        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
@@ -252,7 +262,7 @@ async def start(message: Message, state: FSMContext, db: Database, settings: Set
     if message.chat.type == "private" and (message.text or "").partition(" ")[2].strip() == "idea":
         await open_ticket(message, state, db, settings, message.bot)
         return
-    await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
+    await _send_welcome(message, db, settings)
 
 
 @router.message(command_or_alias("pogoda"), F.chat.type == "private")

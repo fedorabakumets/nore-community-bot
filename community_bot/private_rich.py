@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -19,8 +20,8 @@ from weakref import WeakValueDictionary
 from aiogram import BaseMiddleware
 from aiogram.client.default import Default
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import CopyMessage, DeleteMessage, EditMessageText, SendRichMessage
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNotFound
+from aiogram.methods import CopyMessage, DeleteMessage, EditMessageText, SendMessage, SendPhoto, SendRichMessage
 from aiogram.types import (
     CallbackQuery,
     Chat,
@@ -38,6 +39,8 @@ from aiogram.utils.text_decorations import html_decoration
 from community_bot.commands_guide import CLOSE_COMMANDS_CARD
 from community_bot.inline_style import button_style
 from community_bot.nora_links import nora_link_block, profile_reply
+
+logger = logging.getLogger(__name__)
 
 _MEDIA = {
     "photo": "photo", "video": "video", "animation": "animation", "audio": "audio",
@@ -63,6 +66,10 @@ def _lock(locks, bot, uid):
         lock = asyncio.Lock()
         locks[key] = lock
     return lock
+
+
+def private_turn_lock(bot, uid):
+    return _lock(_EVENT_LOCKS, bot, uid)
 
 
 @dataclass
@@ -224,7 +231,7 @@ def button_rows(markup, *, private=True):
 
 def _plain_buttons(buttons):
     return {button.get("callback_data") for block in buttons if block.get("type") == "buttons"
-            for button in block["buttons"]}
+            for button in block["buttons"] if button.get("callback_data")}
 
 
 async def navigation(bot, uid, body, current, previous_back=None):
@@ -420,7 +427,7 @@ class PrivateRichContextMiddleware(BaseMiddleware):
         if not isinstance(source, Message) or source.chat.type != "private":
             return await handler(event, data)
         bot, uid = data["bot"], source.chat.id
-        async with _lock(_EVENT_LOCKS, bot, uid):
+        async with private_turn_lock(bot, uid):
             if isinstance(event, Message) and getattr(event, "nora_widget", None):
                 from community_bot.message_widgets import submission
 
@@ -479,7 +486,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         fresh = name in _SEND and _FRESH_PANEL.get() == uid
         personal_turn = turn and turn.is_handler and turn.source.chat.id == uid
         current = (await turn.state.get_state()
-                   if personal_turn and turn.state and turn.source.message_id > 0 else page.get("flow"))
+                   if personal_turn and turn.state and turn.source.message_id > 0
+                   else None if fresh else page.get("flow"))
         if name == "deleteMessage":
             if method.message_id == message_id:
                 return True  # Private close actions must keep the navigation surface.
@@ -492,6 +500,8 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
         if name in _EDIT and message_id and method.message_id != message_id:
             # Delayed game updates must not replace a newer personal screen.
             return _message(bot, uid, message_id)
+        if name in _EDIT and page.get("native"):
+            return await make_request(bot, method)
         if name in _EDIT and turn and not turn.is_handler and page.get("screen") != turn.screen:
             return _message(bot, uid, message_id)
         if name == "editMessageReplyMarkup" and turn and uid in turn.sent and method.reply_markup is None:
@@ -562,21 +572,10 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                 for value in presets
             ]})
         rich = InputRichMessage(blocks=body + footer)
-        replaced_id = message_id if page.get("widget") or fresh else None
+        # A new message stays visible even after the user deleted the chat locally.
+        reopen = personal_turn and turn.reopen and uid not in turn.sent
+        replaced_id = message_id if page.get("widget") or page.get("native") or fresh or reopen else None
         if replaced_id:
-            message_id = None
-        if personal_turn and turn.reopen and uid not in turn.sent:
-            if message_id:
-                try:
-                    await make_request(bot, DeleteMessage(chat_id=uid, message_id=message_id))
-                except TelegramBadRequest as error:
-                    detail = str(error).casefold()
-                    if not any(reason in detail for reason in (
-                        "message to delete not found", "message can't be deleted", "message_id_invalid",
-                    )):
-                        raise
-            # Telegram may accept edits after the user deleted the chat only locally.
-            # A fresh send is the only reliable way to make /start visible again.
             message_id = None
         if message_id:
             request = EditMessageText(chat_id=uid, message_id=message_id, rich_message=rich,
@@ -586,9 +585,10 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                                       message_thread_id=getattr(original, "message_thread_id", None),
                                       disable_notification=getattr(original, "disable_notification", None),
                                       protect_content=getattr(original, "protect_content", None))
+        native = False
         try:
             result = await make_request(bot, request)
-        except TelegramBadRequest as error:
+        except (TelegramBadRequest, TelegramNotFound) as error:
             detail = str(error).casefold()
             if message_id and "message is not modified" in detail:
                 if turn and turn.is_handler:
@@ -605,6 +605,25 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                     chat_id=uid, rich_message=rich,
                     message_thread_id=getattr(original, "message_thread_id", None),
                 ))
+            elif (not message_id and isinstance(original, SendMessage | SendPhoto)
+                  and (fresh or page.get("native") or reopen)):
+                from community_bot.reply_rich import bot_publication
+
+                # A definitive rejection leaves the chat free to receive a regular Telegram message.
+                fallback = original
+                if isinstance(original, SendPhoto):
+                    fallback = SendMessage(
+                        chat_id=uid, text=original.caption or "Выбери раздел.", parse_mode=original.parse_mode,
+                        entities=original.caption_entities,
+                        reply_markup=original.reply_markup, disable_notification=original.disable_notification,
+                        protect_content=original.protect_content,
+                    )
+                with bot_publication():
+                    result = await make_request(bot, fallback)
+                logger.warning("Telegram rejected Rich private menu (%s), sent native message", type(error).__name__)
+                native = True
+                body = _content(fallback, bot) + button_rows(markup)
+                number_choice = None
             else:
                 raise  # Never turn transient/API/format errors into duplicate messages.
         # Telegram returns uploaded media as file IDs; persist those rather than local files.
@@ -617,12 +636,17 @@ class PrivateRichMiddleware(BaseRequestMiddleware):
                                               "back": next((b.get("callback_data") for block in footer
                                                             for b in block["buttons"]
                                                             if b.get("text") == "← Назад"), None),
-                                              "screen": screen, "flow": current, "number_choice": number_choice},
+                                              "screen": screen, "flow": current, "number_choice": number_choice,
+                                              "native": native},
                                               ensure_ascii=False))
         if turn and turn.is_handler:
             turn.sent.add(uid)
         if replaced_id:
-            await self.remove_old(make_request, bot, uid, replaced_id)
+            try:
+                await self.remove_old(make_request, bot, uid, replaced_id)
+            except TelegramAPIError as error:
+                logger.warning("Private menu delivered, previous message could not be removed (%s)",
+                               type(error).__name__)
         return (MessageId(message_id=result.message_id) if isinstance(original, CopyMessage)
                 else _uploaded_media(result, original))
 

@@ -10,7 +10,8 @@ import pytest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound, TelegramRetryAfter
-from aiogram.methods import EditMessageText, GetMe, SendPhoto, SendRichMessage
+from aiogram.filters import CommandStart
+from aiogram.methods import EditMessageText, GetMe, SendMessage, SendPhoto, SendRichMessage, SetChatMenuButton
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -28,7 +29,7 @@ from aiogram.types import (
     User,
 )
 
-from community_bot.access import OnboardingKeyboardMiddleware
+from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMiddleware
 from community_bot.blocks import answer_block, edit_block, replace_block
 from community_bot.database import Database
 from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephemeral
@@ -71,6 +72,8 @@ class RecordingSession(BaseSession):
         if method.__api_method__ == "sendWidget" and not self.widgets:
             raise TelegramNotFound(method=method, message="Not Found")
         if method.__api_method__ in {"answerCallbackQuery", "answerWidgetQuery", "deleteMessage"}:
+            return True
+        if isinstance(method, SetChatMenuButton):
             return True
         uid = method.chat_id
         if isinstance(method, EditMessageText) and (uid, method.message_id) in self.uneditable:
@@ -730,13 +733,99 @@ async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatc
     assert 'start:apply' in actions(session.calls[0])
     await turn(setup, handler, incoming(uid=8))
     assert [c.__api_method__ for c in session.calls] == [
-        'sendRichMessage', 'deleteMessage', 'sendRichMessage',
+        'sendRichMessage', 'sendRichMessage', 'deleteMessage',
     ]
-    assert session.calls[1].message_id == 100
-    assert session.calls[-1].reply_markup is None
+    assert session.calls[-1].message_id == 100
+    assert session.calls[1].reply_markup is None
     await show_panel(setup, bot.send_message, 8, 'Следующая страница')
     assert isinstance(session.calls[-1], EditMessageText)
     assert session.calls[-1].message_id == 101
+
+
+async def test_first_start_and_application_work_when_optional_telegram_requests_fail(setup, monkeypatch):
+    from community_bot.routers.private import begin_application_button, start
+
+    db, bot, session, _ = setup
+    settings = bot.community_settings
+    settings.timezone = "Europe/Moscow"
+    settings.welcome_cover = ""
+    monkeypatch.setenv("MINIAPP_URL", "https://nora.example")
+    dispatcher = Dispatcher()
+    for observer in (dispatcher.message, dispatcher.callback_query):
+        observer.outer_middleware(ReplyRichContextMiddleware())
+        observer.outer_middleware(PrivateRichContextMiddleware())
+        observer.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.message.register(start, CommandStart())
+    dispatcher.callback_query.register(begin_application_button, F.data == "start:apply")
+    bot.session.middleware.register(ReplyRichMiddleware())
+    request = session.make_request
+    method_order = []
+
+    async def reject_optional(bot, method, **kwargs):
+        if isinstance(method, (SendRichMessage, SendMessage, SetChatMenuButton)):
+            method_order.append(method.__api_method__)
+        if isinstance(method, SendRichMessage):
+            raise TelegramNotFound(method=method, message="Not Found")
+        if isinstance(method, SetChatMenuButton):
+            raise TelegramRetryAfter(method=method, message="Too Many Requests", retry_after=5)
+        return await request(bot, method, **kwargs)
+
+    session.make_request = reject_optional
+    message = incoming(uid=8, text="/start promo")
+    try:
+        await dispatcher.feed_update(bot, Update(update_id=1, message=message), db=db, settings=settings)
+        assert method_order == ["sendRichMessage", "sendMessage", "setChatMenuButton"]
+        first = next(call for call in session.calls if isinstance(call, SendMessage))
+        assert first.reply_markup.inline_keyboard[0][0].callback_data == "start:apply"
+        assert await db.get_user(8)
+        callback = CallbackQuery(
+            id="apply", chat_instance="chat", from_user=message.from_user, data="start:apply",
+            message=incoming(uid=8, text=first.text).model_copy(update={"message_id": 100}),
+        )
+        await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback), db=db, settings=settings)
+        last = [call for call in session.calls if isinstance(call, SendMessage)][-1]
+        assert "Как тебя зовут?" in last.text
+    finally:
+        await dispatcher.storage.close()
+
+
+async def test_menu_recovery_sends_role_specific_menus_once(setup, monkeypatch):
+    from aiogram.exceptions import TelegramForbiddenError
+
+    from community_bot.menu_recovery import recover_private_menus
+
+    db, bot, session, _ = setup
+    settings = bot.community_settings
+    settings.owner_id = 7
+    dispatcher = Dispatcher()
+    active_state = dispatcher.fsm.get_context(bot=bot, chat_id=10, user_id=10)
+    await active_state.set_state("ApplicationForm:name")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    for uid in range(8, 12):
+        await db.ensure_user(uid)
+    await db.set_bot_state("telegram_is_bot:11", "1")
+    await db.set_bot_state("private_rich_panel:10", json.dumps({"message_id": 80, "flow": "ApplicationForm:name"}))
+    request = session.make_request
+
+    async def reject_blocked(bot, method, **kwargs):
+        if getattr(method, "chat_id", None) == 9:
+            raise TelegramForbiddenError(method=method, message="bot was blocked by the user")
+        return await request(bot, method, **kwargs)
+
+    session.make_request = reject_blocked
+    await recover_private_menus(bot, db, settings, dispatcher.fsm)
+    panels = [call for call in session.calls if isinstance(call, SendRichMessage)]
+    assert [call.chat_id for call in panels] == [7, 8]
+    assert "menu:profile" in actions(panels[0])
+    assert "start:apply" in actions(panels[1])
+    active = next(call for call in session.calls if isinstance(call, SendMessage) and call.chat_id == 10)
+    assert active.reply_markup.inline_keyboard[0][0].url.endswith("?start=menu")
+    assert json.loads(await db.get_bot_state("private_rich_panel:10"))["message_id"] == 80
+    assert "Отправлено: 3. Недоступно: 1." in session.calls[-1].text
+    total = len(session.calls)
+    await recover_private_menus(bot, db, settings, dispatcher.fsm)
+    assert len(session.calls) == total
+    await dispatcher.storage.close()
 
 
 @pytest.mark.parametrize('deletion_error', [None, "message to delete not found", "message can't be deleted"])
@@ -746,7 +835,15 @@ async def test_start_restores_locally_deleted_panel_once_for_multiple_answers(se
     db, bot, session, _ = setup
     await show_panel(setup, bot.send_message, 7, 'Hidden locally; Telegram would still accept edits')
     if deletion_error:
-        session.fail = TelegramBadRequest(method=session.calls[0], message=deletion_error)
+        request = session.make_request
+
+        async def reject_deletion(bot, method, **kwargs):
+            if method.__api_method__ == 'deleteMessage':
+                session.calls.append(method)
+                raise TelegramBadRequest(method=method, message=deletion_error)
+            return await request(bot, method, **kwargs)
+
+        session.make_request = reject_deletion
 
     async def handler(message, data):
         reopen_private_panel()
@@ -755,7 +852,7 @@ async def test_start_restores_locally_deleted_panel_once_for_multiple_answers(se
 
     await turn(setup, handler)
     assert [c.__api_method__ for c in session.calls] == [
-        'sendRichMessage', 'deleteMessage', 'sendRichMessage', 'editMessageText',
+        'sendRichMessage', 'sendRichMessage', 'deleteMessage', 'editMessageText',
     ]
     assert session.calls[-1].message_id == 101
     assert 'Обложка' in session.calls[-1].rich_message.model_dump_json()
