@@ -2,6 +2,9 @@
 window.NoraChat = (() => {
   const colors = ['#f6bf80', '#90d9e5', '#f0a9ca', '#bfdb90', '#c6b7fe',
     '#ffab9e', '#99d9ba', '#ffe090', '#abc9ff', '#eeb4f7'];
+  const roomNames = {
+    lobby:'Лобби', cinema:'Кинотеатр', observatory:'Воспоминание', tavern:'Твоя Нора', forest:'Твоя Нора',
+  };
   const clock = new Intl.DateTimeFormat('ru', {hour:'2-digit', minute:'2-digit'});
 
   function speech(T, text, color) {
@@ -62,14 +65,20 @@ window.NoraChat = (() => {
       <dialog class="nora-chat" id="nora-chat" aria-labelledby="nora-chat-title">
         <div class="nora-chat-panel">
           <div class="nora-chat-top">
-            <div><h2 id="nora-chat-title">Общий чат</h2><small>Игра ↔ группа Telegram</small></div>
-            <button type="button" class="nora-chat-close" aria-label="Закрыть чат" autofocus>×</button>
+            <h2 id="nora-chat-title">Лобби</h2>
+            <div class="nora-chat-tools">
+              <button type="button" class="nora-chat-telegram" aria-label="Связь с Telegram"
+                aria-pressed="false" title="Связь с Telegram"></button>
+            <button type="button" class="nora-chat-close" aria-label="Закрыть чат" autofocus>×</button></div>
           </div>
           <div class="nora-chat-feed" role="log" aria-label="Сообщения" tabindex="0">
             <ol></ol><div class="nora-chat-empty">Загрузка сообщений…</div>
           </div>
           <form class="nora-chat-form">
-            <div class="nora-chat-status" role="status">Сообщение увидит группа Telegram.</div>
+            <div class="nora-chat-draft-quote" hidden>
+              <span></span><button type="button" aria-label="Отменить ответ">×</button>
+            </div>
+            <div class="nora-chat-status" role="status">Только этот игровой чат.</div>
             <div class="nora-chat-compose">
               <input name="message" aria-label="Сообщение" placeholder="Написать в чат…" maxlength="240" required autocomplete="off" enterkeyhint="send" disabled>
               <button type="submit" disabled>Отправить</button>
@@ -81,6 +90,10 @@ window.NoraChat = (() => {
     const dot = opener.querySelector('span');
     const dialog = root.querySelector('.nora-chat');
     const close = dialog.querySelector('.nora-chat-close');
+    const title = dialog.querySelector('#nora-chat-title');
+    const telegramToggle = dialog.querySelector('.nora-chat-telegram');
+    const draftQuote = dialog.querySelector('.nora-chat-draft-quote');
+    const draftDetails = draftQuote.querySelector('span');
     const preview = root.querySelector('.nora-chat-mini');
     const previewLog = preview.querySelector('ol');
     const toggle = root.querySelector('#nora-chat-preview-setting');
@@ -93,22 +106,53 @@ window.NoraChat = (() => {
     const status = dialog.querySelector('.nora-chat-status');
     const form = dialog.querySelector('form');
     const input = form.elements.message;
-    const send = form.querySelector('button');
+    const send = form.querySelector('button[type="submit"]');
     const controls = new AbortController();
     const listen = (el, event, fn) => el?.addEventListener(event, fn, {signal:controls.signal});
     const viewport = window.visualViewport;
-    const signal = ms => AbortSignal.any?.([controls.signal, AbortSignal.timeout(ms)]) || controls.signal;
+    const signal = (ms, ...extra) => AbortSignal.any?.([controls.signal, AbortSignal.timeout(ms), ...extra]) || controls.signal;
     const rows = new Map(), bubbles = new Map();
     let revision = '', timer, stopped = false, polling = false, online = false, sending = false;
-    let shownStatus = '';
+    let pollRequest;
+    let shownStatus = '', currentRoom = location(), telegram = false, view = 0, replyTo = null;
+    title.textContent = roomNames[currentRoom];
     document.fonts?.load('15px NoraCraft').catch(() => {});
 
     function updateForm() {
       input.disabled = !online;
       send.disabled = !online || sending || !input.value.trim();
-      const message = shownStatus || 'Сообщение увидит группа Telegram.';
+      const message = shownStatus || (telegram ? 'В игре и в группе Telegram.' : 'Только этот игровой чат.');
       if (status.textContent !== message) status.textContent = message;
     }
+    function selectReply(line) {
+      replyTo = line;
+      draftQuote.hidden = !line;
+      draftDetails.textContent = line ? line.author + ' · ' + line.text : '';
+    }
+
+    function changeView() {
+      view++;
+      pollRequest?.abort();
+      revision = '';
+      online = false;
+      shownStatus = '';
+      title.textContent = roomNames[currentRoom];
+      dot.hidden = true;
+      updateFeed([]);
+      for (const key of bubbles.keys()) clearBubble(key);
+      empty.textContent = 'Подключаем чат…';
+      updateForm();
+      void poll();
+    }
+
+    listen(telegramToggle, 'click', () => {
+      telegram = !telegram;
+      telegramToggle.setAttribute('aria-pressed', String(telegram));
+      if (!telegram && replyTo?.source === 'telegram') selectReply(null);
+      changeView();
+    });
+    listen(draftQuote.querySelector('button'), 'click', () => selectReply(null));
+
     function syncViewport() {
       if (!viewport) return;
       dialog.style.setProperty('--chat-viewport', viewport.height + 'px');
@@ -146,15 +190,19 @@ window.NoraChat = (() => {
       const draft = input.value, text = draft.trim();
       if (!online || sending || !text) return;
       sending = true;
+      const target = replyTo, sentView = view;
       shownStatus = 'Отправляем…';
       updateForm();
       try {
-        await api('nora-game/chat', {text, location:location()}, signal(15000));
-        if (input.value === draft) input.value = '';
-        shownStatus = '';
-        void poll();
+        await api('nora-game/chat', {text, location:currentRoom, telegram, replyTo:target?.id}, signal(15000));
+        if (view === sentView) {
+          if (input.value === draft) input.value = '';
+          if (replyTo === target) selectReply(null);
+          shownStatus = '';
+          void poll();
+        }
       } catch (error) {
-        shownStatus = error.message || 'Не удалось отправить сообщение.';
+        if (view === sentView) shownStatus = error.message || 'Не удалось отправить сообщение.';
       } finally {
         sending = false;
         if (!stopped) updateForm();
@@ -196,8 +244,21 @@ window.NoraChat = (() => {
       time.textContent = clock.format(date);
       message.textContent = line.text;
       message.dir = 'auto';
-      meta.append(author, origin, time);
-      row.append(meta, message);
+      const reply = document.createElement('button');
+      reply.type = 'button';
+      reply.className = 'nora-chat-reply';
+      reply.setAttribute('aria-label', 'Ответить · ' + line.author);
+      reply.title = 'Ответить';
+      reply.onclick = () => { selectReply(line); input.focus(); };
+      meta.append(author, origin, time, reply);
+      row.append(meta);
+      if (line.quote) {
+        const quote = document.createElement('blockquote');
+        quote.className = 'nora-chat-quote';
+        quote.textContent = line.quote.author + ' · ' + line.quote.text;
+        row.append(quote);
+      }
+      row.append(message);
       log.append(row);
       rows.set(line.id, row);
     }
@@ -227,12 +288,13 @@ window.NoraChat = (() => {
       if (bottom) feed.scrollTop = feed.scrollHeight;
       else if (first?.isConnected) feed.scrollTop = first.offsetTop - offset;
       empty.hidden = rows.size > 0;
-      empty.textContent = 'Здесь появятся новые сообщения из игры и Telegram.';
+      empty.textContent = 'Здесь появятся сообщения этого чата.';
     }
 
     function clearBubble(key) {
-      const sprite = bubbles.get(key)?.sprite;
-      if (sprite) {
+      const bubble = bubbles.get(key);
+      for (const sprite of [bubble?.sprite, bubble?.quote]) {
+        if (!sprite) continue;
         sprite.removeFromParent();
         sprite.material.map.dispose();
         sprite.material.dispose();
@@ -244,15 +306,18 @@ window.NoraChat = (() => {
       if (stopped || polling || document.hidden) return;
       clearTimeout(timer);
       polling = true;
+      const polledView = view;
+      pollRequest = new AbortController();
+      const params = new URLSearchParams({after:revision, location:currentRoom, telegram:telegram?'1':'0'});
       try {
-        const result = await api('nora-game/chat?after=' + revision, undefined, signal(7000));
-        if (stopped) return;
+        const result = await api('nora-game/chat?' + params, undefined, signal(7000, pollRequest.signal));
+        if (stopped || polledView !== view) return;
         if (!online && !sending) shownStatus = '';
         online = true;
         revision = result.revision;
         if (result.messages) updateFeed(result.messages);
       } catch (error) {
-        if (stopped) return;
+        if (stopped || polledView !== view) return;
         revision = '';
         online = false;
         updateFeed([]);
@@ -262,9 +327,11 @@ window.NoraChat = (() => {
         shownStatus = error.message || 'Связь с чатом потеряна.';
       } finally {
         polling = false;
+        pollRequest = null;
         if (!stopped) {
           updateForm();
-          timer = setTimeout(poll, online ? 1400 : 5000);
+          const delay = polledView !== view ? 0 : online ? 1400 : currentRoom === 'cinema' || currentRoom === 'observatory' ? 950 : 5000;
+          timer = setTimeout(poll, delay);
         }
       }
     }
@@ -275,6 +342,13 @@ window.NoraChat = (() => {
       preview,
       panelOpen: () => dialog.open,
       update(now) {
+        const room = location();
+        if (room !== currentRoom) {
+          currentRoom = room;
+          input.value = '';
+          selectReply(null);
+          changeView();
+        }
         for (const [key, bubble] of bubbles) {
           const left = bubble.expires - now;
           if (left <= 0) {
@@ -284,11 +358,25 @@ window.NoraChat = (() => {
           const avatar = key === player ? player : findAvatar(key);
           if (!avatar) {
             bubble.sprite?.removeFromParent();
+            bubble.quote?.removeFromParent();
             continue;
           }
-          if (!bubble.sprite) bubble.sprite = speech(T, bubble.line.text, colors[bubble.line.color]);
+          if (!bubble.sprite) {
+            bubble.sprite = speech(T, bubble.line.text, colors[bubble.line.color]);
+            if (bubble.line.quote) {
+              const quote = bubble.line.quote;
+              bubble.quote = speech(T, quote.author + ' · ' + quote.text, '#a9a2b1');
+              bubble.quote.scale.multiplyScalar(.78);
+              bubble.quote.position.y += bubble.sprite.scale.y + .10;
+            }
+          }
+          const fade = Math.min(1, left / 450);
           if (bubble.sprite.parent !== avatar) avatar.add(bubble.sprite);
-          bubble.sprite.material.opacity = Math.min(1, left / 450);
+          bubble.sprite.material.opacity = fade;
+          if (bubble.quote) {
+            if (bubble.quote.parent !== avatar) avatar.add(bubble.quote);
+            bubble.quote.material.opacity = fade * .62;
+          }
         }
       },
       dispose() {

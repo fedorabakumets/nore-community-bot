@@ -146,6 +146,19 @@ function openLobbyFromLink() {
   else document.addEventListener('DOMContentLoaded', () => window.NoraGame?.open(), {once: true});
 }
 
+async function openGameProfileFromLink() {
+  const match = /^nora_card_([A-Za-z]{3,16}_[a-f0-9]{24})$/.exec(telegramStartParam());
+  if (!match) return;
+  window.NoraIntro?.finish(true);
+  try {
+    await api('nora-game/chat/profile', {card:match[1]});
+    if (tg?.close) tg.close();
+    else toast('Профиль отправлен в группу Норы.');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function openWidgetNoticeFromLink() {
   const match = /^nora_notice_([0-9a-f]{32})$/.exec(telegramStartParam());
   if (!match) return;
@@ -209,6 +222,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     openLobbyFromLink();
     void openWidgetNoticeFromLink();
+    void openGameProfileFromLink();
   } catch (e) {
     window.NoraIntro?.finish(true);
     if (e.message.includes('Миниапка доступна участникам Норы')) {

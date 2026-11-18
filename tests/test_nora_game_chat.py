@@ -39,7 +39,7 @@ async def test_chat_mirrors_only_allowed_group_text_and_keeps_private_ids_off_wi
         await middleware(downstream, message, {'nora_game_chat': chat})
 
     presence = {23: (time.monotonic(), 'session', {'nickname': 'Masha'})}
-    result = chat.snapshot(42, '', presence)
+    result = chat.snapshot(42, '', presence, 'lobby', True)
     first, old = result['messages']
     assert (first['author'], first['text'], first['source'], first['avatar']) == (
         'Маша Ли', 'Всем привет!', 'telegram', 'Masha',
@@ -47,19 +47,19 @@ async def test_chat_mirrors_only_allowed_group_text_and_keeps_private_ids_off_wi
     assert not first['mine'] and first['bubbleMs'] > 0
     assert 'user_id' not in first and 'telegram_id' not in first
     assert old['bubbleMs'] == 0 and old['avatar'] is None
-    assert chat.snapshot(42, result['revision'], presence) == {'revision': result['revision']}
+    assert chat.snapshot(42, result['revision'], presence, 'lobby', True) == {'revision': result['revision']}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ('pose', 'username', 'identity', 'gender', 'location'),
+    ('location', 'label', 'gender', 'pose'),
     [
-        ({'room': 'cinema'}, 'pixel_tg', '@pixel_tg', 'female', 'Кинотеатр • 🎬'),
-        ({}, None, 'Имя <Норы>', 'male', 'ЛОББИ • 🌎'),
+        ('cinema', 'Кинотеатр • 🎬', 'female', {'room': 'cinema'}),
+        ('lobby', 'ЛОББИ • 🌎', 'male', {}),
     ],
 )
 async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictions(
-    tmp_path, pose, username, identity, gender, location,
+    tmp_path, location, label, gender, pose,
 ):
     db = Database(tmp_path / 'chat.db')
     await db.initialize()
@@ -69,18 +69,20 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
     bot = SimpleNamespace(
         get_chat_member=AsyncMock(return_value=member),
         get_chat=AsyncMock(return_value=SimpleNamespace(permissions=SimpleNamespace(can_send_messages=True))),
-        send_message=AsyncMock(return_value=SimpleNamespace(message_id=555, date=datetime.now(UTC))),
+        me=AsyncMock(return_value=SimpleNamespace(username='test_nora')),
+        send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=555, date=datetime.now(UTC))),
     )
     chat = nora_game_chat.GameChat(bot, GROUP)
-    settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow')
+    settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow',
+                               bot_token='test-key')
 
     class Request(dict):
         app = {'db': db, 'settings': settings, 'nora_game_chat': chat, 'nora_lobby': {}}
-        query = {}
+        query = {'telegram': '1', 'location': location}
         content_length = 64
         json = AsyncMock()
 
-    request = Request(actor={'id': 42, 'username': username})
+    request = Request(actor={'id': 42, 'username': 'telegram_unused'})
     request.json.return_value = {'nickname': 'Pixel'}
     await nora_game_api.register(request)
     request.json.return_value = {
@@ -88,7 +90,12 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
     }
     await nora_game_api.save_outfit(request)
 
-    request.json.return_value = {'text': '<b>Привет</b>', 'author': 'быть другим', 'chat_id': 42, 'location': 'cinema'}
+    chat.capture(telegram_message(777, 'Оригинал').model_copy(
+        update={'is_topic_message': True, 'message_thread_id': 123},
+    ))
+    reply_id = chat.telegram[0].id
+    request.app['nora_lobby'][42] = (time.monotonic(), 'session', {'nickname': 'Pixel', **pose})
+    request.json.return_value = {'text': '<b>Привет</b>', 'location': location, 'telegram': True, 'replyTo': reply_id}
     member.status = ChatMemberStatus.LEFT
     with pytest.raises(ValueError, match='участникам'):
         await nora_game_chat.feed(request)
@@ -97,34 +104,39 @@ async def test_game_chat_send_uses_server_nickname_and_respects_group_restrictio
 
     member.status = ChatMemberStatus.RESTRICTED
     member.is_member, member.can_send_messages = True, False
+    chat.local_sent.clear()
     with pytest.raises(ValueError, match='ограничена'):
         await nora_game_chat.send(request)
-    bot.send_message.assert_not_called()
+    bot.send_rich_message.assert_not_called()
 
     member.status = ChatMemberStatus.ADMINISTRATOR
     await db.set_bot_state(MEMORY_NOTICE_KEY, '1')
-    request.app['nora_lobby'][42] = (time.monotonic(), 'session', {'nickname': 'Pixel', **pose})
+    chat.local_sent.clear()
     assert json.loads((await nora_game_chat.send(request)).text) == {'ok': True}
-    bot.send_message.assert_awaited_once()
-    group_id, message = bot.send_message.call_args.args
-    heading, body = message.split('\n')
-    emoji, body = body.split(' ', 1)
-    assert group_id == GROUP
-    assert heading == f'👾NORA • {location}'
-    assert emoji in nora_game_chat.PLAYER_EMOJI[gender]
-    assert body == f'Pixel ({identity}) — <b>Привет</b>'
-    quote, = bot.send_message.call_args.kwargs['entities']
-    assert quote.type == 'blockquote' and quote.offset == 0
-    assert message.encode('utf-16-le')[:quote.length * 2].decode('utf-16-le') == heading
-    assert bot.send_message.call_args.kwargs['parse_mode'] is None
+    bot.send_rich_message.assert_awaited_once()
+    assert bot.send_rich_message.call_args.args == (GROUP,)
+    kwargs = bot.send_rich_message.call_args.kwargs
+    html = kwargs['rich_message'].html
+    assert (
+        '<blockquote><b>👾<a href="https://t.me/test_nora?startapp=nora_lobby&amp;mode=fullscreen">'
+        f'NORA</a> • {label}</b></blockquote>'
+    ) in html
+    assert any(f'<p>{emoji} Pixel (' in html for emoji in nora_game_chat.PLAYER_EMOJI[gender])
+    assert '">Имя &lt;Норы&gt;</a></b>): &lt;b&gt;Привет&lt;/b&gt;</p>' in html
+    assert 'telegram_unused' not in html
+    assert kwargs['reply_parameters'].message_id == 777
+    assert kwargs['reply_parameters'].allow_sending_without_reply is False
+    assert kwargs['message_thread_id'] == 123
     result = json.loads((await nora_game_chat.feed(request)).text)
-    assert result['messages'][0]['mine']
-    assert result['messages'][0]['source'] == 'game'
+    assert result['messages'][-1]['mine']
+    assert result['messages'][-1]['source'] == 'game'
+    assert result['messages'][-1]['quote']['text'] == 'Оригинал'
+    assert 'quote' not in chat.snapshot(42, '', {}, location, False)['messages'][0]
     rows = await db.search_community_messages(GROUP, 'Привет')
     assert [(row['author_name'], row['text']) for row in rows] == [('Pixel (из игры)', '<b>Привет</b>')]
     with pytest.raises(ValueError, match='Слишком часто'):
         await nora_game_chat.send(request)
-    bot.send_message.assert_awaited_once()
+    bot.send_rich_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -139,23 +151,100 @@ async def test_game_chat_applies_link_filter_and_does_not_show_failed_delivery(t
     bot = SimpleNamespace(
         get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)),
         get_chat=AsyncMock(return_value=SimpleNamespace(permissions=SimpleNamespace(can_send_messages=True))),
-        send_message=AsyncMock(side_effect=TelegramBadRequest(SendMessage(chat_id=GROUP, text='test'), 'failed')),
+        me=AsyncMock(return_value=SimpleNamespace(username='test_nora')),
+        send_rich_message=AsyncMock(side_effect=TelegramBadRequest(SendMessage(chat_id=GROUP, text='test'), 'failed')),
     )
     chat = nora_game_chat.GameChat(bot, GROUP)
-    settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow')
+    settings = SimpleNamespace(is_owner=lambda _: False, moderator_ids=frozenset(), timezone='Europe/Moscow',
+                               bot_token='test-key')
     profile = {'nickname': 'Pixel', 'outfit': {'gender': 'male'}}
     monkeypatch.setattr(nora_game_api, '_player_profile', AsyncMock(return_value=profile))
 
     class Request(dict):
         app = {'db': db, 'settings': settings, 'nora_game_chat': chat, 'nora_lobby': {}}
         content_length = 64
-        json = AsyncMock(return_value={'text': 'https://example.org'})
+        json = AsyncMock(return_value={'text': 'https://example.org', 'telegram': True})
 
     request = Request(actor={'id': 42})
     with pytest.raises(ValueError, match='Ссылки'):
         await nora_game_chat.send(request)
-    bot.send_message.assert_not_called()
-    request.json.return_value = {'text': 'Просто текст'}
+    bot.send_rich_message.assert_not_called()
+    chat.local_sent.clear()
+    request.json.return_value = {'text': 'Просто текст', 'telegram': True}
     with pytest.raises(ValueError, match='не подтвердил'):
         await nora_game_chat.send(request)
-    assert not chat.lines
+    assert not chat.visible('lobby', False)
+
+@pytest.mark.asyncio
+async def test_local_send_and_replies_stay_in_room_without_telegram(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'local.db')
+    await db.initialize()
+    bot = SimpleNamespace(get_chat_member=AsyncMock(), send_rich_message=AsyncMock())
+    chat = nora_game_chat.GameChat(bot, GROUP)
+    chat.add('home:81', 81, 'Other', 'Личный текст')
+    chat.add('home:42', 42, 'Pixel', 'Начало диалога')
+    chat.add('lobby', 42, 'Pixel', 'Фраза из лобби')
+    chat.capture(telegram_message(222, 'Из группы'))
+    profile = {'nickname': 'Pixel', 'outfit': {'gender': 'female'}}
+    monkeypatch.setattr(nora_game_api, '_player_profile', AsyncMock(return_value=profile))
+
+    class Request(dict):
+        app = {'db': db, 'settings': None, 'nora_game_chat': chat, 'nora_lobby': {}}
+        query = {'location': 'forest'}
+        content_length = 64
+        json = AsyncMock()
+
+    request = Request(actor={'id': 42})
+    result = json.loads((await nora_game_chat.feed(request)).text)
+    original, = result['messages']
+    assert original['text'] == 'Начало диалога'
+    request.json.return_value = {'text': 'Ответ', 'location': 'forest', 'replyTo': chat.telegram[0].id}
+    with pytest.raises(ValueError, match='недоступно'):
+        await nora_game_chat.send(request)
+    request.json.return_value['replyTo'] = original['id']
+    assert json.loads((await nora_game_chat.send(request)).text) == {'ok': True}
+    result = json.loads((await nora_game_chat.feed(request)).text)
+    assert result['messages'][-1]['quote'] == {'author': 'Pixel', 'text': 'Начало диалога'}
+    assert [line.text for line in chat.visible('lobby', False)] == ['Фраза из лобби']
+    assert [line.text for line in chat.visible('home:81', False)] == ['Личный текст']
+    bot.get_chat_member.assert_not_called()
+    bot.send_rich_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_signed_profile_link_posts_public_profile_in_configured_group(tmp_path, monkeypatch):
+    from community_bot.routers import profile
+
+    db = Database(tmp_path / 'profiles.db')
+    await db.initialize()
+    await db.ensure_user(42, 'hidden_handle', 'Имя из Telegram')
+    await db.update_profile(42, 'profile_name', 'Имя Норы')
+    await db.execute('INSERT INTO nora_game_players (telegram_id, nickname) VALUES (?, ?)', (42, 'Pixel'))
+    bot = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)))
+    chat = nora_game_chat.GameChat(bot, GROUP)
+    send = AsyncMock(return_value=None)
+    monkeypatch.setattr(profile, 'send_profile_card', send)
+    settings = SimpleNamespace(bot_token='testing', restricted_reputation_threshold=15)
+
+    class Request(dict):
+        app = {'db': db, 'settings': settings, 'nora_game_chat': chat}
+        json = AsyncMock()
+
+    request = Request(actor={'id': 81})
+    request.json.return_value = {'card': 'Pixel_' + '0' * 24}
+    with pytest.raises(ValueError, match='недействительна'):
+        await nora_game_chat.profile_card(request)
+
+    token = nora_game_chat._profile_signature('Pixel', settings.bot_token)
+    request.json.return_value = {'card': f'Pixel_{token}', 'chat_id': 42}
+    await db.update_profile(42, 'profile_private', 1)
+    with pytest.raises(ValueError, match='скрыт'):
+        await nora_game_chat.profile_card(request)
+    send.assert_not_called()
+
+    await db.update_profile(42, 'profile_private', 0)
+    result = await nora_game_chat.profile_card(request)
+    assert json.loads(result.text) == {'ok': True}
+    assert send.call_args.args[0].chat.id == GROUP
+    assert 'Имя Норы' in send.call_args.kwargs['text']
+    assert 'hidden_handle' not in send.call_args.kwargs['text']

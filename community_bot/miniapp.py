@@ -422,6 +422,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app['nora_game_chat'] = nora_game_chat.GameChat(bot, getattr(settings, 'community_chat_id', 0))
     app.router.add_get('/api/nora-game/chat', nora_game_chat.feed)
     app.router.add_post('/api/nora-game/chat', nora_game_chat.send)
+    app.router.add_post('/api/nora-game/chat/profile', nora_game_chat.profile_card)
     app['nora_observatory'] = {}
     app.cleanup_ctx.append(lobby_widget.lifecycle)
     app.cleanup_ctx.append(nora_game_api.lobby_record_lifecycle)

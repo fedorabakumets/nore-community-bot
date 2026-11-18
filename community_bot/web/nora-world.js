@@ -629,7 +629,7 @@ window.NoraWorld = (() => {
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
     const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset,
-      ()=>inside?'tavern':inLobby||inChallenge||inCinema?'lobby':'forest');
+      ()=>inCinema?'cinema':inChallenge?'observatory':inside?'tavern':inLobby?'lobby':'forest');
     const cinema=cinemaLayout&&cinemaModule.mount(root,T,cinemaLayout,{
       reset,sessionId:lobby.session,clock:time=>lobby.serverSeconds(time)*1000,
       dialogOpen:()=>chat?.panelOpen()||companion.panelOpen()||records?.panelOpen()||

@@ -1591,3 +1591,54 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
   cursor: pointer;
 }
 .nora-settings-chat input { accent-color: #e5b898; }
+
+.nora-chat-tools { display: flex; align-items: center; gap: 7px; }
+.nora-chat .nora-chat-telegram {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  border: 1px solid #7c7982;
+  background: #36353e;
+  color: #c8c6ce;
+}
+.nora-chat .nora-chat-telegram[aria-pressed="true"] {
+  border-color: #85d8fc;
+  background: #215983;
+  color: #bff1ff;
+}
+.nora-chat-telegram::before, .nora-chat-reply::before { content: ''; display: block; background: currentColor; }
+.nora-chat-telegram::before {
+  width: 22px;
+  height: 20px;
+  clip-path: polygon(0 38%, 100% 0, 84% 100%, 53% 72%, 38% 88%, 38% 58%, 16% 56%, 16% 48%,
+    68% 28%, 44% 58%, 48% 67%, 79% 22%, 20% 49%, 0 49%);
+}
+.nora-chat .nora-chat-reply {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  min-height: 32px;
+  padding: 0;
+  color: #b9b3c2;
+  border: 1px solid #514959;
+  background: #22212b;
+}
+.nora-chat-reply::before {
+  width: 16px;
+  height: 12px;
+  clip-path: polygon(38% 0, 38% 32%, 77% 32%, 77% 45%, 91% 45%, 91% 58%, 100% 58%,
+    100% 100%, 85% 100%, 85% 66%, 69% 66%, 69% 54%, 38% 54%, 38% 88%, 0 45%);
+}
+.nora-chat-quote, .nora-chat-draft-quote {
+  border-left: 2px solid #85808c;
+  margin: 3px 0;
+  padding: 4px 7px;
+  background: #2a2833;
+  color: #c9c3d3;
+  font-size: 11px;
+}
+.nora-chat-quote, .nora-chat-draft-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nora-chat-draft-quote { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.nora-chat-draft-quote[hidden] { display: none; }
+.nora-chat .nora-chat-draft-quote button { min-height: 28px; min-width: 30px; background: #3d3848; }
