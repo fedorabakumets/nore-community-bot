@@ -5,7 +5,7 @@ from typing import Any
 
 from aiogram.filters import Filter
 from aiogram.filters.command import CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, User
 
 # Canonical English/Latin command → Russian (and extra) spoken aliases.
 # Staff aliases exist so moderators can type them, but they are not listed in /commands.
@@ -17,6 +17,9 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "question": ("вопрос",),
     "close": ("закрыть",),
     "profile": ("профиль",),
+    "stats": ("стата",),
+    "top": ("топ",),
+    "millionaires": ("миллионеры",),
     "shop": ("магазин",),
     "store": ("стор", "магазинсправка"),
     "reputation": ("репутация",),
@@ -78,6 +81,9 @@ MULTIWORD_ALIASES: dict[str, str] = {
 
 _PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
 _SLASH_PREFIXES = "/!.／"
+_TARGET_ONLY = {"profile", "stats", "card", "roulette"}
+_USERNAME = re.compile(r"@([A-Za-z0-9_]{1,32})")
+TOP_PERIODS = {"", "сегодня", "неделя", "месяц"}
 
 _ALIAS_TO_COMMAND: dict[str, str] = {}
 for _command, _aliases in COMMAND_ALIASES.items():
@@ -118,11 +124,13 @@ _EXACT_TEXT_COMMANDS = {
     "id",
     "mafia",
     "mail",
+    "millionaires",
     "pet",
     "pogoda",
     "participants",
     "stickers",
     "profile",
+    "stats",
     "question",
     "reputation",
     "roulette",
@@ -141,9 +149,6 @@ def parse_trigger(text: str, *, include_disabled: bool = False) -> tuple[str, st
     if not raw:
         return None
     folded = raw.casefold()
-    profile_mention = re.fullmatch(r"([^\s]+)\s+(@[A-Za-z0-9_]{1,32})", raw)
-    if profile_mention and canonical_command(profile_mention.group(1), include_disabled=include_disabled) == "profile":
-        return "profile", profile_mention.group(2)
     from community_bot.command_registry import is_exact_slug, phrase_command
 
     phrase = phrase_command(folded, include_disabled=include_disabled)
@@ -151,9 +156,14 @@ def parse_trigger(text: str, *, include_disabled: bool = False) -> tuple[str, st
         command, alias = phrase
         if folded == alias:
             return command, ""
+        rest = raw[len(alias):].strip()
+        if command in _TARGET_ONLY and _USERNAME.fullmatch(rest):
+            return command, rest
+        if command == "top" and rest.casefold() not in TOP_PERIODS:
+            return None
         if command in _EXACT_TEXT_COMMANDS or is_exact_slug(command):
             return None
-        return command, raw[len(alias) :].strip()
+        return command, rest
     for alias, command in sorted(MULTIWORD_ALIASES.items(), key=lambda item: -len(item[0])):
         if folded == alias:
             return command, ""
@@ -161,13 +171,18 @@ def parse_trigger(text: str, *, include_disabled: bool = False) -> tuple[str, st
             if command in _EXACT_TEXT_COMMANDS:
                 return None
             return command, raw[len(alias) :].strip()
-    first, _, rest = raw.partition(" ")
+    first, *tail = raw.split(maxsplit=1)
+    rest = tail[0].strip() if tail else ""
     token = first
     slash = token[:1] in _SLASH_PREFIXES
     if slash:
         token = token.lstrip(_SLASH_PREFIXES).split("@", 1)[0]
     command = canonical_command(token, include_disabled=include_disabled)
     if not command:
+        return None
+    if command in _TARGET_ONLY and _USERNAME.fullmatch(rest):
+        return command, rest
+    if command == "top" and rest.casefold() not in TOP_PERIODS:
         return None
     if (command in _EXACT_TEXT_COMMANDS or is_exact_slug(command)) and not slash:
         body = _PUNCT.sub("", raw).casefold()
@@ -232,7 +247,7 @@ def strip_command_address(text: str) -> str | None:
 
 
 def message_trigger(message: Message) -> tuple[str, str] | None:
-    source = message.text or message.caption or ""
+    source = getattr(message, "text", None) or getattr(message, "caption", None) or ""
     chat_type = getattr(getattr(message, "chat", None), "type", "")
     if chat_type in {"group", "supergroup"} and strip_command_address(source) is None:
         return None
@@ -240,15 +255,35 @@ def message_trigger(message: Message) -> tuple[str, str] | None:
     if parsed is not None:
         return parsed
     if chat_type in {"group", "supergroup"}:
-        for entity in (message.entities if message.text else message.caption_entities) or []:
+        for entity in getattr(message, "entities" if message.text else "caption_entities", None) or []:
             if entity.type != "text_mention" or not entity.user:
                 continue
             raw = source.encode("utf-16-le")
             before = raw[:entity.offset * 2].decode("utf-16-le").strip()
             after = raw[(entity.offset + entity.length) * 2:].decode("utf-16-le").strip()
-            if not after and parse_trigger(before) == ("profile", ""):
-                return "profile", entity.extract_from(source)
+            command = parse_trigger(before)
+            if not after and command and command[0] in _TARGET_ONLY and not command[1]:
+                return command[0], entity.extract_from(source)
     return None
+
+
+def split_target_argument(message: Message, args: str) -> tuple[str | User | None, str]:
+    """Take a leading @username or Telegram-selected name from the argument tail."""
+    if not args:
+        return None, args
+    source = (message.text or message.caption or "").rstrip()
+    offset = len(source.removesuffix(args).encode("utf-16-le")) // 2
+    for entity in getattr(message, "entities" if message.text else "caption_entities", None) or []:
+        if entity.offset == offset and entity.type == "text_mention" and entity.user:
+            label = entity.extract_from(source)
+            rest = args[len(label):]
+            if args.startswith(label) and (not rest or rest[0].isspace()):
+                return entity.user, rest.strip()
+    token, *tail = args.split(maxsplit=1)
+    username = _USERNAME.fullmatch(token)
+    if username:
+        return username[1], tail[0] if tail else ""
+    return None, args
 
 
 def is_group_command_to_sweep(message: Message) -> bool:

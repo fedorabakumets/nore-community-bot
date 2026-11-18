@@ -738,6 +738,13 @@ class Database:
             (key, value),
         )
 
+    async def remember_community_join(self, chat_id: int, user_id: int, day: str) -> None:
+        await self.execute(
+            "INSERT INTO bot_state(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=MIN(value, excluded.value)",
+            (f"community_join:{chat_id}:{user_id}", day),
+        )
+
     async def feature_enabled(self, key: str) -> bool:
         row = await self.fetchone("SELECT enabled FROM feature_flags WHERE key = ?", (key,))
         return bool(row and int(row["enabled"]))
@@ -4210,17 +4217,20 @@ class Database:
         )
         return {"messages": messages, "plus": plus, "farm": farm}
 
-    async def daily_message_board(self, day: str, chat_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    async def daily_message_board(
+        self, day: str, chat_id: int, limit: int = 10, *, through: str | None = None,
+    ) -> list[dict[str, Any]]:
         return await self.fetchall(
             """
-            SELECT s.user_id, s.messages, u.telegram_name, u.profile_name, u.username
+            SELECT s.user_id, SUM(s.messages) AS messages, u.telegram_name, u.profile_name, u.username
             FROM daily_scores s
             JOIN users u ON u.user_id = s.user_id
-            WHERE s.day = ? AND s.chat_id = ? AND s.messages > 0
-            ORDER BY s.messages DESC, s.user_id ASC
+            WHERE s.day BETWEEN ? AND ? AND s.chat_id = ? AND s.messages > 0
+            GROUP BY s.user_id
+            ORDER BY messages DESC, s.user_id ASC
             LIMIT ?
             """,
-            (day, chat_id, limit),
+            (day, through or day, chat_id, limit),
         )
 
     async def list_command_overrides(self) -> list[dict[str, Any]]:

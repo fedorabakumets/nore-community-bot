@@ -22,9 +22,10 @@ async def test_group_profile_has_only_red_close_button(monkeypatch, editable, ch
 @pytest.mark.parametrize('ornate', [0, 1])
 async def test_group_profile_request_uses_compact_format(monkeypatch, ornate):
     user = {'user_id': 1, 'profile_ornate': ornate}
-    message = SimpleNamespace(chat=SimpleNamespace(type='group'), from_user=SimpleNamespace(id=1))
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type='group'), from_user=SimpleNamespace(id=1), reply_to_message=None,
+    )
     monkeypatch.setattr(profile, 'register_telegram_user', AsyncMock(return_value=user))
-    monkeypatch.setattr(profile, 'resolve_reply_target', AsyncMock(return_value=None))
     monkeypatch.setattr(profile, 'can_view_profile', AsyncMock(return_value=True))
     render = AsyncMock(return_value='compact')
     monkeypatch.setattr(profile, 'render_profile', render)

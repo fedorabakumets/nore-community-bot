@@ -456,6 +456,7 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.commands_guide import router as commands_router
     from community_bot.event_access import router as event_router
     from community_bot.mafia_notifications import router as mafia_notifications_router
+    from community_bot.routers.member_stats import router as member_stats_router
     from community_bot.sea_notifications import router as sea_notifications_router
 
     dispatcher.include_router(mafia_notifications_router)
@@ -477,6 +478,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(shop_admin_router)
     dispatcher.include_router(commands_router)
     dispatcher.include_router(private_router)
+    dispatcher.include_router(member_stats_router)
     dispatcher.include_router(group_router)
     dispatcher.include_router(assistant_router)
     return dispatcher

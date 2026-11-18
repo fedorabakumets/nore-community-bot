@@ -184,8 +184,8 @@ async def wallet_send_hint(callback: CallbackQuery) -> None:
     if callback.message:
         await edit_block(
             callback.message,
-            "💸 <b>Перевод</b>\nВ личке цели нет. В чате ответом на человека: "
-            "<code>перевести 10</code> или <code>перевести 1 печеньку</code>.",
+            "💸 <b>Перевод</b>\nВ общем чате ответьте получателю <code>Нора перевести 10</code> "
+            "или напишите <code>Нора перевести @имя 10</code>.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("wallet:home"), close_btn("ui:close")]]),
         )

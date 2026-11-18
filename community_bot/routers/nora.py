@@ -106,7 +106,7 @@ async def nora_address(
     text = message.text or ""
     if video_command(text):
         return
-    if parse_trigger(text):
+    if message_trigger(message) or parse_trigger(text):
         raise SkipHandler
     body = strip_address(text)
     if body is None:

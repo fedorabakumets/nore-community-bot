@@ -626,6 +626,7 @@ async def admin_report_review(callback: CallbackQuery, db: Database, settings: S
         await callback.message.answer(
             f"<b>{heading} #{report_id}</b> · {html.escape(row['created_at'][:16])} UTC\n"
             f"Автор записи: <code>{row['reporter_id']}</code>\n"
+            f"Участник: <code>{row['target_id']}</code>\n"
             f"{html.escape(row['reason'])}{link}", parse_mode="HTML",
         )
         body = str(row["text"] or "[Без текста]")

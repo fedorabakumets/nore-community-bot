@@ -69,7 +69,7 @@ _ROUTE_PROMPT = """Ты диспетчер бота Нора. Верни оди�
 
 weather — погода.
 news — новости.
-music_chart — что послушать, чарт, топ, без названия.
+music_chart — что послушать, музыкальный чарт, топ треков без названия.
 music_search — названы песня или исполнитель, query — строка поиска.
 suggest_title — посоветовать фильм или сериал без названия. kind movie, tv или any.
 find_title — назван конкретный фильм или сериал. query — название как сказал человек.
@@ -111,7 +111,7 @@ def rule_intent(text: str) -> dict[str, str] | None:
         return {"tool": "news"}
     if any(word in raw for word in ("команд", "что умеешь", "что ты умеешь")):
         return {"tool": "help"}
-    music = any(word in raw for word in ("чарт", "топ", "музык", "песн", "трек", "послуша"))
+    music = any(word in raw for word in ("чарт", "музык", "песн", "трек", "послуша"))
     cinema = any(word in raw for word in ("фильм", "кино", "сериал", "посмотреть", "глянуть"))
     if music and not cinema:
         named = any(word in raw for word in ("песн", "трек", "найди", "найти", "исполнител"))

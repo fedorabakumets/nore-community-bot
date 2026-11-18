@@ -15,7 +15,7 @@ from aiogram.types import (
     Message,
 )
 
-from community_bot.aliases import command_or_alias, remainder_args, remainder_text
+from community_bot.aliases import command_or_alias, remainder_args
 from community_bot.audit import person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
@@ -26,6 +26,8 @@ from community_bot.helpers import (
     has_permission,
     media_from_message,
     register_telegram_user,
+    resolve_command_target,
+    resolve_member_mention,
     resolve_reply_target,
     user_link,
 )
@@ -152,11 +154,14 @@ async def gift_command(
 ) -> None:
     if not message.from_user:
         return
-    item = gift_item_from_args(remainder_text(message.text or ""))
+    target, args, explicit = await resolve_command_target(message, db, after_first=True)
+    item = gift_item_from_args(" ".join(args))
     if not item:
-        await message.answer("Ответьте на человека: «подарить щит» / плащ / обед / поилка / набор / сова.")
+        await message.answer("Ответьте «Нора подарить щит» или напишите «Нора подарить @имя щит».")
         return
-    target = await resolve_reply_target(message, db)
+    if explicit and not target:
+        await message.answer("Не нашла участника по @имени. Попробуйте ответить на его сообщение.")
+        return
     buyer = await register_telegram_user(db, message.from_user)
     if not target:
         await state.set_state(GiftFlow.target)
@@ -178,9 +183,11 @@ async def gift_target_text(message: Message, state: FSMContext, db: Database, se
     item = str(data.get("gift_item") or "")
     target = await resolve_reply_target(message, db)
     if not target:
-        token = (message.text or "").strip().lstrip("@")
+        token = (message.text or "").strip()
         if token.isdigit():
             target = await db.get_user(int(token))
+        elif token.startswith("@"):
+            target = await resolve_member_mention(db, token[1:])
         else:
             users = await db.search_users(token)
             target = users[0] if users else None
@@ -218,25 +225,29 @@ async def bug_message(message: Message, db: Database, settings: Settings) -> Non
     if await effective_role(db, settings, message.from_user.id) not in {"admin", "owner"}:
         await message.answer("Команда «баг» доступна администраторам и владельцам.")
         return
+    target, args, explicit = await resolve_command_target(message, db)
     source = message.reply_to_message
-    if source is None:
-        await message.answer("Ответьте «баг» на сообщение. После слова можно дописать, что сломалось.")
+    if explicit and source and (not target or not source.from_user or source.from_user.id != target["user_id"]):
+        source = None
+    if source is None and (not target or not args):
+        await message.answer("Ответьте на проблемное сообщение «Нора баг» или напишите «Нора баг @имя описание».")
         return
     await register_telegram_user(db, message.from_user)
-    target = await resolve_reply_target(message, db)
     # Anonymous/channel posts may have no from_user; the reporter owns this technical note.
     target_id = int(target["user_id"]) if target else message.from_user.id
-    media_type, file_id = media_from_message(source)
-    if source.sticker:
-        media_type, file_id = "sticker", source.sticker.file_id
-    elif source.video_note:
-        media_type, file_id = "video_note", source.video_note.file_id
-    elif source.animation:
-        media_type, file_id = "animation", source.animation.file_id
-    text = source.text or source.caption or (f"[{media_type}]" if media_type else "[Сообщение без текста]")
-    note = remainder_text(message.text or message.caption or "") or "нужно проверить"
+    media_type, file_id, text = None, None, ""
+    if source:
+        media_type, file_id = media_from_message(source)
+        if source.sticker:
+            media_type, file_id = "sticker", source.sticker.file_id
+        elif source.video_note:
+            media_type, file_id = "video_note", source.video_note.file_id
+        elif source.animation:
+            media_type, file_id = "animation", source.animation.file_id
+        text = source.text or source.caption or (f"[{media_type}]" if media_type else "[Сообщение без текста]")
+    note = " ".join(args) or "нужно проверить"
     report_id = await db.create_report(
-        message.from_user.id, target_id, message.chat.id, source.message_id, text, f"БАГ · {note}",
+        message.from_user.id, target_id, message.chat.id, source.message_id if source else 0, text, f"БАГ · {note}",
         attachment=(media_type, file_id) if media_type and file_id else None,
     )
     await message.answer(f"🐞 Баг #{report_id} сохранён: админ-панель → Очередь → Репорты.")
@@ -246,19 +257,23 @@ async def bug_message(message: Message, db: Database, settings: Settings) -> Non
 async def report_message(message: Message, db: Database) -> None:
     if not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    if not target or not message.reply_to_message:
-        await message.answer("Ответьте «репорт» на сообщение и коротко напишите причину.")
+    target, args, _ = await resolve_command_target(message, db)
+    source = message.reply_to_message
+    if not target:
+        await message.answer("Ответьте «Нора репорт» или напишите «Нора репорт @имя причина».")
         return
-    reason = remainder_text(message.text or "") or "без причины"
-    text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    if source and (not source.from_user or source.from_user.id != target["user_id"]):
+        source = None
+    if not source and not args:
+        await message.answer("Укажите причину жалобы. Пример: «Нора репорт @имя спам».")
+        return
     await db.create_report(
         message.from_user.id,
         int(target["user_id"]),
         message.chat.id,
-        message.reply_to_message.message_id,
-        text,
-        reason,
+        source.message_id if source else 0,
+        (source.text or source.caption or "") if source else "",
+        " ".join(args) or "без причины",
     )
     await message.answer("🚩 Репорт ушёл в очередь модераторов.")
 

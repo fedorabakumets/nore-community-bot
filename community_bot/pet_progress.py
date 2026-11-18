@@ -251,7 +251,8 @@ async def record(db, user_id, event, *, now=None, message=None, alternatives=())
 
 
 async def record_message(database, message):
-    from community_bot.domain import reputation_delta
+    from community_bot.bot_identity import is_bot
+    from community_bot.helpers import reputation_interaction, resolve_member_mention
 
     user = message.from_user
     if not user or user.is_bot or message.sender_chat:
@@ -267,10 +268,17 @@ async def record_message(database, message):
 
     reply = message.reply_to_message
     target = reply.from_user if reply and not reply.sender_chat else None
-    delta = reputation_delta(message.text or "")
     events = []
-    if delta and target and not target.is_bot and target.id != user.id:
-        events.append("plus" if delta > 0 else "minus")
+    interaction = reputation_interaction(message)
+    if interaction:
+        delta, mention = interaction
+        if mention is None:
+            eligible = target and not target.is_bot and target.id != user.id
+        else:
+            member = await resolve_member_mention(database, mention)
+            eligible = member and member["user_id"] != user.id and not await is_bot(database, member)
+        if eligible:
+            events.append("plus" if delta > 0 else "minus")
     if media:
         events.append(media)
     events.append("text")

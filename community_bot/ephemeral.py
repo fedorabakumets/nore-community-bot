@@ -177,11 +177,10 @@ class GroupHousekeepingMiddleware(BaseMiddleware):
         deleted = False
         if is_cmd:
             deleted = await delete_user_command(event, bot)
-        from community_bot.aliases import parse_trigger
+        from community_bot.aliases import message_trigger
         from community_bot.command_registry import default_reply_ttl, explicit_ttl
 
-        source = (event.text or event.caption or "").strip()
-        parsed = parse_trigger(source) if source else None
+        parsed = message_trigger(event)
         explicit = explicit_ttl(parsed[0]) if parsed else None
         explicit_token = _EXPLICIT_TTL.set(explicit)
         if explicit is not None:

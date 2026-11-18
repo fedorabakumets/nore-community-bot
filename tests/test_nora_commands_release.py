@@ -99,7 +99,7 @@ async def test_new_commands_reach_real_dispatcher_after_assistant(monkeypatch):
         dp.include_router(isolated)
     prepare = AsyncMock()
     monkeypatch.setattr(group, '_prepare_transfer', prepare)
-    monkeypatch.setattr(group, 'resolve_reply_target', AsyncMock(return_value={'user_id': 8}))
+    monkeypatch.setattr(group, 'resolve_command_target', AsyncMock(return_value=({'user_id': 8}, ['5'], False)))
     bot = Bot('123456:test', session=TelegramSession())
     await dp.feed_update(bot, Update(update_id=1, message=message('Нора, перевести 5')),
                          db=SimpleNamespace(), settings=SimpleNamespace())

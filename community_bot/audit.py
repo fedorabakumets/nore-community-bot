@@ -132,14 +132,14 @@ def parse_moderation_args(text: str) -> tuple[timedelta, str, bool]:
 
 
 def parse_punitive_args(
-    text: str,
+    text: str | list[str],
     *,
     need_duration: bool,
     allow_permanent: bool = False,
 ) -> tuple[timedelta | None, str, str | None]:
     from community_bot.aliases import remainder_args
 
-    args = remainder_args(text)
+    args = remainder_args(text) if isinstance(text, str) else text
     if need_duration:
         if not args:
             hint = "30m флуд" if not allow_permanent else "7d мошенничество (или навсегда)"
@@ -158,10 +158,10 @@ def parse_punitive_args(
     return None, reason, None
 
 
-def parse_warn_args(text: str) -> tuple[timedelta | None, str, str | None]:
+def parse_warn_args(text: str | list[str]) -> tuple[timedelta | None, str, str | None]:
     from community_bot.aliases import remainder_args
 
-    args = remainder_args(text)
+    args = remainder_args(text) if isinstance(text, str) else text
     if not args:
         return None, "", "Нужна причина. Пример: /warn спам или /warn 2h токсик"
     duration = parse_duration(args[0])

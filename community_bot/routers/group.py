@@ -37,13 +37,13 @@ from community_bot.audit import (
     person_label,
 )
 from community_bot.blocks import answer_block, edit_block
+from community_bot.bot_identity import is_bot
 from community_bot.config import COOKIE_PAYMENT_QR, COOKIE_PAYMENT_URL, Settings
 from community_bot.database import Database
 from community_bot.domain import (
     cookies_phrase,
     discounted_price,
     is_permanent_duration,
-    reputation_delta,
     reputation_tier,
     transfer_amount,
     transfer_commission_percent,
@@ -58,6 +58,9 @@ from community_bot.helpers import (
     has_permission,
     rank_of_user,
     register_telegram_user,
+    reputation_interaction,
+    resolve_command_target,
+    resolve_member_mention,
     resolve_reply_target,
     safe_send,
     user_link,
@@ -146,6 +149,9 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
         previous.status == ChatMemberStatus.RESTRICTED and not previous.is_member
     )
     if joined and was_outside:
+        await register_telegram_user(db, member.user)
+        moscow_day = event.date.astimezone(ZoneInfo("Europe/Moscow")).date()
+        await db.remember_community_join(event.chat.id, uid, moscow_day.isoformat())
         from community_bot.welcome import send_member_welcome
 
         await send_member_welcome(bot, event.chat.id, member.user)
@@ -373,20 +379,20 @@ async def _take_target(
     db: Database,
     settings: Settings,
     hint: str,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[str]]:
     if not message.from_user:
-        return None
-    target = await resolve_reply_target(message, db)
+        return None, []
+    target, args, _ = await resolve_command_target(message, db)
     if not target:
         await _respond(message, hint)
-        return None
+        return None, args
     if int(target["user_id"]) == message.from_user.id:
         await _respond(message, "На себя эту команду закрыть нельзя.")
-        return None
+        return None, args
     if not await can_manage_user(db, settings, message.from_user.id, int(target["user_id"])):
         await _respond(message, "Ранг этого человека не ниже вашего — действие закрыто.")
-        return None
-    return target
+        return None, args
+    return target, args
 
 
 async def _restrict_mute(bot: Bot, chat_id: int, user_id: int, duration: timedelta) -> None:
@@ -520,9 +526,9 @@ async def staff_user_card(message: Message, db: Database, settings: Settings) ->
         or await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
     ):
         return
-    target = await resolve_reply_target(message, db)
-    if not target:
-        await _respond(message, "Ответьте «карточка» на сообщение человека.")
+    target, args, _ = await resolve_command_target(message, db)
+    if not target or args:
+        await _respond(message, "Ответьте «Нора карточка» или напишите «Нора карточка @имя».")
         return
     pet = await db.get_pet(int(target["user_id"]), settle=False)
     note = str(target.get("moderator_note") or "").strip() or "нет"
@@ -556,10 +562,12 @@ async def show_identifiers(message: Message, bot: Bot) -> None:
 async def mute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_MUTE) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте на человека: /mute 30m флуд")
+    target, args = await _take_target(
+        message, db, settings, "Ответьте «Нора мут 30m флуд» или напишите «Нора мут @имя 30m флуд».",
+    )
     if not target:
         return
-    duration, reason, error = parse_punitive_args(message.text or "", need_duration=True)
+    duration, reason, error = parse_punitive_args(args, need_duration=True)
     if error or duration is None:
         await _respond(message, error or "Нужны время и причина. Пример: /mute 30m флуд")
         return
@@ -715,7 +723,7 @@ async def profile_transfer(callback: CallbackQuery, db: Database, settings: Sett
 async def unmute_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_MUTE) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте командой на сообщение пользователя: /unmute")
+    target, args = await _take_target(message, db, settings, "Ответьте человеку или напишите «Нора размут @имя».")
     if not target:
         return
     try:
@@ -729,7 +737,7 @@ async def unmute_member(message: Message, db: Database, settings: Settings, bot:
         str(target["user_id"]),
         actor_name=message.from_user.full_name,
         target_name=person_label(target),
-        reason=" ".join(remainder_args(message.text or "")),
+        reason=" ".join(args),
     )
     await _respond(message, f"🔊 Мут с {_target_display(target)} снят.", parse_mode="HTML")
 
@@ -738,10 +746,12 @@ async def unmute_member(message: Message, db: Database, settings: Settings, bot:
 async def kick_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_KICK) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте на человека: /kick реклама")
+    target, args = await _take_target(
+        message, db, settings, "Ответьте «Нора кик реклама» или напишите «Нора кик @имя реклама».",
+    )
     if not target:
         return
-    _, reason, error = parse_punitive_args(message.text or "", need_duration=False)
+    _, reason, error = parse_punitive_args(args, need_duration=False)
     if error:
         await _respond(message, error)
         return
@@ -771,10 +781,12 @@ async def kick_member(message: Message, db: Database, settings: Settings, bot: B
 async def ban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_BAN) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте на человека: /ban 7d мошенничество")
+    target, args = await _take_target(
+        message, db, settings, "Ответьте «Нора бан 7d спам» или напишите «Нора бан @имя 7d спам».",
+    )
     if not target:
         return
-    duration, reason, error = parse_punitive_args(message.text or "", need_duration=True, allow_permanent=True)
+    duration, reason, error = parse_punitive_args(args, need_duration=True, allow_permanent=True)
     if error or duration is None:
         await _respond(message, error or "Нужны время и причина. Пример: /ban 7d скам или /ban навсегда скам")
         return
@@ -814,22 +826,18 @@ async def ban_member(message: Message, db: Database, settings: Settings, bot: Bo
 async def unban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_BAN) or not message.from_user:
         return
-    args = remainder_args(message.text or "")
-    replied = await resolve_reply_target(message, db)
+    stored, args, explicit = await resolve_command_target(message, db)
     target_id: int | None = None
-    reason = ""
-    stored: dict[str, Any] | None = None
-    if replied and (not args or not args[0].lstrip("-").isdigit()):
-        target_id = int(replied["user_id"])
-        stored = replied
-        reason = " ".join(args).strip()
-    elif args and args[0].lstrip("-").isdigit():
+    if not explicit and args and args[0].lstrip("-").isdigit():
         target_id = int(args[0])
         stored = await db.get_user(target_id)
-        reason = " ".join(args[1:]).strip()
+        args = args[1:]
+    elif stored:
+        target_id = int(stored["user_id"])
     if target_id is None:
-        await _respond(message, "Ответьте /unban ошибка или напишите /unban TELEGRAM_ID причина")
+        await _respond(message, "Ответьте «Нора разбан причина» или укажите @имя либо Telegram ID перед причиной.")
         return
+    reason = " ".join(args)
     if len(reason) < 2:
         await _respond(message, "Нужна причина разбана — минимум два символа.")
         return
@@ -858,10 +866,12 @@ async def unban_member(message: Message, db: Database, settings: Settings, bot: 
 async def warn_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_WARN) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте на человека: /warn спам или /warn 2h токсик")
+    target, args = await _take_target(
+        message, db, settings, "Ответьте «Нора варн спам» или напишите «Нора варн @имя спам».",
+    )
     if not target:
         return
-    duration, reason, error = parse_warn_args(message.text or "")
+    duration, reason, error = parse_warn_args(args)
     if error:
         await _respond(message, error)
         return
@@ -877,7 +887,9 @@ async def warn_member(message: Message, db: Database, settings: Settings, bot: B
 
     ladder = await apply_warn_ladder(bot, message, int(target["user_id"]), warnings)
     details = f"всего {warnings}{mute_note}"
-    if message.reply_to_message:
+    if message.reply_to_message and message.reply_to_message.from_user and (
+        message.reply_to_message.from_user.id == target["user_id"]
+    ):
         details = f"{details}|src:{message.chat.id}:{message.reply_to_message.message_id}"
     await db.log_admin_action(
         message.from_user.id,
@@ -900,7 +912,7 @@ async def warn_member(message: Message, db: Database, settings: Settings, bot: B
 async def unwarn_member(message: Message, db: Database, settings: Settings) -> None:
     if not await _require_perm(message, db, settings, PERM_WARN) or not message.from_user:
         return
-    target = await _take_target(message, db, settings, "Ответьте командой на сообщение пользователя: /unwarn")
+    target, args = await _take_target(message, db, settings, "Ответьте человеку или напишите «Нора разварн @имя».")
     if not target:
         return
     warnings = await db.remove_warning(int(target["user_id"]))
@@ -911,7 +923,7 @@ async def unwarn_member(message: Message, db: Database, settings: Settings) -> N
         f"осталось {warnings}",
         actor_name=message.from_user.full_name,
         target_name=person_label(target),
-        reason=" ".join(remainder_args(message.text or "")),
+        reason=" ".join(args),
     )
     await _respond(
         message,
@@ -986,10 +998,9 @@ async def sweep_bot_messages(message: Message, db: Database, settings: Settings,
 async def change_role(message: Message, db: Database, settings: Settings) -> None:
     if not await _require_perm(message, db, settings, PERM_ROLES_ASSIGN) or not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    args = remainder_args(message.text or "")
+    target, args, _ = await resolve_command_target(message, db, after_first=True)
     if not target or len(args) != 1:
-        await _respond(message, "Ответьте на сообщение: /role код_роли")
+        await _respond(message, "Ответьте «Нора роль код_роли» или напишите «Нора роль @имя код_роли».")
         return
     new_role = args[0].casefold()
     role = await db.get_staff_role(new_role)
@@ -1579,10 +1590,9 @@ async def admin_give_cookies(message: Message, db: Database, settings: Settings,
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    args = remainder_args(message.text or "")
+    target, args, _ = await resolve_command_target(message, db)
     if not target or not args or not args[0].isdigit():
-        await _respond(message, "Ответьте на сообщение: /givecookies 100 причина")
+        await _respond(message, "Ответьте человеку или напишите «Нора выдать печеньки @имя 100 причина».")
         return
     if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
@@ -1616,10 +1626,9 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings, 
     actor_role = await _require_perm(message, db, settings, PERM_USERS_COOKIES)
     if not actor_role or not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    args = remainder_args(message.text or "")
+    target, args, _ = await resolve_command_target(message, db)
     if not target or not args or not args[0].isdigit():
-        await _respond(message, "Ответьте на сообщение: /setcookies 100 причина")
+        await _respond(message, "Ответьте человеку или напишите «Нора сетпеченьки @имя 100 причина».")
         return
     if not await _can_manage_target(message.from_user.id, target, db, settings):
         await _respond(message, "Нельзя изменять баланс пользователя с равной или более высокой ролью.")
@@ -1709,10 +1718,9 @@ async def freebie_check(callback: CallbackQuery, db: Database, settings: Setting
 async def transfer_command(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    args = remainder_args(message.text or "")
+    target, args, _ = await resolve_command_target(message, db, after_first=True)
     if not target or not args or not args[0].isdigit():
-        await _respond(message, "Ответьте на сообщение пользователя: /transfer 100")
+        await _respond(message, "Ответьте «Нора перевести 100» или напишите «Нора перевести @имя 100».")
         return
     await _prepare_transfer(message, db, settings, target, int(args[0]))
 
@@ -1787,26 +1795,35 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
         )
 
 
-@router.message(F.reply_to_message, F.text, F.chat.type.in_({"group", "supergroup"}))
+@router.message(
+    F.text, F.reply_to_message | F.text.contains("@") | F.entities, F.chat.type.in_({"group", "supergroup"}),
+)
 async def group_reply_actions(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     from community_bot.aliases import strip_command_address
 
     addressed = strip_command_address(message.text or "")
-    amount = transfer_amount(addressed) if addressed is not None else None
-    delta = reputation_delta(message.text or "")
-    if amount is None and delta is None:
+    amount = transfer_amount(addressed) if addressed is not None and message.reply_to_message else None
+    interaction = reputation_interaction(message)
+    if amount is None and interaction is None:
         raise SkipHandler
-    if not message.from_user or not message.reply_to_message or not message.reply_to_message.from_user:
-        return
-    target = await resolve_reply_target(message, db)
-    if not target:
+    if not message.from_user:
         return
     if amount is not None:
-        await _prepare_transfer(message, db, settings, target, amount)
+        target = await resolve_reply_target(message, db)
+        if target:
+            await _prepare_transfer(message, db, settings, target, amount)
         return
-    assert delta is not None
+    assert interaction is not None
+    delta, mention = interaction
+    target = (
+        await resolve_member_mention(db, mention) if mention is not None else await resolve_reply_target(message, db)
+    )
+    if not target:
+        if mention is not None:
+            await message.reply("Не нашла участника по @имени. Попробуйте ответить на его сообщение.")
+        return
     actor = await register_telegram_user(db, message.from_user)
-    if message.reply_to_message.from_user.is_bot:
+    if await is_bot(db, target):
         await message.reply("Репутация ботов не меняется.")
         return
     timezone = ZoneInfo(settings.timezone)

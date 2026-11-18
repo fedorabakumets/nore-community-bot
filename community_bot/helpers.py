@@ -11,9 +11,17 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import Message, User
 
+from community_bot.aliases import message_trigger, parse_trigger, split_target_argument
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LABELS, ROLE_LEVELS, reputation_tier
+from community_bot.domain import (
+    NEGATIVE_REPUTATION_PHRASES,
+    POSITIVE_REPUTATION_PHRASES,
+    ROLE_LABELS,
+    ROLE_LEVELS,
+    reputation_delta,
+    reputation_tier,
+)
 from community_bot.permissions import (
     PERM_SEE_PRIVATE,
     parse_permissions,
@@ -407,3 +415,42 @@ async def resolve_reply_target(message: Message, db: Database) -> dict[str, Any]
         return None
     target = message.reply_to_message.from_user
     return await register_telegram_user(db, target)
+
+
+async def resolve_member_mention(db: Database, mention: str | User) -> dict[str, Any] | None:
+    if isinstance(mention, User):
+        return await register_telegram_user(db, mention)
+    matches = await db.fetchall("SELECT * FROM users WHERE username = ? COLLATE NOCASE LIMIT 2", (mention,))
+    return matches[0] if len(matches) == 1 else None
+
+
+async def resolve_command_target(
+    message: Message, db: Database, *, after_first: bool = False,
+) -> tuple[dict[str, Any] | None, list[str], bool]:
+    source = getattr(message, "text", None) or getattr(message, "caption", None) or ""
+    parsed = message_trigger(message) or parse_trigger(source)
+    args = parsed[1] if parsed else ""
+    mention, rest = split_target_argument(message, args)
+    if mention is None and after_first:
+        parts = args.split(maxsplit=1)
+        if len(parts) == 2:
+            candidate, remaining = split_target_argument(message, parts[1])
+            if candidate is not None and not remaining:
+                mention, rest = candidate, parts[0]
+    if mention is not None:
+        return await resolve_member_mention(db, mention), rest.split(), True
+    return await resolve_reply_target(message, db), args.split(), False
+
+
+def reputation_interaction(message: Message) -> tuple[int, str | User | None] | None:
+    text = (message.text or "").strip()
+    delta = reputation_delta(text)
+    if delta is not None and message.reply_to_message:
+        return delta, None
+    for phrase in POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES:
+        if not text.casefold().startswith(phrase + " "):
+            continue
+        mention, rest = split_target_argument(message, text[len(phrase):].strip())
+        if mention is not None and not rest:
+            return (5 if phrase in POSITIVE_REPUTATION_PHRASES else -5), mention
+    return None
