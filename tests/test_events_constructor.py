@@ -4,13 +4,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.exceptions import TelegramForbiddenError
-from aiogram.methods import SendMessage
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.methods import EditMessageText, SendMessage
 from aiohttp import web
 
 from community_bot import december_cabin, miniapp
 from community_bot.database import Database
-from community_bot.events_api import config, delete, editor, public_events, publish, save, validate
+from community_bot.events_api import config, delete, editor, participants, public_events, publish, save, validate
+from community_bot.rsvp import refresh_event_markup
 from community_bot.shop_api import purchase, quote
 
 
@@ -100,6 +101,66 @@ async def test_december_event_publish_and_rsvp(env, monkeypatch, stored_username
     response = await miniapp.join_event(Request(env, body))
     assert response.status == 200 and "Подробности здесь" in json.loads(response.body)["message"]
     assert await env.db.event_participant_count(eid) == 2
+
+
+@pytest.mark.parametrize("replace_photo_post", [False, True])
+async def test_rich_event_keeps_nora_and_attendance_and_grants_scoped_editor(env, monkeypatch, replace_photo_post):
+    eid = december_cabin.EVENT_ID
+    url = f"https://t.me/NoraBot?startapp=nora_event_{eid}"
+    await env.db.save_studio_event(eid, env.settings.community_chat_id, 123, "Домик",
+                                   [{"text": "Нора", "url": url}], 0, 1, media_type="photo")
+    await env.db.set_bot_state(f"event_config:{eid}", json.dumps({
+        "organizer_id": 2, "registration_only": True, "media_id": "cover", "pinned": True,
+        "post_buttons": [{"text": "Нора", "url": url}],
+    }))
+    await env.db.add_rsvp(eid, 2, 0, kind="rsvp")
+    monkeypatch.setattr(december_cabin, "verify_requested_release_backup", AsyncMock())
+    env.bot.send_rich_message = AsyncMock(return_value=SimpleNamespace(message_id=456))
+    if replace_photo_post:
+        env.bot.edit_message_text.side_effect = [TelegramBadRequest(
+            method=EditMessageText(message_id=123), message="there is no text in the message to edit"
+        )]
+    await december_cabin.upgrade_meetup(env.db, env.settings, env.bot)
+    await december_cabin.upgrade_meetup(env.db, env.settings, env.bot)
+    new_id = 456 if replace_photo_post else 123
+    assert (await env.db.get_studio_event(eid))["message_id"] == new_id
+    assert env.bot.send_rich_message.await_count == int(replace_photo_post)
+    payload = (env.bot.send_rich_message if replace_photo_post else env.bot.edit_message_text).await_args.kwargs
+    blocks = payload["rich_message"].blocks
+    assert blocks[0].photo.media == "cover"
+    assert blocks[-1].buttons[0].callback_data == f"rsvp:{eid}"
+    assert blocks[-1].buttons[0].text == "Я буду (1)"
+    assert payload["reply_markup"].inline_keyboard[0][0].url == url
+    if replace_photo_post:
+        env.bot.pin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, new_id,
+                                                        disable_notification=True)
+        env.bot.unpin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, 123)
+        assert env.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url == url
+
+    env.bot.edit_message_text.side_effect = None
+    await env.db.add_rsvp(eid, 3, 0, kind="rsvp")
+    assert await refresh_event_markup(env.bot, env.db, eid)
+    assert env.bot.edit_message_text.await_args.kwargs["rich_message"].blocks[-1].buttons[0].text == "Я буду (2)"
+    request = Request(env, uid=2)
+    request.match_info, request.query = {"event_id": eid}, {}
+    await env.db.execute("UPDATE users SET profile_private=1 WHERE user_id=3")
+    people = json.loads((await participants(request)).body)
+    assert people == {
+        "items": [{"id": 2, "name": "Имя"}, {"name": "Участник со скрытым профилем"}],
+        "next_offset": None,
+    }
+    assert not json.loads((await editor(request)).body)["can_delete"]
+    new = fields()
+    await save(Request(env, new, uid=2))
+    draft = {"id": new["id"], "revision": 1}
+    env.bot.send_message.return_value = SimpleNamespace(message_id=789)
+    with pytest.raises(web.HTTPForbidden):
+        await publish(Request(env, {**draft, "notify": True}, uid=2))
+    assert (await publish(Request(env, draft, uid=2))).status == 200
+    with pytest.raises(web.HTTPForbidden):
+        await delete(request)
+    with pytest.raises(web.HTTPForbidden):
+        await editor(Request(env, uid=3))
 
 
 async def test_authorization_draft_validation_and_preview(env):

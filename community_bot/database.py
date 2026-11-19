@@ -4197,7 +4197,7 @@ class Database:
     async def list_rsvps(self, event_id: str, *, offset: int = 0, limit: int | None = None) -> list[dict[str, Any]]:
         return await self.fetchall(
             """
-            SELECT r.*, u.telegram_name, u.profile_name, u.username
+            SELECT r.*, u.telegram_name, u.profile_name, u.username, u.profile_private
             FROM event_rsvps r
             JOIN users u ON u.user_id = r.user_id
             WHERE r.event_id = ?

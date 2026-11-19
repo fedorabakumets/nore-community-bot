@@ -13,11 +13,18 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
-from aiogram.types import BufferedInputFile
+from aiogram.types import (
+    BufferedInputFile,
+    InputMediaPhoto,
+    InputRichBlockButtons,
+    InputRichBlockPhoto,
+    InputRichMessage,
+    RichMessageButton,
+)
 from aiohttp import web
 
 from community_bot.ephemeral import keep_in_chat
-from community_bot.helpers import has_permission, rank_of_user
+from community_bot.helpers import can_view_profile, has_permission, rank_of_user
 from community_bot.permissions import PERM_ADMIN_PANEL, PERM_MENTION, PERM_POST
 from community_bot.rsvp import event_lock, event_url, refresh_event_markup
 
@@ -38,7 +45,13 @@ async def has_room(connection, eid):
     return not cap or count["n"] < cap
 
 
-async def allowed(db, settings, uid):
+def editor_grant_key(uid):
+    return f"event_editor:{uid}"
+
+
+async def allowed(db, settings, uid, *, require_admin=False):
+    if not require_admin and await db.get_bot_state(editor_grant_key(uid)) == "1":
+        return True
     return await rank_of_user(db, settings, uid) >= 70 and all(
         [
             await has_permission(db, settings, uid, PERM_ADMIN_PANEL),
@@ -47,9 +60,11 @@ async def allowed(db, settings, uid):
     )
 
 
-async def authorize(request):
-    if not await allowed(request.app["db"], request.app["settings"], request["actor"]["id"]):
-        raise web.HTTPForbidden(reason="Конструктор доступен администраторам с правом публикации")
+async def authorize(request, *, require_admin=False):
+    if not await allowed(
+        request.app["db"], request.app["settings"], request["actor"]["id"], require_admin=require_admin
+    ):
+        raise web.HTTPForbidden(reason="Недостаточно прав для этого действия")
 
 
 def description_blocks(description):
@@ -107,6 +122,28 @@ def render_post(event, cfg, price):
             for link in cfg["links"]
         )
     return text
+
+
+async def rich_registration_payload(db, event, cfg):
+    from community_bot.posting import compose_post_markup
+    from community_bot.private_rich import text_blocks
+
+    active = event["status"] == "active"
+    state = {"cancelled": "❌ Мероприятие отменено", "disabled": "⏸ Запись приостановлена"}
+    banner = f"<b>{state[event['status']]}</b>\n" if not active else ""
+    blocks = []
+    if cfg.get("media_id"):
+        blocks.append(InputRichBlockPhoto(photo=InputMediaPhoto(media=cfg["media_id"])))
+    blocks.extend(text_blocks(banner + render_post(event, cfg, 0), "HTML", compact=False))
+    if active:
+        count = await db.event_participant_count(event["event_id"])
+        blocks.append(InputRichBlockButtons(buttons=[
+            RichMessageButton(text=f"Я буду ({count})", callback_data=f"rsvp:{event['event_id']}", style="success"),
+        ]))
+    return {
+        "rich_message": InputRichMessage(blocks=blocks, skip_entity_detection=True),
+        "reply_markup": compose_post_markup(cfg.get("post_buttons")) if active else None,
+    }
 
 
 def validate(body):
@@ -212,6 +249,35 @@ async def public_events(db, uid):
     return result
 
 
+async def participants(request):
+    db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
+    eid = request.match_info["event_id"]
+    event = await db.get_studio_event(eid)
+    if not event or event["status"] != "active":
+        raise web.HTTPNotFound()
+    offset = int(request.query.get("offset", "0"))
+    if not 0 <= offset <= 100_000:
+        raise ValueError("Некорректная страница списка участников")
+    limit = 30
+    rows = await db.list_rsvps(eid, offset=offset, limit=limit + 1)
+    blocked = {
+        row["other_id"] for row in await db.fetchall(
+            "SELECT blocked_id AS other_id FROM mini_friend_blocks WHERE blocker_id=? "
+            "UNION SELECT blocker_id FROM mini_friend_blocks WHERE blocked_id=?", (uid, uid)
+        )
+    }
+    people = []
+    for row in rows[:limit]:
+        if row["user_id"] not in blocked and await can_view_profile(db, settings, uid, row):
+            people.append({"id": row["user_id"], "name": row["profile_name"] or row["telegram_name"] or "Участник"})
+        else:
+            people.append({"name": "Участник со скрытым профилем"})
+    return web.json_response({
+        "items": people,
+        "next_offset": offset + limit if len(rows) > limit else None,
+    }, headers={"Cache-Control": "no-store"})
+
+
 async def editor(request):
     await authorize(request)
     db = request.app["db"]
@@ -253,6 +319,7 @@ async def editor(request):
         {
             "items": items,
             "can_mention": await has_permission(db, request.app["settings"], request["actor"]["id"], PERM_MENTION),
+            "can_delete": await allowed(db, request.app["settings"], request["actor"]["id"], require_admin=True),
         }
     )
 
@@ -550,7 +617,7 @@ async def publish(request, *, photo=None, send_sticker=True):
 
 
 async def delete(request):
-    await authorize(request)
+    await authorize(request, require_admin=True)
     body = await request.json()
     db, eid = request.app["db"], str(body.get("id", ""))
     from community_bot.event_manager import cancel_event

@@ -1,6 +1,7 @@
 'use strict';
 window.NoraEvents=(()=>{
-  let items=null,editing=null,canMention=false,loading=false,pending=false,linkedEventId=null;
+  let items=null,editing=null,canMention=false,canDelete=false,managing=null,pending=false,linkedEventId=null;
+  const participantLists = new Map();
   const when=e=>e.starts_at?new Date(e.starts_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}):'Дата — скоро';
   function description(event, preview = false) {
     if (!event.description_blocks?.length) {
@@ -12,6 +13,54 @@ window.NoraEvents=(()=>{
       if (kind === 'bold') return `<p class="event-description"><strong>${esc(text)}</strong></p>`;
       return `<p class="event-description">${esc(text.trim())}</p>`;
     }).join('');
+  }
+  function participantList(event) {
+    return `<details class="play-details event-about event-participants" data-retain-open="participants-${esc(event.id)}"
+      data-event-participants="${esc(event.id)}" data-count="${esc(event.count)}">
+      <summary>Участники · ${number(event.count)}${event.capacity ? ' / ' + number(event.capacity) : ''}</summary>
+      <div data-participant-list aria-live="polite"></div>
+    </details>`;
+  }
+  function drawParticipants(details, state) {
+    const body = details.querySelector('[data-participant-list]');
+    const rows = state.items.map(person => `<li>${person.id
+      ? `<button class="text-btn" data-person-view="${esc(person.id)}">${esc(person.name)}</button>`
+      : `<span class="sub">${esc(person.name)}</span>`}</li>`).join('');
+    body.innerHTML = (rows ? `<ul>${rows}</ul>` : '') + (state.loading ? '<p class="sub">Загружаем…</p>'
+      : state.failed ? '<button type="button" class="text-btn" data-participant-more>Повторить загрузку</button>'
+      : state.next !== null ? '<button type="button" class="text-btn" data-participant-more>Показать ещё</button>'
+      : !rows ? '<p class="sub">Пока никто не записался.</p>' : '');
+  }
+  async function loadParticipants(details, nextPage = false) {
+    if (!details.open) return;
+    const id = details.dataset.eventParticipants, count = Number(details.dataset.count);
+    let state = participantLists.get(id);
+    if (!state || state.count !== count) {
+      state = {count, items: [], next: count ? 0 : null, loaded: !count, loading: false, failed: false};
+      participantLists.set(id, state);
+    }
+    if (state.loading || state.next === null || (!nextPage && (state.loaded || state.failed))) {
+      drawParticipants(details, state);
+      return;
+    }
+    state.loading = true;
+    state.failed = false;
+    drawParticipants(details, state);
+    try {
+      const response = await api('events/' + encodeURIComponent(id) + '/participants?offset=' + state.next);
+      state.items.push(...response.items);
+      state.next = response.next_offset;
+      state.loaded = true;
+    } catch {
+      state.failed = true;
+    } finally {
+      state.loading = false;
+      if (participantLists.get(id) === state) {
+        for (const node of document.querySelectorAll('details[open][data-event-participants]')) {
+          if (node.dataset.eventParticipants === id) drawParticipants(node, state);
+        }
+      }
+    }
   }
   function card(event, featured = true) {
     const {id, title, starts_at, location, links, count, capacity, price, paid, joined, has_media,
@@ -32,18 +81,29 @@ window.NoraEvents=(()=>{
           <span><b>${esc(organizer.name)}</b><small>${esc(organizer.role)} · Открыть профиль</small></span>
         </button>` : ''}
         <div class="event-booking">
-          <div>${registration_only ? '' : `<div class="price">${price ? number(price)+' 🍪' : 'Бесплатно'}</div>`}<p class="sub">${number(count)}${capacity ? ' / '+number(capacity) : ''} ${capacity ? 'участников' : plural(count,'участник','участника','участников')}</p></div>
+          ${registration_only ? '' : `<div class="price">${price ? number(price)+' 🍪' : 'Бесплатно'}</div>`}
           <button class="primary" data-event="${esc(id)}" ${paid || !price && joined || full ? 'disabled' : ''}>${status}</button>
         </div>
+        ${participantList(event)}
         ${data.events_admin ? `<button class="secondary" data-event-edit="${esc(id)}">Редактировать</button>` : ''}
       </div>
     </article>`;
   }
-  function form(){const e=editing;return `<button class="text-btn" data-event-editor-close>← К мероприятиям</button><h1>${e.published?'<em>Редактировать</em>':'<em>Новое событие</em>'}</h1><p class="sub">Сохрани настройки, затем проверь предпросмотр и отправь пост в чат.</p><form id="event-editor-form"><label>Название<input name="title" maxlength="80" required value="${esc(e.title)}"></label><label>Описание<textarea name="description" rows="5" maxlength="2500">${esc(e.description)}</textarea></label><div class="event-form-grid"><label>Начало · Москва<input name="starts_at" type="datetime-local" value="${esc(e.localDate||'')}"></label><label>Локация<input name="location" maxlength="200" value="${esc(e.location)}" placeholder="Адрес или место встречи"></label></div><label class="event-toggle"><input name="free" type="checkbox" ${e.price===0?'checked':''}> Бесплатное мероприятие</label><div class="event-form-grid"><label>Цена · 🍪<input name="price" type="number" min="0" max="1000000" step="1" value="${e.price}" ${e.price===0?'disabled':''}></label><label>Максимум участников<input name="capacity" type="number" min="0" max="100000" step="1" value="${e.capacity||0}"></label></div><p class="footer-note">0 мест — без ограничения. Цена фиксируется после первой записи.</p><section class="card event-editor-section"><h3>Медиа</h3><p class="sub" id="event-media-state">${e.media_token?'Новое медиа загружено':e.has_media?'Медиа прикреплено':'Пока без медиа'}</p><label>Фото или видео<input id="event-media-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4"></label><p class="footer-note">Фото до 5 МБ, MP4 до 20 МБ. С медиа текст поста — до 1024 символов.</p>${!e.published?'<button class="text-btn" type="button" data-event-remove-media>Убрать медиа</button>':''}</section><section class="card event-editor-section"><h3>Доп. информация</h3><p class="sub">Именованные ссылки появятся отдельным блоком в сообщении.</p><div id="event-links">${linkInputs()}</div><button class="secondary" type="button" id="event-link-add">+ Добавить ссылку</button></section><section class="card event-editor-section"><h3>Опрос</h3><label>Вопрос<input name="poll_question" maxlength="300" value="${esc(e.poll?.question||'')}" placeholder="Оставь пустым, если опрос не нужен"></label><label>Варианты — каждый с новой строки<textarea name="poll_options" rows="4">${esc(e.poll?.options?.join('\n')||'')}</textarea></label><label class="event-toggle"><input name="poll_anonymous" type="checkbox" ${e.poll?.anonymous!==false?'checked':''}> Анонимное голосование</label><p class="footer-note">2–10 вариантов. Отправленный опрос Telegram не позволяет редактировать.</p></section><button class="primary" type="submit" ${pending?'disabled':''}>Сохранить настройки</button><button class="secondary" type="button" id="event-preview" ${pending?'disabled':''}>Предпросмотр и публикация</button>${e.revision?'<button class="text-btn event-delete" type="button" id="event-delete">Удалить мероприятие</button>':''}</form>`}
+  function form(){const e=editing;return `<button class="text-btn" data-event-editor-close>← К мероприятиям</button><h1>${e.published?'<em>Редактировать</em>':'<em>Новое событие</em>'}</h1><p class="sub">Сохрани настройки, затем проверь предпросмотр и отправь пост в чат.</p><form id="event-editor-form"><label>Название<input name="title" maxlength="80" required value="${esc(e.title)}"></label><label>Описание<textarea name="description" rows="5" maxlength="2500">${esc(e.description)}</textarea></label><div class="event-form-grid"><label>Начало · Москва<input name="starts_at" type="datetime-local" value="${esc(e.localDate||'')}"></label><label>Локация<input name="location" maxlength="200" value="${esc(e.location)}" placeholder="Адрес или место встречи"></label></div><label class="event-toggle"><input name="free" type="checkbox" ${e.price===0?'checked':''}> Бесплатное мероприятие</label><div class="event-form-grid"><label>Цена · 🍪<input name="price" type="number" min="0" max="1000000" step="1" value="${e.price}" ${e.price===0?'disabled':''}></label><label>Максимум участников<input name="capacity" type="number" min="0" max="100000" step="1" value="${e.capacity||0}"></label></div><p class="footer-note">0 мест — без ограничения. Цена фиксируется после первой записи.</p><section class="card event-editor-section"><h3>Медиа</h3><p class="sub" id="event-media-state">${e.media_token?'Новое медиа загружено':e.has_media?'Медиа прикреплено':'Пока без медиа'}</p><label>Фото или видео<input id="event-media-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4"></label><p class="footer-note">Фото до 5 МБ, MP4 до 20 МБ. С медиа текст поста — до 1024 символов.</p>${!e.published?'<button class="text-btn" type="button" data-event-remove-media>Убрать медиа</button>':''}</section><section class="card event-editor-section"><h3>Доп. информация</h3><p class="sub">Именованные ссылки появятся отдельным блоком в сообщении.</p><div id="event-links">${linkInputs()}</div><button class="secondary" type="button" id="event-link-add">+ Добавить ссылку</button></section><section class="card event-editor-section"><h3>Опрос</h3><label>Вопрос<input name="poll_question" maxlength="300" value="${esc(e.poll?.question||'')}" placeholder="Оставь пустым, если опрос не нужен"></label><label>Варианты — каждый с новой строки<textarea name="poll_options" rows="4">${esc(e.poll?.options?.join('\n')||'')}</textarea></label><label class="event-toggle"><input name="poll_anonymous" type="checkbox" ${e.poll?.anonymous!==false?'checked':''}> Анонимное голосование</label><p class="footer-note">2–10 вариантов. Отправленный опрос Telegram не позволяет редактировать.</p></section><button class="primary" type="submit" ${pending?'disabled':''}>Сохранить настройки</button><button class="secondary" type="button" id="event-preview" ${pending?'disabled':''}>Предпросмотр и публикация</button>${canDelete&&e.revision?'<button class="text-btn event-delete" type="button" id="event-delete">Удалить мероприятие</button>':''}</form>`}
   function linkInputs(){return (editing.links||[]).map((l,i)=>`<div class="event-link-row"><label>Название<input data-link-label="${i}" maxlength="60" required value="${esc(l.label)}"></label><label>Адрес<input data-link-url="${i}" type="url" required value="${esc(l.url)}" placeholder="https://…"></label><button type="button" class="text-btn event-delete" data-remove-link="${i}">Убрать</button></div>`).join('')}
   function screen(){if(editing&&data.events_admin)return form();const selected=data.events.find(e=>e.id===linkedEventId);const events=selected?[selected,...data.events.filter(e=>e.id!==linkedEventId)]:data.events;return `<div class="nora-page-heading"><h1>События</h1></div>${data.events_admin?'<button class="primary" data-event-create>+ Создать мероприятие</button>':''}${data.events.length?events.map((event, index)=>card(event, index===0)).join(''):'<div class="card empty">Пока без анонсов.<br>Новая встреча появится здесь.</div>'}${data.events_admin?`<section id="event-drafts">${drafts()}</section>`:''}`}
   function drafts(){const hidden=items?.filter(e=>e.status!=='active')||[];return hidden.length?`<h2>Черновики и выключенные</h2>${hidden.map(e=>`<button class="category-card" data-event-edit="${esc(e.id)}"><span><b>${esc(e.title)}</b><small>${e.published?'Запись выключена':'Ещё не опубликовано'}</small></span><span>Редактировать →</span></button>`).join('')}`:''}
-  async function manage(){if(loading)return;loading=true;try{const r=await api('events/manage');items=r.items;canMention=r.can_mention;const el=$('#event-drafts');if(el)el.innerHTML=drafts()}catch(e){toast(e.message)}finally{loading=false}}
+  function manage() {
+    if (managing) return managing;
+    managing = api('events/manage').then(result => {
+      items = result.items;
+      canMention = result.can_mention;
+      canDelete = result.can_delete;
+      const draftList = $('#event-drafts');
+      if (draftList) draftList.innerHTML = drafts();
+    }).catch(error => toast(error.message)).finally(() => { managing = null; });
+    return managing;
+  }
   function collect(){if(!editing)return;const f=$('#event-editor-form');if(!f)return;const x=new FormData(f);for(const key of ['title','description','location'])editing[key]=x.get(key)||'';editing.localDate=x.get('starts_at')||'';editing.starts_at=editing.localDate?editing.localDate+':00+03:00':null;editing.price=x.get('free')?0:Number(x.get('price')||0);editing.capacity=Number(x.get('capacity')||0);const q=String(x.get('poll_question')||'').trim();editing.poll=q?{question:q,options:String(x.get('poll_options')||'').split('\n').map(s=>s.trim()).filter(Boolean),anonymous:!!x.get('poll_anonymous')}:null;editing.links=[...f.querySelectorAll('[data-link-label]')].map(n=>({label:n.value,url:f.querySelector(`[data-link-url="${n.dataset.linkLabel}"]`).value}))}
   async function edit(id){if(pending)return;await manage();const e=items?.find(e=>e.id===id);if(!e){toast('Мероприятие больше недоступно');return}$('#sheet').close();tab='events';NoraShop.tabChanged(tab);editing=structuredClone(e);editing.localDate=e.starts_at?new Date(new Date(e.starts_at).getTime()+3*3600000).toISOString().slice(0,16):'';render();window.scrollTo(0,0)}
   async function save(preview=false){if(pending||!editing)return;if(!$('#event-editor-form').reportValidity())return;collect();pending=true;try{await api('events/save',editing);await manage();const fresh=items.find(e=>e.id===editing.id);editing={...fresh,localDate:editing.localDate};invalidateCover(editing.id);data=await api('me');pending=false;render();toast('Настройки сохранены');if(preview)showPreview()}catch(e){toast(e.message)}finally{pending=false}}
@@ -75,9 +135,20 @@ window.NoraEvents=(()=>{
       loadCover(node.dataset.eventCover).then(url=>{if(url&&node.isConnected)node.src=url});
     }
   }
-  function mount(){if(tab==='events'&&data.events_admin&&!items&&!loading)manage();loadCovers()}
+  function mount(){
+    if(tab==='events'&&data.events_admin&&!items&&!managing)manage();
+    loadCovers();
+    for (const details of document.querySelectorAll('details[open][data-event-participants]')) loadParticipants(details);
+  }
   function hero(){return `<div class="home-event-strip home-carousel" aria-label="Ближайшие встречи">${data.events.map(e=>`<article class="home-meetup"><img class="home-meetup-cover" ${e.has_media?`data-event-cover="${esc(e.id)}"`:'src="/home-art/gathering-v1.webp"'} alt="Обложка встречи"><span class="home-meetup-badge">${navIcon('events')}Ближайшая встреча</span><div class="home-meetup-content"><h2>${esc(e.title)}</h2><p>${esc(when(e))}${e.location?' · '+esc(e.location):''}</p><div class="home-meetup-footer"><span class="home-meetup-social">${number(e.count)}${e.capacity?' / '+number(e.capacity):''} ${e.capacity?'участников':plural(e.count,'участник','участника','участников')}</span><button class="primary" data-home-event="${esc(e.id)}">Подробнее ${window.NoraInteractive?.icon("arrow")||""}</button></div></div></article>`).join('')}</div>${window.NoraHome.carouselDots(data.events.length,'встреча')}`}
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-event-create')){editing={id:'e'+crypto.randomUUID().replaceAll('-','').slice(0,20),revision:0,title:'',description:'',location:'',price:0,capacity:0,links:[],poll:null,published:false};tab='events';render();window.scrollTo(0,0)}if(b.dataset.eventEdit)edit(b.dataset.eventEdit);if(b.hasAttribute('data-event-editor-close')){editing=null;render()}if(b.id==='event-link-add'){collect();if(editing.links.length>=8){toast('Максимум 8 ссылок');return}editing.links.push({label:'',url:''});$('#event-links').innerHTML=linkInputs()}if(b.dataset.removeLink!==undefined){collect();editing.links.splice(Number(b.dataset.removeLink),1);$('#event-links').innerHTML=linkInputs()}if(b.hasAttribute('data-event-remove-media')){editing.remove_media=true;editing.media_token=null;editing.has_media=false;$('#event-media-state').textContent='Медиа будет удалено после сохранения'}if(b.id==='event-preview')save(true);if(b.id==='event-delete')remove()});
+  document.addEventListener('toggle', event => {
+    if (event.target.matches('details[open][data-event-participants]')) loadParticipants(event.target);
+  }, true);
+  document.addEventListener('click', event => {
+    const more = event.target.closest('[data-participant-more]');
+    if (more) loadParticipants(more.closest('details'), true);
+  });
   document.addEventListener('input',e=>{if(e.target.closest('#event-editor-form'))collect()});
   document.addEventListener('change',async e=>{if(e.target.name==='free'){$('[name="price"]').disabled=e.target.checked;if(e.target.checked)$('[name="price"]').value=0;collect()}if(e.target.id!=='event-media-file')return;const file=e.target.files?.[0];if(!file||pending)return;const uploadEditor=editing;pending=true;$('#event-media-state').textContent='Загружаем…';try{const r=await fetch('/api/events/upload',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||'Не удалось загрузить медиа');if(editing!==uploadEditor)return;editing.media_token=j.token;editing.remove_media=false;editing.has_media=true;$('#event-media-state').textContent='Медиа загружено · сохрани настройки'}catch(err){if(editing===uploadEditor){toast(err.message);const state=$('#event-media-state');if(state)state.textContent='Загрузка не удалась'}}finally{pending=false}});
   document.addEventListener('submit',e=>{if(e.target.id==='event-editor-form'){e.preventDefault();save()}});

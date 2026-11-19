@@ -85,7 +85,27 @@ async def refresh_event_markup(bot, db: Database, event_id: str) -> bool:
     if not event:
         return False
     from community_bot.event_manager import sync_content
+    from community_bot.events_api import config, rich_registration_payload
 
+    cfg = await config(db, event_id)
+    if cfg.get("rich_post"):
+        try:
+            with keep_in_chat():
+                await bot.edit_message_text(
+                    chat_id=event["chat_id"], message_id=event["message_id"], parse_mode=None,
+                    **await rich_registration_payload(db, event, cfg),
+                )
+        except TelegramBadRequest as error:
+            if "message is not modified" not in error.message.casefold():
+                logger.warning("Rich event update rejected: %s (%s)", event_id, type(error).__name__)
+                return False
+        except TelegramAPIError as error:
+            logger.warning("Rich event update deferred: %s (%s)", event_id, type(error).__name__)
+            return False
+        await db.execute(
+            "UPDATE studio_events SET markup_dirty=0,content_dirty=0 WHERE event_id=?", (event_id,)
+        )
+        return True
     content_synced = await sync_content(bot, db, event_id)
     offer = await db.get_event_offer(event_id)
     markup = compose_post_markup(

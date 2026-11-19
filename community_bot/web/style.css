@@ -981,6 +981,9 @@ form label{font-size:14px;color:var(--poster-muted)}
 .event-about summary { min-height: 44px; display: flex; align-items: center; gap: 8px; }
 .event-about summary::before { content: "›"; color: var(--glass-link); }
 .event-about[open] summary::before { transform: rotate(90deg); }
+.event-participants ul { margin: 0 0 8px; padding-inline-start: 24px; }
+.event-participants li { overflow-wrap: anywhere; }
+.event-participants .text-btn { min-height: 44px; text-align: start; }
 .event-booking {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: 8px 12px; border-top: 1px solid var(--glass-line); padding-top: 10px; margin-top: 10px;

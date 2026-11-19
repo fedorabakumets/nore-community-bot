@@ -334,6 +334,8 @@ async def sync_content(bot, db, eid):
     from community_bot.events_api import config, config_key, render_post
 
     cfg = await config(db, eid)
+    if cfg.get("rich_post"):
+        return True  # Rich content and its registration button are edited together by refresh_event_markup.
     if cfg:
         text = cancelled + render_post(event, cfg, int(offer['price']) if offer else 0)
     try:

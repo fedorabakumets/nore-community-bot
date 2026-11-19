@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import FSInputFile
 
 from community_bot import events_api
+from community_bot.access import private_allowed
+from community_bot.ephemeral import keep_in_chat
+from community_bot.posting import compose_post_markup
 from community_bot.release_backup import verify_requested_release_backup
+from community_bot.rsvp import event_lock
 
 logger = logging.getLogger(__name__)
 EVENT_ID = "december-cabin-2026"
@@ -111,6 +116,90 @@ async def publish_meetup(db, settings, bot):
     logger.info("December meetup published and pinned: chat=%s message=%s", event["chat_id"], event["message_id"])
 
 
+async def upgrade_meetup(db, settings, bot):
+    async with event_lock(db, EVENT_ID):
+        event = await db.get_studio_event(EVENT_ID)
+        cfg = await events_api.config(db, EVENT_ID)
+        if not event or event["status"] != "active" or event["chat_id"] != settings.community_chat_id:
+            return
+        key = events_api.config_key(EVENT_ID)
+        organizer_id = cfg.get("organizer_id")
+        if not organizer_id or not cfg.get("registration_only") or not cfg.get("post_buttons"):
+            raise RuntimeError("December meetup registration configuration is incomplete")
+        grant = events_api.editor_grant_key(organizer_id)
+        if not cfg.get("editor_granted"):
+            if await db.get_bot_state(grant) != "1":
+                await verify_requested_release_backup(db, request=EVENT_ID + "-rich")
+                await db.set_bot_state(grant, "1")
+            cfg["editor_granted"] = True
+            await db.set_bot_state(key, json.dumps(cfg, ensure_ascii=False))
+            logger.info("December meetup organizer event editor access granted; mini app access=%s",
+                        await private_allowed(db, settings, organizer_id))
+
+        if cfg.get("rich_post") and not cfg.get("previous_message_id"):
+            return
+        if not cfg.get("rich_post"):
+            payload = await events_api.rich_registration_payload(db, event, cfg)
+            with keep_in_chat():
+                await apply_rich_post(db, bot, event, cfg, payload)
+
+        previous_id = cfg.get("previous_message_id")
+        if previous_id:
+            await bot.pin_chat_message(event["chat_id"], event["message_id"], disable_notification=True)
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=event["chat_id"], message_id=previous_id,
+                    reply_markup=compose_post_markup(cfg["post_buttons"]),
+                )
+            except TelegramBadRequest as error:
+                if not any(reason in error.message.casefold() for reason in ("not modified", "not found")):
+                    raise
+            try:
+                await bot.unpin_chat_message(event["chat_id"], previous_id)
+            except TelegramBadRequest as error:
+                if not any(reason in error.message.casefold() for reason in ("not found", "not pinned")):
+                    raise
+            cfg.pop("previous_message_id")
+            await db.set_bot_state(key, json.dumps(cfg, ensure_ascii=False))
+        logger.info("December meetup Rich Message pinned: chat=%s message=%s", event["chat_id"], event["message_id"])
+
+
+async def apply_rich_post(db, bot, event, cfg, payload):
+    key = events_api.config_key(EVENT_ID)
+    chat_id, old_id = event["chat_id"], event["message_id"]
+    if cfg.get("rich_replacement_sending"):
+        raise RuntimeError("December meetup Rich Message delivery is unconfirmed")
+    try:
+        await bot.edit_message_text(chat_id=chat_id, message_id=old_id, parse_mode=None, **payload)
+    except TelegramBadRequest as error:
+        message = error.message.casefold()
+        if not any(reason in message for reason in (
+            "no text", "not a text message", "can't be edited", "message type", "message content type",
+            "message_id_invalid", "not modified",
+        )):
+            raise
+        if "not modified" not in message:
+            cfg["rich_replacement_sending"] = True
+            await db.set_bot_state(key, json.dumps(cfg, ensure_ascii=False))
+            try:
+                sent = await bot.send_rich_message(chat_id, **payload)
+            except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter):
+                cfg.pop("rich_replacement_sending")
+                await db.set_bot_state(key, json.dumps(cfg, ensure_ascii=False))
+                raise
+            cfg.pop("rich_replacement_sending")
+            cfg["previous_message_id"] = old_id
+            event["message_id"] = sent.message_id
+    cfg["rich_post"] = True
+    async with db.connect() as conn:
+        await conn.execute(
+            "UPDATE studio_events SET message_id=?,content_dirty=0,markup_dirty=0 WHERE event_id=?",
+            (event["message_id"], EVENT_ID),
+        )
+        await conn.execute("UPDATE bot_state SET value=? WHERE key=?", (json.dumps(cfg, ensure_ascii=False), key))
+        await conn.commit()
+
+
 async def run(db, settings, bot):
     if (
         os.getenv("RAILWAY_SERVICE_ID") != PRODUCTION_SERVICE
@@ -120,7 +209,10 @@ async def run(db, settings, bot):
         return
     try:
         await publish_meetup(db, settings, bot)
+        await upgrade_meetup(db, settings, bot)
     except (ValueError, RuntimeError) as error:
         logger.error("December meetup publication stopped: %s", error)
+    except TelegramBadRequest as error:
+        logger.error("December meetup Telegram update rejected: %s", error.message)
     except Exception as error:
         logger.error("December meetup publication interrupted (%s)", type(error).__name__)
