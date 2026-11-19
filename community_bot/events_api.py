@@ -8,6 +8,7 @@ import json
 import re
 import secrets
 from datetime import UTC, datetime
+from itertools import groupby
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -18,7 +19,7 @@ from aiohttp import web
 from community_bot.ephemeral import keep_in_chat
 from community_bot.helpers import has_permission, rank_of_user
 from community_bot.permissions import PERM_ADMIN_PANEL, PERM_MENTION, PERM_POST
-from community_bot.rsvp import event_lock, refresh_event_markup
+from community_bot.rsvp import event_lock, event_url, refresh_event_markup
 
 
 def config_key(eid):
@@ -51,6 +52,36 @@ async def authorize(request):
         raise web.HTTPForbidden(reason="Конструктор доступен администраторам с правом публикации")
 
 
+def description_blocks(description):
+    def classify(line):
+        if line.startswith("> "):
+            return "quote", line[2:]
+        if len(line) > 4 and line.startswith("**") and line.endswith("**"):
+            return "bold", line[2:-2]
+        return "text", line
+
+    lines = [classify(line) for line in description.split("\n")]
+    if all(kind == "text" for kind, _ in lines):
+        return []
+    return [
+        {"kind": kind, "text": "\n".join(line for _, line in group)}
+        for kind, group in groupby(lines, key=lambda line: line[0])
+    ]
+
+
+def render_description(description):
+    blocks = description_blocks(description)
+    if not blocks:
+        return "<blockquote expandable>" + html.escape(description) + "</blockquote>"
+    tags = {"bold": "b", "quote": "blockquote"}
+    parts = []
+    for block in blocks:
+        value = html.escape(block["text"])
+        tag = tags.get(block["kind"])
+        parts.append(f"<{tag}>{value}</{tag}>" if tag else value)
+    return "\n".join(parts)
+
+
 def render_post(event, cfg, price):
     text = f"🎟 <b>{html.escape(event['title'])}</b>"
     if event.get("starts_at"):
@@ -62,11 +93,14 @@ def render_post(event, cfg, price):
         text += f"\n📅 {label} МСК"
     if cfg.get("location"):
         text += "\n📍 " + html.escape(cfg["location"])
-    text += "\n" + (f"🍪 Участие: {price} печенек" if price else "🎫 Бесплатное участие")
+    if cfg.get("registration_only"):
+        text += "\n🎫 Запись без оплаты в Норе"
+    else:
+        text += "\n" + (f"🍪 Участие: {price} печенек" if price else "🎫 Бесплатное участие")
     if cfg.get("capacity"):
         text += f" · Мест: {cfg['capacity']}"
     if event.get("description"):
-        text += "\n\n<blockquote expandable>" + html.escape(event["description"]) + "</blockquote>"
+        text += "\n\n" + render_description(event["description"])
     if cfg.get("links"):
         text += "\n\n<b>Доп. информация</b>\n" + "\n".join(
             f'↗ <a href="{html.escape(link["url"], quote=True)}">{html.escape(link["label"])}</a>'
@@ -148,11 +182,19 @@ async def public_events(db, uid):
     result = []
     for e in rows:
         cfg, offer = await config(db, e["event_id"]), await db.get_event_offer(e["event_id"])
+        organizer = await db.get_user(cfg["organizer_id"]) if cfg.get("organizer_id") else None
         result.append(
             {
                 "id": e["event_id"],
                 "title": e["title"],
                 "description": e["description"],
+                "description_blocks": description_blocks(e["description"]),
+                "registration_only": bool(cfg.get("registration_only")),
+                "organizer": {
+                    "id": organizer["user_id"],
+                    "name": organizer["profile_name"] or organizer["telegram_name"] or organizer["username"],
+                    "role": "Ивент-менеджер",
+                } if organizer else None,
                 "starts_at": e["starts_at"],
                 "price": int(offer["price"]) if offer else 0,
                 "location": cfg.get("location", ""),
@@ -182,6 +224,8 @@ async def editor(request):
         items.append(
             {
                 **{k: e[k] for k in ("title", "description", "starts_at", "status", "revision")},
+                "description_blocks": description_blocks(e["description"]),
+                "registration_only": bool(c.get("registration_only")),
                 "id": e["event_id"],
                 "price": int(offer["price"]) if offer else 0,
                 **{
@@ -213,7 +257,7 @@ async def editor(request):
     )
 
 
-async def save(request):
+async def save(request, *, organizer_id=None, registration_only=False):
     await authorize(request)
     body = await request.json()
     values = validate(body)
@@ -225,6 +269,12 @@ async def save(request):
     db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
     async with event_lock(db, eid):
         old, cfg = await db.get_studio_event(eid), await config(db, eid)
+        if organizer_id is not None:
+            cfg["organizer_id"] = organizer_id
+        if registration_only:
+            cfg["registration_only"] = True
+        if cfg.get("registration_only") and values["price"]:
+            raise ValueError("Для записи без оплаты цена должна быть нулевой")
         if old and (old["revision"] != body.get("revision") or old["status"] not in {"active", "disabled"}):
             return web.json_response({"error": "Мероприятие изменилось. Открой редактор заново"}, status=409)
         count = await db.event_participant_count(eid) if old else 0
@@ -252,9 +302,7 @@ async def save(request):
             raise ValueError("Для опубликованного поста сохраняется тип медиа. Создай новый пост для другого типа")
         cfg.update({k: values[k] for k in ("location", "capacity", "links", "poll")})
         text = render_post(values, cfg, values["price"])
-        plain = html.unescape(re.sub("<[^>]+>", "", text))
-        if len(plain.encode("utf-16-le")) // 2 > (1024 if cfg.get("media_type") else 4096):
-            raise ValueError("Пост слишком длинный: с медиа доступно 1024 символа, без медиа — 4096")
+        check_post_length(text, bool(cfg.get("media_type")))
         async with db.connect() as conn:
             await conn.execute("BEGIN IMMEDIATE")
             # Capacity/price rechecked under SQLite lock against native bot registrations too.
@@ -277,13 +325,14 @@ async def save(request):
             await conn.execute(
                 "UPDATE studio_events SET title=?,description=?,starts_at=?,"
                 "rsvp_enabled=?,media_type=?,revision=revision+1,"
-                "content_dirty=1,markup_dirty=1,buttons_json='[]' WHERE event_id=?",
+                "content_dirty=1,markup_dirty=1,buttons_json=? WHERE event_id=?",
                 (
                     values["title"],
                     values["description"],
                     values["starts_at"],
                     int(values["price"] == 0),
                     cfg.get("media_type", ""),
+                    json.dumps(cfg.get("post_buttons", [])),
                     eid,
                 ),
             )
@@ -318,6 +367,12 @@ async def save(request):
     await db.log_admin_action(uid, "event_edit" if old else "event_create", eid,
                               f"price={values['price']}; capacity={values['capacity']}")
     return web.json_response({"ok": True, "id": eid, "message": "Настройки сохранены"})
+
+
+def check_post_length(text, has_media):
+    plain = html.unescape(re.sub("<[^>]+>", "", text))
+    if len(plain.encode("utf-16-le")) // 2 > (1024 if has_media else 4096):
+        raise ValueError("Пост слишком длинный: с медиа доступно 1024 символа, без медиа — 4096")
 
 
 async def cover(request):
@@ -372,7 +427,7 @@ async def upload(request):
     return web.json_response({"token": token, "type": media["media_type"]})
 
 
-async def publish(request):
+async def publish(request, *, photo=None, send_sticker=True):
     await authorize(request)
     body = await request.json()
     db, bot, settings, uid = request.app["db"], request.app["bot"], request.app["settings"], request["actor"]["id"]
@@ -412,8 +467,16 @@ async def publish(request):
             return result
 
         if event["message_id"] < 0:
+            if cfg.get("registration_only") and not cfg.get("post_buttons"):
+                username = (await bot.me()).username
+                if not username:
+                    raise ValueError("Для кнопки Норы нужно имя бота в Telegram")
+                cfg["post_buttons"] = [{"text": "Нора", "url": event_url(username, eid)}]
+            text = render_post(event, cfg, price)
+            media_type = "photo" if photo else cfg.get("media_type", "")
+            check_post_length(text, bool(media_type))
             markup = compose_post_markup(
-                [], None if price else eid, pay=(f"Билет · {price} 🍪", eid) if price else None
+                cfg.get("post_buttons"), None if price else eid, pay=(f"Билет · {price} 🍪", eid) if price else None
             )
             with keep_in_chat():
                 # Persist Telegram's message ID before marking the send complete.
@@ -421,16 +484,28 @@ async def publish(request):
                     sent = await send_studio_post(
                         bot,
                         settings.community_chat_id,
-                        render_post(event, cfg, price),
-                        cfg.get("media_type"),
-                        cfg.get("media_id"),
+                        text,
+                        media_type,
+                        photo or cfg.get("media_id"),
                         markup,
                     )
-                    await db.execute(
-                        "UPDATE studio_events SET message_id=?,status='active',content_dirty=0 WHERE event_id=?",
-                        (sent.message_id, eid),
-                    )
-                    await db.execute("UPDATE event_offers SET message_id=? WHERE event_id=?", (sent.message_id, eid))
+                    if photo:
+                        file_id = sent.photo[-1].file_id
+                        cfg.update(media_id=file_id, media_type="photo", cover_id=file_id)
+                    async with db.connect() as conn:
+                        await conn.execute(
+                            "UPDATE studio_events SET message_id=?,status='active',content_dirty=0,"
+                            "media_type=?,buttons_json=? WHERE event_id=?",
+                            (sent.message_id, media_type, json.dumps(cfg.get("post_buttons", [])), eid),
+                        )
+                        await conn.execute(
+                            "UPDATE event_offers SET message_id=? WHERE event_id=?", (sent.message_id, eid)
+                        )
+                        await conn.execute(
+                            "UPDATE bot_state SET value=? WHERE key=?",
+                            (json.dumps(cfg, ensure_ascii=False), config_key(eid)),
+                        )
+                        await conn.commit()
                     event.update(message_id=sent.message_id, status="active")
 
                 await once("post_sent", send)
@@ -466,11 +541,12 @@ async def publish(request):
                         ),
                     )
                 await asyncio.sleep(0.05)
-        from community_bot.stickers import send_context_sticker
+        if send_sticker:
+            from community_bot.stickers import send_context_sticker
 
-        await send_context_sticker(bot, db, settings.community_chat_id, "event", event["message_id"])
+            await send_context_sticker(bot, db, settings.community_chat_id, "event", event["message_id"])
     await db.log_admin_action(uid, "event_publish", eid, f"post={event['message_id']}")
-    return web.json_response({"ok": True, "message": "Пост опубликован и закреплён"})
+    return web.json_response({"ok": True, "message": "Пост опубликован и закреплён", "message_id": event["message_id"]})
 
 
 async def delete(request):

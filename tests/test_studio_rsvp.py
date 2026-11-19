@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -154,6 +155,21 @@ async def test_new_people_can_join_and_counter_preserves_other_buttons(app):
     assert buttons[-1].callback_data == "evpay:e-test"
     assert await app.db.get_user(2)
     assert await app.db.get_user(3)
+
+
+async def test_group_registration_sends_one_private_confirmation_with_event_link(app):
+    eid = "cabin"
+    markup = await event(app, eid)
+    url = "https://t.me/NoraBot?startapp=nora_event_cabin"
+    await app.db.set_bot_state(f"event_config:{eid}", json.dumps({
+        "registration_only": True, "post_buttons": [{"text": "Нора", "url": url}],
+    }))
+    await asyncio.gather(attend(app, eid, markup=markup), attend(app, eid, markup=markup))
+    assert await app.db.event_participant_count(eid) == 1
+    private = [call for call in app.session.calls if isinstance(call, SendMessage) and call.chat_id == 2]
+    assert len(private) == 1
+    assert "Зайди в Нору" in private[0].text
+    assert private[0].reply_markup.inline_keyboard[0][0].url == url
 
 
 async def test_duplicate_attendance_does_not_cancel_and_explicit_cancellation_is_idempotent(app):

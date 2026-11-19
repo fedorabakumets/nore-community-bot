@@ -971,6 +971,12 @@ form label{font-size:14px;color:var(--poster-muted)}
 #app .event-content h2 { font-size: clamp(20px, 5.8vw, 28px); margin: 0 0 6px; overflow-wrap: anywhere; }
 .event-content :is(.event-location, .event-description) { margin: 4px 0 8px; }
 .event-content .event-description { line-height: 1.55; }
+.event-content .event-quote {
+  border-inline-start: 2px solid var(--poster-red); background: var(--poster-raised);
+  padding: 10px 12px; margin-block: 8px 12px;
+}
+.event-description strong { color: var(--poster-ink); }
+.event-organizer { min-height: 44px; margin-top: 12px; color: var(--poster-ink); }
 .event-content .event-about { margin: 6px 0; padding: 0; background: transparent; border: 0; }
 .event-about summary { min-height: 44px; display: flex; align-items: center; gap: 8px; }
 .event-about summary::before { content: "›"; color: var(--glass-link); }

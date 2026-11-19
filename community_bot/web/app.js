@@ -223,9 +223,9 @@ navReducedMotion.addEventListener('change',()=>positionNavDrop());
 
 function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
 async function product(sku){await window.NoraShop?.product(sku)}
-async function perform(path,payload){
+async function perform(path,payload,b=$('#pay')){
   if(busy)return;
-  busy=true;const b=$('#pay');if(b)b.disabled=true;
+  busy=true;if(b)b.disabled=true;
   try{
     const r=await api(path,payload);
     $('#sheet').close();toast(r.message||'Готово');tg?.HapticFeedback?.notificationOccurred('success');
@@ -233,7 +233,19 @@ async function perform(path,payload){
   }catch(e){toast(e.message);if(b)b.disabled=false}
   finally{busy=false}
 }
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.durakInvite)durakInboxRoom=b.dataset.durakInvite;if(b.dataset.tab){const from=tab;tab=b.dataset.tab;window.NoraShop?.tabChanged(tab,from);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event){const event=data.events.find(x=>x.id===b.dataset.event);if(demo){toast('Это демонстрация. Запись доступна при входе через Telegram');return}sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);$('#pay').onclick=()=>perform('events/join',{event_id:event.id,price:event.price})}if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
+function bookEvent(button) {
+  const event = data.events.find(item => item.id === button.dataset.event);
+  if (!event) return;
+  if (demo) { toast('Это демонстрация. Запись доступна при входе через Telegram'); return; }
+  const payload = {event_id: event.id, price: event.price};
+  if (event.registration_only) {
+    void perform('events/join', payload, button);
+    return;
+  }
+  sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);
+  $('#pay').onclick = () => perform('events/join', payload);
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.durakInvite)durakInboxRoom=b.dataset.durakInvite;if(b.dataset.tab){const from=tab;tab=b.dataset.tab;window.NoraShop?.tabChanged(tab,from);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event)bookEvent(b);if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
 $('#sheet').addEventListener('close',()=>{
   const dialog=$('#sheet');
   if(dialog.open)return;
@@ -250,6 +262,8 @@ function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
   if (/^nora_(?:d_[A-Za-z0-9_-]{22}|i_[a-f0-9]{16})$/.test(param)) return {view: 'durak'};
+  const event = /^nora_event_([A-Za-z0-9_-]{1,64})$/.exec(param);
+  if (event) return {view: 'events', eventId: event[1]};
   const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community)$/.exec(param);
   if (screen?.[1] === 'cookies') return {view: 'shop', category: '__cookies'};
   if (screen) return {view: screen[1]};
@@ -351,10 +365,17 @@ async function openApp(result) {
   } else if (linked && !blockedLink) {
     window.NoraShop?.tabChanged(tab);
   }
+  if (linked?.eventId && !blockedLink) {
+    window.NoraIntro?.finish(true);
+    window.NoraEvents?.focusEvent(linked.eventId);
+  }
   render();
   loadAvatar();
   if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
   else if (topupClosed) toast('Пополнение временно недоступно');
+  else if (linked?.eventId && !data.events?.some(event => event.id === linked.eventId)) {
+    toast('Мероприятие больше недоступно');
+  }
   if (tab === 'shop' && linked?.sku) {
     if (data.products.some(product => product.sku === linked.sku)) void product(linked.sku);
     else toast('Товар больше недоступен');

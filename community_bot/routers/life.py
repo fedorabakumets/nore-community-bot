@@ -419,8 +419,12 @@ async def _record_attendance(callback: CallbackQuery, db: Database, event: dict)
         await refresh_event_markup(callback.bot, db, event_id)
     if ok:
         from community_bot.notify import emit
+        from community_bot.rsvp import send_attendance_confirmation
 
-        await emit(callback.bot, db, callback.from_user.id, "events", f"🎟 Вы записаны: {html.escape(event['title'])}.")
+        sent = await send_attendance_confirmation(callback.bot, db, callback.from_user.id, event)
+        if sent is None:
+            await emit(callback.bot, db, callback.from_user.id, "events",
+                       f"🎟 Вы записаны: {html.escape(event['title'])}.")
 
 
 @router.callback_query(F.data.startswith("rsvpj:") | F.data.startswith("rsvpc:"))

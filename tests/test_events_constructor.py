@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.methods import SendMessage
 from aiohttp import web
 
+from community_bot import december_cabin, miniapp
 from community_bot.database import Database
 from community_bot.events_api import config, delete, editor, public_events, publish, save, validate
 from community_bot.shop_api import purchase, quote
@@ -49,6 +52,46 @@ async def create(env, body=None):
     await save(Request(env, b))
     item = json.loads((await editor(Request(env))).body)['items'][0]
     return item
+
+
+async def test_december_event_publish_and_rsvp(env, monkeypatch):
+    env.settings.owner_id = 1
+    await env.db.ensure_user(2, "Alice230305", "Алиса")
+    env.bot.me = AsyncMock(return_value=SimpleNamespace(id=1234, username="NoraBot"))
+    env.bot.get_chat_member = AsyncMock(return_value=SimpleNamespace(status="administrator", can_pin_messages=True))
+    env.bot.send_photo.return_value = SimpleNamespace(message_id=123, photo=[SimpleNamespace(file_id="cover")])
+    backup = AsyncMock(return_value=True)
+    monkeypatch.setattr(december_cabin, "verify_requested_release_backup", backup)
+    await december_cabin.publish_meetup(env.db, env.settings, env.bot)
+    await december_cabin.publish_meetup(env.db, env.settings, env.bot)
+    backup.assert_awaited_once()
+    env.bot.send_photo.assert_awaited_once()
+    env.bot.pin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, 123, disable_notification=False)
+    eid = december_cabin.EVENT_ID
+    url = f"https://t.me/NoraBot?startapp=nora_event_{eid}"
+    published = env.bot.send_photo.await_args.kwargs
+    assert "<b>Что Нас там ждёт?</b>\n<blockquote>• Треск" in published["caption"]
+    assert "шашлыки.</blockquote>\nПоиграем" in published["caption"]
+    keyboard = published["reply_markup"].inline_keyboard
+    assert keyboard[0][0].url == url and keyboard[1][0].callback_data == f"rsvp:{eid}"
+    event = (await public_events(env.db, 3))[0]
+    assert event["organizer"]["id"] == 2 and event["has_media"] and event["registration_only"]
+    assert [block["kind"] for block in event["description_blocks"]] == ["text", "bold", "quote", "text"]
+
+    body = {"event_id": eid, "price": 0}
+    monkeypatch.setattr(miniapp, "actor", AsyncMock(return_value={"user_id": 3}))
+    assert (await miniapp.join_event(Request(env, body))).status == 200
+    assert (await miniapp.join_event(Request(env, body))).status == 409
+    env.bot.send_message.assert_awaited_once()
+    assert env.bot.send_message.await_args.args[0] == 3
+    assert env.bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url == url
+    assert env.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url == url
+
+    monkeypatch.setattr(miniapp, "actor", AsyncMock(return_value={"user_id": 2}))
+    env.bot.send_message.side_effect = TelegramForbiddenError(method=SendMessage(chat_id=2, text=""), message="blocked")
+    response = await miniapp.join_event(Request(env, body))
+    assert response.status == 200 and "Подробности здесь" in json.loads(response.body)["message"]
+    assert await env.db.event_participant_count(eid) == 2
 
 
 async def test_authorization_draft_validation_and_preview(env):

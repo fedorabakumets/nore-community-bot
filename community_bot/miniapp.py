@@ -308,7 +308,7 @@ async def confirm(request):
 
 
 async def join_event(request):
-    from community_bot.rsvp import event_lock, refresh_event_markup
+    from community_bot.rsvp import event_lock, refresh_event_markup, send_attendance_confirmation
 
     user = await actor(request)
     db, bot = request.app['db'], request.app['bot']
@@ -330,8 +330,13 @@ async def join_event(request):
             ok, message = await db.add_rsvp(eid, user['user_id'], 0, kind='rsvp')
         if ok and event['rsvp_enabled']:
             await refresh_event_markup(bot, db, eid)
-    return web.json_response({'ok': ok, 'message': 'Вы в списке участников!' if ok else message},
-                             status=200 if ok else 409)
+    if ok:
+        message = 'Вы в списке участников!'
+        if not price:
+            sent = await send_attendance_confirmation(bot, db, user['user_id'], event)
+            if sent is False:
+                message += ' Подробности здесь, в карточке события.'
+    return web.json_response({'ok': ok, 'message': message}, status=200 if ok else 409)
 
 
 def normalized_photo(raw: bytes) -> bytes:

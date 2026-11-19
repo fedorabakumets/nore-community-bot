@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 from weakref import WeakValueDictionary
@@ -24,6 +25,31 @@ def event_lock(db: Database, event_id: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _LOCKS[key] = lock
     return lock
+
+
+def event_url(username: str, event_id: str) -> str:
+    return f"https://t.me/{username}?startapp=nora_event_{event_id}"
+
+
+async def send_attendance_confirmation(bot, db: Database, user_id: int, event: dict) -> bool | None:
+    from community_bot.events_api import config
+
+    cfg = await config(db, event["event_id"])
+    if not cfg.get("registration_only"):
+        return None
+    try:
+        await bot.send_message(
+            user_id,
+            f"🎟 Ты в списке на «<b>{html.escape(event['title'])}</b>»!\n\n"
+            "Зайди в Нору — в карточке события есть подробности и профиль организатора.",
+            parse_mode="HTML",
+            reply_markup=compose_post_markup(cfg["post_buttons"]),
+            request_timeout=6,
+        )
+    except TelegramAPIError as error:
+        logger.info("Event confirmation delivery failed for %s (%s)", event["event_id"], type(error).__name__)
+        return False
+    return True
 
 
 async def published_event(callback: CallbackQuery, db: Database, community_chat_id: int):
