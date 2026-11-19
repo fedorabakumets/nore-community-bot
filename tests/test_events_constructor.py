@@ -54,11 +54,19 @@ async def create(env, body=None):
     return item
 
 
-async def test_december_event_publish_and_rsvp(env, monkeypatch):
+@pytest.mark.parametrize("stored_username", ["Alice230305", None])
+async def test_december_event_publish_and_rsvp(env, monkeypatch, stored_username):
     env.settings.owner_id = 1
-    await env.db.ensure_user(2, "Alice230305", "Алиса")
+    await env.db.ensure_user(2, stored_username, "Алиса")
+    await env.db.ensure_user(3, "another_alice", "Алиса")
     env.bot.me = AsyncMock(return_value=SimpleNamespace(id=1234, username="NoraBot"))
-    env.bot.get_chat_member = AsyncMock(return_value=SimpleNamespace(status="administrator", can_pin_messages=True))
+    env.bot.get_chat_administrators = AsyncMock(return_value=[])
+    members = {
+        1234: SimpleNamespace(status="administrator", can_pin_messages=True),
+        2: SimpleNamespace(user=SimpleNamespace(id=2, username="Alice230305", is_bot=False)),
+        3: SimpleNamespace(user=SimpleNamespace(id=3, username="another_alice", is_bot=False)),
+    }
+    env.bot.get_chat_member = AsyncMock(side_effect=lambda chat, uid: members[uid])
     env.bot.send_photo.return_value = SimpleNamespace(message_id=123, photo=[SimpleNamespace(file_id="cover")])
     backup = AsyncMock(return_value=True)
     monkeypatch.setattr(december_cabin, "verify_requested_release_backup", backup)

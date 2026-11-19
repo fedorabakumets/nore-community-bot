@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 
 from community_bot import events_api
@@ -43,6 +44,30 @@ class EventRequest(dict):
         return self.body
 
 
+def is_organizer(user) -> bool:
+    return not user.is_bot and (user.username or "").casefold() == ORGANIZER_USERNAME
+
+
+async def organizer_profile(db, settings, bot):
+    rows = await db.fetchall(
+        "SELECT user_id FROM users WHERE user_id>0 AND "
+        "(role!='member' OR LOWER(username) LIKE '%alice%' OR profile_name LIKE '%лиса%' "
+        "OR telegram_name LIKE '%лиса%' OR LOWER(profile_name) LIKE '%alice%' "
+        "OR LOWER(telegram_name) LIKE '%alice%') ORDER BY updated_at DESC"
+    )
+    for member in await bot.get_chat_administrators(settings.community_chat_id):
+        if is_organizer(member.user) and await db.get_user(member.user.id):
+            return member.user.id
+    for row in rows:
+        try:
+            member = await bot.get_chat_member(settings.community_chat_id, row["user_id"])
+        except TelegramBadRequest:
+            continue
+        if is_organizer(member.user):
+            return member.user.id
+    raise RuntimeError("December meetup organizer username could not be verified against a NORA profile")
+
+
 async def publish_meetup(db, settings, bot):
     event = await db.get_studio_event(EVENT_ID)
     cfg = await events_api.config(db, EVENT_ID)
@@ -58,8 +83,9 @@ async def publish_meetup(db, settings, bot):
         organizers = await db.fetchall(
             "SELECT user_id FROM users WHERE LOWER(username)=? AND user_id>0 LIMIT 2", (ORGANIZER_USERNAME,)
         )
-        if len(organizers) != 1:
-            raise RuntimeError("December meetup organizer username did not resolve to one NORA profile")
+        organizer_id = (
+            organizers[0]["user_id"] if len(organizers) == 1 else await organizer_profile(db, settings, bot)
+        )
         if not COVER.is_file():
             raise RuntimeError("December meetup cover is missing")
         await verify_requested_release_backup(db, request=EVENT_ID)
@@ -70,7 +96,7 @@ async def publish_meetup(db, settings, bot):
                 "starts_at": "2026-12-02T14:00:00+03:00",
                 "description": DESCRIPTION,
             }),
-            organizer_id=organizers[0]["user_id"],
+            organizer_id=organizer_id,
             registration_only=True,
         )
         event = await db.get_studio_event(EVENT_ID)
