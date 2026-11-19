@@ -1874,7 +1874,7 @@ body:has(#home-story-viewer[open]) { overflow: hidden; }
 .home-story-toolbar progress::-webkit-progress-bar { background: #ffffff4d; }
 .home-story-toolbar progress::-webkit-progress-value { background: #fff; }
 .home-story-toolbar progress::-moz-progress-bar { background: #fff; }
-.home-story-toolbar button, .home-story-play {
+.home-story-toolbar button {
   display: grid;
   place-items: center;
   width: 44px;
@@ -1884,15 +1884,14 @@ body:has(#home-story-viewer[open]) { overflow: hidden; }
   background: #18141bd9;
   color: #fff;
 }
-.home-story-toolbar svg, .home-story-play svg { width: 24px; height: 24px; }
+.home-story-toolbar svg { width: 24px; height: 24px; }
 .home-story-sound[aria-pressed="false"] .story-sound-muted,
 .home-story-sound[aria-pressed="true"] .story-sound-waves { display: none; }
-.home-story-play, .home-story-error {
+.home-story-error {
   position: absolute;
   top: 50%;
   left: 50%;
   translate: -50% -50%;
 }
-.home-story-play { width: 60px; height: 60px; }
 .home-story-error { width: min(260px, 80%); text-align: center; color: #fff; }
-.home-story-play[hidden], .home-story-error[hidden] { display: none; }
+.home-story-error[hidden] { display: none; }

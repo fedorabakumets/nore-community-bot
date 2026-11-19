@@ -25,17 +25,34 @@ window.NoraHome=(()=>{
   const storyDialog = document.querySelector('#home-story-viewer');
   const storyVideo = storyDialog.querySelector('video');
   const storyProgress = storyDialog.querySelector('progress');
-  const storyPlay = storyDialog.querySelector('.home-story-play');
   const storySound = storyDialog.querySelector('.home-story-sound');
   const storyError = storyDialog.querySelector('.home-story-error');
+  const storySource = '/intro/nora-update-20261120.mp4';
   let storyOpener;
+  let playbackAttempt = 0;
+
+  function preloadStory() {
+    if (!storyVideo.hasAttribute('src')) storyVideo.src = storySource;
+  }
 
   function closeStory() {
     if (storyDialog.open) storyDialog.close();
   }
 
-  function startStoryPlayback() {
-    storyVideo.play().catch(() => {});
+  async function startStoryPlayback() {
+    const attempt = ++playbackAttempt;
+    storyError.hidden = true;
+    try {
+      await storyVideo.play();
+    } catch (error) {
+      if (!storyDialog.open || attempt !== playbackAttempt || error.name === 'AbortError') return;
+      if (error.name === 'NotAllowedError' && !storyVideo.muted) {
+        storyVideo.muted = true;
+        await startStoryPlayback();
+        return;
+      }
+      storyError.hidden = false;
+    }
   }
 
   function openStory(trigger) {
@@ -43,15 +60,15 @@ window.NoraHome=(()=>{
     storyOpener = trigger;
     storyError.hidden = true;
     storyProgress.value = 0;
+    preloadStory();
+    if (storyVideo.error) storyVideo.load();
+    if (storyVideo.currentTime > 0) storyVideo.currentTime = 0;
     storyVideo.muted = false;
-    storyPlay.hidden = false;
     storyDialog.showModal();
-    storyVideo.src = '/intro/nora-update-20261120.mp4';
     startStoryPlayback();
   }
 
   storyDialog.querySelector('.home-story-close').addEventListener('click', closeStory);
-  storyPlay.addEventListener('click', startStoryPlayback);
   storySound.addEventListener('click', () => { storyVideo.muted = !storyVideo.muted; });
   storyVideo.addEventListener('volumechange', () => {
     storySound.setAttribute('aria-pressed', String(storyVideo.muted));
@@ -66,8 +83,6 @@ window.NoraHome=(()=>{
     event.preventDefault();
     toggleStoryPlayback();
   });
-  storyVideo.addEventListener('playing', () => { storyPlay.hidden = true; });
-  storyVideo.addEventListener('pause', () => { storyPlay.hidden = false; });
   storyVideo.addEventListener('timeupdate', () => {
     storyProgress.value = storyVideo.duration > 0 && Number.isFinite(storyVideo.duration)
       ? storyVideo.currentTime / storyVideo.duration
@@ -77,13 +92,12 @@ window.NoraHome=(()=>{
   storyVideo.addEventListener('error', () => {
     if (!storyDialog.open) return;
     storyError.hidden = false;
-    storyPlay.hidden = true;
   });
   storyDialog.addEventListener('close', () => {
     if (storyDialog.open) return;
+    playbackAttempt++;
     storyVideo.pause();
-    storyVideo.removeAttribute('src');
-    storyVideo.load();
+    if (storyVideo.currentTime > 0) storyVideo.currentTime = 0;
     (storyOpener?.isConnected ? storyOpener : document.querySelector('[data-home-story]'))?.focus();
   });
   document.addEventListener('visibilitychange', () => {
@@ -95,6 +109,7 @@ window.NoraHome=(()=>{
   });
 
   function render(app, html) {
+    preloadStory();
     const logo = app.querySelector('.home-wordmark');
     if (!logo) {
       app.innerHTML = html;
