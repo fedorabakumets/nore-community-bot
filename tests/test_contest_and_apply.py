@@ -194,6 +194,47 @@ async def test_new_member_gets_one_rich_welcome(tmp_path: Path, username: str | 
     assert photo.photo.media.path.is_file()
 
 
+async def test_rich_welcome_includes_video_when_available(tmp_path: Path, monkeypatch) -> None:
+    from aiogram.types import InputRichBlockVideo
+
+    from community_bot import welcome
+
+    video = tmp_path / "new-member.mp4"
+    video.write_bytes(b"fake test video")
+    monkeypatch.setattr(welcome, "WELCOME_VIDEO", video)
+    bot = AsyncMock()
+    bot.me.return_value = User(id=9, first_name="Нора", is_bot=True, username="nora_bot")
+    await welcome.send_member_welcome(bot, -100123, User(id=7, first_name="Новичок", is_bot=False))
+
+    blocks = bot.send_rich_message.call_args.kwargs["rich_message"].blocks
+    assert isinstance(blocks[-1], InputRichBlockVideo)
+    assert blocks[-1].video.media.path == video
+    assert blocks[-1].video.supports_streaming is True
+
+
+async def test_rich_welcome_video_rejection_falls_back_to_photo(tmp_path: Path, monkeypatch) -> None:
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SendRichMessage
+    from aiogram.types import InputRichBlockPhoto, InputRichMessage
+
+    from community_bot import welcome
+
+    video = tmp_path / "new-member.mp4"
+    video.write_bytes(b"fake test video")
+    monkeypatch.setattr(welcome, "WELCOME_VIDEO", video)
+    bot = AsyncMock()
+    bot.me.return_value = User(id=9, first_name="Нора", is_bot=True, username="nora_bot")
+    method = SendRichMessage(chat_id=-100123, rich_message=InputRichMessage(blocks=[]))
+    bot.send_rich_message.side_effect = [TelegramBadRequest(method=method, message="video rejected"), None]
+
+    await welcome.send_member_welcome(bot, -100123, User(id=7, first_name="Новичок", is_bot=False))
+
+    assert bot.send_rich_message.await_count == 2
+    blocks = bot.send_rich_message.call_args.kwargs["rich_message"].blocks
+    assert isinstance(blocks[-1], InputRichBlockPhoto)
+    assert blocks[-1].photo.media.path.is_file()
+
+
 async def test_cookie_contest_join_count_and_draw(tmp_path: Path) -> None:
     db = Database(tmp_path / "contest.db")
     await db.initialize()
