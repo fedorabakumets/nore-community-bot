@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.methods import EditMessageText, SendMessage
+from aiogram.methods import EditMessageText, SendMessage, UnpinChatMessage
 from aiohttp import web
 
 from community_bot import december_cabin, miniapp
@@ -120,6 +120,7 @@ async def test_rich_event_keeps_nora_and_attendance_and_grants_scoped_editor(env
         env.bot.edit_message_text.side_effect = [TelegramBadRequest(
             method=EditMessageText(message_id=123), message="there is no text in the message to edit"
         )]
+        env.bot.unpin_chat_message.side_effect = lambda chat_id, **kwargs: UnpinChatMessage(chat_id=chat_id, **kwargs)
     await december_cabin.upgrade_meetup(env.db, env.settings, env.bot)
     await december_cabin.upgrade_meetup(env.db, env.settings, env.bot)
     new_id = 456 if replace_photo_post else 123
@@ -134,7 +135,7 @@ async def test_rich_event_keeps_nora_and_attendance_and_grants_scoped_editor(env
     if replace_photo_post:
         env.bot.pin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, new_id,
                                                         disable_notification=True)
-        env.bot.unpin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, 123)
+        env.bot.unpin_chat_message.assert_awaited_once_with(env.settings.community_chat_id, message_id=123)
         assert env.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url == url
 
     env.bot.edit_message_text.side_effect = None

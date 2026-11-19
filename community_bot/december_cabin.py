@@ -145,7 +145,11 @@ async def upgrade_meetup(db, settings, bot):
 
         previous_id = cfg.get("previous_message_id")
         if previous_id:
-            await bot.pin_chat_message(event["chat_id"], event["message_id"], disable_notification=True)
+            try:
+                await bot.pin_chat_message(event["chat_id"], event["message_id"], disable_notification=True)
+            except TelegramBadRequest as error:
+                if not any(reason in error.message.casefold() for reason in ("already pinned", "not modified")):
+                    raise
             try:
                 await bot.edit_message_reply_markup(
                     chat_id=event["chat_id"], message_id=previous_id,
@@ -155,7 +159,7 @@ async def upgrade_meetup(db, settings, bot):
                 if not any(reason in error.message.casefold() for reason in ("not modified", "not found")):
                     raise
             try:
-                await bot.unpin_chat_message(event["chat_id"], previous_id)
+                await bot.unpin_chat_message(event["chat_id"], message_id=previous_id)
             except TelegramBadRequest as error:
                 if not any(reason in error.message.casefold() for reason in ("not found", "not pinned")):
                     raise
