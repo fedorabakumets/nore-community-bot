@@ -39,6 +39,7 @@ try {
     }
     querySelectorAll(selector){return selector==='button'?[this.querySelector('button:first-child'),this.querySelector('button:last-child')]:[];}
     setAttribute() {} setPointerCapture() {} focus() {} blur() {} click(){this.emit('click');}
+    insertAdjacentHTML() {} replaceChildren() {} reset() {} remove() {}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
     getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
@@ -108,7 +109,7 @@ try {
   sharedGeometry.dispose();sharedMaterial.dispose();
   console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
-  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,warmup=30}={}) {
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,cinema=false,warmup=30}={}) {
     const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
     root.querySelector('.nora-aim-choices').hidden=true;
     document.createElement = () => new Element();
@@ -131,6 +132,10 @@ try {
     if(observatory){
       vm.runInContext(observatory.code,context);
       window.NoraObservatory.load=async()=>observatory.layout;
+    }
+    if(cinema){
+      vm.runInContext(await readFile(new URL('nora-cinema.js',web),'utf8'),context);
+      window.NoraCinema.load=async()=>cinemaLayout;
     }
     vm.runInContext(wings, context);
     vm.runInContext(voxel, context);
@@ -163,6 +168,75 @@ try {
     useNearby(world,'Выйти из таверны');
     world.frames(1);
   }
+  function tiltCamera({canvas}, from, to, pointerType='mouse'){
+    const pointer={pointerType,pointerId:7,clientX:120};
+    canvas.emit(pointerType==='touch'?'pointerdown':'pointerleave',{...pointer,clientY:from});
+    if(pointerType==='mouse')canvas.emit('pointermove',{...pointer,clientY:from});
+    canvas.emit('pointermove',{...pointer,clientY:to});
+    canvas.emit('pointerup',pointer);
+  }
+  function assertCameraAboveFloor(game, location){
+    const camera=game.camera();
+    assert.ok(camera.position.y>=.21,location+': camera stays above the floor');
+    camera.updateMatrixWorld();
+    for(const x of [-1,1])for(const y of [-1,1]){
+      assert.ok(new Three.Vector3(x,y,-1).unproject(camera).y>0,location+': near plane clears the floor');
+    }
+  }
+  function assertSkyView(game, location, pointerType='mouse'){
+    tiltCamera(game,510,20,pointerType);
+    for(let i=0;i<60;i++){
+      game.frames(1);
+      assertCameraAboveFloor(game,location);
+    }
+    for(let i=0;i<3;i++){
+      game.frames(1);
+      const camera=game.camera();
+      assert.ok(camera.getWorldDirection(new Three.Vector3()).y>.98,location+': can look almost straight up in every view');
+      assertCameraAboveFloor(game,location);
+      game.root.querySelector('.nora-world-view').click();
+    }
+  }
+  const cameraWorld=await setup(0,60,undefined,undefined,false,true,null,{cinema:true});
+  cameraWorld.player.position.set(2,.017,2);
+  cameraWorld.root.emit('nora-pov',{detail:180});
+  cameraWorld.frames(240);
+  const orbitRadius=()=>cameraWorld.camera().position.distanceTo(
+    new Three.Vector3(cameraWorld.player.position.x,1.1,cameraWorld.player.position.z));
+  const openRadius=orbitRadius();
+  assert.ok(openRadius>8,'max camera distance in the open lobby');
+  assertSkyView(cameraWorld,'Lobby');
+  cameraWorld.frames(1);
+  assert.ok(orbitRadius()<1,'the steep upward orbit retracts toward the avatar');
+  cameraWorld.key('Space');
+  cameraWorld.frames(12);
+  assert.ok(cameraWorld.player.position.y>.35,'jump lifts the player during a steep orbit');
+  for(let i=0;i<48;i++){
+    cameraWorld.frames(1);
+    assertCameraAboveFloor(cameraWorld,'Lobby jump and landing');
+  }
+  assert.ok(orbitRadius()<1,'camera retracts again on landing');
+  tiltCamera(cameraWorld,20,470);
+  for(let i=0;i<240;i++){
+    cameraWorld.frames(1);
+    assertCameraAboveFloor(cameraWorld,'Lobby');
+  }
+  assert.ok(Math.abs(orbitRadius()-openRadius)<.01,'the camera returns to the configured distance');
+
+  const cinemaPortal=cinemaLayout.portal;
+  cameraWorld.player.position.set(cinemaPortal.x,.017,cinemaPortal.z+1.25);
+  useNearby(cameraWorld,'Кинотеатр');cameraWorld.frames(1);
+  assert.ok(cameraWorld.camera().getWorldDirection(new Three.Vector3()).y>.1,'cinema is initially framed on its screen');
+  assertSkyView(cameraWorld,'Cinema');
+  cameraWorld.player.position.set(cinemaLayout.exit.x,.017,cinemaLayout.exit.z);
+  useNearby(cameraWorld,'В лобби');cameraWorld.frames(1);
+  goToIsland(cameraWorld);
+  assertSkyView(cameraWorld,'Forest');
+  cameraWorld.player.position.set(0,.017,cameraWorld.window.NoraScenery.tavernOffset+3.6);
+  useNearby(cameraWorld,'Войти в таверну');cameraWorld.frames(1);
+  assertSkyView(cameraWorld,'Tavern');
+  cameraWorld.stop();
+  console.log('NORA upward camera: all three views in the lobby, cinema, forest and tavern; floor collision and zoom recovery passed.');
   const povWorld=await setup();
   const fullDistance=povWorld.camera().position.distanceTo(povWorld.player.position);
   povWorld.root.emit('nora-pov',{detail:40});povWorld.frames(180);
@@ -817,6 +891,7 @@ try {
   const peerInMemory=course.scene().children.find(node=>node!==course.player&&node.getObjectByName('memory-armor'));
   assert.ok(peerInMemory?.getObjectByName('memory-armor').visible,'other players wear armor too');
   assert.ok(level.getObjectByName('memory-gate-1').visible);
+  assertSkyView(course,'Memory','touch');
 
   course.player.position.set(relics.seal[0],.017,relics.seal[1]);
   course.frames(4);useNearby(course,'Поднять печать');course.frames(8);

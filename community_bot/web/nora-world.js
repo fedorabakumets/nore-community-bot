@@ -5,6 +5,7 @@ window.NoraWorld = (() => {
   const TAVERN_JUMP_LIMIT=1.5; // Keep the avatar below the ceiling beams.
   const trees = [[-5.7,-5.6], [5.2,-4.7], [-5.6,5.3], [5.5,5.7]];
   const FURNITURE_RADIUS=.12;
+  const CAMERA_CLEARANCE=.22, MAX_LOOK_UP=85*Math.PI/180;
   function overlapsBox(x,z,[x0,x1,z0,z1],radius){
     return x>x0-radius&&x<x1+radius&&z>z0-radius&&z<z1+radius;
   }
@@ -21,11 +22,13 @@ window.NoraWorld = (() => {
   }
   function cameraDistance(origin,direction,distance,boxes) {
     // Swept camera volume: enlarged boxes cover the near plane, not only its center ray.
-    let safe=distance;
+    // All locations share a base floor at y=0. Retract along the orbit
+    // ray to clear it without changing the direction the camera faces.
+    let safe=direction.y<0?Math.min(distance,(origin.y-CAMERA_CLEARANCE)/-direction.y):distance;
     for(const bounds of boxes){
       let near=0,far=distance;
       for(const [axis,lo,hi] of [['x',0,1],['y',2,3],['z',4,5]]){
-        const min=bounds[lo]-.22,max=bounds[hi]+.22,v=direction[axis],p=origin[axis];
+        const min=bounds[lo]-CAMERA_CLEARANCE,max=bounds[hi]+CAMERA_CLEARANCE,v=direction[axis],p=origin[axis];
         if(Math.abs(v)<1e-7){if(p<min||p>max){far=-1;break;}}
         else {const a=(min-p)/v,b=(max-p)/v;near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));}
       }
@@ -391,7 +394,7 @@ window.NoraWorld = (() => {
     for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
     function turnCamera(dx,dy){
       targetYaw-=dx*.006;
-      targetPitch=Math.max(inCinema?-.85:.15,Math.min(.85,targetPitch+dy*.004));
+      targetPitch=Math.max(-MAX_LOOK_UP,Math.min(.85,targetPitch+dy*.004));
     }
     const mouseLocked=()=>document.pointerLockElement===canvas;
     function releaseMouse(){
@@ -761,7 +764,7 @@ window.NoraWorld = (() => {
         matrix.position.set(g.x,g.y,g.z);matrix.rotation.set(0,g.heading,0);matrix.scale.set(.012*fade,.012*fade,.16*fade);matrix.updateMatrix();wind.setMatrixAt(i,matrix.matrix);}
       wind.instanceMatrix.needsUpdate=true;
     }
-    const target=new T.Vector3(), offset=new T.Vector3(), direction=new T.Vector3();
+    const target=new T.Vector3(), direction=new T.Vector3();
     syncLocation();
     const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
     const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
@@ -1028,8 +1031,8 @@ window.NoraWorld = (() => {
           opacity=fade<opacity?fade:Math.min(fade,opacity+(fade-opacity)*(1-Math.exp(-5*dt)));
           if(opacity>.999)opacity=1;
           character.setOpacity(opacity);
-          offset.copy(direction).multiplyScalar(actualDistance);
-          camera.position.copy(target).add(offset);camera.lookAt(target);
+          camera.position.copy(target).addScaledVector(direction,actualDistance);
+          camera.lookAt(target.copy(camera.position).sub(direction));
         }
         const guest=inside&&burrow&&burrow.host()!==nickname;
         burrow?.tick(time,inside);if(inside)furnishing?.tick(time);character.animateWear?.(dt);
