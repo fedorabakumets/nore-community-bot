@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Bot
-from aiogram.methods import DeleteMessage, SendMessage, SendPhoto
+from aiogram.methods import DeleteMessage, SendMessage, SendRichMessage
 from aiogram.types import MessageOriginHiddenUser, Update
 from test_nora_commands_release import message
 from test_studio_rsvp import TelegramSession
@@ -194,6 +194,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
     await db.execute("UPDATE users SET reputation = 60 WHERE user_id = 8")
     session = TelegramSession()
     bot = Bot(settings.bot_token, session=session)
+    monkeypatch.setattr(bot, "me", AsyncMock(return_value=SimpleNamespace(username="nora_bot")))
     monkeypatch.setattr(bot, "get_chat_member", AsyncMock(return_value=SimpleNamespace(status="member")))
     monkeypatch.setattr("community_bot.access.sync_menu", AsyncMock())
     monkeypatch.setattr("community_bot.routers.private.flow_reply_keyboard", lambda: None)
@@ -222,8 +223,8 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
 
     try:
         await dispatch("Нора, профиль")
-        cards = [call for call in session.calls if isinstance(call, (SendMessage, SendPhoto))]
-        assert cards and "Участник 7" in (getattr(cards[0], "caption", None) or cards[0].text)
+        cards = [call for call in session.calls if isinstance(call, SendRichMessage)]
+        assert len(cards) == 1 and cards[0].rich_message.blocks[0].text == "Участник 7"
         await dispatch("Нора, любимый факт")
         assert replies()[0].text == "Штатная команда"
         await dispatch("Нора, какая погода?")

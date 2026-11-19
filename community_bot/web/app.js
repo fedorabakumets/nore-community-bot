@@ -282,6 +282,15 @@ async function openGameProfileFromLink() {
   }
 }
 
+function openPersonFromLink() {
+  const match = /^nora_profile_([1-9][0-9]{0,15})$/.exec(telegramStartParam());
+  if (!match) return;
+  const id = Number(match[1]);
+  if (!Number.isSafeInteger(id)) return;
+  window.NoraIntro?.finish(true);
+  void window.NoraPeople?.visit(id);
+}
+
 async function openWidgetNoticeFromLink() {
   const match = /^nora_notice_([0-9a-f]{32})$/.exec(telegramStartParam());
   if (!match) return;
@@ -351,6 +360,7 @@ async function openApp(result) {
     else toast('Товар больше недоступен');
   }
   openLobbyFromLink();
+  openPersonFromLink();
   void openWidgetNoticeFromLink();
   void openGameProfileFromLink();
 }

@@ -33,17 +33,14 @@ async def test_profile_mention_targets_and_privacy(tmp_path, monkeypatch):
     await db.initialize()
     await db.ensure_user(8, username='Some_User', telegram_name='Анна')
     send = AsyncMock()
-    view = AsyncMock(return_value=True)
-    monkeypatch.setattr(profile, 'send_profile_card', send)
-    monkeypatch.setattr(profile, 'can_view_profile', view)
-    monkeypatch.setattr(profile, 'render_profile', AsyncMock(return_value='card'))
+    monkeypatch.setattr(profile, 'send_group_profile', send)
     await profile.show_profile(event('Нора профиль @some_user'), db, object())
-    assert send.await_args.args[1]['user_id'] == 8
+    assert send.await_args.args[3]['user_id'] == 8
     target = User(id=9, is_bot=False, first_name='Анна')
     entity = MessageEntity(type='text_mention', offset=13, length=4, user=target)
     await profile.show_profile(event('Нора профиль Анна', [entity]), db, object())
-    assert send.await_args.args[1]['user_id'] == 9
-    assert view.await_args.args[2] == 7
+    assert send.await_args.args[3]['user_id'] == 9
+    assert send.await_args.args[4] == 7
 
 
 async def test_unknown_username_does_not_show_own_profile(tmp_path, monkeypatch):
@@ -52,7 +49,7 @@ async def test_unknown_username_does_not_show_own_profile(tmp_path, monkeypatch)
     answer = AsyncMock()
     send = AsyncMock()
     monkeypatch.setattr(Message, 'answer', answer)
-    monkeypatch.setattr(profile, 'send_profile_card', send)
+    monkeypatch.setattr(profile, 'send_group_profile', send)
     await profile.show_profile(event('Нора профиль @unknown'), db, object())
     answer.assert_awaited_once()
     send.assert_not_awaited()

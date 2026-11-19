@@ -259,9 +259,7 @@ def _profile_signature(nickname, secret):
 
 
 async def profile_card(request):
-    from community_bot.helpers import render_profile
-    from community_bot.routers.profile import send_profile_card
-    from community_bot.ui_owner import bind_ui_owner
+    from community_bot.group_profile import send_group_profile
 
     db, settings, chat = request.app['db'], request.app['settings'], request.app['nora_game_chat']
     actor = request['actor']['id']
@@ -275,7 +273,6 @@ async def profile_card(request):
     user = await db.get_user(row['telegram_id']) if row else None
     if not user or user['profile_private']:
         raise ValueError('Профиль скрыт или недоступен.')
-    text = await render_profile(db, settings, {**user, 'username': None}, compact=True)
     now = time.monotonic()
     if now < chat.next_card:
         raise ValueError('Подожди несколько секунд перед показом профиля.')
@@ -283,10 +280,9 @@ async def profile_card(request):
     group = Chat(id=chat.group_id, type='supergroup')
     message = Message(message_id=0, date=datetime.now(UTC), chat=group).as_(chat.bot)
     try:
-        sent = await send_profile_card(message, user, settings, editable=False, text=text, db=db)
+        await send_group_profile(message, db, settings, user, actor, show_username=False)
     except TelegramAPIError:
         raise ValueError('Не удалось показать профиль в группе.') from None
-    await bind_ui_owner(db, sent, actor, 'profile')
     return web.json_response({'ok': True})
 
 

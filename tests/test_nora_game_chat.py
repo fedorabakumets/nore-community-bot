@@ -212,18 +212,18 @@ async def test_local_send_and_replies_stay_in_room_without_telegram(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_signed_profile_link_posts_public_profile_in_configured_group(tmp_path, monkeypatch):
-    from community_bot.routers import profile
-
+async def test_signed_profile_link_posts_public_profile_in_configured_group(tmp_path):
     db = Database(tmp_path / 'profiles.db')
     await db.initialize()
     await db.ensure_user(42, 'hidden_handle', 'Имя из Telegram')
     await db.update_profile(42, 'profile_name', 'Имя Норы')
     await db.execute('INSERT INTO nora_game_players (telegram_id, nickname) VALUES (?, ?)', (42, 'Pixel'))
-    bot = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)))
+    bot = SimpleNamespace(
+        get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)),
+        me=AsyncMock(return_value=SimpleNamespace(username='nora_bot')),
+        send_rich_message=AsyncMock(return_value=telegram_message(99, None, bot=True)),
+    )
     chat = nora_game_chat.GameChat(bot, GROUP)
-    send = AsyncMock(return_value=None)
-    monkeypatch.setattr(profile, 'send_profile_card', send)
     settings = SimpleNamespace(bot_token='testing', restricted_reputation_threshold=15)
 
     class Request(dict):
@@ -240,11 +240,12 @@ async def test_signed_profile_link_posts_public_profile_in_configured_group(tmp_
     await db.update_profile(42, 'profile_private', 1)
     with pytest.raises(ValueError, match='скрыт'):
         await nora_game_chat.profile_card(request)
-    send.assert_not_called()
+    bot.send_rich_message.assert_not_called()
 
     await db.update_profile(42, 'profile_private', 0)
     result = await nora_game_chat.profile_card(request)
     assert json.loads(result.text) == {'ok': True}
-    assert send.call_args.args[0].chat.id == GROUP
-    assert 'Имя Норы' in send.call_args.kwargs['text']
-    assert 'hidden_handle' not in send.call_args.kwargs['text']
+    assert bot.send_rich_message.call_args.args[0] == GROUP
+    card = bot.send_rich_message.call_args.kwargs['rich_message']
+    assert card.blocks[0].text == 'Имя Норы'
+    assert 'hidden_handle' not in card.model_dump_json()

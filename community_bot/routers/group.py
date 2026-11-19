@@ -50,6 +50,7 @@ from community_bot.domain import (
     transfer_commission_percent,
 )
 from community_bot.ephemeral import delete_user_command, keep_in_chat
+from community_bot.group_profile import refresh_group_profile
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -688,6 +689,8 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
             await callback.message.answer("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
         except TelegramBadRequest:
             pass
+    if isinstance(callback.message, Message):
+        await refresh_group_profile(callback.message, db, settings, target_id)
 
 
 @router.callback_query(F.data.startswith("profile_transfer:"), F.message.chat.type.in_({"group", "supergroup"}))
