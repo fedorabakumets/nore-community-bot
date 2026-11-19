@@ -16,7 +16,10 @@ const seconds = c => c.speed==='fast'?20:60;
 const key = 'nora-durak-'+(tg?.initDataUnsafe?.user?.id||'session');
 let host, mode='open', list, room, config={...initial}, target, friends, inviteCode='', selected=null;
 let challenge=false, batch=null, pending=false, message='', watch, refreshTimer, timer, generation=0, drag;
-let clockDeadline=0, menuRequest=0, activeParam='';
+let clockDeadline=0, undoDeadline=0, menuRequest=0, activeParam='', lastTap, handledPointer;
+let reactionCursor='', reactionReady=0, reactionPending=false, sortRank, hints, showReactions;
+const landing=new Map(), receivedReactions=new Map();
+let reactionsPreloaded=false;
 const store = (name,value) => { try { if(value===null)sessionStorage.removeItem(key+name);else sessionStorage.setItem(key+name,value); } catch {} };
 const stored = name => {try{return sessionStorage.getItem(key+name)}catch{return null}};
 const nameAt = seat => room?.members.find(m=>m.seat===seat)?.name||'Участник';
@@ -128,71 +131,193 @@ function friendScreen(){
     return `<div class="dk-friend">${portrait({...m,avatar:m.has_avatar})}<strong>${esc(m.name)}</strong>${actionButton('invite',here?'За столом':sent?'Отправлено':'Позвать','dk-small',`data-id="${m.id}" ${here||sent||!m.available?'disabled':''}`)}</div>`;
   }).join(''):'<p>Пока нет друзей. Можно пригласить игрока по ссылке.</p>':'Загружаем список друзей…'}</div>`;
 }
-function seatPosition(index,total){
-  // Adapted from Duren Board.seatPosition. Reserve the lower edge for the viewer's hand.
-  const angle=(-90+(index+1)*360/total)*Math.PI/180;
-  return `--x:${50+38*Math.cos(angle)}%;--y:${45-31*Math.sin(angle)}%`;
+const emotions = ['Привет рукой','Безразличие','Громкий смех','Насмешка с картами','Закатывание глаз',
+  'Улыбка','Подмигивание','Радостное приветствие','Одобрение','Цветы',
+  'Дразнит','В очках','Воздушный поцелуй','Удивление','Неловкость',
+  'Грусть','Вызов картой','Нейтральное выражение','Скепсис','Озадаченность',
+  'Хитрая улыбка','Злость','Злорадство','Фейспалм','Задумчивость'];
+const reactionImage = id => '/durak-cards/reaction-'+id+'.webp';
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const randomNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('');
+const storedPreference = name => {try{return localStorage.getItem(key+name)}catch{return null}};
+function savePreference(name,value){
+  try{localStorage.setItem(key+name,value)}catch{}
 }
+
 function seatLabel(g,seat){
   if(g.forfeit.includes(seat))return 'Сдался';
   if(g.out.includes(seat))return 'Вышел';
   if(seat===g.defender)return 'Защита';
   if(seat===g.attacker)return 'Атака';
-  return 'За столом';
+  return '';
 }
 function turnText(g){
   if(g.phase==='review')return 'Проверка карт';
-  if(g.turn===room.own)return {attack:'Твой ход',defend:'Твоя защита',throw:g.taking?'Подкинь или спасуй':'Подкинь или заверши'}[g.phase];
-  return `${g.taking?'Забирает · ':g.phase==='defend'?'Отбивается · ':'Ходит · '}${nameAt(g.turn)}`;
+  if(g.turn===room.own)return {attack:'Твой ход',defend:'Отбивайся',throw:g.taking?'Подкинь или спасуй':'Подкинь или заверши'}[g.phase];
+  return `${g.taking?'Забирает':g.phase==='defend'?'Отбивается':'Ходит'} · ${nameAt(g.turn)}`;
+}
+function movesFor(g,card){
+  return g.moves.filter(m=>m.card===card&&['attack','defend','transfer'].includes(m.kind));
 }
 function groupCandidates(g,first){
   if(!g.moves.some(m=>m.kind==='attack'&&m.card===first)||g.capacity-g.table.length<2)return [];
-  const open=g.table.length===0;
-  return g.moves.filter(m=>m.kind==='attack'&&(!open||(m.card>>2)===(first>>2))).map(m=>m.card);
+  return g.moves.filter(m=>m.kind==='attack'&&(m.card>>2)===(first>>2)).map(m=>m.card);
 }
 function controls(g){
   if(challenge)return `<div class="dk-checks" aria-label="Выбери карту для проверки">${g.challenge.map(c=>
     actionButton('report',faceName(c),'dk-secondary',`data-card="${c}" aria-label="Оспорить ${faceName(c)}"`)).join('')}</div>`+
-    actionButton('challenge-mode','Отмена');
+    actionButton('challenge-mode','Закрыть');
   if(batch)return actionButton('attack-group',`Сыграть ×${batch.length}`,'dk-primary',batch.length<2?'disabled':'')+
     actionButton('batch-cancel','Отмена');
-  const picked=g.moves.filter(m=>m.card===selected);
-  const buttons=[];
-  if(picked.some(m=>m.kind==='attack'))buttons.push(actionButton('attack',g.table.length?'Подкинуть':'Походить','dk-primary'));
+  const picked=movesFor(g,selected), buttons=[];
+  if(picked.some(m=>m.kind==='attack'))buttons.push(actionButton('attack',g.table.length?'Подкинуть':'Походить','dk-secondary'));
   if(groupCandidates(g,selected).length>1)buttons.push(actionButton('batch','Несколько карт'));
-  if(picked.some(m=>m.kind==='transfer'))buttons.push(actionButton('transfer','Перевести','dk-secondary'));
+  if(picked.some(m=>m.kind==='transfer'))buttons.push(actionButton('transfer','Перевести'));
   const cover=picked.filter(m=>m.kind==='defend');
-  if(cover.length===1)buttons.push(actionButton('defend','Отбить','dk-primary',`data-slot="${cover[0].slot}"`));
+  if(cover.length===1)buttons.push(actionButton('defend','Отбить','dk-secondary',`data-slot="${cover[0].slot}"`));
   if(cover.length>1)buttons.push('<span class="dk-muted">Выбери карту на столе</span>');
-  if(g.moves.some(m=>m.kind==='take'))buttons.push(actionButton('take','Беру','dk-secondary'));
-  if(g.moves.some(m=>m.kind==='pass'))buttons.push(actionButton('pass',g.taking?'Пас':'Бито','dk-secondary'));
-  if(g.challenge.length)buttons.push(actionButton('challenge-mode',challenge?'Отмена проверки':'Оспорить','dk-secondary',`aria-pressed="${challenge}"`));
-  if(!buttons.length)buttons.push(`<span class="dk-muted">${g.moves.length?'Выбери карту в руке':'Ожидаем ход'}</span>`);
+  if(g.moves.some(m=>m.kind==='take'))buttons.push(actionButton('take','Беру','dk-primary'));
+  if(g.moves.some(m=>m.kind==='pass'))buttons.push(actionButton('pass',g.taking?'Пас':'Бито','dk-primary'));
+  if(g.challenge.length)buttons.push(actionButton('challenge-mode','Оспорить'));
+  if(g.moves.some(m=>m.kind==='undo'))buttons.push(actionButton('undo','Вернуть ход','dk-secondary','data-undo'));
+  if(!buttons.length)buttons.push(`<span class="dk-muted">${g.moves.some(m=>m.card!==undefined)?'Перетащи карту на стол':'Ожидаем ход'}</span>`);
   return buttons.join('');
+}
+function chair(m,g){
+  const own=m.seat===room.own,role=seatLabel(g,m.seat),count=g.counts[m.seat];
+  const backs=own||!count?'':`<span class="dk-backs" aria-hidden="true">${'<i></i>'.repeat(Math.min(3,count))}</span>`;
+  const avatar=own?actionButton('reactions',portrait(m),'dk-avatar-button',
+    'aria-label="Эмоции" aria-controls="dk-reaction-panel" aria-expanded="false"'):portrait(m);
+  return `<div class="dk-chair ${own?'dk-own':''} ${g.turn===m.seat?'is-turn':''} ${role==='Защита'?'is-defender':''}"
+    data-seat="${m.seat}" data-player="${m.id}">
+    <span class="dk-seat-emblem">${avatar}<i class="dk-direction" aria-label="Защищается">▸</i><span class="dk-bubble" aria-hidden="true"></span></span>
+    <span class="dk-seat-detail"><strong>${own?'Ты':esc(m.name)}</strong><small>${backs}${own?'':count}${role?`<span>${role}</span>`:''}${g.marked.includes(m.seat)?'<b title="Уличён в шулерстве">!</b>':''}</small></span>
+  </div>`;
 }
 function gameScreen(){
   const g=room.game,c=room.config;
-  const n=room.members.length,others=[...room.members.slice(room.own+1),...room.members.slice(0,room.own)];
-  const ownHand=[...g.hand].sort((a,b)=>((a%4===g.trump)-(b%4===g.trump))||a%4-b%4||a-b);
+  const others=Array.from({length:room.members.length-1},(_,i)=>room.members[(room.own+i+1)%room.members.length]);
+  const bySuit=(a,b)=>((a%4===g.trump)-(b%4===g.trump))||a%4-b%4||a-b;
+  const ownHand=[...g.hand].sort(sortRank?(a,b)=>a-b:bySuit);
+  const rows=Math.ceil(ownHand.length/12)||1,columns=Math.ceil(ownHand.length/rows)||1;
   const cardMoves=new Set(batch?groupCandidates(g,batch[0]):g.moves.map(m=>m.card));
-  const targetable=new Set(g.moves.filter(m=>m.kind==='defend'&&m.card===selected).map(m=>m.slot));
   return `<header class="dk-gamehead">${actionButton('back','← Столы','dk-back')}<strong>${labels.variant[c.variant]}</strong><span>${chips(c.stake)}</span>
-    ${actionButton('game-info','Правила','dk-text')}</header>
-    <div class="dk-felt"><div class="dk-ring" aria-hidden="true"></div>
-    ${others.map((m,i)=>`<div class="dk-chair ${g.turn===m.seat?'is-turn':''}" data-seat="${m.seat}" style="${seatPosition(i,n)}">
-      ${portrait(m)}<span><strong>${esc(m.name)}</strong><small>${g.counts[m.seat]} карт · ${seatLabel(g,m.seat)}</small></span>${g.marked.includes(m.seat)?'<i title="Уличён в шулерстве">!</i>':''}</div>`).join('')}
-    <div class="dk-stock" data-origin="deck" aria-label="В колоде ${g.stock}, козырь ${suits[g.trump]}">
-      ${g.bottom!==null?`<img class="dk-trump" src="${face(g.bottom)}" alt="Козырь ${faceName(g.bottom)}">`:''}
-      <span class="dk-backcard">${g.stock||suits[g.trump]}</span>${g.bottom!==null?`<b class="dk-trump-name">${faceName(g.bottom)}</b>`:''}</div>
-    <div class="dk-pairs" data-origin="table" data-slots="${g.table.length}">${g.table.length?g.table.map(([a,d],i)=>
-      `<div class="dk-pair ${targetable.has(i)?'can-cover':''}" data-slot="${i}">${[a,d].map((card,j)=>card===null?'':`<button type="button" class="dk-tablecard ${j?'cover':''} ${challenge&&g.challenge.includes(card)?'can-check':''}" data-on-table="${card}" aria-label="${faceName(card)}">${cardImg(card)}</button>`).join('')}</div>`).join(''):
-      '<span class="dk-felt-mark" aria-hidden="true">♠</span>'}</div>
-    <div class="dk-discard" data-origin="discard">Отбой <b>${g.discard}</b></div></div>
-    <div class="dk-turn"><span aria-live="polite"><small>Заход ${g.round} · козырь ${suits[g.trump]}</small><strong>${esc(turnText(g))}</strong></span><time id="dk-clock" aria-live="off"></time></div>
-    <div class="dk-hand" data-seat="${room.own}" aria-label="Твои карты">${ownHand.map(card=>
-      `<button type="button" data-hand="${card}" class="dk-handcard ${cardMoves.has(card)?'legal':''}" aria-pressed="${batch?batch.includes(card):selected===card}" aria-label="${faceName(card)}">${cardImg(card)}</button>`).join('')}</div>
-    <div class="dk-actions">${controls(g)}</div>`;
+    ${actionButton('game-info','⋯','dk-back','aria-label="Настройки и правила стола"')}</header>
+    <div class="dk-felt" data-players="${room.members.length}">
+      <div class="dk-opponents">${others.map(m=>chair(m,g)).join('')}</div>
+      <div class="dk-stock" data-origin="deck" aria-label="В колоде ${g.stock}, козырь ${suits[g.trump]}">
+        ${g.bottom!==null?`<img class="dk-trump" src="${face(g.bottom)}" alt="Козырь ${faceName(g.bottom)}">`:''}
+        <span class="dk-backcard" ${g.stock?'':'data-empty'}>${g.stock}</span></div>
+      <div class="dk-pairs" data-origin="table" data-slots="${g.table.length}">
+        ${g.table.map(([a,d],i)=>`<div class="dk-pair" data-pair="${a}" data-slot="${i}">
+          ${[a,d].map((card,j)=>card===null?'':`<button type="button" class="dk-tablecard ${j?'cover':''} ${challenge&&g.challenge.includes(card)?'can-check':''}"
+            data-on-table="${card}" aria-label="${j?'Защита':'Атака'} ${faceName(card)}">${cardImg(card)}</button>`).join('')}</div>`).join('')}
+        ${g.table.length<6?`<button type="button" class="dk-drop" data-drop tabindex="-1" aria-hidden="true" disabled><span></span></button>`:''}
+      </div>
+      ${actionButton('discard',`Отбой <b>${g.discard}</b>`,'dk-discard',`data-origin="discard" ${g.last_discard?.length?'':'disabled'}`)}
+    </div>
+    <div class="dk-turn">${chair(room.members[room.own],g)}
+      <span class="dk-turn-text" aria-live="polite"><small>Заход ${g.round} · козырь ${suits[g.trump]}</small><strong>${esc(turnText(g))}</strong></span>
+      <time id="dk-clock" aria-live="off"></time>
+      ${actionButton('sort',sortRank?'Ранг':'Масть','dk-sort',`aria-label="Сортировка по ${sortRank?'достоинству':'масти'}. Переключить"`)}
+    </div>
+    <div class="dk-hand" data-origin="hand" aria-label="Твои карты" style="--rows:${rows};--columns:${columns}">${ownHand.map((card,i)=>{
+      const row=Math.floor(i/columns),col=i%columns,count=Math.min(columns,ownHand.length-row*columns);
+      const fan=rows===1?Math.max(-5,Math.min(5,(col-(count-1)/2)*1.6)):0;
+      return `<button type="button" data-hand="${card}" class="dk-handcard ${hints&&cardMoves.has(card)?'legal':''}"
+        style="--row:${row};--col:${col};--row-cards:${count};--fan:${fan}deg"
+        aria-pressed="${batch?batch.includes(card):selected===card}" aria-label="${faceName(card)}">${cardImg(card)}</button>`;
+    }).join('')}</div>
+    <div class="dk-actions">${controls(g)}</div>
+    <div id="dk-reaction-panel" class="dk-reaction-panel" role="region" aria-label="Эмоции" hidden></div>
+    <p class="dk-error" role="status">${esc(message)}</p>`;
 }
+function syncAttributes(node,fresh){
+  for(const attr of [...node.attributes])if(!fresh.hasAttribute(attr.name))node.removeAttribute(attr.name);
+  for(const {name,value} of fresh.attributes)if(node.getAttribute(name)!==value)node.setAttribute(name,value);
+}
+function syncList(node,fresh,key,patch){
+  const byKey=new Map([...node.children].map(child=>[key(child),child]));
+  let next=node.firstElementChild;
+  for(const incoming of [...fresh.children]){
+    const id=key(incoming),current=byKey.get(id);
+    byKey.delete(id);
+    if(current)patch(current,incoming);
+    const item=current||incoming;
+    if(item!==next)node.insertBefore(item,next);
+    next=item.nextElementSibling;
+  }
+  byKey.forEach(child=>child.remove());
+}
+function syncContents(node,fresh){
+  if(node.innerHTML!==fresh.innerHTML)node.replaceChildren(...fresh.childNodes);
+}
+function syncChair(node,fresh){
+  syncAttributes(node,fresh);
+  syncContents(node.querySelector('.dk-seat-detail'),fresh.querySelector('.dk-seat-detail'));
+}
+function syncScene(html){
+  const template=document.createElement('template');template.innerHTML=html;
+  const fresh=template.content, node=selector=>host.querySelector(selector), incoming=selector=>fresh.querySelector(selector);
+  const felt=node('.dk-felt');
+  syncAttributes(felt,incoming('.dk-felt'));
+  syncList(node('.dk-opponents'),incoming('.dk-opponents'),e=>e.dataset.player,syncChair);
+  syncChair(node('.dk-own'),incoming('.dk-own'));
+  for(const selector of ['.dk-stock','.dk-discard','.dk-turn-text','.dk-sort','.dk-actions','.dk-error']){
+    const current=node(selector),replacement=incoming(selector);
+    syncAttributes(current,replacement);syncContents(current,replacement);
+  }
+  const pairs=node('.dk-pairs'), newPairs=incoming('.dk-pairs');
+  syncAttributes(pairs,newPairs);
+  syncList(pairs,newPairs,e=>e.dataset.pair,(pair,next)=>{
+    syncAttributes(pair,next);
+    if(pair.matches('[data-pair]'))syncList(pair,next,e=>e.dataset.onTable,syncAttributes);
+  });
+  const hand=node('.dk-hand'),newHand=incoming('.dk-hand');
+  syncAttributes(hand,newHand);
+  syncList(hand,newHand,e=>e.dataset.hand,(card,next)=>{
+    syncAttributes(card,next);
+    card.classList.toggle('is-held',drag?.card===Number(card.dataset.hand)||landing.has(Number(card.dataset.hand)));
+  });
+}
+function paint(){
+  if(!host?.isConnected)return;
+  const playing=mode==='room'&&room?.status==='playing';
+  document.body.classList.toggle('dk-playing',playing);
+  host.className='dk-root'+(playing?' dk-game':'');
+  host.setAttribute('aria-live',playing?'off':'polite');
+  host.dataset.revision=room?String(room.rev):'';
+  host.dataset.mode=mode;
+  if(playing){
+    const html=gameScreen();
+    if(host.querySelector('.dk-felt'))syncScene(html);
+    else {
+      host.innerHTML=html;
+      if(!reactionsPreloaded){
+        reactionsPreloaded=true;
+        const preload=()=>emotions.forEach((_,i)=>{
+          const img=new Image();img.fetchPriority='low';img.src=reactionImage(i+1);
+        });
+        if(window.requestIdleCallback)window.requestIdleCallback(preload,{timeout:1000});
+        else setTimeout(preload,200);
+      }
+    }
+    updateTargets();
+    lockActions();
+    clockTick();
+    return;
+  }
+  let html;
+  if(mode==='open'||mode==='mine')html=menuScreen();
+  if(mode==='create')html=createScreen();
+  if(mode==='code')html=privateScreen();
+  if(mode==='preview'&&target)html=confirmJoin();
+  if(mode==='friends'&&room)html=friendScreen();
+  if(mode==='room'&&room)html=room.status==='waiting'?waiting():resultScreen();
+  host.innerHTML=(html||`${header('Карточный стол')}<p class="dk-muted">Загружаем стол…</p>`)+
+    `<p class="dk-error" role="status">${esc(message)}</p>`;
+}
+
 function resultScreen(){
   const r=room.result,own=room.members.find(p=>p.seat===room.own),cancel=room.status==='cancelled';
   const title=cancel?'Стол закрыт':r.forfeit.includes(own.seat)?'Поражение':r.reason==='draw'?'Ничья':own.payout?'Победа':'Поражение';
@@ -207,40 +332,33 @@ function resultScreen(){
     <div class="dk-panel">${room.members.map(m=>`<div class="dk-friend">${portrait(m)}<strong>${esc(m.name)}</strong><span>${chips(m.payout||0)}</span></div>`).join('')}</div>
     ${actionButton('again','Сыграть ещё','dk-primary dk-wide')}`;
 }
-function paint(){
-  if(!host?.isConnected)return;
-  const playing=mode==='room'&&room?.status==='playing';
-  document.body.classList.toggle('dk-playing',playing);
-  host.className='dk-root'+(playing?' dk-game':'');
-  host.setAttribute('aria-live',playing?'off':'polite');
-  host.dataset.revision=room?String(room.rev):'';
-  host.dataset.mode=mode;
-  const prev=host.querySelector('.dk-hand')?.scrollLeft||0;
-  let html;
-  if(mode==='open'||mode==='mine')html=menuScreen();
-  if(mode==='create')html=createScreen();
-  if(mode==='code')html=privateScreen();
-  if(mode==='preview'&&target)html=confirmJoin();
-  if(mode==='friends'&&room)html=friendScreen();
-  if(mode==='room'&&room)html=room.status==='playing'?gameScreen():room.status==='waiting'?waiting():resultScreen();
-  host.innerHTML=(html||`${header('Карточный стол')}<p class="dk-muted">Загружаем стол…</p>`)+
-    `<p class="dk-error" role="status">${esc(message)}</p>`;
-  const hand=host.querySelector('.dk-hand');
-  if(hand)hand.scrollLeft=prev;
-  if(playing)clockTick();
-}
 function clockTick(){
   const el=host?.querySelector('#dk-clock');
   if(!el)return;
   const left=Math.max(0,Math.ceil(clockDeadline-performance.now()/1000));
   if(el.textContent!==left+' с')el.textContent=left+' с';
   el.classList.toggle('urgent',left<=5);
+  const undo=host.querySelector('[data-undo]');
+  if(undo)undo.disabled=pending||performance.now()/1000>=undoDeadline;
+  if(left<=0&&drag)cancelDrag();
+}
+function lockActions(){
+  host?.querySelectorAll('.dk-actions button:not([data-undo])').forEach(button=>{
+    if(pending&&!button.disabled){
+      button.disabled=true;
+      button.dataset.awaitingMove='';
+    }else if(!pending&&button.hasAttribute('data-awaiting-move')){
+      button.disabled=false;
+      delete button.dataset.awaitingMove;
+    }
+  });
 }
 function stopNetwork(){
   generation++;watch?.abort();watch=null;clearTimeout(refreshTimer);clearInterval(timer);menuRequest++;
 }
 function change(next){
-  stopNetwork();mode=next;message='';selected=null;challenge=false;batch=null;
+  cancelDrag();landing.forEach(el=>el.remove());landing.clear();
+  stopNetwork();mode=next;message='';selected=null;challenge=false;batch=null;lastTap=null;
   if(next!=='room'&&next!=='friends')store('room',null);
   paint();window.scrollTo(0,0);
 }
@@ -264,81 +382,185 @@ async function readMenu(append=false){
 function flash(event){
   if(!host||!room)return;
   const text=event.kind==='challenge'?`${nameAt(event.marked)} уличён в шулерстве`:
-    event.kind==='transfer'?`Переводит ${nameAt(event.seat)}`:
     ['surrender','timeout'].includes(event.kind)?`${nameAt(event.seat)} ${event.kind==='timeout'?'пропустил ход':'сдался'}`:'';
   if(text)toast(text);
 }
+function box(el){
+  if(!el)return null;
+  const r=el.getBoundingClientRect();
+  return {x:r.left,y:r.top,w:r.width,h:r.height};
+}
 function positions(){
   const map=new Map();
-  host?.querySelectorAll('[data-seat],[data-origin],[data-on-table],[data-hand]').forEach(el=>{
-    for(const name of ['seat','origin','onTable','hand'])if(el.dataset[name]!==undefined){
-      const b=el.getBoundingClientRect();
-      map.set(name+el.dataset[name],{x:b.left+b.width/2,y:b.top+b.height/2});
-    }
+  host?.querySelectorAll('.dk-chair .dk-avatar,[data-origin],[data-on-table],[data-hand]').forEach(el=>{
+    const {seat,origin,onTable,hand}=el.matches('.dk-avatar')?el.closest('[data-seat]').dataset:el.dataset;
+    if(seat!==undefined)map.set('seat'+seat,box(el));
+    if(origin!==undefined)map.set(origin,box(el));
+    if(onTable!==undefined)map.set('table'+onTable,box(el));
+    if(hand!==undefined)map.set('hand'+hand,box(el));
   });
   return map;
 }
-function motion(frames,before){
-  if(!frames.length||!host)return;
-  const after=positions(),events=frames.flatMap(f=>f.events);
-  events.forEach(flash);
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches||!host.classList.contains('dk-game'))return;
-  host.querySelectorAll('.dk-flight').forEach(el=>el.remove());
-  const point=k=>after.get(k)||before.get(k);
-  const flight=(a,b,card,delay=0)=>{
-    if(!a||!b)return;
-    const el=document.createElement('i');el.className='dk-flight';
-    if(card!==null)el.style.backgroundImage=`url("${face(card)}")`;
-    el.style.left=a.x+'px';el.style.top=a.y+'px';host.append(el);
-    const animation=el.animate([{transform:'translate(-50%,-50%) rotate(-8deg) scale(.72)',opacity:0},
-      {opacity:1,offset:.18},{transform:`translate(calc(-50% + ${b.x-a.x}px),calc(-50% + ${b.y-a.y}px)) rotate(2deg) scale(.92)`,opacity:.22}],
-      {duration:260,delay:Math.min(delay,550),easing:'cubic-bezier(.22,.7,.28,1)',fill:'backwards'});
-    animation.onfinish=animation.oncancel=()=>el.remove();
-  };
-  for(const e of events){
-    const seat='seat'+e.seat, desk=point('origintable'), stock=point('origindeck');
-    if(e.kind==='deal'){
-      host.querySelector('.dk-stock')?.animate([{transform:'rotate(-12deg)'},{transform:'rotate(9deg)'},{transform:'none'}],{duration:260});
-      host.querySelector('.dk-trump')?.animate([{opacity:0},{opacity:1}],{duration:450});
-      for(let k=0;k<6;k++)room.members.forEach(m=>flight(stock,point('seat'+m.seat),null,30*k+16*m.seat));
-    }else if(['attack','defend','transfer'].includes(e.kind)){
-      flight(before.get('hand'+e.card)||point(seat),point('onTable'+e.card)||desk,e.card);
-    }else if(['collect','discard'].includes(e.kind)){
-      e.cards.forEach((c,i)=>flight(before.get('onTable'+c)||desk,e.kind==='collect'?point(seat):point('origindiscard'),c,35+i*8));
-    }else if(e.kind==='draw'){
-      for(let i=0;i<e.count;i++)flight(stock,point(seat),null,140+i*25);
-    }
+function animateHand(before,after){
+  if(reducedMotion())return;
+  for(const el of host.querySelectorAll('[data-hand]:not(.is-held)')){
+    const id='hand'+el.dataset.hand,a=before.get(id);
+    const moving=el.getAnimations().find(animation=>animation.id==='durak-hand');
+    moving?.cancel();
+    const b=moving?box(el):after.get(id);
+    if(!a||!b||Math.abs(a.x-b.x)+Math.abs(a.y-b.y)<1)continue;
+    el.animate([{transform:`translate(${a.x-b.x}px,${a.y-b.y}px)`},{transform:'none'}],
+      {id:'durak-hand',duration:185,easing:'cubic-bezier(.22,.7,.28,1)'});
   }
 }
+function flight(a,b,card,{delay=0,duration=230,el}={}){
+  if(!a?.w||!a.h||!b?.w||!b.h||!host)return;
+  const ghost=document.createElement('i');
+  ghost.className='dk-flight';
+  if(card!==null)ghost.style.backgroundImage=`url("${face(card)}")`;
+  ghost.style.cssText+=`left:${a.x}px;top:${a.y}px;width:${a.w}px;height:${a.h}px`;
+  host.append(ghost);
+  const animation=ghost.animate([{transform:'none'},{transform:`translate(${b.x-a.x}px,${b.y-a.y}px) scale(${b.w/a.w},${b.h/a.h})`}],
+    {duration,delay,fill:'backwards',easing:'cubic-bezier(.22,.72,.28,1)'});
+  if(delay)ghost.animate([{opacity:0},{opacity:0}],{duration:delay});
+  el?.animate([{opacity:0},{opacity:0}],{duration:delay+duration});
+  animation.onfinish=animation.oncancel=()=>ghost.remove();
+}
+function motion(frames,before,after,previous){
+  const events=frames.flatMap(f=>f.events);
+  events.forEach(flash);
+  if(!host?.classList.contains('dk-game')||reducedMotion())return;
+  const point=k=>after.get(k)||before.get(k);
+  const cardSize=host.querySelector('.dk-tablecard,.dk-handcard')?.getBoundingClientRect().width||48;
+  const cardAt=(p,w=cardSize*.76)=>p&&({x:p.x+(p.w-w)/2,y:p.y+(p.h-w*1.42)/2,w,h:w*1.42});
+  const stock=cardAt(point('deck')),desk=cardAt(point('table')),discard=cardAt(point('discard'));
+  const seat=s=>cardAt(point('seat'+s));
+  const hand=card=>host.querySelector(`[data-hand="${card}"]`);
+  const table=card=>host.querySelector(`[data-on-table="${card}"]`);
+  const collected=new Set(events.filter(e=>e.kind==='collect'&&e.seat===room.own).flatMap(e=>e.cards));
+  let drawIndex=0, played=0;
+  const newHand=(room.game?.hand||[]).filter(c=>!previous?.hand.includes(c)&&!collected.has(c));
+  for(const event of events){
+    const {kind,card,cards,seat:player}=event,own=player===room.own;
+    if(kind==='deal'){
+      host.querySelector('.dk-trump')?.animate([{opacity:0},{opacity:1}],{duration:250});
+      for(let i=0;i<6;i++)room.members.forEach(m=>{
+        const ownCard=room.game.hand[i], reveal=m.seat===room.own;
+        flight(stock,reveal?point('hand'+ownCard):seat(m.seat),reveal?ownCard:null,
+          {delay:i*37+m.seat*12,el:reveal?hand(ownCard):null});
+      });
+    }else if(['attack','defend','transfer'].includes(kind)){
+      const released=landing.get(card);
+      flight(own?(released?box(released.firstElementChild):before.get('hand'+card)):seat(player),
+        point('table'+card)||desk,card,{delay:released?0:Math.min(played++*34,170),el:table(card)});
+      released?.remove();
+    }else if(['collect','discard','undo'].includes(kind)){
+      cards.forEach((c,i)=>{
+        const destination=kind==='discard'?discard:own?point('hand'+c):seat(player);
+        flight(before.get('table'+c)||desk,destination,c,{delay:i*19,el:own?hand(c):null});
+      });
+    }else if(kind==='draw'){
+      for(let i=0;i<event.count;i++){
+        const c=own?newHand[drawIndex++]:undefined;
+        flight(stock,c===undefined?seat(player):point('hand'+c),c??null,
+          {delay:165+i*29,el:c===undefined?null:hand(c)});
+      }
+    }
+  }
+  if(events.some(e=>e.kind==='challenge'||e.kind==='surrender'||e.kind==='timeout')){
+    for(const c of newHand)if(before.has('table'+c))flight(before.get('table'+c),point('hand'+c),c,{el:hand(c)});
+  }
+  animateHand(before,after);
+}
+function syncReactions(view){
+  if(view.reaction_cursor!==undefined)reactionCursor=view.reaction_cursor;
+  for(const event of view.reactions||[]){
+    if(event.room_id!==room?.id)continue;
+    const last=receivedReactions.get(event.sender_id),left=(event.expires-view.reaction_now)*1000;
+    if(last?.timestamp>=event.timestamp||left<=0)continue;
+    receivedReactions.set(event.sender_id,event);
+    const bubble=host.querySelector(`[data-player="${event.sender_id}"] .dk-bubble`);
+    if(!bubble||!showReactions)continue;
+    const img=document.createElement('img');
+    img.src=reactionImage(event.emoji_id);img.alt=emotions[event.emoji_id-1];img.style.setProperty('--visible',left+'ms');
+    bubble.replaceChildren(img);setTimeout(()=>img.remove(),left);
+  }
+}
+async function sendReaction(id){
+  if(reactionPending||performance.now()<reactionReady)return;
+  const rid=room.id,gen=generation;
+  reactionPending=true;
+  setReactionPanel(false,true);
+  try{
+    const view=await api('durak/action',{action:'reaction',room:rid,emoji_id:id,nonce:randomNonce()});
+    if(gen===generation){
+      reactionReady=performance.now()+2800;
+      syncReactions(view);
+    }
+  }catch(err){if(gen===generation)errorText(err)}
+  finally{
+    reactionPending=false;
+    if(host?.querySelector('#dk-reaction-panel:not([hidden])'))setReactionPanel(true);
+  }
+}
+function setReactionPanel(open,focus=false){
+  const panel=host?.querySelector('#dk-reaction-panel'),button=host?.querySelector('[data-dk=reactions]');
+  if(!panel||!button)return;
+  if(open&&!panel.children.length){
+    panel.innerHTML=`<div class="dk-reaction-head"><strong>Эмоции</strong>
+      ${actionButton('reactions-close','×','dk-back','aria-label="Закрыть эмоции"')}</div>
+      <div class="dk-emotions">${emotions.map((name,i)=>actionButton('react',`<img src="${reactionImage(i+1)}" alt="" width="96" height="96">`,'',
+        `data-emoji="${i+1}" aria-label="${name}" title="${name}"`)).join('')}</div>
+      <label><input type="checkbox" id="dk-react-show" ${showReactions?'checked':''}> Показывать эмоции в игре</label>`;
+  }
+  panel.hidden=!open;button.setAttribute('aria-expanded',String(open));
+  if(open){
+    const left=Math.max(0,reactionReady-performance.now());
+    const options=[...panel.querySelectorAll('[data-emoji]')];
+    options.forEach(btn=>btn.disabled=reactionPending||left>0);
+    if(left>0)setTimeout(()=>options.forEach(btn=>btn.disabled=reactionPending),left);
+    if(focus)panel.querySelector('[data-dk=reactions-close]').focus();
+  }else if(focus)button.focus();
+}
 function accept(view,old){
-  if(!view||view.unchanged)return;
+  if(!view)return;
+  if(view.unchanged){syncReactions(view);return}
   if(room?.id===view.id&&view.rev<room.rev)return;
   const first=!room||room.id!==view.id,changed=first||room.rev!==view.rev;
-  if(!changed)return;
-  const was=room?.status,previousRound=room?.game?.round,prev=positions();
+  if(!changed){syncReactions(view);return}
+  const previous=room?.game,was=room?.status,before=positions();
   room=view;clockDeadline=performance.now()/1000+Math.max(0,view.deadline-view.now);
-  batch=null;
+  undoDeadline=performance.now()/1000+Math.max(0,(view.game?.undo_until||0)-view.now);
   if(mode==='friends'&&room.status!=='waiting')mode='room';
   if(!room.game?.hand.includes(selected))selected=null;
+  if(batch&&(!room.game||!batch.every(c=>groupCandidates(room.game,batch[0]).includes(c))||
+      batch.length>room.game.capacity-room.game.table.length))batch=null;
   challenge=challenge&&Boolean(room.game?.challenge.length);
-  message='';paint();
+  if(drag&&(!room.game||!room.game.hand.includes(drag.card)||room.game.round!==drag.round||
+      (drag.moves.length&&!liveDragMoves(drag).length)))cancelDrag();
+  message='';
   const frames=view.frames.filter(f=>f.rev>old);
   if(!frames.length&&room.status==='playing'&&(was==='waiting'||(first&&room.game.events.some(e=>e.kind==='deal')))){
     frames.push({events:[{kind:'deal'}]});
   }
-  motion(frames,prev);
-  if(previousRound&&room.game?.round>previousRound&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
-    host.querySelector('.dk-turn')?.animate([{opacity:.45,transform:'translateY(3px)'},{opacity:1,transform:'none'}],{duration:200});
+  if(was==='playing'&&room.status!=='playing'&&host.querySelector('.dk-felt')&&!reducedMotion()){
+    const gen=generation;host.dataset.revision=String(view.rev);
+    motion(frames,before,before,previous);
+    host.querySelector('.dk-felt').animate([{opacity:1},{opacity:.35}],{delay:90,duration:260,fill:'forwards'});
+    setTimeout(()=>{if(gen===generation)paint()},490);
+  }else{
+    paint();motion(frames,before,positions(),previous);syncReactions(view);
   }
   if(!['playing','waiting'].includes(room.status))clearInterval(timer);
 }
+
 async function syncLoop(id,gen){
   let failures=0;
   while(gen===generation&&!document.hidden&&host&&['room','friends'].includes(mode)){
     const previous=room?.id===id?room.rev:-1;
     const controller=new AbortController();watch=controller;
     try{
-      const view=await api('durak/room/'+id+(previous>=0?'?after='+previous:''),null,controller.signal);
+      const view=await api('durak/room/'+id+(previous>=0?'?after='+previous+'&reactions='+reactionCursor:''),null,controller.signal);
       if(gen!==generation)return;
       accept(view,previous);failures=0;
       if(!room||!['waiting','playing'].includes(room.status))return;
@@ -353,7 +575,7 @@ async function syncLoop(id,gen){
 }
 function openRoom(id,friendView=false){
   const same=room?.id===id;
-  if(!same)room=null;
+  if(!same){room=null;reactionCursor='';reactionReady=0;receivedReactions.clear()}
   change(friendView?'friends':'room');store('room',id);
   timer=setInterval(clockTick,350);
   if(same&&room.status!=='waiting'&&room.status!=='playing'){clearInterval(timer);return}
@@ -367,13 +589,13 @@ async function freshRoom(id){
 async function send(action,fields,after){
   if(pending)return;
   pending=true;message='';
+  lockActions();clockTick();
   const gen=generation;
   const payload={action,...fields};
   const serialized=JSON.stringify(payload);
   let saved;
   try{saved=JSON.parse(stored('pending')||'null')}catch{}
-  const nonce=saved?.serialized===serialized?saved.nonce:
-    Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+  const nonce=saved?.serialized===serialized?saved.nonce:randomNonce();
   store('pending',JSON.stringify({serialized,nonce}));
   try{
     const reply=await api('durak/action',{...payload,nonce});
@@ -381,11 +603,27 @@ async function send(action,fields,after){
     if(gen===generation&&host)await after(reply.id);
   }catch(err){
     if(gen===generation&&host){if(room&&['room','friends'].includes(mode))await freshRoom(room.id).catch(()=>{});errorText(err)}
-  }finally{pending=false}
+  }finally{pending=false;lockActions();clockTick()}
 }
 function move(kind,slot){
   const candidate=room?.game?.moves.find(m=>m.kind===kind&&(m.card===undefined||m.card===selected)&&(slot===undefined||slot===m.slot));
-  if(candidate)send('move',{room:room.id,rev:room.rev,move:candidate},()=>{selected=null;challenge=false;return freshRoom(room.id)});
+  if(candidate)submitMove(candidate);
+}
+async function submitMove(candidate,gesture){
+  if(pending||room?.status!=='playing')return;
+  const rid=room.id,rev=room.rev;
+  if(gesture)landing.set(gesture.card,gesture.el);
+  lastTap=null;selected=null;batch=null;challenge=false;
+  updateTargets();
+  try{await send('move',{room:rid,rev,move:candidate},()=>room?.id===rid&&room.rev>rev?undefined:freshRoom(rid))}
+  finally{
+    if(gesture){
+      landing.delete(gesture.card);
+      if(gesture.b.isConnected)returnCard(gesture,true);
+      else gesture.el.remove();
+    }
+    if(room?.id===rid&&room.rev===rev&&mode==='room')paint();
+  }
 }
 function codeFrom(text){
   const raw=text.trim();
@@ -435,11 +673,12 @@ function confirmLeave(){
 }
 function back(){
   if(!host)return false;
+  if(host.querySelector('#dk-reaction-panel:not([hidden])')){setReactionPanel(false,true);return true}
   if(mode==='friends'&&room){openRoom(room.id);return true}
   if(!['open','mine'].includes(mode)){change('open');readMenu();return true}
   return false;
 }
-function pick(card){
+function pick(card,quick=false){
   if(!room?.game?.hand.includes(card))return;
   if(batch){
     if(batch.includes(card)){
@@ -450,23 +689,37 @@ function pick(card){
     }
     paint();return;
   }
+  const now=performance.now(),options=movesFor(room.game,card);
+  if(quick&&lastTap?.card===card&&lastTap.rev===room.rev&&now-lastTap.at<420&&options.length===1){
+    submitMove(options[0]);return;
+  }
+  lastTap=quick?{card,rev:room.rev,at:now}:null;
   selected=selected===card?null:card;challenge=false;paint();
 }
 function playOn(card,slot){
   if(challenge&&room.game.challenge.includes(card)){
-    send('move',{room:room.id,rev:room.rev,move:{kind:'challenge',card}},()=>{challenge=false;return freshRoom(room.id)});
+    submitMove({kind:'challenge',card});
   }else if(selected!==null)move('defend',slot);
 }
 function click(e){
-  if(drag?.suppress){drag=null;return}
+  if(e.detail>0&&handledPointer&&performance.now()-handledPointer.at<650&&
+      (e.pointerId==null||e.pointerId===-1||e.pointerId===handledPointer.id||
+        (handledPointer.type==='touch'&&e.pointerType==='mouse'))){
+    handledPointer=null;
+    e.preventDefault();e.stopPropagation();return;
+  }
   const b=e.target.closest('button');
   if(!b||!host.contains(b)||b.disabled)return;
+  if(host.classList.contains('dk-game')&&room?.status!=='playing')return;
   if(b.dataset.option){
     const name=b.dataset.option;config[name]=['players','deck'].includes(name)?Number(b.dataset.value):b.dataset.value;
     paint();return;
   }
-  if(b.hasAttribute('data-hand')){pick(Number(b.dataset.hand));return}
-  if(b.hasAttribute('data-on-table')){playOn(Number(b.dataset.onTable),Number(b.closest('[data-slot]').dataset.slot));return}
+  if(b.hasAttribute('data-hand')){pick(Number(b.dataset.hand),e.detail>0);return}
+  if(b.hasAttribute('data-on-table')){
+    if(challenge||!b.classList.contains('cover'))playOn(Number(b.dataset.onTable),Number(b.closest('[data-slot]').dataset.slot));
+    return;
+  }
   const act=b.dataset.dk;
   switch(act){
     case 'open':case 'mine':change(act);readMenu();break;
@@ -490,9 +743,29 @@ function click(e){
     case 'copy':inviteLink(false);break;
     case 'share':inviteLink(true);break;
     case 'leave-confirm':confirmLeave();break;
+    case 'sort':{
+      cancelDrag();
+      const before=positions();sortRank=!sortRank;savePreference('sort',sortRank?'rank':'suit');
+      paint();animateHand(before,positions());break;
+    }
+    case 'reactions':setReactionPanel(b.getAttribute('aria-expanded')!=='true',true);break;
+    case 'reactions-close':setReactionPanel(false,true);break;
+    case 'react':sendReaction(Number(b.dataset.emoji));break;
+    case 'drop':
+      if(batch?.length>1&&b.dataset.kind==='attack')submitMove({kind:'attack_many',cards:[...batch]});
+      else move(b.dataset.kind);
+      break;
+    case 'discard':
+      if(room.game?.last_discard?.length)sheet(`<h2>Последний отбой</h2><div class="dk-history">${room.game.last_discard.map(cardImg).join('')}</div>`);
+      break;
     case 'game-info':{
       const canLeave=!room.game.out.includes(room.own)&&!room.game.forfeit.includes(room.own);
-      sheet(`<h2>Твой стол</h2>${settingsLine(room.config)}${rulesInfo(room.config)}${canLeave?'<button class="secondary" id="dk-surrender">Сдаться</button>':''}`);
+      sheet(`<h2>Твой стол</h2>${settingsLine(room.config)}${rulesInfo(room.config)}
+        <label><input type="checkbox" id="dk-hints" ${hints?'checked':''}> Подсвечивать карты с доступным ходом</label>
+        ${canLeave?'<button class="secondary" id="dk-surrender">Сдаться</button>':''}`);
+      document.getElementById('dk-hints').onchange=e=>{
+        hints=e.target.checked;savePreference('hints',String(hints));paint();
+      };
       const quit=document.getElementById('dk-surrender');
       if(quit)quit.onclick=()=>{document.getElementById('sheet').close();confirmLeave()};break;
     }
@@ -501,13 +774,18 @@ function click(e){
     case 'batch':batch=[selected];paint();break;
     case 'batch-cancel':batch=null;selected=null;paint();break;
     case 'attack-group':
-      if(batch?.length>1)send('move',{room:room.id,rev:room.rev,move:{kind:'attack_many',cards:[...batch]}},()=>freshRoom(room.id));
+      if(batch?.length>1)submitMove({kind:'attack_many',cards:[...batch]});
       break;
-    case 'attack':case 'take':case 'pass':case 'transfer':move(act);break;
+    case 'attack':case 'take':case 'pass':case 'transfer':case 'undo':move(act);break;
     case 'defend':move('defend',Number(b.dataset.slot));break;
   }
 }
 function input(e){
+  if(e.target.id==='dk-react-show'){
+    showReactions=e.target.checked;savePreference('reactions',String(showReactions));
+    if(!showReactions)host.querySelectorAll('.dk-bubble').forEach(b=>b.replaceChildren());
+    return;
+  }
   if(e.target.id==='dk-code'){inviteCode=e.target.value;return}
   if(e.target.id==='dk-private'){config.private=e.target.checked;return}
   if(e.target.id!=='dk-stake')return;
@@ -518,47 +796,142 @@ function input(e){
   const btn=host.querySelector('[data-dk=create]');btn.disabled=!!why(config);btn.textContent='Создать за '+chips(config.stake);
 }
 function submit(e){if(e.target.id==='dk-code-form'){e.preventDefault();previewCode(codeFrom(host.querySelector('#dk-code').value))}}
+function liveDragMoves(gesture){
+  const g=room?.game;
+  if(!g||g.round!==gesture.round||performance.now()/1000>=clockDeadline)return [];
+  return movesFor(g,gesture.card).filter(m=>gesture.moves.some(old=>old.kind===m.kind&&old.slot===m.slot&&
+    (m.kind!=='defend'||old.target===g.table[m.slot]?.[0])));
+}
+function hitTest(x,y,moves){
+  const hit=document.elementFromPoint(x,y),pair=hit?.closest('[data-pair]');
+  if(pair&&hit.closest('.dk-tablecard:not(.cover)')){
+    const move=moves.find(m=>m.kind==='defend'&&m.slot===Number(pair.dataset.slot));
+    return {node:pair,move};
+  }
+  const drop=hit?.closest('[data-drop]');
+  if(drop)return {node:drop,move:moves.find(m=>m.kind===drop.dataset.kind)};
+  return {node:hit?.closest('.dk-pairs')};
+}
+function updateTargets(){
+  const g=room?.game,felt=host?.querySelector('.dk-felt');
+  if(!g||!felt)return;
+  const moves=drag?liveDragMoves(drag):movesFor(g,selected);
+  const slot=host.querySelector('[data-drop]');
+  if(slot){
+    const kind=moves.find(m=>m.kind==='attack'||m.kind==='transfer')?.kind||'';
+    slot.dataset.kind=kind;
+    slot.disabled=!kind;
+    slot.tabIndex=kind?0:-1;
+    slot.setAttribute('aria-hidden',String(!kind));
+    const title=kind==='transfer'?'Перевести':kind==='attack'?(g.table.length?'Подкинуть':'Ход сюда'):'';
+    if(slot.firstChild.textContent!==title)slot.firstChild.textContent=title;
+    if(slot.dataset.dk!=='drop')slot.dataset.dk='drop';
+  }
+  for(const pair of felt.querySelectorAll('[data-pair]')){
+    pair.classList.toggle('can-cover',moves.some(m=>m.kind==='defend'&&m.slot===Number(pair.dataset.slot)));
+  }
+  highlightTarget(moves);
+}
+function highlightTarget(moves){
+  const hit=drag?.moved?hitTest(drag.x,drag.y,moves):null;
+  const previous=host?.querySelector('.is-target');
+  const next=hit?.move?hit.node:null;
+  if(previous!==next){previous?.classList.remove('is-target');next?.classList.add('is-target')}
+}
 function down(e){
-  const b=e.target.closest('[data-hand]');
-  if(b&&!batch&&e.isPrimary&&e.button===0)drag={id:e.pointerId,c:Number(b.dataset.hand),x:e.clientX,y:e.clientY};
+  if(e.isPrimary)handledPointer=null;
+  const b=e.target.closest('[data-hand]'),g=room?.game;
+  if(!g||!b||drag||challenge||!e.isPrimary||e.button!==0)return;
+  const card=Number(b.dataset.hand),at=box(b);
+  const el=document.createElement('i');
+  el.className='dk-flight dk-drag';
+  el.style.cssText=`left:${at.x}px;top:${at.y}px;width:${at.w}px;height:${at.h}px`;
+  el.innerHTML=cardImg(card);
+  el.setAttribute('aria-hidden','true');
+  const moves=movesFor(g,card).map(m=>({...m,target:g.table[m.slot]?.[0]}));
+  drag={id:e.pointerId,card,b,el,moves,round:g.round,x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY};
+  host.append(el);b.classList.add('is-held');
+  host.setPointerCapture(e.pointerId);
+  e.preventDefault();
+  updateTargets();
 }
 function pointer(e){
-  if(!drag||e.pointerId!==drag.id||drag.suppress)return;
-  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
-  const sideTray=matchMedia('(orientation:landscape) and (max-height:560px)').matches;
-  const toward=sideTray?-dx:-dy,across=sideTray?Math.abs(dy):Math.abs(dx);
-  if(!drag.el&&(toward<9||toward<across))return;
-  if(!drag.el){
-    drag.el=document.createElement('i');drag.el.className='dk-flight dk-drag';
-    drag.el.style.backgroundImage=`url("${face(drag.c)}")`;host.append(drag.el);
-    host.setPointerCapture?.(e.pointerId);
-  }
-  drag.el.style.left=e.clientX+'px';drag.el.style.top=e.clientY+'px';
+  if(!drag||e.pointerId!==drag.id)return;
+  drag.x=e.clientX;drag.y=e.clientY;
+  const x=drag.x-drag.startX,y=drag.y-drag.startY;
+  if(!drag.moved&&Math.hypot(x,y)<7)return;
+  drag.moved=true;
+  drag.el.style.transform=`translate3d(${x}px,${y}px,0)`;
+  highlightTarget(liveDragMoves(drag));
+}
+function release(gesture){
+  drag=null;
+  if(host?.hasPointerCapture(gesture.id))host.releasePointerCapture(gesture.id);
+  updateTargets();
+}
+function returnCard(gesture,rejected=false){
+  const {b,el}=gesture;
+  const reveal=()=>{
+    if(drag?.b!==b&&!landing.has(gesture.card))b.classList.remove('is-held');
+    el.remove();
+  };
+  if(!b.isConnected||reducedMotion()){reveal();return}
+  const a=box(el),to=box(b);
+  el.style.left=a.x+'px';el.style.top=a.y+'px';el.style.transform='none';
+  el.classList.add('is-returning');
+  const animation=el.animate([
+    {transform:'none'},
+    {transform:`translate(${to.x-a.x}px,${to.y-a.y}px)`},
+  ],{duration:155,easing:'cubic-bezier(.22,.72,.28,1)'});
+  animation.onfinish=animation.oncancel=reveal;
+  if(rejected)el.firstElementChild.classList.add('is-rejected');
+}
+function cancelDrag(){
+  if(!drag)return;
+  const gesture=drag;
+  release(gesture);returnCard(gesture);
 }
 function up(e){
   if(!drag||e.pointerId!==drag.id)return;
-  if(!drag.el||e.type==='pointercancel'){drag.el?.remove();drag=null;return}
-  drag.el.remove();
-  const hit=document.elementFromPoint(e.clientX,e.clientY);
-  selected=drag.c;drag={suppress:true};setTimeout(()=>{if(drag?.suppress)drag=null},100);
-  if(!hit?.closest('.dk-felt')){paint();return}
-  const slot=hit.closest('[data-slot]');
-  if(slot)move('defend',Number(slot.dataset.slot));
-  else if(room.game.moves.some(m=>m.card===selected&&m.kind==='attack'))move('attack');
-  else if(room.game.moves.some(m=>m.card===selected&&m.kind==='transfer'))move('transfer');
-  paint();
+  const gesture=drag;
+  if(e.type!=='pointerup'){cancelDrag();return}
+  handledPointer={id:e.pointerId,type:e.pointerType,at:performance.now()};
+  e.preventDefault();
+  if(!gesture.moved&&Math.hypot(e.clientX-gesture.startX,e.clientY-gesture.startY)>=7)pointer(e);
+  if(!gesture.moved){
+    release(gesture);gesture.el.remove();gesture.b.classList.remove('is-held');
+    pick(gesture.card,true);return;
+  }
+  const {node,move}=hitTest(e.clientX,e.clientY,liveDragMoves(gesture));
+  release(gesture);
+  if(!move||pending){
+    returnCard(gesture,Boolean(node));
+    return;
+  }
+  if(batch&&move.kind==='attack'&&batch.length>1&&batch.includes(gesture.card)){
+    submitMove({kind:'attack_many',cards:[...batch]},gesture);
+  }else submitMove(move,gesture);
 }
+
 function visibility(){
   if(!host)return;
-  stopNetwork();
+  cancelDrag();stopNetwork();
   if(document.hidden)return;
   if(room&&['room','friends'].includes(mode)){openRoom(room.id,mode==='friends')}
   else if(['open','mine','create','preview'].includes(mode))readMenu();
 }
+function keydown(e){
+  if(e.key==='Escape'&&host.querySelector('#dk-reaction-panel:not([hidden])')){
+    e.stopPropagation();setReactionPanel(false,true);
+  }
+}
 function mount(root){
   if(!root||host===root)return;
   host=root;mode='open';list=null;room=null;friends=null;message='';
-  for(const [type,fn] of Object.entries({click,input,submit,pointerdown:down,pointermove:pointer,pointerup:up,pointercancel:up}))host.addEventListener(type,fn);
+  receivedReactions.clear();reactionCursor='';reactionReady=0;
+  sortRank=storedPreference('sort')==='rank';
+  showReactions=storedPreference('reactions')!=='false';hints=storedPreference('hints')!=='false';
+  for(const [type,fn] of Object.entries({click,input,submit,keydown,pointerdown:down,pointermove:pointer,pointerup:up,pointercancel:up,lostpointercapture:up}))host.addEventListener(type,fn);
   document.addEventListener('visibilitychange',visibility);
   const param=telegramStartParam(),linked=/^nora_d_([\w-]{22})$/.exec(param);
   const invited=durakInboxRoom||/^nora_i_([a-f0-9]{16})$/.exec(param)?.[1];
@@ -579,7 +952,9 @@ function mount(root){
 }
 function unmount(){
   if(!host)return;
-  stopNetwork();drag?.el?.remove();drag=null;
+  stopNetwork();
+  if(drag){const gesture=drag;release(gesture);gesture.el.remove()}
+  landing.forEach(el=>el.remove());landing.clear();
   document.removeEventListener('visibilitychange',visibility);
   document.body.classList.remove('dk-playing');host=null;
 }

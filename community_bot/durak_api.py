@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
 import time
 import weakref
+from collections import deque
 
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +16,10 @@ from aiohttp import web
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
 from community_bot.friends_api import deliver_notice
+
+REACTION_DURATION = 2.7
+REACTION_COOLDOWN = 2.8
+REACTION_RETRY_WINDOW = 60
 
 
 def _summary(row):
@@ -74,11 +80,16 @@ async def snapshot(db, rid, uid, after=-1):
         invited = []
         if r["status"] == "waiting":
             invited = [x["uid"] for x in await rooms.rows(conn, "SELECT uid FROM durak_invites WHERE room=?", (rid,))]
+        now = time.time()
+        game = rules.public_view(g, own["seat"]) if g else None
+        if game and rooms.can_undo(r, own["seat"], now):
+            game["moves"].append({"kind": "undo"})
+            game["undo_until"] = min(g["undo"]["deadline"], r["deadline"])
         return {"id": rid, "host": r["host"], "config": r["config"], "status": r["status"], "rev": r["rev"],
-                "deadline": r["deadline"], "now": time.time(), "own": own["seat"],
+                "deadline": r["deadline"], "now": now, "own": own["seat"],
                 "members": public, "invited": invited,
                 "code": r["code"] if r["status"] == "waiting" else None, "result": r["result"],
-                "game": rules.public_view(g, own["seat"]) if g else None,
+                "game": game,
                 "frames": [f for f in r["frames"] if f["rev"] > after] if after >= 0 else []}
 
 
@@ -89,6 +100,8 @@ class Updates:
         self.next_due = 0
         self.cleanup_at = 0
         self.watchers = {}
+        self.reactions = {}
+        self.reaction_cleanup_at = 0
 
     def event(self, rid):
         event = self.events.get(rid)
@@ -96,11 +109,41 @@ class Updates:
             event = self.events[rid] = asyncio.Event()
         return event
 
-    def notify(self, rid):
+    def wake(self, rid):
         event = self.events.pop(rid, None)
         if event:
             event.set()
+
+    def notify(self, rid):
+        self.wake(rid)
         self.next_due = 0
+
+    def reaction_view(self, rid, now):
+        events = self.reactions.get(rid)
+        return {
+            "reaction_cursor": events[-1][1]["reaction_id"] if events else "",
+            "reactions": [event for _, event in (events or ()) if event["expires"] > now],
+            "reaction_now": now,
+        }
+
+    def react(self, rid, uid, emoji, nonce, now):
+        events = self.reactions.setdefault(rid, deque())
+        while events and events[0][1]["timestamp"] <= now - REACTION_RETRY_WINDOW:
+            events.popleft()
+        for previous_nonce, event in reversed(events):
+            if event["sender_id"] != uid:
+                continue
+            if previous_nonce == nonce:
+                if event["emoji_id"] != emoji:
+                    raise rooms.Conflict("Эта реакция уже отправлена")
+                return event
+        if any(e["sender_id"] == uid and e["timestamp"] > now - REACTION_COOLDOWN for _, e in events):
+            return None
+        event = {"reaction_id": secrets.token_hex(8), "room_id": rid, "sender_id": uid, "emoji_id": emoji,
+                 "timestamp": now, "expires": now + REACTION_DURATION}
+        events.append((nonce, event))
+        self.wake(rid)
+        return event
 
     async def restore(self, db, now):
         # A deployment or outage cannot cost a disconnected player a turn.
@@ -116,6 +159,10 @@ class Updates:
 
     async def tick(self, db, now=None):
         now = time.time() if now is None else now
+        if now >= self.reaction_cleanup_at:
+            self.reactions = {rid: events for rid, events in self.reactions.items()
+                              if events[-1][1]["timestamp"] > now - REACTION_RETRY_WINDOW}
+            self.reaction_cleanup_at = now + REACTION_RETRY_WINDOW
         if now >= self.cleanup_at:
             await db.execute("DELETE FROM durak_rooms WHERE status IN ('finished','cancelled') AND updated<?",
                              (now - rooms.HISTORY_TTL,))
@@ -168,9 +215,13 @@ async def table(request):
     after = int(request.query.get("after", request.query.get("since", -1)))
     db, updates = request.app["db"], request.app["durak_updates"]
     event = updates.event(rid)
+    cursor = request.query.get("reactions")
     view = await snapshot(db, rid, uid, after)
+    feed = updates.reaction_view(rid, time.time())
     if "after" not in request.query or after != view["rev"] or view["status"] not in rooms.LIVE:
-        return web.json_response(view)
+        return web.json_response({**view, **feed})
+    if cursor is not None and feed["reaction_cursor"] != cursor:
+        return web.json_response({"rev": after, "unchanged": True, **feed})
     # One pending watch per authenticated tab/user; replacing a background tab cannot grow watchers indefinitely.
     slot = (uid, rid)
     if slot in updates.watchers:
@@ -182,9 +233,10 @@ async def table(request):
         except TimeoutError:
             pass
         latest = await snapshot(db, rid, uid, after)
+        feed = updates.reaction_view(rid, time.time())
         if latest["rev"] == after:
-            return web.json_response({"rev": after, "unchanged": True})
-        return web.json_response(latest)
+            return web.json_response({"rev": after, "unchanged": True, **feed})
+        return web.json_response({**latest, **feed})
     finally:
         updates.watchers.pop(slot, None)
 
@@ -207,6 +259,8 @@ async def action(request):
         raise ValueError("Слишком большая команда")
     body = await request.json()
     db, uid = request.app["db"], request["actor"]["id"]
+    if isinstance(body, dict) and body.get("action") == "reaction":
+        return await reaction(request, db, uid, body)
     try:
         rid, notice = await rooms.command(db, uid, body)
     except rooms.Conflict as exc:
@@ -228,6 +282,28 @@ async def action(request):
                 ]])
         await deliver_notice(bot, db, *notice, reply_markup=markup)
     return web.json_response({"id": rid})
+
+
+async def reaction(request, db, uid, body):
+    rid, emoji, nonce = body.get("room"), body.get("emoji_id"), body.get("nonce")
+    if (body.keys() != {"action", "room", "emoji_id", "nonce"}
+            or not isinstance(rid, str) or not re.fullmatch(r"[a-f0-9]{16}", rid)
+            or type(emoji) is not int or not 1 <= emoji <= 25
+            or not isinstance(nonce, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{16,64}", nonce)):
+        raise ValueError("Выбери эмоцию за своим столом")
+    member = await db.fetchone(
+        "SELECT 1 FROM durak_members m JOIN durak_rooms r ON r.id=m.room "
+        "WHERE m.room=? AND m.uid=? AND r.status='playing'", (rid, uid))
+    if not member:
+        return web.json_response({"error": "Ты не участвуешь в текущей партии"}, status=403)
+    now = time.time()
+    try:
+        event = request.app["durak_updates"].react(rid, uid, emoji, nonce, now)
+    except rooms.Conflict as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    if event is None:
+        return web.json_response({"error": "Подожди перед следующей эмоцией"}, status=429)
+    return web.json_response({"reactions": [event], "reaction_now": now})
 
 
 def register(app):

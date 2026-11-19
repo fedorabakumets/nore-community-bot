@@ -155,7 +155,7 @@ def _remember(game, seat, move, illegal):
     game["journal"].append({"seat": seat, **move, "illegal": illegal, "before": before})
 
 
-def _rewind(game, index):
+def rewind(game, index):
     entries = game["journal"][index:]
     for entry in reversed(entries):
         if entry["kind"] == "defend":
@@ -184,7 +184,7 @@ def _challenge(game, seat, card):
     if marked not in game["marked"]:
         game["marked"].append(marked)
     if illegal:
-        _rewind(game, index)
+        rewind(game, index)
     game["events"].append({"kind": "challenge", "seat": seat, "marked": marked, "upheld": illegal})
 
 
@@ -285,6 +285,7 @@ def close_round(game):
         game["events"].append({"kind": "collect", "seat": defender, "cards": cards})
     else:
         game["discard"].extend(cards)
+        game["last_discard"] = cards
         game["first_beaten"] = True
         game["events"].append({"kind": "discard", "cards": cards})
     game["table"] = []
@@ -313,7 +314,7 @@ def forfeit(game, seat, reason):
     # Abandon the interrupted bout. Return each card to its original owner before
     # removing the forfeiting hand, so a third player's cards cannot disappear.
     game["events"] = [{"kind": reason, "seat": seat}]
-    _rewind(game, 0)
+    rewind(game, 0)
     game["discard"].extend(game["hands"][seat])
     game["hands"][seat] = []
     game["forfeit"].append(seat)
@@ -329,7 +330,8 @@ def public_view(game, seat):
     return {
         "hand": game["hands"][seat], "counts": [len(h) for h in game["hands"]],
         "stock": len(game["deck"]), "trump": game["trump"], "bottom": game["deck"][-1] if game["deck"] else None,
-        "discard": len(game["discard"]), "table": game["table"], "round": game["round"], "capacity": _cap(game),
+        "discard": len(game["discard"]), "last_discard": game.get("last_discard", []),
+        "table": game["table"], "round": game["round"], "capacity": _cap(game),
         "attacker": game["attacker"], "defender": game["defender"], "turn": turn(game),
         "phase": game["phase"], "taking": game["taking"], "out": game["out"], "forfeit": game["forfeit"],
         "marked": game["marked"], "events": game["events"], "moves": moves(game, seat), "result": game["result"],

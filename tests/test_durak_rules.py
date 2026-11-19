@@ -105,6 +105,23 @@ def test_transfer_capacity_and_no_transfer_after_defence():
     assert not any(m["kind"] == "transfer" for m in game.moves(g, 1))
 
 
+@pytest.mark.parametrize("players", [3, 4, 5, 6])
+def test_transfer_chain_moves_defender_around_the_table(players):
+    fillers = iter([c for c in range(52) if c not in range(16, 20)])
+    hands = [[next(fillers) for _ in range(5)] for _ in range(players)]
+    for seat, card in enumerate(range(16, 16 + min(players, 4))):
+        hands[seat].append(card)
+    g = position(hands, variant="transfer", stock=list(fillers))
+    play(g, 0, "attack", 16)
+    for seat in range(1, min(players, 4)):
+        assert g["defender"] == seat
+        play(g, seat, "transfer", 16 + seat)
+        assert all(defense is None for _, defense in g["table"])
+    assert g["defender"] == min(players, 4) % players
+    assert not any(m["kind"] == "transfer" for m in game.moves(g, g["defender"]))
+    assert_cards(g, [c for c in range(52) if players >= 4 or c != 19])
+
+
 def test_neighbours_take_throw_and_first_successful_bout_limit():
     g = position([[16, 17, 40], [24, 25, 26, 27, 28, 29], [18, 41], [19, 42]], scope="neighbours")
     play(g, 0, "attack", 16)
@@ -169,6 +186,11 @@ def test_refill_order_and_view_secrecy():
     assert v["hand"] == g["hands"][0] and v["counts"] == [6, 1, 3]
     assert not {"deck", "hands", "journal"} & v.keys()
     assert all("cards" not in e for e in v["events"] if e["kind"] == "draw")
+    assert v["last_discard"] == [16, 20]
+    game.forfeit(g, 2, "surrender")
+    assert game.public_view(g, 0)["last_discard"] == [16, 20]
+    del g["last_discard"]
+    assert game.public_view(g, 0)["last_discard"] == []
 
 
 def test_multi_card_opening_atomic_and_each_card_can_be_challenged():

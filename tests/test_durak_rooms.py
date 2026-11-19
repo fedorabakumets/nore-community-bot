@@ -262,6 +262,123 @@ async def test_signed_http_uses_only_actor_and_rejects_unsigned(db):
     assert await balance(db, 1) == 900 and await balance(db, 2) == 1000
 
 
+@pytest.mark.parametrize("n", [2, 3, 6])
+async def test_reactions_wake_members_without_revising_the_room(db, n, monkeypatch):
+    rid = await run(db, 1, "create", config={"players": n, "deck": 52})
+    for uid in range(2, n + 1):
+        await run(db, uid, "join", room=rid)
+    before = await api.snapshot(db, rid, 1)
+    ledger = await amounts(db, rid)
+    now = [time.time()]
+    monkeypatch.setattr(api, "time", SimpleNamespace(time=lambda: now[0]))
+    app = {"db": db, "durak_updates": api.Updates()}
+    updates = app["durak_updates"]
+    body = command("reaction", room=rid, emoji_id=9)
+    subscribed = asyncio.Event()
+    expected_watchers = n
+
+    class TrackingEvent(asyncio.Event):
+        async def wait(self):
+            if len(updates.watchers) == expected_watchers:
+                subscribed.set()
+            return await super().wait()
+
+    event = updates.events[rid] = TrackingEvent()
+
+    class Request(dict):
+        content_length = None
+        match_info = {"rid": rid}
+
+        def __init__(self, uid, payload=body, **query):
+            super().__init__(actor={"id": uid})
+            self.app, self.payload, self.query = app, payload, query
+
+        async def json(self):
+            return self.payload
+
+    watchers = [asyncio.create_task(api.table(Request(uid, after=str(before["rev"]), reactions="")))
+                for uid in range(1, n + 1)]
+    try:
+        await asyncio.wait_for(subscribed.wait(), timeout=4)
+        assert (await api.action(Request(8))).status == 403
+        with pytest.raises(ValueError):
+            await api.action(Request(1, body | {"sender_id": 8}))
+        with pytest.raises(ValueError):
+            await api.action(Request(1, body | {"emoji_id": True}))
+        with pytest.raises(ValueError):
+            await api.action(Request(1, body | {"emoji_id": 26}))
+        first = json.loads((await api.action(Request(1))).body)["reactions"][0]
+        assert event.is_set()
+        views = await asyncio.wait_for(asyncio.gather(*watchers), timeout=4)
+        assert all(json.loads(r.body)["reactions"] == [first] for r in views)
+    finally:
+        for task in watchers:
+            task.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
+    assert first["sender_id"] == 1
+    # An open pre-release Mini App has no reaction cursor. It must still long-poll.
+    subscribed.clear()
+    expected_watchers = 1
+    legacy_event = updates.events[rid] = TrackingEvent()
+    legacy = asyncio.create_task(api.table(Request(1, after=str(before["rev"]))))
+    try:
+        await asyncio.wait_for(subscribed.wait(), timeout=4)
+        assert not legacy.done()
+        legacy_event.set()
+        await asyncio.wait_for(legacy, timeout=4)
+    finally:
+        legacy.cancel()
+        await asyncio.gather(legacy, return_exceptions=True)
+    assert json.loads((await api.action(Request(1))).body)["reactions"] == [first]
+    assert (await api.action(Request(1, body | {"emoji_id": 1}))).status == 409
+    distinct = command("reaction", room=rid, emoji_id=2)
+    assert (await api.action(Request(1, distinct))).status == 429
+    await api.action(Request(2, distinct))
+    reconnect = json.loads((await api.table(Request(n))).body)
+    assert [e["sender_id"] for e in reconnect["reactions"]] == [1, 2]
+    now[0] += 3
+    assert not json.loads((await api.table(Request(n))).body)["reactions"]
+    assert json.loads((await api.action(Request(1))).body)["reactions"] == [first]
+    assert (await api.action(Request(1, distinct))).status == 200
+    after = await api.snapshot(db, rid, 1)
+    assert (after["deadline"], after["rev"], after["game"]) == (before["deadline"], before["rev"], before["game"])
+    assert await amounts(db, rid) == ledger
+
+
+async def test_undo_uses_latest_revision_and_original_clock(db, monkeypatch):
+    from random import Random
+
+    deal = rules.deal
+    monkeypatch.setattr(rules, "deal", lambda config: deal(config, rng=Random(0)))
+    rid = await run(db, 1, "create", config={"players": 3, "variant": "transfer"})
+    for uid in (2, 3):
+        await run(db, uid, "join", room=rid)
+    before = await api.snapshot(db, rid, 1)
+    attack, transfer, undo = {"kind": "attack", "card": 16}, {"kind": "transfer", "card": 17}, {"kind": "undo"}
+    await run(db, 1, "move", room=rid, rev=before["rev"], move=attack)
+    first = await api.snapshot(db, rid, 1)
+    assert undo in first["game"]["moves"]
+    assert undo not in (await api.snapshot(db, rid, 2))["game"]["moves"]
+    with pytest.raises(rooms.Conflict):
+        await run(db, 2, "move", room=rid, rev=first["rev"], move=undo)
+    await run(db, 2, "move", room=rid, rev=first["rev"], move=transfer)
+    second = await api.snapshot(db, rid, 2)
+    assert second["game"]["defender"] == 2
+    race = command("move", room=rid, rev=first["rev"], move=undo)
+    with pytest.raises(rooms.Conflict):
+        await rooms.command(db, 1, race)
+    rollback = command("move", room=rid, rev=second["rev"], move=undo)
+    await rooms.command(db, 2, rollback)
+    await rooms.command(db, 2, rollback)
+    restored = await api.snapshot(db, rid, 2)
+    assert restored["rev"] == second["rev"] + 1
+    assert restored["game"]["table"] == [[16, None]]
+    assert restored["game"]["defender"] == 1 and 17 in restored["game"]["hand"]
+    assert restored["deadline"] == first["deadline"]
+    assert undo not in restored["game"]["moves"]
+    assert await amounts_as_list(db, rid) == [-100, -100, -100]
+
+
 async def test_backup_before_additive_schema_and_restore(db):
     async with db.connect() as conn:
         for name in ("durak_commands", "durak_invites", "durak_members", "durak_rooms"):

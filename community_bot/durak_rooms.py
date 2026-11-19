@@ -200,6 +200,33 @@ async def _update_turn(conn, r, now, previous, previous_phase):
         r["deadline"] = min(r["expires"], now + rules.SECONDS[r["config"]["speed"]])
 
 
+def can_undo(r, seat, now):
+    entry = r["game"].get("undo") if r["status"] == "playing" else None
+    return bool(entry and entry["rev"] == r["rev"] and entry["seat"] == seat
+                and now < min(entry["deadline"], r["deadline"]))
+
+
+async def _play(conn, r, seat, move, now):
+    g = r["game"]
+    if move == {"kind": "undo"}:
+        if not can_undo(r, seat, now):
+            raise Conflict("Этот ход уже нельзя отменить")
+        entry = g.pop("undo")
+        cards = [e["card"] for e in g["journal"][entry["index"]:]]
+        rules.rewind(g, entry["index"])
+        r["deadline"] = min(entry["deadline"], r["deadline"])
+        g["events"] = [{"kind": "undo", "seat": seat, "cards": cards}]
+        return
+    g.pop("undo", None)
+    previous, phase = rules.turn(g), g["phase"]
+    deadline, index = r["deadline"], len(g["journal"])
+    rules.play(g, seat, move)
+    await _update_turn(conn, r, now, previous, phase)
+    if (g["phase"] not in ("finished", "review") and g["events"]
+            and all(e["kind"] in ("attack", "defend", "transfer") for e in g["events"])):
+        g["undo"] = {"rev": r["rev"] + 1, "seat": seat, "deadline": deadline, "index": index}
+
+
 async def _leave(conn, r, uid, m, now, *, cancel=False):
     if r["status"] == "waiting":
         if uid == r["host"]:
@@ -370,10 +397,7 @@ async def command(db, uid, body, *, now=None):
                     if action != "move":
                         await _leave(conn, r, uid, m, now, cancel=action == "cancel")
                     elif r["status"] == "playing":
-                        g = r["game"]
-                        previous, phase = rules.turn(g), g["phase"]
-                        rules.play(g, m["seat"], body.get("move"))
-                        await _update_turn(conn, r, now, previous, phase)
+                        await _play(conn, r, m["seat"], body.get("move"), now)
                     else:
                         raise Conflict("Партия ещё не началась или уже завершена")
                 else:
