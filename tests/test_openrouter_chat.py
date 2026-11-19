@@ -1,21 +1,26 @@
 import asyncio
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from aiogram import Bot
+from aiogram import Bot, Dispatcher, Router
 from aiogram.methods import DeleteMessage, SendMessage, SendRichMessage
-from aiogram.types import ChatJoinRequest, MessageOriginHiddenUser, Update
+from aiogram.types import ChatJoinRequest, MessageOriginHiddenUser, Update, VideoNote, Voice
 from test_nora_commands_release import message
 from test_studio_rsvp import TelegramSession, callback
 
-from community_bot import openrouter_chat
+from community_bot import nora_speech, openrouter_chat
 from community_bot.command_registry import apply_rows, restore_defaults
 from community_bot.config import load_settings
 from community_bot.database import Database
+from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephemeral
 from community_bot.main import create_dispatcher
+from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware
+from community_bot.reply_rich import ReplyRichMiddleware
+from community_bot.routers import nora
 from community_bot.states import ApplicationForm
 
 
@@ -91,6 +96,117 @@ async def test_release_answer_receives_public_details_and_dates(db, settings, mo
     assert "№22 · 2026-11-18 · В Норе кино" in system
     assert "Выбрать видео" in system
     assert "объекты префикса" not in system and "передаёт по каналу лобби" not in system
+
+
+@pytest.mark.parametrize("private, fallback", [(False, False), (True, False), (True, True)])
+async def test_speech_context_quotes_media_and_closes_even_with_a_private_panel(
+    db, settings, monkeypatch, private, fallback,
+):
+    uid = settings.owner_id
+    chat_id = uid if private else settings.community_chat_id
+    await db.ensure_user(uid)
+    await db.add_cookies(uid, 20, "test")
+    assert (await db.purchase_pet(uid, "cat", "Кот", 10))[0]
+    if private:
+        await db.set_bot_state(f"private_rich_panel:{uid}", '{"message_id": 444}')
+    pending = asyncio.Event()
+
+    async def wait_for_expiry(sent, delay):
+        if "уровне" not in (sent.text or ""):
+            await pending.wait()
+
+    expire = AsyncMock(side_effect=wait_for_expiry)
+    monkeypatch.setattr("community_bot.ephemeral.delete_later", expire)
+    answers = AsyncMock(return_value=("Встретимся в семь. <Текст записи>", "В семь."))
+    dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
+    dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
+    isolated = Router()
+    isolated.message.handlers.extend(nora.assistant_router.message.handlers)
+    isolated.callback_query.handlers.extend(nora.router.callback_query.handlers)
+    dispatcher.include_router(isolated)
+    assistant = openrouter_chat.OpenRouterChat(db, settings)
+    monkeypatch.setattr(assistant, "answer_speech", answers)
+    dispatcher["openrouter_chat"] = assistant
+    session = TelegramSession()
+    session.fail = lambda method: fallback and isinstance(method, SendRichMessage)
+    async with Bot(settings.bot_token, session=session) as bot:
+        bot.community_db = db
+        bot.session.middleware.register(PrivateRichMiddleware())
+        patch_bot_ephemeral(bot)
+        bot.session.middleware.register(ReplyRichMiddleware())
+        media = (
+            {"voice": Voice(file_id="v", file_unique_id="v", duration=9)}
+            if private else {"video_note": VideoNote(file_id="c", file_unique_id="c", duration=9, length=240)}
+        )
+        source = message(None, uid=uid if private else 8, chat_id=chat_id, **media).model_copy(
+            update={"message_id": 42},
+        )
+        topic = {} if private else {"is_topic_message": True, "message_thread_id": 12}
+        event = message("Нора, во сколько встреча?", uid=uid, chat_id=chat_id, reply_to_message=source, **topic)
+        await dispatcher.feed_update(bot, Update(update_id=1, message=event), db=db, settings=settings)
+        answers.assert_not_awaited()
+        assert any("2 уровне" in str(call) for call in session.calls)
+        await db.execute("UPDATE pet_development SET stage=5, level=2 WHERE user_id=?", (uid,))
+        session.calls.clear()
+        await dispatcher.feed_update(bot, Update(update_id=2, message=event), db=db, settings=settings)
+        answers.assert_awaited_once()
+        assert answers.await_args.args[0].message_id == source.message_id
+        assert answers.await_args.args[1:] == ("во сколько встреча?", uid)
+        rich = next(call for call in session.calls if isinstance(call, SendRichMessage))
+        assert rich.reply_parameters.message_id == source.message_id
+        assert rich.message_thread_id == topic.get("message_thread_id")
+        answer, details, buttons = rich.rich_message.blocks
+        assert answer.text == "В семь."
+        assert details.type == "details" and "<Текст записи>" in details.blocks[0].text
+        assert buttons.buttons[0].text == "❌"
+        action = buttons.buttons[0].callback_data
+        markup = None
+        if fallback:
+            plain = next(call for call in session.calls if isinstance(call, SendMessage))
+            assert plain.reply_parameters.message_id == source.message_id
+            assert "<blockquote expandable>" in plain.text and "&lt;Текст записи&gt;" in plain.text
+            markup = plain.reply_markup
+        await asyncio.sleep(0)
+        assert expire.await_args.args[1] == 120
+        if not private:
+            other = callback(action, user_id=8, chat_id=chat_id, message_id=session.message_id, markup=markup)
+            await dispatcher.feed_update(bot, Update(update_id=3, callback_query=other), db=db, settings=settings)
+            assert not any(isinstance(call, DeleteMessage) for call in session.calls)
+        close = callback(action, user_id=uid, chat_id=chat_id, message_id=session.message_id, markup=markup)
+        await dispatcher.feed_update(bot, Update(update_id=4, callback_query=close), db=db, settings=settings)
+        assert any(isinstance(call, DeleteMessage) and call.message_id == close.message.message_id
+                   for call in session.calls)
+        pending.set()
+    await dispatcher.storage.close()
+
+
+async def test_speech_translation_uses_the_same_daily_limit(db, settings, clock, monkeypatch):
+    chat = openrouter_chat.OpenRouterChat(db, replace(settings, groq_api_key="test"))
+    recognize = AsyncMock(return_value=("Seven o’clock.", False))
+    monkeypatch.setattr(openrouter_chat, "transcribe", recognize)
+    answer = AsyncMock(return_value='{"translation":"В семь часов.","answer":"В семь."}')
+    monkeypatch.setattr(chat, "_request_history", answer)
+    source = message(None, voice=Voice(file_id="v", file_unique_id="v", duration=8))
+    for _ in range(5):
+        assert await chat.answer_speech(source, "Во сколько?", 7) == ("В семь часов.", "В семь.")
+        clock.now += 6
+    assert "лимит" in await chat.answer("А теперь шутку", 7)
+    assert recognize.await_count == 5
+    assert "Seven o’clock." in answer.await_args.args[1]
+
+
+async def test_speech_download_is_bounded_before_contacting_provider(monkeypatch):
+    download = AsyncMock()
+    monkeypatch.setattr(Bot, "download", download)
+    async with Bot("123456:test") as bot:
+        source = message(
+            None, voice=Voice(file_id="v", file_unique_id="v", duration=nora_speech.MAX_SECONDS + 1),
+        ).as_(bot)
+        with pytest.raises(nora_speech.SpeechError, match="до 3 минут"):
+            await nora_speech.transcribe(source, groq_key="test", gemini_key="")
+        download.assert_not_awaited()
 
 
 @pytest.mark.parametrize("model", ["openrouter/auto", "vendor/model", "vendor/model:free"])

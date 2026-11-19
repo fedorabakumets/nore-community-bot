@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import re
+from html import escape
 
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNotFound
 from aiogram.filters import Filter, StateFilter
-from aiogram.types import LinkPreviewOptions, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichBlockButtons,
+    InputRichBlockDetails,
+    InputRichBlockParagraph,
+    InputRichMessage,
+    LinkPreviewOptions,
+    Message,
+    ReplyParameters,
+    RichMessageButton,
+)
 
 from community_bot.aliases import message_trigger, parse_trigger
 from community_bot.chat_memory import retention_notice
@@ -13,17 +28,21 @@ from community_bot.command_registry import get_command, nora_enabled
 from community_bot.community_facts import community_fact
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.ephemeral import delete_user_command, reply_ttl
+from community_bot.ephemeral import delete_user_command, expire_reply, reply_ttl
 from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_address
 from community_bot.nora_knowledge import is_nora_topic
+from community_bot.nora_speech import CLOSE_SPEECH_CARD
 from community_bot.openrouter_chat import OpenRouterChat, archive_question
 from community_bot.pet_progress import level
 from community_bot.pet_video import PetVideoQueue, video_command
+from community_bot.private_rich import standalone_rich_message
+from community_bot.reply_rich import bot_publication
 
 router = Router(name="nora")
 assistant_router = Router(name="nora_assistant")
 
 _NORA = re.compile(r"(?i)^\s*нора\b")
+_speech_cards: dict[tuple[int, int], tuple[int, asyncio.Task[None]]] = {}
 
 
 async def assistant_access_error(user_id: int, db: Database | None) -> str | None:
@@ -46,6 +65,76 @@ def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
 
     note = retention_notice(prompt, datetime.now(ZoneInfo(settings.timezone))) if archive_question(prompt) else None
     return f"{note}\n\n{answer}" if note else answer
+
+
+async def _respond_to_speech(
+    message: Message, source: Message, chat: OpenRouterChat, prompt: str, db: Database | None,
+) -> None:
+    assert message.from_user is not None
+    user_id = message.from_user.id
+    result = await assistant_access_error(user_id, db)
+    if result is None:
+        result = await chat.answer_speech(source, prompt, user_id)
+    with standalone_rich_message(), reply_ttl(None), bot_publication():
+        if isinstance(result, str):
+            sent = await message.reply(result, parse_mode=None)
+        else:
+            transcript, answer = result
+            summary = "Текст голосового" if source.voice else "Текст кружка"
+            blocks = [InputRichBlockParagraph(text=answer)] if answer else []
+            dismiss = RichMessageButton(text="❌", style="link", callback_data=CLOSE_SPEECH_CARD)
+            rich = InputRichMessage(blocks=[
+                *blocks,
+                InputRichBlockDetails(summary=summary, blocks=[InputRichBlockParagraph(text=transcript)]),
+                InputRichBlockButtons(buttons=[dismiss]),
+            ], skip_entity_detection=True)
+            options = {
+                "message_thread_id": message.message_thread_id if message.is_topic_message else None,
+                "reply_parameters": ReplyParameters(message_id=source.message_id, allow_sending_without_reply=True),
+            }
+            try:
+                sent = await message.bot.send_rich_message(message.chat.id, rich_message=rich, **options)
+            except (TelegramBadRequest, TelegramNotFound):
+                prefix = escape(answer) + "\n\n" if answer else ""
+                # Telegram measures text in UTF-16 units. Keep room for the answer and expandable quote.
+                remaining = 3900 * 2 - len(answer.encode("utf-16-le"))
+                plain = transcript.encode("utf-16-le")[:remaining]
+                content = escape(plain.decode("utf-16-le", "ignore"))
+                text = f"{prefix}<blockquote expandable>{summary}\n{content}</blockquote>"
+                button = InlineKeyboardButton(text="❌", callback_data=CLOSE_SPEECH_CARD)
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[[button]])
+                sent = await message.bot.send_message(
+                    message.chat.id, text, parse_mode="HTML", reply_markup=keyboard,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True), **options,
+                )
+    timer = expire_reply(sent, 120)
+    if not isinstance(result, str):
+        key = (sent.chat.id, sent.message_id)
+        _speech_cards[key] = (user_id, timer)
+        timer.add_done_callback(lambda _: _speech_cards.pop(key, None))
+
+
+@router.callback_query(F.data == CLOSE_SPEECH_CARD)
+async def close_speech(callback: CallbackQuery) -> None:
+    message = callback.message
+    if not isinstance(message, Message):
+        await callback.answer()
+        return
+    card = _speech_cards.get((message.chat.id, message.message_id))
+    if card is None:
+        await callback.answer("Карточка уже недоступна.")
+        return
+    user_id, timer = card
+    if callback.from_user.id != user_id:
+        await callback.answer("Закрыть карточку может тот, кто её запросил.")
+        return
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        await callback.answer("Не удалось закрыть карточку.")
+        return
+    timer.cancel()
+    await callback.answer()
 
 
 async def _respond_to_prompt(
@@ -102,6 +191,15 @@ async def nora_address(
         raise SkipHandler
     body = strip_address(text)
     if body is None:
+        return
+    source = getattr(message, "reply_to_message", None)
+    if source and source.chat.id == message.chat.id and (source.voice or source.video_note):
+        if not nora_enabled() or message.sender_chat or message.forward_origin or message.via_bot:
+            return
+        if message.chat.type != "private" and message.chat.id != settings.community_chat_id:
+            return
+        if openrouter_chat is not None:
+            await _respond_to_speech(message, source, openrouter_chat, body, db)
         return
     if openrouter_chat is not None and (rule_intent(body) is None or archive_question(body) or is_nora_topic(body)):
         if not nora_enabled():

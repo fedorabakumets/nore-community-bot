@@ -40,6 +40,7 @@ from community_bot.commands_guide import CLOSE_COMMANDS_CARD
 from community_bot.inline_style import button_style
 from community_bot.keyboards import start_apply_keyboard
 from community_bot.nora_links import nora_link_block, profile_reply
+from community_bot.nora_speech import CLOSE_SPEECH_CARD
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +442,8 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                 current = await data["state"].get_state()
                 if not submission(event, json.loads(raw) if raw else {}, current):
                     return "nora_widget_rejected"
-            if isinstance(event, CallbackQuery) and event.data != CLOSE_COMMANDS_CARD and source.message_id > 0:
+            if (isinstance(event, CallbackQuery) and event.data not in {CLOSE_COMMANDS_CARD, CLOSE_SPEECH_CARD}
+                    and source.message_id > 0):
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
                 is_panel = saved and json.loads(saved)["message_id"] == source.message_id
                 standalone = (not is_panel and (event.data or "").startswith(_NOTICE_ACTIONS)

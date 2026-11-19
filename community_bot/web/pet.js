@@ -33,11 +33,12 @@ window.NoraPet = (() => {
         ['reset', 'Когда обновляется набор?', 'В ' + r.reset_hour + ' ' + r.timezone + ' начинается новый набор. Незавершённые вчерашние задания закрываются. Отметки за ' + d.milestones.join(' и ') + ' сообщений копятся несколько дней и не добавляют XP.'],
       ]],
       ['Уровни и награды', [
-        ['levels', 'Какие функции открывает каждый уровень?', 'Компаньон доступен сразу: уход, походы и питомец в игре. На этапе ' + r.ai_stage + ' открывается Собеседник с Норой ИИ в основном чате и в личке, на этапе ' + r.video_stage + ' — Помощник с видео. Прежние функции остаются доступны.'],
+        ['levels', 'Какие функции открывает каждый уровень?', 'Компаньон доступен сразу: уход, походы и питомец в игре. На этапе ' + r.ai_stage + ' открывается Собеседник с Норой ИИ и переводом голосовых и кружков. На этапе ' + r.video_stage + ' — Помощник со скачиванием видео. Прежние функции остаются доступны.'],
         ['rewards', 'Где получить награду?', 'Печеньки сразу поступают на общий баланс. Репутация начисляется автоматически с учётом потолка профиля. Результат операции виден в деталях этапа. Обед, поилка и восстановление настроения хранятся до применения. Их можно использовать прямо с карточки наград или из подробностей этапа.'],
       ]],
       ['ИИ Нора', [
         ['ai', 'Как поговорить с Норой?', 'Со 2-го уровня питомца напиши «Нора, …» в основном чате или в личке. В основном чате можно спросить о переписке за последние 48 часов. Ответь на сообщение Норы, чтобы продолжить разговор. Запросов в день по репутации: ' + r.ai_limits + '. Лимит обновляется в полночь по времени сообщества.'],
+        ['speech', 'Как перевести голосовое или кружок?', 'Ответь прямо на запись: «Нора, что здесь сказали?» или задай свой вопрос. Нора ответит под записью. Раскрой карточку, чтобы прочитать текст на русском. Карточку можно закрыть по ❌, через две минуты она исчезнет сама. Подходят записи до 3 минут и 12 МБ. Запрос входит в дневной лимит ИИ.'],
       ]],
       ['Загрузка видео', [
         ['video', 'Как получить ролик?', 'С 3-го уровня питомца отправь «Нора https://vm.tiktok.com/…», «Нора https://instagram.com/reel/…» или «Нора https://youtube.com/shorts/…». Бот пришлёт видео ответом в личке или в основном чате. Пока питомец в походе, скачивание недоступно. Доступно ' + r.video_daily_limit + ' успешных отправок за сутки по Москве, включая повторную отправку из кеша.'],
@@ -85,6 +86,24 @@ window.NoraPet = (() => {
   function petGameButton(label) {
     return '<button type="button" class="nora-pixel-button pet2-play" data-play-with-pet><span>'
       + esc(label) + '</span><span aria-hidden="true">↗</span></button>';
+  }
+
+  function levelCards(d) {
+    const levels = [
+      [1, 'Уход, походы и питомец в игре'],
+      [d.rules.ai_stage, 'Нора ИИ, перевод голосовых и кружков'],
+      [d.rules.video_stage, 'Скачивание видео по ссылке'],
+    ];
+    return '<ul class="pet2-levels" aria-label="Уровни питомца">' + levels.map(([stage, benefit], index) => {
+      const level = index + 1;
+      const state = level === d.level ? 'Твой уровень' : level < d.level ? 'Открыт' : 'С этапа ' + stage;
+      return '<li><button type="button" class="pet2-level" data-pet-stage="' + stage + '"'
+        + (level === d.level ? ' aria-current="true"' : '') + '>'
+        + '<img src="/pet-art/level-' + level + '.webp" alt="" width="320" height="320" loading="lazy" decoding="async">'
+        + '<span class="pet2-level-copy"><small>Уровень ' + level + ' · ' + state + '</small><strong>'
+        + esc(d.stages[stage - 1].level_name) + '</strong><span>' + benefit + '</span></span>'
+        + '<span class="pet2-level-arrow" aria-hidden="true">›</span></button></li>';
+    }).join('') + '</ul>';
   }
 
   function quests(d) {
@@ -165,6 +184,7 @@ window.NoraPet = (() => {
       + '<span>' + (next ? d.xp + '/' + d.rules.stage_xp + ' XP' : 'Максимум') + question('xp', 'Опыт') + '</span></div>'
       + '<ol class="pet2-route" aria-label="Этапы развития">' + path(d) + '</ol><p class="sub pet2-note">'
       + (next ? 'Следующая награда · ' + esc(next.label) : 'Все уровни открыты') + '</p>'
+      + levelCards(d)
       + (saved.length ? '<div class="pet2-rewards">' + saved.map(s => '<div><span>' + esc(s.label)
         + '</span>' + rewardButton(s, p) + '</div>').join('') + '</div>' : '') + '</section>'
       + (next ? '<section class="card pet2-panel"><div class="pet2-heading">' + section('Задания на сегодня', 'quests') + '</div>'
@@ -208,7 +228,8 @@ window.NoraPet = (() => {
       + esc(s.level_name) + ' · ур. ' + s.level + ' · ' + status[s.status] + '</p><h3>'
       + esc(s.label) + '</h3><p>' + esc(detail) + '</p>'
       + (s.status === 'available' ? rewardButton(s, p) : '') + '<button class="text-btn" data-pet-help="'
-      + topic + '">Как это работает</button></div>');
+      + topic + '">Как это работает</button>' + (stage === d.rules.ai_stage
+        ? '<button class="text-btn" data-pet-help="speech">Перевод голосовых и кружков</button>' : '') + '</div>');
   }
 
   function clock() {

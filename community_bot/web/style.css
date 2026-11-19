@@ -1287,6 +1287,18 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .pet2-step[data-state]:not([data-state="locked"]){color:var(--red);background:#d1344d23}
 .pet2-step.major{font-weight:800;border-color:#ae415b}
 .pet2-step[aria-current]{color:#fff!important;background:#ad2d47!important;border-color:#e77288;box-shadow:inset 0 0 0 1px #e77288}
+.pet2-levels{display:grid;gap:8px;list-style:none;padding:0;margin:12px 0 0}
+.pet2-level{display:grid;grid-template-columns:clamp(68px,22vw,100px) minmax(0,1fr) auto;align-items:center;width:100%;min-height:86px;gap:10px;padding:0 9px 0 0;overflow:hidden;border:1px solid var(--line);border-radius:14px;background:linear-gradient(106deg,#421624,var(--panel) 76%);color:inherit;text-align:left;font:inherit;cursor:pointer}
+.pet2-levels li:nth-child(2) .pet2-level{background:linear-gradient(106deg,#252447,var(--panel) 76%)}
+.pet2-levels li:nth-child(3) .pet2-level{background:linear-gradient(106deg,#412515,var(--panel) 76%)}
+.pet2-level[aria-current]{border-color:var(--red)}
+.pet2-level:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.pet2-level img{width:100%;height:100%;min-height:0;aspect-ratio:1;object-fit:cover}
+.pet2-level-copy{display:grid;gap:4px;padding:7px 0;font-size:12px;line-height:1.3;min-width:0}
+.pet2-level-copy small{color:var(--muted);font-size:11px}
+.pet2-level-copy strong{font:15px/1.25 Monocraft,monospace;overflow-wrap:anywhere}
+.pet2-level[aria-current] small,.pet2-level-arrow{color:var(--red)}
+.pet2-level-arrow{font-size:22px;line-height:1}
 .pet2-rewards{display:grid;gap:4px;margin-top:8px}
 .pet2-rewards>div{display:flex;align-items:center;justify-content:space-between;gap:6px;border-top:1px solid var(--line);padding-top:4px;font-size:13px}
 .pet2-rewards button,.pet2-handbook .secondary{min-height:40px;font-size:12px}

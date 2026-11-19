@@ -99,6 +99,8 @@ async def delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
     try:
         await message.delete()
     except (TelegramBadRequest, TelegramForbiddenError) as error:
+        if isinstance(error, TelegramBadRequest) and "message to delete not found" in str(error).casefold():
+            return
         logger.warning(
             "Не удалось удалить сообщение бота %s в чате %s: %s",
             message.message_id,

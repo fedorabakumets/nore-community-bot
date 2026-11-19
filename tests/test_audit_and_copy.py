@@ -224,7 +224,7 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 22
+    assert latest.number == 23
     text = updates_text()
     assert "№15" in text
     assert "№14" in text
@@ -260,11 +260,11 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert "очередь" not in pin.casefold()
     assert f"Обновление №{latest.number}" in pin
     details = member_details_text(latest)
-    assert "Нора, в кино" in details
-    assert "50 🍪" in details
+    assert "5 и 10" in details
+    assert "Нора, во сколько предложили встретиться?" in details
     assert "админка" not in details.casefold()
     staff = staff_announcement(latest)
-    assert "приватное хранилище" in staff
+    assert "Groq или Gemini" in staff
     assert "Админка" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()
     assert "рулетка" in labels

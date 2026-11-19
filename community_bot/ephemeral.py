@@ -75,6 +75,12 @@ def _track(task: asyncio.Task[Any]) -> None:
     task.add_done_callback(_PENDING.discard)
 
 
+def expire_reply(message: Message, ttl: float) -> asyncio.Task[None]:
+    task = asyncio.create_task(delete_later(message, ttl))
+    _track(task)
+    return task
+
+
 def schedule_group_reply(result: Any, ttl: float | None = None) -> None:
     delay = BOT_REPLY_TTL if ttl is None else ttl
     if not delay:
@@ -86,7 +92,7 @@ def schedule_group_reply(result: Any, ttl: float | None = None) -> None:
         messages.extend(item for item in result if isinstance(item, Message))
     for sent in messages:
         if sent.chat.type in {"group", "supergroup"}:
-            _track(asyncio.create_task(delete_later(sent, delay)))
+            expire_reply(sent, delay)
 
 
 def _schedule(result: Any) -> None:
