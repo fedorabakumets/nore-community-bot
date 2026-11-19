@@ -112,15 +112,6 @@ from community_bot.ui_owner import bind_ui_owner
 router = Router(name="community")
 
 
-@router.my_chat_member()
-async def remember_managed_channel(event: ChatMemberUpdated, db: Database) -> None:
-    if event.chat.type == "channel" and event.new_chat_member.status in {
-        ChatMemberStatus.MEMBER,
-        ChatMemberStatus.ADMINISTRATOR,
-    }:
-        await db.set_bot_state("freebie_channel_id", str(event.chat.id))
-
-
 @router.chat_member()
 async def community_membership_changed(event: ChatMemberUpdated, db: Database, settings: Settings, bot: Bot) -> None:
     if event.chat.id != settings.community_chat_id:
@@ -1688,7 +1679,7 @@ async def admin_set_cookies(message: Message, db: Database, settings: Settings, 
 
 @router.message(command_or_alias("freebie"), F.chat.type.in_({"group", "supergroup"}))
 async def freebie_offer(message: Message, settings: Settings) -> None:
-    if not settings.freebie_channel_url:
+    if not settings.freebie_channel_id or not settings.freebie_channel_url:
         await _respond(message, "Бонус за подписку ещё не настроен владельцем.")
         return
     await _respond(
@@ -1703,8 +1694,7 @@ async def freebie_offer(message: Message, settings: Settings) -> None:
 
 @router.callback_query(F.data == "freebie:check", F.message.chat.type.in_({"group", "supergroup"}))
 async def freebie_check(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    stored_channel_id = await db.get_bot_state("freebie_channel_id")
-    channel_id = settings.freebie_channel_id or (int(stored_channel_id) if stored_channel_id else 0)
+    channel_id = settings.freebie_channel_id
     if not channel_id:
         await callback.answer("Проверка подписки ещё не настроена владельцем.", show_alert=True)
         return

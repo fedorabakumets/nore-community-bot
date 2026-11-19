@@ -54,7 +54,10 @@ python3 -m venv .venv
 Настройки перечислены в `.env.example` и `community_bot/config.py`.
 Для интеграционной проверки нужны отдельные тестовые бот, чат и SQLite.
 Обязательны BOT_TOKEN и ненулевой OWNER_ID. OWNER_IDS дополняет OWNER_ID;
-COMMUNITY_CHAT_ID имеет приоритет перед GROUP_ID. Секреты храните вне Git.
+`COMMUNITY_CHAT_ID` имеет приоритет перед `GROUP_ID` и задаёт единственную группу,
+из которой Нора принимает события. Без этого ID работают личные чаты и Mini App.
+Для бонуса за подписку задайте `FREEBIE_CHANNEL_ID` и `FREEBIE_CHANNEL_URL`.
+Секреты храните вне Git.
 
 До запуска настройте COMMUNITY_INVITE_URL. Для покупки печенек бот и Mini App
 используют ссылку Ozon Банка из `community_bot/config.py`. QR-код для сообщения

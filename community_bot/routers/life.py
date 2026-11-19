@@ -602,8 +602,11 @@ async def captcha_new_members(message: Message, db: Database, bot: Bot, settings
 
 
 @router.callback_query(F.data.startswith("captcha:ok:"))
-async def captcha_ok(callback: CallbackQuery, db: Database, bot: Bot) -> None:
-    chat_id = int(callback.data.rsplit(":", 1)[1])
+async def captcha_ok(callback: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
+    chat_id = settings.community_chat_id
+    if not chat_id or callback.data != f"captcha:ok:{chat_id}":
+        await callback.answer("Эта кнопка больше не действует.")
+        return
     if not await db.pop_captcha(callback.from_user.id, chat_id):
         await callback.answer("Уже подтверждено.")
         return

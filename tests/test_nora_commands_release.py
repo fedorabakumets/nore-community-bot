@@ -2,12 +2,23 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram import Dispatcher, Router
+from aiogram import Bot, Dispatcher, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from aiogram.types import CallbackQuery, Chat, Message, PhotoSize, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    ChatMemberLeft,
+    ChatMemberMember,
+    ChatMemberUpdated,
+    Message,
+    PhotoSize,
+    Update,
+    User,
+)
 
 from community_bot.aliases import CommandOrAlias, is_group_command_to_sweep, parse_trigger
 from community_bot.command_registry import restore_defaults
+from community_bot.community_scope import CommunityScopeMiddleware
 from community_bot.database import Database
 from community_bot.domain import NEGATIVE_REPUTATION_PHRASES, POSITIVE_REPUTATION_PHRASES, reputation_delta
 from community_bot.ephemeral import GroupHousekeepingMiddleware, current_reply_ttl
@@ -25,18 +36,61 @@ def message(text, uid=7, chat_id=-100123, **extra):
     )
 
 
-async def test_command_menu_contains_only_the_guide():
+@pytest.mark.parametrize("chat_id", [-100123, 0])
+async def test_command_menu_contains_only_the_guide_in_allowed_chats(chat_id):
     from community_bot.main import configure_commands
 
-    bot = SimpleNamespace(set_my_commands=AsyncMock())
-    await configure_commands(bot)
+    bot = SimpleNamespace(set_my_commands=AsyncMock(), delete_my_commands=AsyncMock())
+    await configure_commands(bot, chat_id)
     calls = bot.set_my_commands.await_args_list
+    scopes = {"all_private_chats", "chat"} if chat_id else {"all_private_chats"}
     assert {(call.kwargs["scope"].type, call.kwargs["language_code"]) for call in calls} == {
-        ("all_private_chats", None), ("all_private_chats", "ru"),
-        ("all_group_chats", None), ("all_group_chats", "ru"),
+        (scope, language) for scope in scopes for language in (None, "ru")
+    }
+    assert {(call.kwargs["scope"].type, call.kwargs["language_code"])
+            for call in bot.delete_my_commands.await_args_list} == {
+        ("all_group_chats", None), ("all_group_chats", "ru")
     }
     for call in calls:
         assert [(command.command, command.description) for command in call.args[0]] == [("commands", "Нора команды")]
+        if call.kwargs["scope"].type == "chat":
+            assert call.kwargs["scope"].chat_id == chat_id
+
+
+@pytest.mark.parametrize("chat_type,chat_id,allowed_id,passes,leaves", [
+    ("group", -99, -100123, False, True),
+    ("supergroup", -100999, -100123, False, True),
+    ("supergroup", -100123, -100123, True, False),
+    ("supergroup", -100999, 0, False, False),
+    ("channel", -100999, -100123, False, False),
+    ("private", 7, -100123, True, False),
+])
+async def test_bot_membership_is_scoped_before_router(chat_type, chat_id, allowed_id, passes, leaves, monkeypatch):
+    dp = Dispatcher()
+    dp.update.outer_middleware(CommunityScopeMiddleware())
+    handled = []
+
+    @dp.my_chat_member()
+    async def record_membership(event):
+        handled.append(event.chat.id)
+
+    async with Bot("123456:test") as bot:
+        leave = AsyncMock()
+        monkeypatch.setattr(bot, "leave_chat", leave)
+        bot_user = User(id=bot.id, is_bot=True, first_name="Нора")
+        event = ChatMemberUpdated(
+            chat=Chat(id=chat_id, type=chat_type), from_user=User(id=7, is_bot=False, first_name="Участник"),
+            date=1725000000, old_chat_member=ChatMemberLeft(user=bot_user),
+            new_chat_member=ChatMemberMember(user=bot_user),
+        )
+        await dp.feed_update(
+            bot, Update(update_id=1, my_chat_member=event), settings=SimpleNamespace(community_chat_id=allowed_id),
+        )
+    assert handled == ([chat_id] if passes else [])
+    if leaves:
+        leave.assert_awaited_once_with(chat_id)
+    else:
+        leave.assert_not_awaited()
 
 
 @pytest.mark.parametrize('prefix', ['Нора ', 'нора ', 'Нора, ', 'нора,', 'НОРА, '])

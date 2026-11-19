@@ -222,12 +222,7 @@ async def emergency_stop_confirm(
     if callback.message:
         await callback.message.edit_text("⛔ Бот аварийно отключён.")
 
-    chat_ids = {settings.community_chat_id}
-    stored_channel_id = await db.get_bot_state("freebie_channel_id")
-    if stored_channel_id:
-        with contextlib.suppress(ValueError):
-            chat_ids.add(int(stored_channel_id))
-    for chat_id in chat_ids:
+    for chat_id in {settings.community_chat_id, settings.freebie_channel_id}:
         if chat_id:
             with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
                 await bot.leave_chat(chat_id)

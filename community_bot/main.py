@@ -13,11 +13,13 @@ from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
     BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
 
+from community_bot.community_scope import CommunityScopeMiddleware
 from community_bot.config import Settings, load_settings
 from community_bot.covers import cover_path_for
 from community_bot.database import Database
@@ -55,11 +57,15 @@ from community_bot.updates import announcement_key, community_announcement, late
 logger = logging.getLogger(__name__)
 
 
-async def configure_commands(bot: Bot) -> None:
+async def configure_commands(bot: Bot, community_chat_id: int) -> None:
     commands = [BotCommand(command="commands", description="Нора команды")]
-    for scope in (BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
-        for language_code in (None, "ru"):
-            await bot.set_my_commands(commands, scope=scope, language_code=language_code)
+    for language_code in (None, "ru"):
+        await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats(), language_code=language_code)
+        await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats(), language_code=language_code)
+        if community_chat_id:
+            await bot.set_my_commands(
+                commands, scope=BotCommandScopeChat(chat_id=community_chat_id), language_code=language_code,
+            )
 
 
 async def retry_transient_telegram_setup(label: str, operation) -> object:
@@ -423,6 +429,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
     from community_bot.message_widgets import WidgetUpdateMiddleware
 
+    dispatcher.update.outer_middleware(CommunityScopeMiddleware())
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     from community_bot.memory_capture import CommunityMemoryMiddleware
 
@@ -544,7 +551,9 @@ async def main() -> None:
 
     await load_registry(db)
     command_setup_task = asyncio.create_task(
-        retry_transient_telegram_setup("command registration", lambda: configure_commands(bot)),
+        retry_transient_telegram_setup(
+            "command registration", lambda: configure_commands(bot, settings.community_chat_id),
+        ),
         name="nora-telegram-command-registration",
     )
     await log_community_permissions(bot, settings)
@@ -605,7 +614,7 @@ async def main() -> None:
             "polling",
             lambda: dispatcher.start_polling(
                 bot,
-                allowed_updates=[*dispatcher.resolve_used_update_types(), "widget_query"],
+                allowed_updates=sorted({*dispatcher.resolve_used_update_types(), "my_chat_member", "widget_query"}),
                 db=db,
                 settings=settings,
                 emergency_stop=emergency_stop,

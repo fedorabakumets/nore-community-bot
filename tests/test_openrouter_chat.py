@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 import pytest
 from aiogram import Bot
 from aiogram.methods import DeleteMessage, SendMessage, SendRichMessage
-from aiogram.types import MessageOriginHiddenUser, Update
+from aiogram.types import ChatJoinRequest, MessageOriginHiddenUser, Update
 from test_nora_commands_release import message
-from test_studio_rsvp import TelegramSession
+from test_studio_rsvp import TelegramSession, callback
 
 from community_bot import openrouter_chat
 from community_bot.command_registry import apply_rows, restore_defaults
@@ -218,10 +218,33 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
         await dispatcher.feed_update(bot, Update(update_id=event.message_id, message=event), db=db, settings=settings)
         return event
 
+    async def feed(**event):
+        await dispatcher.feed_update(bot, Update(update_id=50, **event), db=db, settings=settings)
+
     def replies():
         return [call for call in session.calls if isinstance(call, SendMessage)]
 
     try:
+        foreign_chat_id = -100999
+        foreign_reply = message("сообщение", uid=8, chat_id=foreign_chat_id)
+        await dispatch("+реп", chat_id=foreign_chat_id, reply_to_message=foreign_reply)
+        foreign_message = await dispatch("Привет", uid=77, chat_id=foreign_chat_id)
+        assert await db.get_user(77) is None
+        assert (await db.get_user(8))["reputation"] == 60
+        foreign_join = ChatJoinRequest(
+            chat=foreign_message.chat, from_user=foreign_message.from_user,
+            user_chat_id=77, date=foreign_message.date,
+        )
+        await feed(chat_join_request=foreign_join)
+        await feed(callback_query=callback("nwn:read:1", chat_id=foreign_chat_id))
+        assert not session.calls
+        assert await db.get_user(77) is None
+
+        await db.add_captcha(settings.owner_id, foreign_chat_id)
+        await feed(callback_query=callback(f"captcha:ok:{foreign_chat_id}"))
+        assert len(session.calls) == 1 and session.calls[0].text == "Эта кнопка больше не действует."
+        assert await db.pop_captcha(settings.owner_id, foreign_chat_id)
+
         await dispatch("Нора, профиль")
         cards = [call for call in session.calls if isinstance(call, SendRichMessage)]
         assert len(cards) == 1 and cards[0].rich_message.blocks[1].text == "Участник 7"
