@@ -284,8 +284,6 @@ class OpenRouterChat:
         return await self._answer(prompt, user_id, history, message)
 
     async def answer_speech(self, source: Message, prompt: str, user_id: int) -> tuple[str, str] | str:
-        if not self._groq_key and not self._gemini_key:
-            return "Расшифровка записей сейчас недоступна."
         if not self._claim():
             return _LIMIT_REACHED
         try:
@@ -294,7 +292,7 @@ class OpenRouterChat:
                 return quota_error
             self._next_request = time.monotonic() + _GLOBAL_INTERVAL
             transcript, russian = await transcribe(source, groq_key=self._groq_key, gemini_key=self._gemini_key)
-            if russian and not prompt:
+            if russian and prompt.casefold().strip(" .!?") in {"", "расшифруй", "переведи"}:
                 return transcript, ""
             answer = ""
             try:

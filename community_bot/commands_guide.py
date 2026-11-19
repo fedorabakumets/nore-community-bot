@@ -11,6 +11,8 @@ from aiogram.types import (
     FSInputFile,
     InputMediaPhoto,
     InputRichBlockButtons,
+    InputRichBlockDetails,
+    InputRichBlockParagraph,
     InputRichBlockPhoto,
     InputRichMessage,
     Message,
@@ -54,6 +56,23 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
     app = await nora_link_block(bot, "commands_guide", set(), "")
     rich_message = InputRichMessage(blocks=[
         InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(COMMANDS_ART))),
+        InputRichBlockDetails(summary="Как пользоваться Норой ИИ, читать записи и скачивать видео", blocks=[
+            InputRichBlockParagraph(
+                text="Нора ИИ · Со 2-го уровня начни вопрос с «Нора» в основном чате или в личке. "
+                     "Ответь на её сообщение, чтобы продолжить разговор.",
+            ),
+            InputRichBlockParagraph(
+                text="Голосовое · Ответь на запись фразой «Нора, расшифруй». Под ней раскрой «Текст голосового».",
+            ),
+            InputRichBlockParagraph(
+                text="Кружок · Ответь на видеокружок фразой «Нора, расшифруй». Под ним раскрой «Текст кружка». "
+                     "Карточки записей закрываются по ❌ и исчезают через две минуты.",
+            ),
+            InputRichBlockParagraph(
+                text="Видео · С 3-го уровня отправь «Нора» и публичную ссылку на TikTok, Reels или Shorts. "
+                     "Нора пришлёт MP4, который можно сохранить из Telegram.",
+            ),
+        ]),
         *([app] if app else []),
         InputRichBlockButtons(buttons=[
             RichMessageButton(text="Закрыть", style="danger", callback_data=CLOSE_COMMANDS_CARD),

@@ -209,6 +209,39 @@ async def test_speech_download_is_bounded_before_contacting_provider(monkeypatch
         download.assert_not_awaited()
 
 
+async def test_russian_transcript_without_speech_keys_does_not_call_text_model(db, settings, monkeypatch):
+    chat = openrouter_chat.OpenRouterChat(db, replace(settings, groq_api_key="", gemini_api_key=""))
+    recognize = AsyncMock(return_value=("Завтра в семь.", True))
+    monkeypatch.setattr(openrouter_chat, "transcribe", recognize)
+    answer = AsyncMock()
+    monkeypatch.setattr(chat, "_request_history", answer)
+    source = message(None, voice=Voice(file_id="v", file_unique_id="v", duration=8))
+    assert await chat.answer_speech(source, "расшифруй", 7) == ("Завтра в семь.", "")
+    recognize.assert_awaited_once_with(source, groq_key="", gemini_key="")
+    answer.assert_not_awaited()
+
+
+@pytest.mark.parametrize("with_cloud_key", [False, True])
+async def test_local_recognition_when_cloud_is_absent_or_fails(monkeypatch, with_cloud_key):
+    async def download(bot, media, *, destination, **kwargs):
+        destination.write(b"telegram audio")
+
+    async def recognize_local(source):
+        assert source.suffix == ".ogg"
+        assert source.read_bytes() == b"telegram audio"
+        return "Завтра в семь.", True
+
+    monkeypatch.setattr(Bot, "download", download)
+    monkeypatch.setattr(nora_speech, "_local", recognize_local)
+    cloud = AsyncMock(return_value=None)
+    monkeypatch.setattr(nora_speech, "_cloud", cloud)
+    async with Bot("123456:test") as bot:
+        event = message(None, voice=Voice(file_id="v", file_unique_id="v", duration=8)).as_(bot)
+        groq_key = "test" if with_cloud_key else ""
+        assert await nora_speech.transcribe(event, groq_key=groq_key, gemini_key="") == ("Завтра в семь.", True)
+    assert cloud.await_count == int(with_cloud_key)
+
+
 @pytest.mark.parametrize("model", ["openrouter/auto", "vendor/model", "vendor/model:free"])
 async def test_model_env_allows_only_free_models(db, settings, monkeypatch, model):
     monkeypatch.setenv("OPENROUTER_MODEL", model)
