@@ -20,6 +20,7 @@ from aiohttp import web
 
 from community_bot.config import COOKIE_PAYMENT_QR
 from community_bot.database import Database
+from community_bot.welcome import WELCOME_VIDEO
 
 ROOT = Path(__file__).parent / 'web'
 ASSETS = Path(__file__).parent.parent / 'assets'
@@ -277,7 +278,7 @@ async def overview(request):
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
         'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
         'events_admin': await allowed(db, settings, user['user_id']),
-        'home': {'community_url': community_url, 'news': news},
+        'home': {'community_url': community_url, 'news': news, 'welcome_video': WELCOME_VIDEO.is_file()},
         'history': await describe_transactions(db, history),
     })
 
@@ -618,6 +619,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/pet-art/', ASSETS / 'pets' / 'mini', show_index=False)
     app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
+    app.router.add_static('/welcome-media/', ASSETS / 'welcome', show_index=False)
     app.router.add_static('/durak-cards/', ROOT / 'durak-cards', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app
