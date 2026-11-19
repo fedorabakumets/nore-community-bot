@@ -95,6 +95,14 @@ async def accepted(db, uid: int, other: int) -> bool:
         return await accepted_in_connection(connection, uid, other)
 
 
+async def current_relationship(db, uid: int, other: int) -> dict | None:
+    return await db.fetchone(
+        "SELECT requester_id, status, token FROM mini_friendships WHERE low_id=? AND high_id=? "
+        "AND (status='accepted' OR (status='pending' AND expires_at>?))",
+        (*_pair(uid, other), time.time()),
+    )
+
+
 async def inbox_in_connection(connection, uid: int, text: str) -> int:
     """Invitation and inbox entry commit together; delivery preferences affect only DM."""
     cursor = await connection.execute(

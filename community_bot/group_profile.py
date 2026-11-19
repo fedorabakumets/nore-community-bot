@@ -71,13 +71,9 @@ async def _avatar(db, user):
     if not (file_id := user.get("avatar_file_id")):
         return None
     if user.get("avatar_media_type") == "video":
-        return InputRichBlockDetails(summary="Видео профиля", blocks=[
-            InputRichBlockVideo(video=InputMediaVideo(media=file_id)),
-        ])
+        return InputRichBlockVideo(video=InputMediaVideo(media=file_id))
     if photo := await profile_photo_input(db, file_id):
-        return InputRichBlockDetails(summary="Фото профиля", blocks=[
-            InputRichBlockPhoto(photo=InputMediaPhoto(media=photo)),
-        ])
+        return InputRichBlockPhoto(photo=InputMediaPhoto(media=photo))
     return None
 
 
@@ -110,8 +106,8 @@ async def send_group_profile(
         ))
     commands.append(ibtn(await _friend_icon(db, requester_id, uid), f"{FRIEND_PREFIX}{uid}", "success"))
     votes = [ibtn("👍", f"profile_action:rep_up:{uid}"), ibtn("👎", f"profile_action:rep_down:{uid}")]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[commands, votes])
-    actions, reputation = [
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[votes, commands])
+    reputation, actions = [
         InputRichBlockButtons(align="center", buttons=[
             RichMessageButton(**button.model_dump(exclude_none=True)) for button in row
         ]) for row in keyboard.inline_keyboard
@@ -122,11 +118,12 @@ async def send_group_profile(
         if (value := str(user.get(field) or "").strip())
     ]
     body = [
+        reputation,
         InputRichBlockSectionHeading(text=name, size=2),
         InputRichBlockParagraph(text=subtitle),
-        actions,
-        _table(user, settings),
         *details,
+        _table(user, settings),
+        actions,
     ]
     avatar = await _avatar(db, user)
     thread = message.message_thread_id if message.is_topic_message else None
@@ -136,17 +133,18 @@ async def send_group_profile(
         try:
             sent = await bot.send_rich_message(
                 message.chat.id, message_thread_id=thread,
-                rich_message=InputRichMessage(blocks=[*body, *media, reputation], skip_entity_detection=True),
+                rich_message=InputRichMessage(blocks=[*media, *body], skip_entity_detection=True),
             )
             break
         except (TelegramBadRequest, TelegramNotFound):
             continue
     if sent is None:
         balance, score = _stats(user, settings)
-        text = f"<b>{escape(name)}</b>\n{escape(subtitle)}\n🍪 {balance} · Репутация {escape(score)}"
+        text = f"<b>{escape(name)}</b>\n{escape(subtitle)}"
         for detail in details:
             content = escape(detail.blocks[0].text)
             text += f"\n<blockquote expandable>{detail.summary}\n{content}</blockquote>"
+        text += f"\n🍪 {balance} · Репутация {escape(score)}"
         with bot_publication():
             sent = await bot.send_message(
                 message.chat.id, text, message_thread_id=thread, parse_mode="HTML", reply_markup=keyboard,

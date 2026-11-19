@@ -351,6 +351,12 @@ def _target_display(target: dict[str, object]) -> str:
     return user_link(int(target["user_id"]), display_name(target))
 
 
+def _reputation_ping(settings: Settings, target: dict[str, object], value: int, text: str, pet_line: str | None) -> str:
+    tier = reputation_tier(value, settings.restricted_reputation_threshold)
+    extra = f"\n{pet_line}" if pet_line else ""
+    return f"{tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}"
+
+
 async def _can_manage_target(
     actor_id: int,
     target: dict[str, object],
@@ -646,13 +652,9 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
         return
     if action not in {"rep_up", "rep_down"}:
         return
-    if callback.message.chat.id == settings.community_chat_id and not callback.from_user.is_bot:
-        from community_bot.pet_progress import record_telegram_event
-
-        await record_telegram_event(
-            db, callback.from_user.id, "plus" if action == "rep_up" else "minus",
-            (callback.message.chat.id, f"callback:{callback.id}", datetime.now(UTC)),
-        )
+    if await is_bot(db, target):
+        await callback.answer("Репутация ботов не меняется.", show_alert=True)
+        return
     delta = 5 if action == "rep_up" else -5
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()
@@ -664,15 +666,20 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     if not ok or new_value is None:
         await callback.answer(text, show_alert=True)
         return
+    if callback.message.chat.id == settings.community_chat_id and not callback.from_user.is_bot:
+        from community_bot.pet_progress import record_telegram_event
+
+        await record_telegram_event(
+            db, callback.from_user.id, "plus" if delta > 0 else "minus",
+            (callback.message.chat.id, f"callback:{callback.id}", datetime.now(UTC)),
+        )
     if delta > 0:
         from community_bot.life import unlock
 
         await unlock(db, callback.from_user.id, "first_plus")
-    target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
     await callback.answer("Питомец вмешался!" if pet_line and "перехватил" in pet_line else text[:180])
-    extra = f"\n{pet_line}" if pet_line else ""
     await callback.message.answer(
-        f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
+        _reputation_ping(settings, target, new_value, text, pet_line),
         parse_mode="HTML",
     )
     if pet_line and "перехватил" in pet_line:
@@ -1850,10 +1857,8 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         from community_bot.life import unlock
 
         await unlock(db, message.from_user.id, "first_plus")
-    target_tier = reputation_tier(new_value, settings.restricted_reputation_threshold)
-    extra = f"\n{pet_line}" if pet_line else ""
     await message.reply(
-        f"{target_tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}",
+        _reputation_ping(settings, target, new_value, text, pet_line),
         parse_mode="HTML",
     )
     if pet_line and "перехватил" in pet_line:

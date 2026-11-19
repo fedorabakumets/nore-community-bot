@@ -17,10 +17,12 @@ _POSITIVE = re.compile(
 
 
 def button_style(button: InlineKeyboardButton) -> str | None:
+    action = button.callback_data or ""
+    if action.startswith("gf:"):
+        return button.style
     text = button.text.strip()
     if _BACK.search(text) or (text.startswith(("←", "↩")) and len(text) > 2):
         return "danger"
-    action = button.callback_data or ""
     if action.startswith(("menu:", "game:pick:", "cg:pick:", "sg:pick:", "shop:cat:")):
         return None
     if "снять мут" in text.casefold() or "заполнить анкету" in text.casefold():

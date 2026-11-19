@@ -247,5 +247,5 @@ async def test_signed_profile_link_posts_public_profile_in_configured_group(tmp_
     assert json.loads(result.text) == {'ok': True}
     assert bot.send_rich_message.call_args.args[0] == GROUP
     card = bot.send_rich_message.call_args.kwargs['rich_message']
-    assert card.blocks[0].text == 'Имя Норы'
+    assert card.blocks[1].text == 'Имя Норы'
     assert 'hidden_handle' not in card.model_dump_json()

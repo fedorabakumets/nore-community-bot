@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
-from community_bot import friends_api
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file, replace_block
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.group_profile import FRIEND_PREFIX, refresh_group_profile, send_group_profile
+from community_bot.group_friendship import DECISION_PREFIX, group_friend_decision, group_profile_friend
+from community_bot.group_profile import FRIEND_PREFIX, send_group_profile
 from community_bot.helpers import (
     can_view_profile,
     format_warn_entry,
@@ -118,23 +118,12 @@ async def show_profile(message: Message, db: Database, settings: Settings) -> No
     await send_profile_card(message, target, settings, editable=editable, text=text, db=db)
 
 
-@router.callback_query(F.data.startswith(FRIEND_PREFIX), F.message.chat.type.in_({"group", "supergroup"}))
-async def group_profile_friend(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    recipient = callback.data.removeprefix(FRIEND_PREFIX)
-    try:
-        result, notices = await friends_api.mutate(
-            db, settings, callback.from_user.id, {"action": "request", "recipient": recipient},
-        )
-    except ValueError as error:
-        await callback.answer(str(error), show_alert=True)
-        return
-    await callback.answer(result, show_alert=True)
-    for inbox_id, uid, text in notices:
-        await friends_api.deliver_notice(bot, db, inbox_id, uid, text)
-    if isinstance(callback.message, Message):
-        owner = await db.get_ui_owner(callback.message.chat.id, callback.message.message_id)
-        if owner == callback.from_user.id:
-            await refresh_group_profile(callback.message, db, settings, int(recipient))
+router.callback_query.register(
+    group_profile_friend, F.data.startswith(FRIEND_PREFIX), F.message.chat.type.in_({"group", "supergroup"}),
+)
+router.callback_query.register(
+    group_friend_decision, F.data.startswith(DECISION_PREFIX), F.message.chat.type.in_({"group", "supergroup"}),
+)
 
 
 @router.callback_query(F.data.startswith("profile:"))
