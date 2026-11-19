@@ -1794,3 +1794,105 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .play-hero .durak-hero-art { display:grid; place-items:center; color:#fff3df; opacity:1; }
 .durak-hero-art i { position:absolute; width:62px; height:86px; display:grid; place-items:center; font:44px Georgia,serif; background:#f1dfcf; color:#281c24; border-radius:8px; transform:translateX(-13px) rotate(-17deg); }
 .durak-hero-art i+i { color:#b51f42; transform:translate(17px,6px) rotate(15deg); }
+
+/* One tap opens the latest NORA update in a portrait story. */
+.home-stories {
+  display: flex;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 2px;
+}
+#app .home-story-trigger {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 62px;
+  height: 62px;
+  padding: 3px;
+  border-radius: 50%;
+  background: conic-gradient(from 25deg, #ff476b, #e92472 48%, #53e3ff 75%, #ff476b);
+  box-shadow: 0 0 13px #ff315655;
+}
+.home-story-trigger img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--poster-bg);
+  border-radius: 50%;
+  object-fit: cover;
+}
+body:has(#home-story-viewer[open]) { overflow: hidden; }
+#home-story-viewer {
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+#home-story-viewer::backdrop { background: #000; }
+.home-story-stage {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  height: 100%;
+  margin-inline: auto;
+}
+.home-story-stage video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.home-story-toolbar {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(var(--safe-top, 0px) + 8px) max(12px, var(--safe-right, 0px)) 12px max(12px, var(--safe-left, 0px));
+  background: linear-gradient(180deg, #000b, transparent);
+}
+.home-story-toolbar progress {
+  flex: 1;
+  min-width: 0;
+  height: 3px;
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #ffffff4d;
+  accent-color: #fff;
+}
+.home-story-toolbar progress::-webkit-progress-bar { background: #ffffff4d; }
+.home-story-toolbar progress::-webkit-progress-value { background: #fff; }
+.home-story-toolbar progress::-moz-progress-bar { background: #fff; }
+.home-story-toolbar button, .home-story-play {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  border-radius: 50%;
+  background: #18141bd9;
+  color: #fff;
+}
+.home-story-toolbar svg, .home-story-play svg { width: 24px; height: 24px; }
+.home-story-sound[aria-pressed="false"] .story-sound-muted,
+.home-story-sound[aria-pressed="true"] .story-sound-waves { display: none; }
+.home-story-play, .home-story-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+}
+.home-story-play { width: 60px; height: 60px; }
+.home-story-error { width: min(260px, 80%); text-align: center; color: #fff; }
+.home-story-play[hidden], .home-story-error[hidden] { display: none; }

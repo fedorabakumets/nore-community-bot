@@ -6,6 +6,7 @@ window.NoraHome=(()=>{
   function carouselDots(count,label){return count>1?`<div class="home-carousel-dots" aria-label="Выбор: ${label}">${Array.from({length:count},(_,i)=>`<button type="button" data-carousel-dot="${i}" aria-label="${label} ${i+1}" ${i===0?'aria-current="true"':''}></button>`).join('')}</div>`:''}
   function screen(){const u=data.user,p=data.profile,name=u.profile_name||u.telegram_name||'Друг';
     return `<section class="community-home"><div class="home-intro">${NoraLogo.markup(true)}<div class="home-intro-copy"><h1>Свои <em>рядом</em></h1><p class="home-tagline">Привет, ${NoraPrefix(p.prefix)}${esc(name)}</p></div></div>
+      <div class="home-stories"><button type="button" class="home-story-trigger" data-home-story aria-label="Смотреть историю обновления Норы" aria-haspopup="dialog" aria-controls="home-story-viewer"><img src="/intro/nora-update-20261120.jpg" alt="" width="52" height="52"></button></div>
       ${data.events.length?`<div id="home-event-carousel">${window.NoraEvents?.hero()||''}</div>`:`<article class="home-meetup home-meetup-empty"><img class="home-meetup-cover" src="/home-art/gathering-v1.webp" alt="Иллюстрация: друзья за настольной игрой" fetchpriority="high"><span class="home-meetup-badge">${navIcon('events')}Встречи Норы</span><div class="home-meetup-content"><h2>Скоро встретимся</h2><p class="home-meetup-date">${icon('pin')}Новый анонс появится здесь</p><div class="home-meetup-footer"><span>Найди свою компанию</span><button class="primary" data-tab="friends">К друзьям ${arrow}</button></div></div></article>`}
       ${p.fill_percent===100?`<section class="home-news"><div class="home-section-heading"><h2>Что нового</h2><button class="text-btn" data-home-news>Все новости →</button></div><div class="home-updates home-carousel" aria-label="Обновления Норы">${(data.home?.news||[]).map((n,i)=>`<button class="home-news-article${i===0?' home-news-featured':''}" data-home-article="${n.number}"><small>Обновление №${n.number}</small><b>${title(n.title)}</b><p>${esc(n.summary)}</p>${i===0?'<img class="home-news-art" src="/art/update.webp" alt="" loading="lazy" width="512" height="512">':''}<small>Читать →</small></button>`).join('')||'<p>Обновления скоро появятся.</p>'}</div>${carouselDots((data.home?.news||[]).length,'обновление')}</section>`:`<section class="home-access"><span class="eyebrow">Профиль · ${number(p.fill_percent)}%</span><h2>Открой возможности Норы</h2><p>Пять шагов: имя, дата рождения, увлечения, описание и аватар. Сохраним каждый шаг. За первое полное заполнение — 10 🍪.</p><button class="primary" data-profile-wizard>Заполнить по шагам →</button><button class="text-btn" data-tab="lk">Открыть профиль</button></section>`}
       <div class="home-shortcuts"><button class="home-shortcut home-shortcut-games" data-tab="games"><small>Вместе или соло</small><b>Игры</b><span>Морской бой, Мафия и Ракетка</span>${window.NoraInteractive?.icon('game')||''}</button><button class="home-shortcut home-shortcut-pet" data-tab="pet"><small>Твой спутник</small><b>Питомец</b><span>${data.pet?'Позаботься о питомце':'Заведи маленького друга'}</span>${NoraShop.svg('pets')}</button></div>
@@ -20,6 +21,79 @@ window.NoraHome=(()=>{
   function event(id){const e=data.events.find(e=>e.id===id);if(!e)return;sheet(`<span class="eyebrow">Встреча Норы</span>${window.NoraEvents?.card(e)||''}`);window.NoraEvents?.mount()}
 
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-home-news'))news();if(b.dataset.homeArticle)article(Number(b.dataset.homeArticle));if(b.hasAttribute('data-home-idea'))idea();if(b.hasAttribute('data-home-send-idea'))telegram('https://t.me/nora_community_bot?start=idea');if(b.hasAttribute('data-home-chat')){if(profileTabLocked('community')){profileWizard();return}if(data.home?.community_url)telegram(data.home.community_url);else sheet('<h2>Чат сообщества</h2><p class="sub">Ссылка на чат сейчас не настроена. Напиши команде Норы — поможем попасть к своим.</p><button class="primary" data-home-idea>Связаться с командой</button>')}if(b.dataset.homeEvent)event(b.dataset.homeEvent);if(b.hasAttribute('data-home-season')){if(data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}$('#sheet').close();tab='shop';NoraShop.tabChanged(tab);render();document.querySelector('.seasonal-drop')?.scrollIntoView({block:'start'})}});
+
+  const storyDialog = document.querySelector('#home-story-viewer');
+  const storyVideo = storyDialog.querySelector('video');
+  const storyProgress = storyDialog.querySelector('progress');
+  const storyPlay = storyDialog.querySelector('.home-story-play');
+  const storySound = storyDialog.querySelector('.home-story-sound');
+  const storyError = storyDialog.querySelector('.home-story-error');
+  let storyOpener;
+
+  function closeStory() {
+    if (storyDialog.open) storyDialog.close();
+  }
+
+  function startStoryPlayback() {
+    storyVideo.play().catch(() => {});
+  }
+
+  function openStory(trigger) {
+    if (storyDialog.open) return;
+    storyOpener = trigger;
+    storyError.hidden = true;
+    storyProgress.value = 0;
+    storyVideo.muted = false;
+    storyPlay.hidden = false;
+    storyDialog.showModal();
+    storyVideo.src = '/intro/nora-update-20261120.mp4';
+    startStoryPlayback();
+  }
+
+  storyDialog.querySelector('.home-story-close').addEventListener('click', closeStory);
+  storyPlay.addEventListener('click', startStoryPlayback);
+  storySound.addEventListener('click', () => { storyVideo.muted = !storyVideo.muted; });
+  storyVideo.addEventListener('volumechange', () => {
+    storySound.setAttribute('aria-pressed', String(storyVideo.muted));
+  });
+  function toggleStoryPlayback() {
+    if (storyVideo.paused) startStoryPlayback();
+    else storyVideo.pause();
+  }
+  storyVideo.addEventListener('click', toggleStoryPlayback);
+  storyVideo.addEventListener('keydown', (event) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    toggleStoryPlayback();
+  });
+  storyVideo.addEventListener('playing', () => { storyPlay.hidden = true; });
+  storyVideo.addEventListener('pause', () => { storyPlay.hidden = false; });
+  storyVideo.addEventListener('timeupdate', () => {
+    storyProgress.value = storyVideo.duration > 0 && Number.isFinite(storyVideo.duration)
+      ? storyVideo.currentTime / storyVideo.duration
+      : 0;
+  });
+  storyVideo.addEventListener('ended', closeStory);
+  storyVideo.addEventListener('error', () => {
+    if (!storyDialog.open) return;
+    storyError.hidden = false;
+    storyPlay.hidden = true;
+  });
+  storyDialog.addEventListener('close', () => {
+    if (storyDialog.open) return;
+    storyVideo.pause();
+    storyVideo.removeAttribute('src');
+    storyVideo.load();
+    (storyOpener?.isConnected ? storyOpener : document.querySelector('[data-home-story]'))?.focus();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && storyDialog.open) storyVideo.pause();
+  });
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-home-story]');
+    if (trigger) openStory(trigger);
+  });
+
   function render(app, html) {
     const logo = app.querySelector('.home-wordmark');
     if (!logo) {
