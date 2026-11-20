@@ -109,7 +109,7 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/barricade', '/api/games/invite', '/api/seasonal',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/games/', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -593,9 +593,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/sea', sea_api.status)
     app.router.add_post('/api/sea/action', sea_api.action)
 
-    from community_bot.game_invitations import open_invitation
+    from community_bot.game_invitations import open_invitation, quick_preview
 
     app.router.add_post('/api/games/invite', open_invitation)
+    app.router.add_get(r'/api/games/quick/{game:durak|barricade}/{rid:[a-f0-9]{16}}', quick_preview)
 
     from community_bot.interactive_runtime import lifecycle
 
@@ -633,7 +634,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'durak.js', 'durak.css',
-                 'barricade.js', 'barricade-board.js', 'barricade.css', 'style.css'):
+                 'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):
         app.router.add_get('/vendor/' + name, lambda r, n=name: web.FileResponse(
@@ -651,6 +652,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
     app.router.add_static('/pet-art/', ASSETS / 'pets' / 'mini', show_index=False)
     app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
+    app.router.add_static('/barricade-sfx/', ROOT / 'barricade-sfx', show_index=False)
     app.router.add_static('/durak-cards/', ROOT / 'durak-cards', show_index=False)
     app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
     return app

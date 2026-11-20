@@ -11,7 +11,7 @@ from aiohttp import web
 from community_bot import barricade_rules as rules
 from community_bot import durak_rooms as rooms
 from community_bot.durak_api import NO_BLOCKED_MEMBERS, SUMMARY, _summary
-from community_bot.game_invitations import deliver_game_invitation
+from community_bot.game_invitations import announce_quick_lobby, deliver_game_invitation
 
 GAME = "barricade"
 ONLY = f"{rooms.GAME_KIND}='barricade'"
@@ -155,7 +155,10 @@ async def action(request):
             updates.notify(body["room"])
         return web.json_response({"error": str(exc)}, status=409)
     updates.notify(rid)
-    if notice:
+    if isinstance(notice, rooms.QuickLobby):
+        await announce_quick_lobby(request.app["bot"], db, request.app["settings"], "barricade",
+                                  rid, uid, notice.stake)
+    elif notice:
         inbox_id, recipient, _ = notice
         await deliver_game_invitation(request.app["bot"], db, request.app["settings"], GAME,
                                       rid, uid, recipient, inbox_id)

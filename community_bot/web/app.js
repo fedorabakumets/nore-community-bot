@@ -171,10 +171,10 @@ function mountDurak() {
   if (window.NoraDurak) { window.NoraDurak.mount(root); return; }
   if (!document.getElementById('durak-style')) {
     const css = document.createElement('link');
-    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=night';
+    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=quick-game';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=night-witch').catch(() => {
+  durakModule ??= import('/durak.js?v=quick-game').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');
@@ -198,13 +198,13 @@ function openBarricade(entry) {
 function mountBarricade() {
   if (tab !== 'barricade') { barricadeEntry = null; barricadeView?.unmount(); return; }
   const root = document.getElementById('barricade-root');
-  for (const [id, href] of [['durak-style', '/durak.css?v=night'], ['barricade-style', '/barricade.css?v=1']]) {
+  for (const [id, href] of [['durak-style', '/durak.css?v=quick-game'], ['barricade-style', '/barricade.css?v=quick-game']]) {
     if (document.getElementById(id)) continue;
     const css = document.createElement('link');
     css.id = id; css.rel = 'stylesheet'; css.href = href;
     document.head.append(css);
   }
-  barricadeModule ??= import('/barricade.js?v=1').catch(() => {
+  barricadeModule ??= import('/barricade.js?v=quick-game').catch(() => {
     barricadeModule = null;
     if (!root.isConnected || tab !== 'barricade') return;
     const retry = document.createElement('button');
@@ -330,6 +330,8 @@ function telegramStartParam() {
 function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
+  const quick = /^nora_q_(durak|barricade)_([a-f0-9]{16})$/.exec(param);
+  if (quick) return {view: quick[1], quickRoom: quick[2]};
   const invite = /^nora_inv_(mafia|sea|durak|barricade)_([1-9][0-9]{0,15})_([A-Za-z0-9_-]{16,22})$/.exec(param);
   if (invite) return {view: invite[1], invite: {game: invite[1], recipient: Number(invite[2]), room_id: invite[3]}};
   const barricade = /^nora_b_([A-Za-z0-9_-]{22})$/.exec(param);
@@ -437,8 +439,12 @@ async function openApp(result) {
       inviteError = error.message;
     }
   }
+  if (linked?.quickRoom && !blockedLink) {
+    if (view === 'durak') durakEntry = {quick: linked.quickRoom};
+    if (view === 'barricade') barricadeEntry = {quick: linked.quickRoom};
+  }
   if (linked?.code && !blockedLink) barricadeEntry = {code: linked.code};
-  if (linked?.invite || linked?.code) window.NoraIntro?.finish(true);
+  if (linked?.invite || linked?.code || linked?.quickRoom) window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
   else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','friends','community','events'].includes(view)) tab = view;

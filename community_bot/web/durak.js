@@ -18,7 +18,7 @@ let host, mode='open', list, room, config={...initial}, target, friends, inviteC
 let challenge=false, batch=null, pending=false, message='', watch, refreshTimer, timer, generation=0, drag;
 let clockDeadline=0, undoDeadline=0, menuRequest=0, activeParam='', lastTap, handledPointer;
 let reactionCursor='', reactionReady=0, reactionPending=false, sortRank, hints, showReactions;
-let lobbyEntry=false;
+let lobbyEntry=false, quickStake=100;
 let itemsPending=false;
 const landing=new Map(), receivedReactions=new Map();
 let reactionsPreloaded=false;
@@ -61,16 +61,24 @@ function playerHeader(){
 }
 function menuScreen(){
   return `${header('Дурак','Игры')}${playerHeader()}<div class="dk-main-menu">
-    ${actionButton('quick','<span aria-hidden="true">▷</span>Быстрая игра','dk-main-quick')}
+    ${actionButton('quick',window.NoraLogo.quickGame(),'nora-quick-action')}
     <button type="button" data-tab="friends"><span aria-hidden="true">♧</span>Друзья</button>
     ${actionButton('items','<span aria-hidden="true">♢</span>Предметы','')}
     ${actionButton('create-form','<span aria-hidden="true">＋</span>Создать комнату','dk-main-create')}</div>`;
 }
 function quickScreen(){
   const open=list?.open||[];
+  const max = Math.min(10000,list?.balance || 0);
   const quick=open.filter(r=>!why(r.config)).sort((a,b)=>
     a.config.stake-b.config.stake||(a.config.players-a.count)-(b.config.players-b.count))[0];
   return `${header('Быстрая игра','Дурак')}
+    <form id="dk-quick-form" class="dk-panel dk-quick-form">
+      <label for="dk-quick-stake">Ставка с игрока</label>
+      <input id="dk-quick-stake" name="stake" type="number" inputmode="numeric" min="5" max="${Math.max(5,max)}"
+        value="${Math.min(Math.max(5,max),quickStake)}" required>
+      <p class="dk-muted">Если соперник ещё не ищет игру, Нора позовёт игроков в основном чате.</p>
+      <button type="submit" class="dk-primary dk-wide" ${!list||why({stake:5})?'disabled':''}>Начать поиск</button>
+    </form>
     ${quick?actionButton('preview',`Подобрать стол · ${chips(quick.config.stake)}`,'dk-primary dk-wide',`data-id="${quick.id}"`):''}
     <div class="dk-tools">${actionButton('code-form','Войти по коду')}${actionButton('mine','Мои игры')}</div>
     ${open.map(r=>row(r,'open')).join('')||`<p class="dk-empty">${list?'Свободных столов пока нет.':'Ищем столы…'}</p>`}
@@ -181,8 +189,10 @@ function waiting(){
       return m?`<div>${portrait(m)}<span><strong>${esc(m.name)}</strong><small>${m.id===room.host?'Создатель':m.seat===room.own?'Твоё место':'За столом'}</small></span><b>${chips(m.reserved)}</b></div>`:
         `<div class="dk-vacant"><i>+</i><span>Свободное место</span></div>`;
     }).join('')}</div></div>
-    ${actionButton('friends','Пригласить друзей','dk-primary dk-wide')}<div class="dk-tools">${actionButton('share','В Telegram')}${actionButton('copy','Ссылка')}</div>
-    ${actionButton('copy-code','Скопировать код','dk-text')}${rulesInfo(c)}
+    ${c.quick ? '<p class="dk-hint">Нора зовёт соперника в основном чате.</p>' :
+      actionButton('friends','Пригласить друзей','dk-primary dk-wide') +
+      `<div class="dk-tools">${actionButton('share','В Telegram')}${actionButton('copy','Ссылка')}</div>` +
+      actionButton('copy-code','Скопировать код','dk-text')}${rulesInfo(c)}
     ${actionButton('leave-confirm',own.id===room.host?'Отменить стол':'Выйти с возвратом','dk-text dk-danger')}`;
 }
 function friendScreen(){
@@ -421,7 +431,7 @@ function clockTick(){
   if(left<=0&&drag)cancelDrag();
 }
 function lockActions(){
-  host?.querySelectorAll('.dk-actions button:not([data-undo])').forEach(button=>{
+  host?.querySelectorAll('.dk-actions button:not([data-undo]), .dk-quick-form button').forEach(button=>{
     if(pending&&!button.disabled){
       button.disabled=true;
       button.dataset.awaitingMove='';
@@ -823,7 +833,7 @@ function click(e){
     case 'more':readMenu(true);break;
     case 'back':back();break;
     case 'create-form':case 'new-private':config={...initial,private:act==='new-private'};change('create');readMenu();break;
-    case 'again':config={...room.config};room=null;change('create');readMenu();break;
+    case 'again':config={...room.config};delete config.quick;room=null;change('create');readMenu();break;
     case 'create':send('create',{config:{...config}},id=>{room=null;openRoom(id)});break;
     case 'quick':{
       if(list?.active){openRoom(list.active);break}
@@ -849,7 +859,7 @@ function click(e){
     case 'resume':openRoom(b.dataset.id);break;
     case 'code-form':inviteCode='';change('code');readMenu();break;
     case 'preview':target=[...list.open,...list.invites].find(r=>r.id===b.dataset.id);inviteCode='';if(target)change('preview');break;
-    case 'join':send('join',{room:target.id,code:inviteCode},id=>{
+    case 'join':send(target.config.quick?'join-quick':'join',target.config.quick?{room:target.id}:{room:target.id,code:inviteCode},id=>{
       if(activeParam)store('param',activeParam);
       room=null;openRoom(id);
     });break;
@@ -905,6 +915,7 @@ function input(e){
     if(!showReactions)host.querySelectorAll('.dk-bubble').forEach(b=>b.replaceChildren());
     return;
   }
+  if(e.target.id==='dk-quick-stake'){const value=e.target.valueAsNumber;if(Number.isFinite(value))quickStake=value;return}
   if(e.target.id==='dk-code'){inviteCode=e.target.value;return}
   if(e.target.id==='dk-private'){config.private=e.target.checked;return}
   if(e.target.id!=='dk-stake')return;
@@ -914,7 +925,14 @@ function input(e){
   host.querySelector('#dk-eligibility').textContent=why(config);
   const btn=host.querySelector('[data-dk=create]');btn.disabled=!!why(config);btn.textContent='Создать за '+chips(config.stake);
 }
-function submit(e){if(e.target.id==='dk-code-form'){e.preventDefault();previewCode(codeFrom(host.querySelector('#dk-code').value))}}
+function submit(e){
+  if(e.target.id==='dk-code-form'){e.preventDefault();previewCode(codeFrom(host.querySelector('#dk-code').value))}
+  if(e.target.id==='dk-quick-form'){
+    e.preventDefault();
+    quickStake=Number(new FormData(e.target).get('stake'));
+    send('quick',{config:{stake:quickStake}},openRoom);
+  }
+}
 function liveDragMoves(gesture){
   const g=room?.game;
   if(!g||g.round!==gesture.round||performance.now()/1000>=clockDeadline)return [];
@@ -1055,6 +1073,18 @@ function mount(root){
   const entry=durakEntry;
   durakEntry=null;
   lobbyEntry=Boolean(entry);
+  if(entry?.quick){
+    paint();
+    const gen=generation;
+    readMenu().then(async ()=>{
+      if(!host||gen!==generation)return;
+      if(list?.active===entry.quick){openRoom(entry.quick);return}
+      const found=await api('games/quick/durak/'+entry.quick);
+      if(!host||gen!==generation)return;
+      target=found;inviteCode='';change('preview');
+    }).catch(err=>{if(host&&gen===generation)errorText(err)});
+    return;
+  }
   if(entry?.create){
     config={...initial};change('create');readMenu();
     return;

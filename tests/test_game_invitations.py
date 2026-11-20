@@ -10,9 +10,14 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import SendRichMessage
 from aiogram.types import Message, RichMessage
 
-from community_bot import durak_api, durak_rooms, mafia_api, sea_api
+from community_bot import barricade_api, durak_api, durak_rooms, mafia_api, sea_api
 from community_bot.database import Database
-from community_bot.game_invitations import close_game_invitation, deliver_game_invitation, open_invitation
+from community_bot.game_invitations import (
+    close_game_invitation,
+    deliver_game_invitation,
+    open_invitation,
+    quick_preview,
+)
 from community_bot.miniapp import protection
 from tests.test_miniapp import Request as MiniAppRequest
 from tests.test_miniapp import signed
@@ -142,3 +147,53 @@ async def test_group_delivery_survives_closed_dm_and_rich_api_rejection(db):
     red, green = bot.send_message.call_args.kwargs["reply_markup"].inline_keyboard[0]
     assert red.callback_data == "game-invite:close:2:5"
     assert green.url.endswith("nora_inv_mafia_2_" + "a" * 22)
+
+@pytest.mark.parametrize(("game", "title", "handler"), [
+    ("durak", "🃏 Дурак", durak_api.action), ("barricade", "🪵 Баррикада", barricade_api.action),
+])
+async def test_quick_lobby_announces_only_new_waiting_rooms_and_opens_specific_room(db, game, title, handler):
+    bot = SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
+                          send_rich_message=AsyncMock())
+    request = Request(db, 1, {"action": "quick", "config": {"stake": 100}, "nonce": secrets.token_hex(16)}, bot)
+    first, retry = await handler(request), await handler(request)
+    rid = json.loads(first.body)["id"]
+    assert retry.body == first.body
+    bot.send_rich_message.assert_awaited_once()
+    args, kwargs = bot.send_rich_message.call_args
+    assert args == (-100123,)
+    heading, host, stake, actions = kwargs["rich_message"].blocks
+    assert heading.text == title and host.text[0].text == "@player_1"
+    assert stake.text[1].text == "100 🍪"
+    assert actions.buttons[0].text == "Присоединиться"
+    assert actions.buttons[0].url == f"https://t.me/test_nora?startapp=nora_q_{game}_{rid}"
+
+    click = Request(db, 2, {})
+    click.path = f"/api/games/quick/{game}/{rid}"
+    click.match_info = {"game": game, "rid": rid}
+    assert (await protection(click, quick_preview)).status == 200
+    assert (await db.get_user(2))["cookies"] == 100
+    click.body = {"action": "join-quick", "room": rid, "nonce": secrets.token_hex(16)}
+    click.app["bot"] = bot
+    assert json.loads((await handler(click)).body)["id"] == rid
+    assert (await db.get_user(2))["cookies"] == 0
+    assert (await protection(click, quick_preview)).status == 400
+    assert bot.send_rich_message.await_count == 1
+
+
+@pytest.mark.parametrize(("game", "handler"), [("durak", durak_api.action), ("barricade", barricade_api.action)])
+async def test_quick_match_reuses_lobby_at_exact_stake_with_no_second_announcement(db, game, handler):
+    bot = SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
+                          send_rich_message=AsyncMock())
+    async def search(uid, stake):
+        response = await handler(Request(db, uid, {
+            "action": "quick", "config": {"stake": stake}, "nonce": secrets.token_hex(16),
+        }, bot))
+        return json.loads(response.body)["id"]
+
+    original = await search(1, 100)
+    assert await search(2, 10) != original
+    assert await search(3, 100) == original
+    assert bot.send_rich_message.await_count == 2
+    assert (await db.get_user(1))["cookies"] == 0
+    assert (await db.get_user(3))["cookies"] == 0
+    assert (await db.get_user(2))["cookies"] == (90 if game == "durak" else 100)

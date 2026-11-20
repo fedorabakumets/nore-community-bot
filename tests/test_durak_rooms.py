@@ -1,6 +1,7 @@
 """Escrow, invitation, persistence and HTTP identity regressions on disposable SQLite."""
 import asyncio
 import json
+import random
 import secrets
 import time
 from types import SimpleNamespace
@@ -225,7 +226,10 @@ async def test_poor_player_disabled_games_and_cancel_before_start(db):
     assert await balance(db, 1) == await balance(db, 2) == 1000
 
 
-async def test_simultaneous_moves_restart_hidden_information_and_forfeit(db):
+async def test_simultaneous_moves_restart_hidden_information_and_forfeit(db, monkeypatch):
+    # Both racing attacks can be defended, so restart won't collect a forced take.
+    deal = rules.deal
+    monkeypatch.setattr(rules, "deal", lambda config: deal(config, rng=random.Random(2)))
     rid = await run(db, 1, "create", config={"deck": 24, "speed": "fast", "stake": 125})
     await run(db, 2, "join", room=rid)
     initial = await api.snapshot(db, rid, 1)

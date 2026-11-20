@@ -15,10 +15,12 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InputRichBlockButtons,
     InputRichBlockParagraph,
+    InputRichBlockSectionHeading,
     InputRichMessage,
     Message,
     RichBlockButtons,
     RichMessageButton,
+    RichTextBold,
     RichTextTextMention,
     User,
 )
@@ -127,6 +129,66 @@ async def close_game_invitation(callback: CallbackQuery, settings):
         await callback.answer("Telegram не смог удалить сообщение.", show_alert=True)
         return
     await callback.answer()
+
+
+async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
+    chat_id = settings.community_chat_id
+    if not bot or not chat_id:
+        return
+    if not await db.fetchone("SELECT 1 FROM durak_rooms WHERE id=? AND status='waiting' AND deadline>?",
+                             (rid, time.time())):
+        return
+    title = "🃏 Дурак" if game == "durak" else "🪵 Баррикада"
+    stake_text = f"{stake:,}".replace(",", " ") + " 🍪"
+    try:
+        async with asyncio.timeout(6):
+            username = (await bot.me()).username
+            if not username:
+                return
+            host = _mention(await db.get_user(uid))
+            url = f"https://t.me/{username}?startapp=nora_q_{game}_{rid}"
+            button = RichMessageButton(text="Присоединиться", style="success", url=url)
+            with standalone_rich_message(), bot_publication(), keep_in_chat():
+                try:
+                    await bot.send_rich_message(chat_id, rich_message=InputRichMessage(
+                        blocks=[
+                            InputRichBlockSectionHeading(text=title, size=2),
+                            InputRichBlockParagraph(text=[host, " открыл лобби для быстрой игры."]),
+                            InputRichBlockParagraph(
+                                text=["Ставка ", RichTextBold(text=stake_text), " · 1 из 2 игроков"],
+                            ),
+                            InputRichBlockButtons(align="center", buttons=[button]),
+                        ],
+                        skip_entity_detection=True,
+                    ))
+                except (TelegramBadRequest, TelegramNotFound):
+                    await bot.send_message(
+                        chat_id,
+                        f"<b>{title}</b>\n{user_link(uid, host.text)} открыл лобби. Ставка <b>{stake_text}</b>",
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text=button.text, style=button.style, url=url),
+                        ]]),
+                    )
+    except _DELIVERY_ERRORS as error:
+        logger.warning("Quick lobby announcement failed: %s", type(error).__name__)
+
+
+async def quick_preview(request):
+    from community_bot import durak_rooms as rooms
+    from community_bot.durak_api import SUMMARY, _summary
+
+    game, rid = request.match_info["game"], request.match_info["rid"]
+    uid, db = request["actor"]["id"], request.app["db"]
+    async with db.connect() as conn:
+        await conn.execute("BEGIN")
+        row = await rooms.one(conn, SUMMARY + f"""
+            WHERE r.id=? AND {rooms.GAME_KIND}=? AND json_extract(r.config,'$.quick')=1
+              AND r.status='waiting' AND r.deadline>?
+        """, (rid, game, time.time()))
+        if not row or await rooms._blocked(conn, rid, uid):
+            raise ValueError("Лобби закрыто или соперник уже нашёлся")
+        return web.json_response(_summary(row))
 
 
 async def open_invitation(request):

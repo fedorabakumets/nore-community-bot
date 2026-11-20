@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from community_bot import barricade_rules as barricade
@@ -60,6 +61,11 @@ logger = logging.getLogger(__name__)
 
 class Conflict(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class QuickLobby:
+    stake: int
 
 
 def dump(value):
@@ -136,26 +142,31 @@ def _barricade_config(values, quick):
 
 
 async def _create(conn, uid, values, now, *, game, quick=False):
-    config = rules.settings(values) if game == "durak" else _barricade_config(values, quick)
+    if game == "durak" and quick:
+        if not isinstance(values, dict) or values.keys() != {"stake"}:
+            raise ValueError("Выбери ставку")
+        config = {**rules.settings(values), "quick": True}
+    else:
+        config = rules.settings(values) if game == "durak" else _barricade_config(values, quick)
     if quick:
         await _entry(conn, uid, config["stake"])
         candidates = await rows(conn, f"""
             SELECT r.*,{GAME_KIND} AS kind FROM durak_rooms r
-            WHERE r.status='waiting' AND r.host!=? AND r.deadline>? AND {GAME_KIND}='barricade'
+            WHERE r.status='waiting' AND r.host!=? AND r.deadline>? AND {GAME_KIND}=?
               AND json_extract(r.config,'$.quick')=1 AND json_extract(r.config,'$.stake')=?
             ORDER BY r.created,r.id
-        """, (uid, now, config["stake"]))
+        """, (uid, now, game, config["stake"]))
         for row in candidates:
             if await _blocked(conn, row["id"], uid):
                 continue
             candidate = _load(row)
             try:
-                await _eligible(conn, candidate["host"], config["stake"])
+                await _eligible(conn, candidate["host"], config["stake"] if game == "barricade" else 0)
             except ValueError:
                 await _finish(conn, candidate, now, cancel="unfunded")
                 await _save(conn, candidate, now)
                 continue
-            await _join(conn, candidate, uid, None, now, matched=True)
+            await _join(conn, candidate, uid, None, now, quick=True)
             return candidate
     ttl = QUICK_TTL if quick else LOBBY_TTL
     rid = secrets.token_hex(8)
@@ -187,10 +198,12 @@ async def _invited(conn, rid, uid):
     return invite and await accepted_in_connection(conn, uid, invite["sender"])
 
 
-async def _join(conn, r, uid, code, now, *, matched=False):
+async def _join(conn, r, uid, code, now, *, quick=False):
     if r["status"] != "waiting" or await _blocked(conn, r["id"], uid):
         raise Conflict("Стол больше недоступен для входа")
-    if r["config"].get("quick") and not matched:
+    if quick and not r["config"].get("quick"):
+        raise ValueError("Этот стол недоступен для быстрого входа")
+    if r["config"].get("quick") and not quick:
         raise ValueError("Этот стол доступен через быстрый поиск")
     if r["config"]["private"] and code != r["code"] and not await _invited(conn, r["id"], uid):
         raise ValueError("Для приватного стола нужно приглашение")
@@ -451,10 +464,11 @@ async def command(db, uid, body, *, now=None, game="durak"):
         raise ValueError("Обнови экран и повтори действие")
     digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     action, notice = body.get("action"), None
-    fields = {"create": {"config"}, "join": {"room", "code"}, "invite": {"room", "friend"},
-              "leave": {"room", "rev"}, "cancel": {"room", "rev"}, "move": {"room", "rev", "move"}}
+    fields = {"create": {"config"}, "quick": {"config"}, "join": {"room", "code"}, "join-quick": {"room"},
+              "invite": {"room", "friend"}, "leave": {"room", "rev"}, "cancel": {"room", "rev"},
+              "move": {"room", "rev", "move"}}
     if game == "barricade":
-        fields.update(quick={"config"}, decline={"room"})
+        fields["decline"] = {"room"}
     if not isinstance(action, str) or action not in fields or body.keys() - (fields[action] | {"action", "nonce"}):
         raise ValueError("Неизвестные параметры команды")
     async with db.connect() as conn:
@@ -467,6 +481,8 @@ async def command(db, uid, body, *, now=None, game="durak"):
             return old["room"], None
         if action in ("create", "quick"):
             r = await _create(conn, uid, body.get("config"), now, game=game, quick=action == "quick")
+            if action == "quick" and r["status"] == "waiting":
+                notice = QuickLobby(r["config"]["stake"])
         else:
             rid = body.get("room")
             if not isinstance(rid, str) or len(rid) > 32:
@@ -475,8 +491,8 @@ async def command(db, uid, body, *, now=None, game="durak"):
             if await _expire(conn, r, now):
                 await conn.commit()
                 raise Conflict("Время истекло, состояние стола обновилось")
-            if action == "join":
-                await _join(conn, r, uid, body.get("code"), now)
+            if action in ("join", "join-quick"):
+                await _join(conn, r, uid, body.get("code"), now, quick=action == "join-quick")
             elif action == "decline":
                 cursor = await conn.execute("DELETE FROM durak_invites WHERE room=? AND uid=?", (rid, uid))
                 if not cursor.rowcount:

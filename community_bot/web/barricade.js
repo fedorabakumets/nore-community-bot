@@ -1,3 +1,4 @@
+import {cue, soundEnabled, supported as soundSupported, toggleSound, unlock} from '/barricade-audio.js?v=2';
 import {attachBoard, buttonPosition, previewPosition} from '/barricade-board.js?v=1';
 
 const endpoint = 'barricade';
@@ -28,6 +29,18 @@ function boardMarkup(extra = '') {
     '<canvas width="360" height="315" aria-hidden="true"></canvas><div class="bc-targets"></div></div>';
 }
 
+function soundButton() {
+  return soundSupported() ? btn('sound', `<svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 9h4l5-4v14l-5-4H4z"/><path class="bc-sound-wave" d="M16 8a6 6 0 0 1 0 8m3-10a9 9 0 0 1 0 12"/>
+    <path class="bc-sound-muted" d="m16 10 4 4m0-4-4 4"/></svg>`, 'bc-sound',
+    'aria-label="Звук" aria-pressed="' + soundEnabled() + '"') : '';
+}
+
+function menuAction(action, label, sub, path) {
+  return btn(action, `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>
+    <span><strong>${label}</strong>${sub ? '<small>' + sub + '</small>' : ''}</span>`, 'bc-menu-action');
+}
+
 function renderMenu() {
   const me = data.user;
   const name = me.profile_name || me.telegram_name || 'Участник';
@@ -40,13 +53,13 @@ function renderMenu() {
       '</span><small>' + chips(item.config.stake) + '</small>', 'bc-room dk-secondary', 'data-id="' + item.id + '"')).join('');
   return heading('Баррикада', 'Игры') + '<div class="dk-player-strip">' +
     avatar({id: me.user_id, name, avatar: data.has_avatar && !data.avatar_video}) +
-    '<strong>' + esc(name) + '</strong><span class="bc-balance">' + chips(model?.balance ?? me.cookies) + '</span></div>' +
+    '<strong>' + esc(name) + '</strong><span class="bc-balance">' + chips(model?.balance ?? me.cookies) + '</span>' + soundButton() + '</div>' +
     boardMarkup('bc-demo') +
     (canResume ? btn('resume', 'Вернуться к партии', 'dk-primary dk-wide', 'data-id="' + model.active.id + '"') : '') +
-    '<div class="dk-main-menu">' + btn('quick', '<span aria-hidden="true">▷</span>Быстрая игра', 'dk-main-quick') +
-    btn('friends', '<span aria-hidden="true">♧</span>Друзья', '') +
-    btn('items', '<span aria-hidden="true">♢</span>Предметы', '') +
-    btn('create', '<span aria-hidden="true">＋</span>Создать игру', 'dk-main-create') + '</div>' +
+    '<div class="bc-menu-actions">' + btn('quick', window.NoraLogo.quickGame(), 'nora-quick-action') +
+    menuAction('create', 'Создать игру', 'Приватная комната', 'M5 7v10m0-9h14m-3-3v14m-6-8h8') +
+    menuAction('friends', 'Друзья', '', 'M8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20v-3a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v3M16 4a3 3 0 0 1 0 6m1 3a5 5 0 0 1 5 5v2') +
+    menuAction('items', 'Предметы', '', 'm3 9 9-5 9 5-9 5-9-5zm0 0v7l9 4 9-4V9m-9 5v6m-4-14 9 5') + '</div>' +
     (roomButtons ? '<section class="bc-list"><h2>Приглашения</h2>' + roomButtons + '</section>' : '') +
     (recentButtons ? '<details class="bc-panel"><summary>Последние партии</summary>' + recentButtons + '</details>' : '') +
     '<details class="bc-panel bc-rules"><summary>Правила игры</summary>' +
@@ -70,7 +83,7 @@ function stakeScreen() {
   const reason = restriction();
   return heading(quick ? 'Быстрая игра' : 'Создать игру') +
     '<form class="bc-panel bc-form"><p class="dk-muted">' +
-    (quick ? 'Подберём соперника с такой же ставкой.' :
+    (quick ? 'Подберём соперника с такой же ставкой. Если его ещё нет, Нора позовёт игроков в основном чате.' :
       selectedFriend ? 'Приглашение получит ' + esc(selectedFriend.name) + '.' : 'Пригласи друга из Норы или отправь ссылку.') +
     '</p><label for="bc-stake">Ставка с игрока</label>' +
     '<div class="bc-presets">' + [5, 10, 25, 50, 100].map(value => btn('stake', chips(value), 'dk-secondary',
@@ -103,7 +116,7 @@ function inviteScreen() {
     ' ждёт тебя</h2><p class="dk-muted">Ставка ' + chips(invited.config.stake) + ' · банк ' +
     chips(invited.config.stake * 2) + '</p><div class="dk-tools">' +
     btn('join', 'Сыграть на ' + chips(invited.config.stake), 'dk-primary', restriction() ? 'disabled' : '') +
-    btn(invited.code ? 'back' : 'decline', invited.code ? 'В меню' : 'Отклонить') +
+    btn(invited.code || invited.config.quick ? 'back' : 'decline', invited.code || invited.config.quick ? 'В меню' : 'Отклонить') +
     '</div>' + (restriction() ? '<p class="bc-feedback">' + esc(restriction()) + '</p>' : '') + '</div>';
 }
 
@@ -127,7 +140,7 @@ function playerCards() {
 function matchScreen() {
   return heading('Баррикада', 'Игры') + '<div class="bc-players">' + playerCards() + '</div>' +
     '<div class="bc-match-line"><strong class="bc-turn" role="status"></strong><time class="bc-clock"></time>' +
-    '<span class="bc-pot">' + chips(room.config.stake) + '</span></div>' +
+    '<span class="bc-pot">' + chips(room.config.stake) + '</span>' + soundButton() + '</div>' +
     boardMarkup() + '<p class="bc-connection" role="status"></p><div class="bc-actions"></div><div class="bc-end"></div>';
 }
 
@@ -298,7 +311,13 @@ async function loadMenu(entry) {
     const result = await api(endpoint);
     if (generation !== sequence || !root) return;
     model = result;
-    if (entry?.code) {
+    if (entry?.quick) {
+      if (model.active?.id === entry.quick) {openRoom(entry.quick);return;}
+      const found = await api('games/quick/' + endpoint + '/' + entry.quick);
+      if (generation !== sequence || !root) return;
+      invited = found;
+      change('invite');
+    } else if (entry?.code) {
       const found = await api(endpoint + '/preview', {code: entry.code});
       if (generation !== sequence || !root) return;
       invited = {...found, code: entry.code};
@@ -318,6 +337,17 @@ async function loadMenu(entry) {
   }
 }
 
+function soundForSnapshot(previous, next) {
+  if (next.status === 'finished' && previous?.status === 'playing') {
+    cue(next.result.loser === next.own ? 'loss' : 'win');
+  } else if (next.status === 'playing' && previous?.status !== 'playing') {
+    cue('start');
+  } else if (previous?.board && next.board) {
+    if (next.board.walls.length > previous.board.walls.length) cue('wall');
+    else if (JSON.stringify(next.board.pawns) !== JSON.stringify(previous.board.pawns)) cue('move');
+  }
+}
+
 function accept(view) {
   if (!root || (room && view.rev < room.rev)) return;
   connected = true;
@@ -327,6 +357,7 @@ function accept(view) {
     return;
   }
   const previous = room;
+  soundForSnapshot(previous, view);
   room = view;
   stamp = performance.now();
   if (previous?.rev !== room.rev) {
@@ -474,7 +505,12 @@ function confirmSurrender() {
 function click(event) {
   const button = event.target.closest('[data-bc]');
   if (!button || button.disabled) return;
+  unlock();
   const {bc, id, r, c} = button.dataset;
+  if (bc === 'sound') {
+    toggleSound();
+    button.setAttribute('aria-pressed', String(soundEnabled()));
+  }
   if (bc === 'back') back();
   if (bc === 'menu') returnToMenu();
   if (bc === 'again') {
@@ -488,7 +524,8 @@ function click(event) {
     invited = model.invites.find(item => item.id === id);
     change('invite');
   }
-  if (bc === 'join') submitAction('join', {room: invited.id, code: invited.code}, openRoom);
+  if (bc === 'join') submitAction(invited.config.quick ? 'join-quick' : 'join',
+    invited.config.quick ? {room: invited.id} : {room: invited.id, code: invited.code}, openRoom);
   if (bc === 'decline') submitAction('decline', {room: invited.id}, returnToMenu);
   if (bc === 'quick' || bc === 'create' || bc === 'items') {
     selectedFriend = null;
@@ -579,6 +616,9 @@ function mount(element, entry) {
   orientation = 'h';
   error = '';
   for (const [type, fn] of Object.entries({click, submit, keydown})) root.addEventListener(type, fn);
+  root.addEventListener('pointerdown', unlock);
+  root.addEventListener('touchend', unlock, {passive: true});
+  root.addEventListener('keydown', unlock);
   document.addEventListener('visibilitychange', visibility);
   timer = setInterval(clock, 250);
   render();
@@ -592,6 +632,9 @@ function unmount() {
   scene = null;
   clearInterval(timer);
   clearInterval(demoTimer);
+  root.removeEventListener('pointerdown', unlock);
+  root.removeEventListener('touchend', unlock);
+  root.removeEventListener('keydown', unlock);
   document.removeEventListener('visibilitychange', visibility);
   for (const [type, fn] of Object.entries({click, submit, keydown})) root.removeEventListener(type, fn);
   root = null;

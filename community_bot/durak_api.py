@@ -15,7 +15,7 @@ from community_bot import barricade_rules as barricade
 from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
-from community_bot.game_invitations import deliver_game_invitation
+from community_bot.game_invitations import announce_quick_lobby, deliver_game_invitation
 
 REACTION_DURATION = 2.7
 REACTION_COOLDOWN = 2.8
@@ -315,7 +315,10 @@ async def action(request):
             request.app["durak_updates"].notify(body["room"])
         return web.json_response({"error": str(exc)}, status=409)
     request.app["durak_updates"].notify(rid)
-    if notice:
+    if isinstance(notice, rooms.QuickLobby):
+        await announce_quick_lobby(request.app["bot"], db, request.app["settings"], "durak",
+                                  rid, uid, notice.stake)
+    elif notice:
         inbox_id, recipient, _ = notice
         await deliver_game_invitation(
             request.app["bot"], db, request.app["settings"], "durak", rid, uid, recipient, inbox_id,
