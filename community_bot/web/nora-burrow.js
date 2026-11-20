@@ -7,7 +7,7 @@ window.NoraBurrow = (() => {
   function el(tag,content,cls){
     const node=document.createElement(tag);if(content)node.textContent=content;if(cls)node.className=cls;return node;
   }
-  function mount(root,me,{reset,enter,changed,equip,where,returnToLobby}){
+  function mount(root,me,{reset,enter,changed,equip,where,returnToLobby,housesChanged}){
     const panel=el('dialog',null,'nora-burrow');panel.setAttribute('aria-label','Мастерская норы');
     const head=el('header'),title=el('h2'),balance=el('small'),tabs=el('div',null,'burrow-tabs'),list=el('div',null,'burrow-list'),status=el('p');
     status.setAttribute('role','status');root.append(panel);panel.append(head,tabs,list,status);
@@ -18,7 +18,8 @@ window.NoraBurrow = (() => {
     const homeButton=button('Моя нора',()=>open('home'),'nora-world-outfit burrow-manage');
     homeButton.hidden=true;root.querySelector('.nora-world-bar').append(homeButton);
     let view='',group='decor',own,home,host=null,loading=false,polling=false,next=0,serial=0,dead=false,search='',offset=0,dirVersion=0;
-    const request=(body,query='')=>api(path+query,body,AbortSignal.timeout(7000));
+    let trailAt=0,trailPending=null,trailRevision='';
+    const request=(body,query='',timeout=7000)=>api(path+query,body,AbortSignal.timeout(timeout));
     async function run(fn){
       if(loading||dead)return;loading=true;panel.setAttribute('aria-busy','true');
       try{await fn();}catch(error){if(!dead){if(panel.open)status.textContent=error.message;else toast(error.message);}}
@@ -48,14 +49,41 @@ window.NoraBurrow = (() => {
       ++serial;host=data.host;enter(host);apply(data);next=performance.now()+2400;
       if(panel.open)panel.close();
     }
+    async function knock(name){
+      try{
+        await request({action:'knock',target:name});
+        if(!dead)toast('Стук услышит '+name+' в игровом чате.');
+      }finally{
+        trailAt=0;
+      }
+    }
+    function refreshTrail(time,force=false){
+      if(!housesChanged)return;
+      if(trailPending)return trailPending;
+      if(!force&&time<trailAt)return;
+      trailAt=time+12000;
+      trailPending=request(undefined,'?trail=1',2500).then(({houses})=>{
+        if(dead)return;
+        const revision=JSON.stringify(houses);
+        if(revision===trailRevision)return;
+        trailRevision=revision;housesChanged(houses);
+      }).catch(()=>{trailAt=time+3000;}).finally(()=>{trailPending=null;});
+      return trailPending;
+    }
     function leave(){
       ++serial;host=null;home=null;homeButton.hidden=true;changed(null,null,catalog);
+    }
+    async function exit(){
+      const current=host;
+      await refreshTrail(performance.now(),true);
+      if(dead||current!==host)return;
+      leave();returnToLobby(current);
     }
     function render(){
       tabs.replaceChildren();list.replaceChildren();status.textContent='';
       title.textContent=view==='shop'?'Лавка у портала':view==='deck'?'Проигрыватель «Волна»':'Моя нора';
       balance.textContent=view==='shop'?own.balance+' 🍪':'';
-      if(view==='home')tabs.append(button('Пригласить игрока',()=>directory(true)));
+      if(view==='home')tabs.append(button('Пригласить игрока',directory));
       if(view!=='deck')for(const [id,label] of Object.entries(groups)){
         const tab=button(label,()=>{group=id;render();});tab.setAttribute('aria-pressed',String(group===id));tabs.append(tab);
       }
@@ -100,20 +128,20 @@ window.NoraBurrow = (() => {
       status.textContent='Загрузка…';await items();
       const data=await request();if(dead)return;apply(data);render();
     }
-    async function directory(invite=false){
-      view=invite?'invite':'directory';show();title.textContent=invite?'Пригласить в свою нору':'Чужие норки';
+    async function directory(){
+      view='invite';show();title.textContent='Пригласить в свою нору';
       balance.textContent='';tabs.replaceChildren();search='';offset=0;
       const form=el('form'),field=el('input'),submit=el('button','Найти');field.type='search';field.placeholder='Ник игрока';field.setAttribute('aria-label','Ник игрока');field.maxLength=16;
       form.append(field,submit);tabs.append(form);
       async function page(){
         const v=++dirVersion;
         const result=await request(undefined,'?'+new URLSearchParams({directory:'1',q:search,offset}));
-        if(dead||v!==dirVersion||view!==(invite?'invite':'directory'))return;
+        if(dead||v!==dirVersion||view!=='invite')return;
         list.replaceChildren();status.textContent='';
         for(const {name,online} of result.players){
           const row=el('article'),copy=el('div');copy.append(el('strong',name),el('small',online?'Сейчас в игре':'Сейчас вне игры'));
-          const send=button(invite?'Пригласить':'Попроситься',async()=>{
-            await request({action:invite?'invite':'request',target:name});send.disabled=true;send.textContent='Отправлено';
+          const send=button('Пригласить',async()=>{
+            await request({action:'invite',target:name});send.disabled=true;send.textContent='Отправлено';
             status.textContent='Сообщение для '+name+' в игровом чате · 10 минут на ответ.';
           });row.append(copy,send);list.append(row);
         }
@@ -130,18 +158,19 @@ window.NoraBurrow = (() => {
       if(data.enter)await go(data.enter);
     }
     return {
-      open,go,directory,respond,leave,run,host:()=>host,home:()=>home,
+      open,go,knock,respond,exit,run,host:()=>host,home:()=>home,
       switchLamp:async()=>{apply(await request({action:'light',item:'lamp',lit:!home.lamp}));},
       burst:()=>request({action:'burst',target:host}),
       panelOpen:()=>panel.open,
       tick(time,inside){
+        refreshTrail(time);
         homeButton.hidden=!inside||host!==me;
         if(!inside||!host||time<next||polling||loading)return;
         const current=host;
         next=time+2400;polling=true;
         refresh().catch(error=>{
           if(!dead&&host===current&&current!==me&&error.message==='Сначала получи приглашение хозяина.'){
-            if(panel.open)panel.close();leave();returnToLobby();toast('Визит завершён. Ты снова в лобби.');
+            if(panel.open)panel.close();exit();toast('Визит завершён. Ты вышел из норы.');
           }
         }).finally(()=>{polling=false;});
       },

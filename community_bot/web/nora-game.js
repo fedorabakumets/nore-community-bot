@@ -8,7 +8,7 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"aim-actions", "nora-world":"burrows", "nora-chat":"burrows", "nora-cinema":"burrows", "nora-scenery":"burrows", "nora-burrow":"burrows", "nora-burrow-models":"burrows",
+      const version = {"nora-companion":"aim-actions", "nora-world":"burrow-trail", "nora-chat":"burrow-trail", "nora-cinema":"burrow-trail", "nora-scenery":"burrow-trail", "nora-burrow":"burrow-trail", "nora-burrow-models":"burrow-trail",
         "nora-voxel":"burrows", "nora-observatory":"reticle-hud"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
@@ -17,7 +17,7 @@
     return scripts.get(name);
   }
   async function loadGame() {
-    for (const name of ["nora-burrow-models", "nora-burrow", "nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-chat", "nora-cinema", "nora-world"]) await loadScript(name);
+    for (const name of ["nora-burrow-models", "nora-burrow-trail", "nora-burrow", "nora-wings", "nora-voxel", "nora-scenery", "nora-companion", "nora-observatory", "nora-chat", "nora-cinema", "nora-world"]) await loadScript(name);
     defaults = window.NoraVoxel.defaults; wingShop = window.NoraWings;
   }
   let helpDismissed = false;

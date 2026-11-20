@@ -24,7 +24,7 @@ try {
   const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
   class Element extends EventTarget {
     open=false; dataset = {}; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
-    children = new Map();
+    children = new Map(); attributes = new Map();
     classes = new Set();
     classList = {
       add: name=>this.classes.add(name),
@@ -38,11 +38,12 @@ try {
       return this.children.get(selector);
     }
     querySelectorAll(selector){return selector==='button'?[this.querySelector('button:first-child'),this.querySelector('button:last-child')]:[];}
-    setAttribute() {} setPointerCapture() {} focus() {} blur() {} click(){this.emit('click');}
+    setAttribute(key,value){this.attributes.set(key,value);} getAttribute(key){return this.attributes.get(key);}
+    setPointerCapture() {} focus() {} blur() {} click(){this.emit('click');}
     insertAdjacentHTML() {} replaceChildren() {} reset() {} remove() {}
     showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
     getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
-    getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}}; }
+    getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}, strokeRect(){}}; }
     emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); return this.dispatchEvent(e); }
   }
   const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
@@ -52,13 +53,12 @@ try {
   const cinemaLayout=JSON.parse(await readFile(new URL('nora-cinema.json',web),'utf8'));
   const sharedGeometry=new Three.BoxGeometry(),sharedMaterial=new Three.MeshLambertMaterial();
   const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial,memoryLayout.portal,cinemaLayout);
-  const [cinemaGate,noraGate,memoryGate]=['cinema','tavern','observatory'].map(name=>
+  const [cinemaGate,memoryGate]=['cinema','observatory'].map(name=>
     tavern.lobby.getObjectByName('nora-'+name+'-portal').position);
-  assert.equal(cinemaGate.z,noraGate.z);
-  assert.equal(memoryGate.z,noraGate.z);
-  assert.equal(noraGate.x,sceneryWindow.NoraScenery.lobbySpawn.x);
-  assert.equal(cinemaGate.x-noraGate.x,noraGate.x-memoryGate.x);
-  assert.ok(memoryGate.x-noraGate.x>3.24,'neighboring portal prompts do not overlap');
+  assert.equal(cinemaGate.z,memoryGate.z);
+  assert.ok(cinemaGate.x<0&&memoryGate.x<0,'the portals are west of the residential trail');
+  assert.ok(memoryGate.x-cinemaGate.x>3.24,'neighboring portal prompts do not overlap');
+  assert.equal(tavern.lobby.getObjectByName('nora-tavern-portal'),undefined,'the burrow portal is gone');
   const record=tavern.indoor.getObjectByName('nora-record'),notes=tavern.indoor.getObjectByName('nora-music-notes');
   assert.ok(record&&notes,'record player and notes are present');
   assert.equal(tavern.outdoor.getObjectByName('nora-tavern-windows').count,8,'windows on all four facades');
@@ -162,9 +162,7 @@ try {
     performAction(action);
   }
   function goToIsland(world){
-    const {x,z}=world.window.NoraScenery.tavernPortal;
-    world.player.position.set(x,.017,z+1.15);
-    useNearby(world,'НОРА');
+    world.window.worldActions.performAction({text:'Войти в таверну'});
     useNearby(world,'Выйти из таверны');
     world.frames(1);
   }
@@ -264,14 +262,16 @@ try {
     'the extended slider keeps the mobile camera farther back');
   mobileWorld.stop();
   const desktopAim=await setup(1);
+  goToIsland(desktopAim);
   const prompt=desktopAim.root.querySelector('.nora-aim-action');
   const marker=desktopAim.root.querySelector('.nora-reticle');
-  const aimPortal=desktopAim.window.NoraScenery.tavernPortal;
+  const aimPortal={x:0,z:desktopAim.window.NoraScenery.portalZ.home};
+  desktopAim.player.position.x=3;desktopAim.frames(1);
   assert.equal(marker.hidden,false,'reticle is visible while exploring');
   assert.equal(prompt.hidden,true,'a distant portal offers no interaction');
   desktopAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
   desktopAim.frames(1);
-  assert.equal(prompt.querySelector('.nora-aim-label').textContent,'НОРА','the centered portal is actionable');
+  assert.equal(prompt.querySelector('.nora-aim-label').textContent,'ЛОББИ','the centered portal is actionable');
   const aimPointer=x=>desktopAim.canvas.emit('pointermove',{pointerType:'mouse',pointerId:1,clientX:x,clientY:20});
   aimPointer(20);aimPointer(260);desktopAim.frames(50);
   assert.equal(prompt.hidden,true,'turning away hides the interaction within reach');
@@ -291,16 +291,17 @@ try {
   desktopAim.player.position.z=aimPortal.z+1.35;desktopAim.frames(1);
   desktopAim.key('KeyE');desktopAim.frames(12);
   assert.equal(prompt.hidden,true,'the prompt disappears after interaction');
-  assert.equal(desktopAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','E opens the aimed portal');
+  assert.match(desktopAim.root.querySelector('.nora-world-bar small').textContent,/^ЛОББИ/,'E opens the aimed portal');
   desktopAim.stop();
   const touchAim=await setup(0,60,undefined,undefined,true);
+  goToIsland(touchAim);
   touchAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
   touchAim.frames(1);
   const touchPrompt=touchAim.root.querySelector('.nora-aim-action');
   assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,true,'third-person view hides the reticle on touch');
   assert.equal(touchPrompt.hidden,false,'aiming in third person works on touch');
   touchPrompt.click();touchAim.frames(12);
-  assert.equal(touchAim.root.querySelector('.nora-world-bar small').textContent,'ТАВЕРНА','tapping the prompt performs the same interaction');
+  assert.match(touchAim.root.querySelector('.nora-world-bar small').textContent,/^ЛОББИ/,'tapping the prompt performs the same interaction');
   touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
   assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,false,'first person has a reticle');
   touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
@@ -786,9 +787,7 @@ try {
   const peer=hasPeer();
   const remoteSplit=peer.getObjectByName('thighRight').rotation.x-peer.getObjectByName('thighLeft').rotation.x;
   assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
-  const {x:noraX,z:noraZ}=lobbyWorld.window.NoraScenery.tavernPortal;
-  lobbyWorld.player.position.set(noraX,.017,noraZ+1.15);lobbyWorld.frames(1);
-  useNearby(lobbyWorld,'НОРА');await flush();
+  lobbyWorld.window.worldActions.performAction({text:'Войти в таверну'});await flush();
   assert.ok(exchanges.at(-1).leave,'entering the tavern leaves the shared lobby');
   lobbyWorld.frames(1);
   useNearby(lobbyWorld,'Выйти из таверны');
@@ -858,8 +857,7 @@ try {
   const gate=course.scene().getObjectByName('nora-observatory-portal');
   const lobby=gate.parent;
   assert.ok(!lobby.getObjectByName('nora-parkour-finish'),'the old lobby course is removed');
-  const [noraSign,memorySign]=lobby.children.filter(node=>node.name==='nora-portal-label');
-  assert.equal(noraSign.position.z,memorySign.position.z);
+  const [memorySign]=lobby.children.filter(node=>node.name==='nora-portal-label');
   assert.ok(memorySign.position.z>portal.z+.8&&memorySign.material.opacity<1);
   const signY=memorySign.position.y;
   course.frames(20);

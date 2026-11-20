@@ -1,7 +1,7 @@
 'use strict';
 window.NoraBurrowModels = (() => {
   const slots = [[-3,-3.35],[2.9,-3.35],[-3,-1.35],[3,-1.35],[-3,.7],[3,.7],[-2.9,3],[2.9,3]];
-  const stall = {x:2.15,z:2.8};
+  const stall = {x:-6.9,z:2.6};
   const wood='#784a38', brass='#e5b968', dark='#342e39', mint='#8adbc5', wine='#a6455a';
   function merchant(box,solid) {
     const {x,z}=stall;

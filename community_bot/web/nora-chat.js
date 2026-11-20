@@ -122,7 +122,7 @@ window.NoraChat = (() => {
 
     const system=dialog.querySelector('.nora-visit-messages');
     let visitRevision='';
-    const visitText=n=>n.other+({request:' просится к тебе в нору.',invite:' приглашает тебя в свою нору.',
+    const visitText=n=>n.other+({request:' стучится в дверь твоей норы.',invite:' приглашает тебя в свою нору.',
       allowed:' открыл для тебя нору.',declined:' отклонил запрос на визит.'}[n.kind]||'');
     function visits(notes){
       const revision=notes.map(n=>n.id).join();
@@ -142,7 +142,7 @@ window.NoraChat = (() => {
         card.append(name,msg);system.append(card);
         const options=n.kind==='request'?[['accept','Впустить'],['decline','Отказать']]:
           n.kind==='invite'?[['accept','В гости'],['decline','Отказать']]:
-          n.kind==='allowed'?[['enter','Залезть в нору'],['dismiss','Закрыть']]:[['dismiss','Закрыть']];
+          n.kind==='allowed'?[['enter','Войти в нору'],['dismiss','Закрыть']]:[['dismiss','Закрыть']];
         for(const [action,label] of options){
           const b=document.createElement('button');b.textContent=label;
           b.onclick=async()=>{

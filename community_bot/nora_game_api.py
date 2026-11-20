@@ -92,7 +92,13 @@ async def _player_profile(database, telegram_id, *, private=False):
 
 
 async def status(request):
-    return web.json_response(await _player_profile(request.app['db'], request['actor']['id'], private=True))
+    database, uid = request.app['db'], request['actor']['id']
+    profile = await _player_profile(database, uid, private=True)
+    if profile['nickname']:
+        async with database.connect() as db:
+            await nora_burrows.mark_seen(db, uid)
+            await db.commit()
+    return web.json_response(profile)
 
 
 async def companion(request):
@@ -126,6 +132,7 @@ async def register(request):
         try:
             await db.execute('INSERT INTO nora_game_players (telegram_id, nickname) VALUES (?, ?)',
                              (request['actor']['id'], nickname))
+            await nora_burrows.mark_seen(db, request['actor']['id'])
             await db.commit()
         except sqlite3.IntegrityError:
             return web.json_response({'error': 'Этот никнейм уже занят'}, status=409)
@@ -273,16 +280,21 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         raise ValueError('Проверь данные сессии')
     presence = app['nora_lobby']
     cinema = app.get('nora_cinema')
+    visits = app.get('nora_visits')
     now = time.monotonic()
     expired = [(key, sid) for key, (seen, sid, _) in presence.items() if now - seen >= LOBBY_TTL]
     for key, _ in expired:
         del presence[key]
+        if visits:
+            visits.activity.pop(key, None)
     for key, expired_session in expired:
         await music_api.return_departed_record(app['db'], key, expired_session)
     current = presence.get(user_id)
     if body.get('leave') is True:
         if current and current[1] == session:
             del presence[user_id]
+            if visits:
+                await visits.touch(app['db'], user_id, now, leaving=True)
             if cinema and current[2].get('room') == CINEMA_ROOM:
                 cinema.refresh(presence, now)
             await music_api.return_departed_record(app['db'], user_id, session)
@@ -294,6 +306,11 @@ async def lobby_snapshot(app, user_id, body, profile=None):
     if room is not None and not (in_memory or in_cinema or home):
         raise ValueError('Проверь локацию игрока')
     bounds = LOBBY_BOUNDS
+    if room is None:
+        # The client extends the path with each occupied plot. Keep lobby replication
+        # on that corridor without querying the ranking for every movement frame.
+        trail = nora_burrows.TRAIL
+        bounds = {**bounds, 'x': (bounds['x'][0], 1_000_000)}
     if in_memory:
         limits = nora_observatory.LAYOUT['bounds']
         bounds = {**bounds, 'x': (-limits['x'], limits['x']), 'z': (-limits['z'], limits['z'])}
@@ -312,6 +329,8 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         if type(value) not in (int, float) or not minimum <= value <= maximum:
             raise ValueError('Проверь координаты игрока')
         pose[key] = value
+    if room is None and pose['x'] > trail['start'] and not trail['minZ'] <= pose['z'] <= trail['maxZ']:
+        raise ValueError('Проверь координаты игрока')
 
     supplied_profile = profile is not None
     if supplied_profile:
@@ -334,7 +353,6 @@ async def lobby_snapshot(app, user_id, body, profile=None):
                 profile['outfit'].pop('wear', None)
     if not profile['nickname'] or not profile['outfit']:
         raise ValueError('Сначала создай персонажа')
-    visits = app.get('nora_visits')
     if home and (not visits or not visits.allowed(profile['nickname'], home[1])):
         raise ValueError('Сначала получи приглашение хозяина.')
     height = body.get('y')
@@ -382,6 +400,8 @@ async def lobby_snapshot(app, user_id, body, profile=None):
         attempts = app.get('nora_observatory')
         if attempts and user_id in attempts and attempts[user_id].session == session:
             del attempts[user_id]
+    if visits:
+        await visits.touch(app['db'], user_id, now)
     current = presence.get(user_id)
     was_in_cinema = current and current[2].get('room') == CINEMA_ROOM
     seat = None

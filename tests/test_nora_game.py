@@ -200,7 +200,7 @@ async def test_lobby_exchanges_only_game_profiles_and_expires_presence(tmp_path,
 
     with pytest.raises(ValueError, match='персонажа'):
         await exchange(3)
-    for bad_x in (True, float('nan'), float('inf'), 17, '1'):
+    for bad_x in (True, float('nan'), float('inf'), -17, 1_000_001, '1'):
         with pytest.raises(ValueError, match='координаты'):
             await exchange(1, x=bad_x)
     assert await exchange(1, nickname='Spoofed', telegram_id=2) == []

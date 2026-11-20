@@ -2,8 +2,8 @@
 window.NoraScenery = (() => {
   const tavernOffset=-4.95, portalZ={home:6.75};
   const lobbyDeck={x:0,z:9.5};
-  const lobbySpawn={x:0,z:6.8}, tavernPortal={x:0,z:-3.4};
-  function create(T, geometry, material, memoryPortal, cinemaLayout) {
+  const lobbySpawn={x:0,z:6.8};
+  function create(T, geometry, material, memoryPortal, cinemaLayout, trailLayout) {
     let blocks = [], solids = [], cameraBoxes = [];
     const outdoorZone={limit:7.35, boxes:[], cameraBoxes:[]}, indoorZone={limitX:4.25,limitZ:4.55,boxes:[],cameraBoxes:[]};
     function box(x,y,z,w,h,d,color){blocks.push([x,y,z,w,h,d,color]);}
@@ -229,8 +229,9 @@ window.NoraScenery = (() => {
       box(x+.5,-.25,z+.5,1,.5,1,['#3e4949','#414d4e','#374447'][tone]);
       if(Math.abs(x+.5)>16.5||Math.abs(z+.5)>11.5)
         box(x+.5,-.85,z+.5,1,.7,1,'#34343e');
-      if(x===0||x===-1||z===0||z===-1||(
-        x>=-11&&x<11&&z>=-7&&z<7&&(x===-11||x===10||z===-7||z===6)))
+      const joinsTrail=trailLayout&&x+1>trailLayout.start&&z>=-2&&z<3;
+      if(!joinsTrail&&(x===0||x===-1||z===0||z===-1||(
+        x>=-11&&x<11&&z>=-7&&z<7&&(x===-11||x===10||z===-7||z===6))))
         box(x+.5,.015,z+.5,.96,.03,.96,['#626071','#777384','#555765'][tone]);
     }
     for(let x=-26;x<26;x+=2)for(let z=-22;z<22;z+=2){
@@ -240,11 +241,13 @@ window.NoraScenery = (() => {
     for(let edge=0;edge<4;edge++){
       const end=edge<2?18:13;
       for(let i=-end;i<=end;i++){
+        if(edge===3&&trailLayout&&i>=trailLayout.minZ-1&&i<=trailLayout.maxZ+1)continue;
         const x=edge<2?i:(edge===2?-17:17),z=edge<2?(edge===0?-12:12):i;
         box(x,.25,z,1.03,.5,.85,i%3?'#4f535f':'#636173');
         if(i%2===0)bush(x,z,.85);
       }
       for(let i=-end;i<=end;i+=3){
+        if(edge===3&&trailLayout&&i>=trailLayout.minZ-2&&i<=trailLayout.maxZ+2)continue;
         const x=edge<2?i:(edge===2?-19:19),z=edge<2?(edge===0?-14:14):i;
         for(const layer of [0,1]){
           const start=blocks.length;
@@ -405,7 +408,6 @@ window.NoraScenery = (() => {
       sprite.position.set(x,2.46,z);area.add(sprite);gateLabels.push(sprite);
     }
     if(window.NoraBurrowModels){const {x,z}=window.NoraBurrowModels.stall;addSign(lobby,'ЛАВКА',x,z+1.12);}
-    lobbyGate(tavernPortal,'НОРА','nora-tavern-portal');
     if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ','nora-observatory-portal',{
       palette:['#332239','#66476f','#c7a0d3','#936cac','#e5c3e6'],
     });
@@ -450,5 +452,5 @@ window.NoraScenery = (() => {
       for(const label of gateLabels){label.material.map.dispose();label.material.dispose();}
     }};
   }
-  return {create,tavernOffset,portalZ,lobbyDeck,lobbySpawn,tavernPortal};
+  return {create,tavernOffset,portalZ,lobbyDeck,lobbySpawn};
 })();
