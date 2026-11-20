@@ -6,7 +6,7 @@ window.NoraSea = (() => {
   let pollTimer = null,
     pending = false;
   const draft = { stake: "0", title: "", password: "" };
-  let lastRoomId = "";
+  let lastRoomId = "", creating = false;
   let lastHtml = "";
   let serverClock = 0, receivedAt = 0;
 
@@ -93,26 +93,29 @@ window.NoraSea = (() => {
 
   function home() {
     const s = state.sea;
-    const stakeNote = Number(draft.stake)
-      ? "Ставка создателя спишется при создании, соперника — при старте. Победитель забирает удвоенную ставку, при ничьей — возврат."
-      : "Бесплатная партия: печеньки не списываются.";
-    return (
-      backBtn() +
-      invites() +
-      `<div class="play-title-row"><div><p class="eyebrow">С ботом бесплатно · с другом бесплатно или на 🍪</p><h1>Морской<br><em>бой</em></h1></div>` +
-      `<span class="rocket-balance"><small>В кошельке</small><b>${number(s?.balance ?? data.user.cookies)} 🍪</b></span></div>` +
-      `<p class="sub">Попал — стреляй ещё. Промах — ход переходит. Потопи весь флот.</p>` +
-      errorBox() +
-      (s && !s.enabled ? '<p class="game-restricted">Новые игры временно выключены администрацией.</p>' : "") +
-      `<section class="card mafia-create"><span class="eyebrow">Соперник и режим</span><h2>Начнём бой.</h2>` +
-      `<label for="sea-title">Название комнаты</label><input id="sea-title" maxlength="60" placeholder="Морской бой" value="${esc(draft.title)}"><label for="sea-password">Пароль комнаты (необязательно)</label><input id="sea-password" type="password" maxlength="64" autocomplete="new-password" placeholder="От 4 символов" value="${esc(draft.password)}"><p class="sub">Пароль нужен для входа из списка. Личное приглашение другу действует без пароля.</p>` +
-      `<label>Ставка для игры с другом</label><div class="stake-chips" role="group" aria-label="Ставка для игры с другом">${stakeChips()}</div>` +
-      `<div class="pet-action-row"><button class="primary" id="sea-create-bot" ${pending || !s || !s.enabled ? "disabled" : ""}>С ботом бесплатно</button>` +
-      `<button class="secondary" id="sea-create-friend" ${pending || !s || !s.enabled ? "disabled" : ""}>Комната для друга</button></div>` +
-      `<p class="sub">${stakeNote}</p></section>` +
-      rules() +
-      recentList()
-    );
+    const active = ["lobby", "active"].includes(s?.room?.status);
+    const disabled = pending || !s?.enabled || active ? "disabled" : "";
+    const stakeNote = Number(draft.stake) ? "Ставка спишется при создании. При ничьей обе ставки возвращаются." : "";
+    return `<div class="sea-setup">
+      ${backBtn()}
+      <div class="play-title-row"><h1>Морской бой</h1><span class="rocket-balance"><b>${number(s?.balance ?? data.user.cookies)} 🍪</b></span></div>
+      ${errorBox()}
+      ${s && !s.enabled ? '<p class="game-restricted">Новые игры временно выключены администрацией.</p>' : ""}
+      ${active ? '<button class="secondary sea-resume" id="sea-resume">Вернуться в текущую игру</button>' : ""}
+      <section class="card sea-create">
+        <label for="sea-title">Название лобби</label>
+        <input id="sea-title" maxlength="60" placeholder="Морской бой" value="${esc(draft.title)}">
+        <label for="sea-password">Пароль для входа из списка</label>
+        <input id="sea-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Необязательно · от 4 символов" value="${esc(draft.password)}">
+        <label>Ставка с другом</label><div class="stake-chips" role="group" aria-label="Ставка для игры с другом">${stakeChips()}</div>
+        ${stakeNote ? `<p class="sub stake-note">${stakeNote}</p>` : ""}
+        <div class="sea-create-actions">
+          <button class="primary" id="sea-create-friend" ${disabled}>Создать лобби</button>
+          <button class="secondary" id="sea-create-bot" ${disabled}>С ботом бесплатно</button>
+        </div>
+      </section>
+      ${invites()}${rules()}${recentList()}
+    </div>`;
   }
 
   function playerRow(p) {
@@ -187,7 +190,7 @@ window.NoraSea = (() => {
   }
 
   function screen() {
-    return `<div id="sea-content">${state.sea?.room ? room() : home()}</div>`;
+    return `<div id="sea-content">${state.sea?.room && !creating ? room() : home()}</div>`;
   }
 
   async function load(force = false, roomId = undefined) {
@@ -263,6 +266,7 @@ window.NoraSea = (() => {
     try {
       const response = await api("sea/action", body);
       state.sea = { ...(state.sea || {}), ...response };
+      if (body.action === "create") creating = false;
       if (response.server_now) { serverClock = response.server_now; receivedAt = Date.now(); }
       if (response.room?.id) lastRoomId = response.room.id;
       if (response.message && !opts.quiet) toast(response.message);
@@ -305,11 +309,28 @@ window.NoraSea = (() => {
 
   async function joinLobby(roomId, password) {
     const result = await perform({action: "join", room_id: roomId, password}, {close: true});
-    if (result) { tab = "sea"; render(); window.scrollTo(0, 0); }
+    if (result) {
+      const previous = tab;
+      tab = "sea";
+      NoraShop.tabChanged(tab, previous);
+      render();
+      window.scrollTo(0, 0);
+    } else window.NoraInteractive?.reloadLobbies();
+  }
+
+  function openSetup() {
+    creating = true;
+    lastRoomId = "";
+    const previous = tab;
+    tab = "sea";
+    NoraShop.tabChanged(tab, previous);
+    render();
+    window.scrollTo(0, 0);
   }
 
   function mount() {
     if (tab === "sea") load(true);
+    else creating = false;
     timerTick();
     schedule();
   }
@@ -331,6 +352,11 @@ window.NoraSea = (() => {
       load(true);
       return;
     }
+    if (b.id === "sea-resume") {
+      creating = false;
+      patch();
+      return;
+    }
     if (b.id === "sea-create-bot") {
       perform({ action: "create", vs_bot: true, stake: 0 });
       return;
@@ -350,7 +376,7 @@ window.NoraSea = (() => {
     if (b.dataset.seaAdminClose) {
       const roomId = b.dataset.seaAdminClose;
       sheet(`<h2>Закрыть комнату?</h2><p class="sub">Лобби будет закрыто, ставка создателя вернётся.</p><button class="primary" id="sea-admin-close-confirm">Закрыть комнату</button>`);
-      $("#sea-admin-close-confirm").onclick = async () => { if (await perform({action: "admin_close", room_id: roomId}, {close: true})) window.NoraCommunity?.reload(); };
+      $("#sea-admin-close-confirm").onclick = async () => { if (await perform({action: "admin_close", room_id: roomId}, {close: true})) window.NoraInteractive?.reloadLobbies(); };
       return;
     }
     if (b.dataset.seaKick) {
@@ -382,10 +408,12 @@ window.NoraSea = (() => {
       perform({ action: "respond", room_id: b.dataset.roomId, accept }).then((result) => {
         if (tab === "notices") window.NoraCabinet?.reloadNotices();
         if (result && accept) {
+          const previous = tab;
           tab = "sea";
+          NoraShop.tabChanged(tab, previous);
           render();
           window.scrollTo(0, 0);
-        }
+        } else window.NoraInteractive?.reloadLobbies();
       });
       return;
     }
@@ -430,6 +458,7 @@ window.NoraSea = (() => {
     parent: () => "games",
     load,
     inviteCard,
+    openSetup,
     mount,
     handles: (view) => VIEWS.has(view),
     refreshCurrent: () => {

@@ -515,6 +515,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     app.router.add_get('/api/community', community_api.status)
     app.router.add_get('/api/community/people', community_api.directory)
+    app.router.add_get('/api/community/lobbies', community_api.lobbies)
     app.router.add_get('/api/community/presence', community_api.presence)
     app.router.add_get('/api/presence', social_profiles.status)
     app.router.add_post('/api/presence', social_profiles.update)

@@ -708,7 +708,9 @@ def _check_password(room, uid: int, value, now: float) -> None:
     _password_attempts.pop(key, None)
 
 
-async def public_lobbies(db, uid: int, *, admin: bool = False, now: float | None = None) -> list[dict]:
+async def public_lobbies(
+    db, uid: int, *, admin: bool = False, include_full: bool = False, now: float | None = None
+) -> list[dict]:
     now = _now(now)
     await tick(db, now)
     rows = await db.fetchall("SELECT * FROM mini_sea_rooms WHERE status='lobby' AND deadline>? "
@@ -720,7 +722,7 @@ async def public_lobbies(db, uid: int, *, admin: bool = False, now: float | None
             room["state"] = _normalize_state(json.loads(room.pop("state_json")))
             players = _active(room)
             host = _player(room, room["host_id"])
-            if not admin and (not room["state"].get("public") or room["bot"] or len(players) >= 2
+            if not admin and (not room["state"].get("public") or room["bot"] or (len(players) >= 2 and not include_full)
                               or uid in room["state"].get("kicked", [])):
                 continue
             if not admin and await _one(conn, "SELECT 1 FROM mini_friend_blocks WHERE "
@@ -953,10 +955,13 @@ def _view(room, uid: int) -> dict:
         "ships_left": ships_left,
         "inviteable": room["status"] == "lobby" and not room["bot"],
         "locked": bool(room["state"].get("password")),
+        "public": bool(room["state"].get("public")),
     }
 
 
-async def read_status(db, uid: int, now: float | None = None, room_id: str | None = None) -> dict:
+async def read_status(
+    db, uid: int, now: float | None = None, room_id: str | None = None, *, lobby_details: bool = False
+) -> dict:
     now = _now(now)
     await tick(db, now)
     async with db.connect() as conn:
@@ -981,7 +986,8 @@ async def read_status(db, uid: int, now: float | None = None, room_id: str | Non
         for invite in invites:
             if not await accepted_in_connection(conn, uid, invite["sender_id"]):
                 continue
-            sender = json.loads(invite["state_json"])["players"].get(str(invite["sender_id"]))
+            state = json.loads(invite["state_json"])
+            sender = state["players"].get(str(invite["sender_id"]))
             if sender and not sender["left"]:
                 clean_invites.append(
                     {
@@ -991,6 +997,11 @@ async def read_status(db, uid: int, now: float | None = None, room_id: str | Non
                         "sender_name": sender["name"],
                     }
                 )
+                if lobby_details:
+                    clean_invites[-1].update(
+                        players_count=sum(not p["left"] for p in state["players"].values()),
+                        locked=bool(state.get("password") or not state.get("public")),
+                    )
         recent = await _rows(
             conn,
             "SELECT r.id,r.title,r.status,r.stake,r.finished_at,r.state_json FROM mini_sea_rooms r "

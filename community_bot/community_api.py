@@ -127,3 +127,54 @@ async def presence(request):
     rows = await people(request.app['db'], request.app['settings'], request['actor']['id'])
     ids = [r['user_id'] for r in rows if r['rank'] > 0]
     return web.json_response(await presence_map(request.app['db'], ids))
+
+
+async def lobbies(request):
+    from community_bot import durak_api, mafia_api, sea_api
+    from community_bot.helpers import has_permission
+    from community_bot.permissions import PERM_GAMES
+
+    db, settings, uid = request.app['db'], request.app['settings'], request['actor']['id']
+    sea_admin = await has_permission(db, settings, uid, PERM_GAMES)
+    sea = await sea_api.read_status(db, uid, lobby_details=True)
+    mafia = await mafia_api.read_status(db, uid, lobby_details=True)
+    sea_rooms = {
+        r['id']: dict(id=r['id'], title=r['title'], players=r['players'],
+                      locked=r['locked'] or not r['public'], stake=r['stake'], admin=sea_admin,
+                      action='join' if r['public'] and not r['bot'] and r['players'] < 2 else '')
+        for r in await sea_api.public_lobbies(db, uid, admin=sea_admin, include_full=True)
+    }
+    mafia_rooms = {
+        r['id']: dict(id=r['id'], title=r['title'], players=r['players'], locked=False,
+                      action='join' if r['players'] < mafia_api.RULES['max_players'] else '')
+        for r in await mafia_api.public_lobbies(db, uid)
+    }
+    for game, status, entries, capacity in (
+        ('sea', sea, sea_rooms, 2),
+        ('mafia', mafia, mafia_rooms, mafia_api.RULES['max_players']),
+    ):
+        for invite in status['invites']:
+            rid = invite['room_id']
+            entries[rid] = {**entries.get(rid, {}), 'id': rid, 'title': invite['title'],
+                            'players': invite['players_count'], 'stake': invite.get('stake', 0),
+                            'locked': invite['locked'] if game == 'sea' else not invite['public'],
+                            'action': 'invite'}
+        room = status['room']
+        if room and room['status'] == 'lobby':
+            rid = room['id']
+            entries[rid] = {**entries.get(rid, {}), 'id': rid, 'title': room['title'],
+                            'players': sum(not player['left'] for player in room['players']),
+                            'locked': room.get('locked', False) or not room['public'],
+                            'stake': room.get('stake', 0), 'action': 'resume'}
+        for entry in entries.values():
+            entry.update(game=game, capacity=capacity)
+
+    cards = [
+        dict(id=r['id'], title=r['host_name'], game='durak', players=r['count'], capacity=r['config']['players'],
+             locked=r['config']['private'], stake=r['config']['stake'], action='resume' if r['own'] else 'preview',
+             config=r['config'])
+        for r in await durak_api.lobbies(db, uid)
+    ]
+    result = [*sea_rooms.values(), *mafia_rooms.values(), *cards]
+    result.sort(key=lambda r: {'resume': 0, 'invite': 1}.get(r['action'], 2))
+    return web.json_response({'rooms': result})

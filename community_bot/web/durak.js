@@ -18,6 +18,7 @@ let host, mode='open', list, room, config={...initial}, target, friends, inviteC
 let challenge=false, batch=null, pending=false, message='', watch, refreshTimer, timer, generation=0, drag;
 let clockDeadline=0, undoDeadline=0, menuRequest=0, activeParam='', lastTap, handledPointer;
 let reactionCursor='', reactionReady=0, reactionPending=false, sortRank, hints, showReactions;
+let lobbyEntry=false;
 const landing=new Map(), receivedReactions=new Map();
 let reactionsPreloaded=false;
 const store = (name,value) => { try { if(value===null)sessionStorage.removeItem(key+name);else sessionStorage.setItem(key+name,value); } catch {} };
@@ -37,7 +38,7 @@ function rulesInfo(c){
     <p>До старта резерв возвращается при выходе. После старта сдача и тайм-аут (${seconds(c)} с) означают поражение. Карты прерванного захода возвращаются владельцам, остальные продолжают.</p>
     <p>Победители поровну делят весь банк. Остаток по одной печеньке получают раньше вышедшие, при равенстве — по месту за столом. При ничьей ставки возвращаются, доли сдавшихся делятся между остальными. Техническая отмена возвращает все резервы.</p></details>`;
 }
-function header(title,backText='Дурак'){
+function header(title,backText=lobbyEntry?'Игры':'Дурак'){
   const back = backText==='Игры'?'<button type="button" class="dk-back" data-tab="games">← Игры</button>':
     actionButton('back','← '+backText,'dk-back');
   return `<header class="dk-heading">${back}<h1>${title}</h1></header>`;
@@ -675,7 +676,7 @@ function back(){
   if(!host)return false;
   if(host.querySelector('#dk-reaction-panel:not([hidden])')){setReactionPanel(false,true);return true}
   if(mode==='friends'&&room){openRoom(room.id);return true}
-  if(!['open','mine'].includes(mode)){change('open');readMenu();return true}
+  if(!lobbyEntry&&!['open','mine'].includes(mode)){change('open');readMenu();return true}
   return false;
 }
 function pick(card,quick=false){
@@ -933,6 +934,22 @@ function mount(root){
   showReactions=storedPreference('reactions')!=='false';hints=storedPreference('hints')!=='false';
   for(const [type,fn] of Object.entries({click,input,submit,keydown,pointerdown:down,pointermove:pointer,pointerup:up,pointercancel:up,lostpointercapture:up}))host.addEventListener(type,fn);
   document.addEventListener('visibilitychange',visibility);
+  const entry=durakEntry;
+  durakEntry=null;
+  lobbyEntry=Boolean(entry);
+  if(entry?.create){
+    config={...initial};change('create');readMenu();
+    return;
+  }
+  if(entry?.room){
+    const r=entry.room;
+    if(r.action==='resume')openRoom(r.id);
+    else{
+      target={id:r.id,host_name:r.title,count:r.players,config:r.config};
+      inviteCode='';change('preview');readMenu();
+    }
+    return;
+  }
   const param=telegramStartParam(),linked=/^nora_d_([\w-]{22})$/.exec(param);
   const invited=durakInboxRoom||/^nora_i_([a-f0-9]{16})$/.exec(param)?.[1];
   durakInboxRoom=null;

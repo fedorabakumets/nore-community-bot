@@ -27,11 +27,17 @@ def _summary(row):
             "count": row["count"], "status": row["status"], "updated": row["updated"]}
 
 
-SUMMARY = """
+SUMMARY_FIELDS = """
     SELECT r.id,r.host,r.config,r.status,r.updated,r.created,
            COALESCE(NULLIF(u.profile_name,''),NULLIF(u.telegram_name,''),u.username,'Участник') AS host_name,
            (SELECT COUNT(*) FROM durak_members m WHERE m.room=r.id) AS count
-    FROM durak_rooms r JOIN users u ON u.user_id=r.host
+"""
+SUMMARY_FROM = " FROM durak_rooms r JOIN users u ON u.user_id=r.host "
+SUMMARY = SUMMARY_FIELDS + SUMMARY_FROM
+NO_BLOCKED_MEMBERS = """
+    NOT EXISTS(SELECT 1 FROM durak_members m JOIN mini_friend_blocks b ON
+        (b.blocker_id=m.uid AND b.blocked_id=?) OR (b.blocked_id=m.uid AND b.blocker_id=?)
+        WHERE m.room=r.id)
 """
 
 
@@ -42,9 +48,7 @@ async def menu(db, uid, *, before=None):
         balance, restriction = await rooms._wallet(conn, uid)
         public = await rooms.rows(conn, SUMMARY + """
             WHERE r.status='waiting' AND json_extract(r.config,'$.private')=0 AND r.deadline>?
-              AND NOT EXISTS(SELECT 1 FROM durak_members m JOIN mini_friend_blocks b ON
-                (b.blocker_id=m.uid AND b.blocked_id=?) OR (b.blocked_id=m.uid AND b.blocker_id=?)
-                WHERE m.room=r.id)
+              AND """ + NO_BLOCKED_MEMBERS + """
               AND (? IS NULL OR (r.created,r.id)<(?,?))
             ORDER BY r.created DESC,r.id DESC LIMIT 41
         """, (time.time(), uid, uid, cutoff, cutoff, last_id))
@@ -64,6 +68,30 @@ async def menu(db, uid, *, before=None):
         return {"open": [_summary(row) for row in public[:40]], "next": next_page,
                 "mine": [_summary(row) for row in mine], "invites": valid_invites, "balance": balance,
                 "restriction": restriction, "active": active["room"] if active else None}
+
+
+async def lobbies(db, uid):
+    async with db.connect() as conn:
+        await conn.execute("BEGIN")
+        rows = await rooms.rows(conn, SUMMARY_FIELDS + ", own.uid IS NOT NULL AS own" + SUMMARY_FROM + """
+            LEFT JOIN durak_members own ON own.room=r.id AND own.uid=? AND own.active=1
+            LEFT JOIN durak_invites i ON i.room=r.id AND i.uid=?
+            WHERE r.status='waiting' AND r.deadline>? AND (
+                own.uid IS NOT NULL OR (
+                    (json_extract(r.config,'$.private')=0 OR i.uid IS NOT NULL)
+                    AND """ + NO_BLOCKED_MEMBERS + """
+                )
+            )
+            ORDER BY r.created DESC,r.id DESC
+        """, (uid, uid, time.time(), uid, uid))
+        result = []
+        for row in rows:
+            item = _summary(row)
+            own = bool(row["own"])
+            if item["config"]["private"] and not own and not await rooms._invited(conn, item["id"], uid):
+                continue
+            result.append({**item, "own": own})
+        return result
 
 
 async def snapshot(db, rid, uid, after=-1):

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from community_bot import community_api, mafia_api, sea_api
 from community_bot import durak_api as api
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
@@ -79,6 +80,52 @@ async def test_public_private_discovery_invite_and_link(db):
     assert len({c for v in views for c in v["game"]["hand"]}) == 18
     assert [m["reserved"] for m in views[0]["members"]] == [100, 100, 100]
     assert not (await api.menu(db, 2))["invites"]
+
+
+async def test_community_lobbies_combine_games_and_respect_room_access(db):
+    settings = SimpleNamespace(is_owner=lambda uid: uid == 1, owner_ids={1}, moderator_ids=set())
+
+    class Request(dict):
+        app = {"db": db, "settings": settings}
+
+    async def listing(uid):
+        response = await community_api.lobbies(Request(actor={"id": uid}))
+        return {r["id"]: r for r in json.loads(response.body)["rooms"]}
+
+    async def mafia(uid, action, **fields):
+        result = await mafia_api.apply_action(
+            db, settings, uid, {"action": action, "request_id": secrets.token_hex(16), **fields}
+        )
+        return result[0]
+
+    cards = await run(db, 1, "create", config={"private": True, "players": 3})
+    await friends(db, 1, 2)
+    await run(db, 1, "invite", room=cards, friend=2)
+    sea, _, _ = await sea_api.apply_action(
+        db, settings, 3, {"action": "create", "vs_bot": False, "password": "test", "request_id": secrets.token_hex(16)}
+    )
+    public = await mafia(4, "create", public=True)
+    private = await mafia(5, "create")
+
+    rooms = await listing(2)
+    assert {(r["game"], r["locked"]) for r in rooms.values()} == {
+        ("durak", True), ("sea", True), ("mafia", False),
+    }
+    assert rooms[cards]["action"] == "preview" and rooms[cards]["capacity"] == 3
+    assert rooms[sea]["action"] == "join" and rooms[sea]["players"] == 1
+    assert rooms[public]["action"] == "join" and rooms[public]["capacity"] == 12
+    assert private not in rooms and cards not in await listing(6)
+    assert (await listing(5))[private]["action"] == "resume"
+    with pytest.raises(mafia_api.Conflict):
+        await mafia(2, "join", room_id=private)
+
+    await mafia(2, "join", room_id=public)
+    assert (await listing(2))[public]["action"] == "resume"
+    assert (await listing(6))[public]["players"] == 2
+    await db.execute("INSERT INTO mini_friend_blocks VALUES(?,?,?,?)", (2, 6, "test", "now"))
+    assert public not in await listing(6)
+    with pytest.raises(mafia_api.Conflict):
+        await mafia(6, "join", room_id=public)
 
 
 async def test_last_seat_race_reserve_refund_leave_rejoin_and_replay(db):

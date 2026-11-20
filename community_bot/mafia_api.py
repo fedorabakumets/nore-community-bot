@@ -1,4 +1,4 @@
-"""Private, free Mini App Mafia. SQLite owns roles, clocks and every transition."""
+"""Free Mini App Mafia. SQLite owns roles, clocks and every transition."""
 
 from __future__ import annotations
 
@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS mini_mafia_requests (
 TIMINGS = {"night": 60, "discussion": 90, "vote": 45}
 LOBBY_SECONDS = 3600
 MAX_GAME_SECONDS = 7200
+LOBBY_BLOCK = """
+    SELECT 1 FROM mini_mafia_members m JOIN mini_friend_blocks b
+    ON (b.blocker_id=m.user_id AND b.blocked_id=?) OR (b.blocked_id=m.user_id AND b.blocker_id=?)
+    WHERE m.active=1 AND m.room_id=
+"""
 ROLE_INFO = [
     {"id": "civilian", "name": "Мирный житель", "description": "Слушай, замечай противоречия и ищи мафию на суде."},
     {"id": "mafia", "name": "Мафия", "description": "Ночью обсуждайте цель в тайном чате и выбирайте жертву."},
@@ -65,7 +70,7 @@ RULES = {
         {
             "title": "Бесплатно и вместе",
             "text": "5–12 человек. Ставок и наград в печеньках нет. "
-            "Создатель приглашает друзей, все отмечают готовность. Роли раздаются случайно, хозяин их не выбирает.",
+            "Игроки входят через список лобби или по приглашению. Все отмечают готовность. Роли раздаются случайно.",
         },
         {
             "title": "Состав города",
@@ -387,10 +392,11 @@ def _view(room, uid):
         "messages": [m for m in state["messages"] if m["channel"] in visible][-150:],
         "available_targets": _targets(room, own),
         "inviteable": room["status"] == "lobby" and not own["left"],
+        "public": bool(room["state"].get("public")),
     }
 
 
-async def read_status(db, uid, now=None, room_id=None):
+async def read_status(db, uid, now=None, room_id=None, *, lobby_details=False):
     now = time.time() if now is None else now
     await tick(db, now)
     async with db.connect() as conn:
@@ -426,6 +432,8 @@ async def read_status(db, uid, now=None, room_id=None):
                         "players_count": sum(not p["left"] for p in state["players"].values()),
                     }
                 )
+                if lobby_details:
+                    clean_invites[-1]["public"] = bool(state.get("public"))
         recent = await _rows(
             conn,
             "SELECT r.id,r.title,r.status,r.finished_at,r.state_json FROM mini_mafia_rooms r "
@@ -445,6 +453,20 @@ async def read_status(db, uid, now=None, room_id=None):
             "invites": clean_invites,
             "recent": recent,
         }
+
+
+async def public_lobbies(db, uid):
+    return await db.fetchall(
+        """
+        SELECT r.id,r.title,
+            (SELECT COUNT(*) FROM mini_mafia_members m WHERE m.room_id=r.id AND m.active=1) AS players
+        FROM mini_mafia_rooms r
+        WHERE r.status='lobby' AND r.deadline>? AND json_extract(r.state_json,'$.public')=1
+          AND NOT EXISTS(""" + LOBBY_BLOCK + """r.id)
+        ORDER BY r.created_at DESC
+        """,
+        (time.time(), uid, uid),
+    )
 
 
 def _new_player(user):
@@ -477,6 +499,9 @@ async def _new_room(conn, uid, body, now):
     if not isinstance(title, str) or not 2 <= len(title.strip()) <= 60:
         raise ValueError("Название комнаты — от 2 до 60 символов")
     title = title.strip()
+    public = body.get("public", False)
+    if type(public) is not bool:
+        raise ValueError("Выбери, будет ли лобби открытым")
     user = await _one(conn, "SELECT user_id,profile_name,telegram_name FROM users WHERE user_id=?", (uid,))
     room = {
         "id": secrets.token_urlsafe(16),
@@ -488,6 +513,7 @@ async def _new_room(conn, uid, body, now):
         "created_at": now,
         "finished_at": None,
         "state": {
+            "public": public,
             "round": 0,
             "phase_token": secrets.token_urlsafe(18),
             "players": {str(uid): _new_player(user)},
@@ -539,10 +565,16 @@ async def _respond(conn, db, settings, room, uid, body, now):
         raise Conflict("Приглашение больше не действует. Приглашать могут только друзья из этой комнаты")
     if not await miniapp_allowed(db, settings, uid):
         raise ValueError("Миниапка доступна участникам Норы")
+    return await _join_lobby(conn, room, uid, now)
+
+
+async def _join_lobby(conn, room, uid, now):
+    if room["state"].get("public") and await _one(conn, LOBBY_BLOCK + "?", (uid, uid, room["id"])):
+        raise Conflict("Подключиться к этой комнате нельзя")
     member = await _one(conn, "SELECT room_id FROM mini_mafia_members WHERE user_id=? AND active=1", (uid,))
     if member:
         raise Conflict("Сначала выйди из текущей комнаты")
-    if len(_alive(room)) >= 12:
+    if len(_alive(room)) >= RULES["max_players"]:
         raise Conflict("В комнате уже 12 игроков")
     user = await _one(conn, "SELECT user_id,profile_name,telegram_name FROM users WHERE user_id=?", (uid,))
     _players(room)[str(uid)] = _new_player(user)
@@ -555,7 +587,8 @@ async def _respond(conn, db, settings, room, uid, body, now):
         (room["id"], uid, now),
     )
     await conn.execute(
-        "UPDATE mini_mafia_invites SET status='accepted' WHERE room_id=? AND user_id=?", (room["id"], uid)
+        "UPDATE mini_mafia_invites SET status='accepted' WHERE room_id=? AND user_id=? AND status='pending'",
+        (room["id"], uid),
     )
     _log(room, f"{_players(room)[str(uid)]['name']} присоединился. Подтвердите готовность новым составом.", now)
     return "Ты в комнате. Отметь готовность, когда будешь готов начать"
@@ -707,7 +740,7 @@ async def apply_action(db, settings, uid, body, now=None):
     if not isinstance(body, dict):
         raise ValueError("Некорректное действие")
     action_name = body.get("action")
-    actions = {"create", "invite", "respond", "ready", "start", "leave", "cancel", "chat", "night", "vote"}
+    actions = {"create", "join", "invite", "respond", "ready", "start", "leave", "cancel", "chat", "night", "vote"}
     request_id = body.get("request_id")
     if (
         action_name not in actions
@@ -733,7 +766,9 @@ async def apply_action(db, settings, uid, body, now=None):
             if previous["payload_hash"] != digest:
                 raise Conflict("Этот запрос уже был использован для другого действия")
             return previous["room_id"], previous["message"], None
-        if action_name in {"create", "start", "invite"} or (action_name == "respond" and body.get("accept") is True):
+        if action_name in {"create", "join", "start", "invite"} or (
+            action_name == "respond" and body.get("accept") is True
+        ):
             enabled = await _one(conn, "SELECT enabled FROM feature_flags WHERE key='games'")
             if not enabled or not enabled["enabled"]:
                 raise ValueError("Игры временно выключены администрацией")
@@ -754,6 +789,10 @@ async def apply_action(db, settings, uid, body, now=None):
                 message = await _respond(conn, db, settings, room, uid, body, now)
                 if not body["accept"]:
                     focus = None
+            elif action_name == "join":
+                if room["status"] != "lobby" or not room["state"].get("public"):
+                    raise Conflict("Открытое лобби недоступно")
+                message = await _join_lobby(conn, room, uid, now)
             else:
                 own = _players(room).get(str(uid))
                 if not own or own["left"]:

@@ -133,9 +133,17 @@ function eventCard(e){return `<article class="card event"><span class="eyebrow">
 function navIcon(id){if(id==='interactive')return window.NoraInteractive?.icon('game')||'';const paths={community:'M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0 M3 17c-5-1 1-7 9-10s15-2 9 3S4 19 3 17',home:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',shop:'M4 8h16v13H4z M8 8V5a4 4 0 0 1 8 0v3',events:'M4 5h16v16H4z M4 10h16 M8 2v5 M16 2v5',wallet:'M3 6h17v15H3z M3 6V3h14 M15 12h6v5h-6z',pet:'M8 11c-2 0-4 3-4 5s2 3 4 2c2-1 2-1 4-1s2 0 4 1c2 1 4 0 4-2s-2-5-4-5c-2 0-2 1-4 1s-2-1-4-1z M5 5v2 M10 3v3 M15 3v3 M20 5v2',lk:'M5 21v-2a7 7 0 0 1 14 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="${paths[id]}"/></svg>`}
 const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4Z"/><path d="M26 56V37a6 6 0 0 1 12 0v19"/>',shop:'<rect x="11" y="24" width="42" height="33" rx="6"/><path d="M22 26v-7a10 10 0 0 1 20 0v7"/>',community:'<circle cx="32" cy="32" r="17"/><path d="M13.2 37.2C3 43.4 4.5 48 10.8 48.3c7.7.4 22.5-5.7 33.4-12.2C54.7 29.9 60 24.4 57 20.9c-2.4-2.8-8-1.9-14.7.7"/>',events:'<rect x="12" y="17" width="40" height="39" rx="6"/><path d="M22 10v14M42 10v14M12 29h40"/><circle cx="23" cy="40" r="2.5" fill="currentColor" stroke="none"/>'};
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
-let durakModule, durakInboxRoom;
+let durakModule, durakInboxRoom, durakEntry;
+function openDurak(entry) {
+  durakEntry = entry;
+  const from = tab;
+  tab = 'durak';
+  NoraShop.tabChanged(tab, from);
+  render();
+  window.scrollTo(0, 0);
+}
 function mountDurak() {
-  if (tab !== 'durak') { window.NoraDurak?.unmount(); return; }
+  if (tab !== 'durak') { durakEntry = null; window.NoraDurak?.unmount(); return; }
   const root = document.getElementById('durak-root');
   if (window.NoraDurak) { window.NoraDurak.mount(root); return; }
   if (!document.getElementById('durak-style')) {
@@ -143,7 +151,7 @@ function mountDurak() {
     css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=2';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=2').catch(() => {
+  durakModule ??= import('/durak.js?v=lobbies').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');
