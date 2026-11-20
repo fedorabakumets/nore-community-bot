@@ -101,8 +101,8 @@ window.NoraInteractive = (() => {
   function interactiveScreen() {
     return `${mafiaInvites()}<p class="eyebrow">У каждого свой способ</p><h1>Побудем<br><em>вместе</em></h1><p class="sub play-intro">Заботься, играй, собирай своих.</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">Твой маленький спутник</span><strong><em>Питомец</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + " ждёт тебя. Забота, походы и маленькие находки." : "Заведи питомца. Заботься о нём и отправляй за приключениями."}</span><span class="play-hero-cta">${data.pet ? "К питомцу" : "Знакомиться"} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">Один или всей компанией</span><strong><em>Игры</em></strong><span class="play-hero-description">У города есть тайны.<br>У ракеты — свой предел.</span><span class="play-hero-cta">Выбрать игру ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>Свои всегда рядом<small>Добавляй друзей и зови играть</small></span>${icon("arrow")}</button>`;
   }
-  const games = { durak: "Дурак", sea: "Морской бой", mafia: "Мафия", rocket: "Ракетка" };
-  const gameChoices = ["durak", "sea", "mafia", "rocket"];
+  const games = { durak: "Дурак", barricade: "Баррикада", sea: "Морской бой", mafia: "Мафия", rocket: "Ракетка" };
+  const gameChoices = ["durak", "barricade", "mafia", "rocket"];
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
 
@@ -159,7 +159,8 @@ window.NoraInteractive = (() => {
     const title = game === "durak" ? "Стол " + room.title : room.title;
     const detail = action === "invite" ? "Приглашение" : action === "resume" ? "Моё лобби" : "";
     const name = games[game];
-    const attributes = action === "invite" ? `data-${game}-respond="yes" data-room-id="${roomId}"`
+    const attributes = game === "barricade" ? `data-barricade-lobby="${roomId}"`
+      : action === "invite" ? `data-${game}-respond="yes" data-room-id="${roomId}"`
       : action === "resume" && game !== "durak" ? `data-tab="${game}"`
       : game === "sea" && action === "join" ? `data-sea-join="${roomId}" data-locked="${locked ? 1 : 0}"`
       : game === "mafia" && action === "join" ? `data-mafia-join="${roomId}"`
@@ -171,7 +172,7 @@ window.NoraInteractive = (() => {
     return `<li class="game-lobby-row game-${game}">
       ${attributes ? `<button type="button" class="lobby-entry" id="lobby-${game}-${roomId}" ${attributes}>${contents}</button>`
         : `<div class="lobby-entry">${contents}</div>`}
-      ${action === "invite" ? `<button type="button" class="lobby-side-action" data-${game}-respond="no" data-room-id="${roomId}" aria-label="Отклонить приглашение в ${esc(title)}">×</button>` : ""}
+      ${action === "invite" && game !== "barricade" ? `<button type="button" class="lobby-side-action" data-${game}-respond="no" data-room-id="${roomId}" aria-label="Отклонить приглашение в ${esc(title)}">×</button>` : ""}
       ${room.admin ? `<button type="button" class="lobby-side-action" data-sea-admin-close="${roomId}" aria-label="Закрыть лобби ${esc(title)}">×</button>` : ""}
     </li>`;
   }
@@ -201,7 +202,7 @@ window.NoraInteractive = (() => {
     refresh?.setAttribute("aria-busy", "true");
     const previous = lobbyList();
     try {
-      lobbyRooms = (await api("community/lobbies")).rooms;
+      lobbyRooms = (await api("community/lobbies")).rooms.filter(room => room.game !== "sea");
       lobbyError = "";
     } catch (error) {
       lobbyError = error.message || "Связь прервалась";
@@ -906,10 +907,11 @@ window.NoraInteractive = (() => {
       else {
         $("#sheet").close();
         if (game === "durak") openDurak({ create: true });
-        else if (game === "sea") window.NoraSea.openSetup();
+        else if (game === "barricade") openBarricade({ create: true });
         else go(game);
       }
     }
+    if (b.dataset.barricadeLobby) openBarricade({id: b.dataset.barricadeLobby});
     if (b.dataset.durakLobby) {
       const room = lobbyRooms?.find(r => r.game === "durak" && r.id === b.dataset.durakLobby);
       if (room) openDurak({ room });

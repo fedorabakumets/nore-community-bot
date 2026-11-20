@@ -24,6 +24,7 @@ let applicationScreen = null;
 
 function showApplication(application) {
   applicationScreen = application;
+  barricadeView?.unmount();
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -183,6 +184,41 @@ function mountDurak() {
   });
   durakModule.then(module => { if (module && tab === 'durak') module.mount(document.getElementById('durak-root')); });
 }
+let barricadeModule, barricadeView, barricadeEntry;
+
+function openBarricade(entry) {
+  barricadeEntry = entry;
+  const from = tab;
+  tab = 'barricade';
+  window.NoraShop?.tabChanged(tab, from);
+  render();
+  window.scrollTo(0, 0);
+}
+
+function mountBarricade() {
+  if (tab !== 'barricade') { barricadeEntry = null; barricadeView?.unmount(); return; }
+  const root = document.getElementById('barricade-root');
+  for (const [id, href] of [['durak-style', '/durak.css?v=night'], ['barricade-style', '/barricade.css?v=1']]) {
+    if (document.getElementById(id)) continue;
+    const css = document.createElement('link');
+    css.id = id; css.rel = 'stylesheet'; css.href = href;
+    document.head.append(css);
+  }
+  barricadeModule ??= import('/barricade.js?v=1').catch(() => {
+    barricadeModule = null;
+    if (!root.isConnected || tab !== 'barricade') return;
+    const retry = document.createElement('button');
+    retry.className = 'secondary'; retry.textContent = 'Загрузить Баррикаду ещё раз';
+    retry.onclick = mountBarricade; root.replaceChildren(retry);
+  });
+  barricadeModule.then(view => {
+    if (!view || !root.isConnected || tab !== 'barricade') return;
+    barricadeView = view;
+    view.mount(root, barricadeEntry);
+    barricadeEntry = null;
+  });
+}
+
 function render(){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
 if(tab==='home')content=window.NoraHome?.screen()||'';
 if(tab==='commands')content=NoraCommands.screen();
@@ -193,6 +229,7 @@ if(tab==='community')content=window.NoraCommunity?.screen()||'';
 if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
+if(tab==='barricade')content='<section id="barricade-root"><p class="sub">Открываем Баррикаду…</p></section>';
 if(tab==='durak')content='<section id="durak-root"><p class="sub">Открываем карточный стол…</p></section>';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
@@ -203,13 +240,15 @@ const expanded=app.dataset.screen===tab
   :null;
 app.dataset.screen=tab;
 if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
-else if(tab!=='durak'||!app.querySelector('#durak-root'))app.innerHTML=html;
+else if (!(tab === 'durak' && app.querySelector('#durak-root')) &&
+         !(tab === 'barricade' && app.querySelector('#barricade-root'))) app.innerHTML=html;
 mountDurak();
+mountBarricade();
 if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open]')){
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
 
 
 // Keep the dock mounted: polling must not restart the travelling selection.
@@ -275,7 +314,7 @@ function bookEvent(button) {
   sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);
   $('#pay').onclick = () => perform('events/join', payload);
 }
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.durakInvite)durakInboxRoom=b.dataset.durakInvite;if(b.dataset.tab){const from=tab;tab=b.dataset.tab;window.NoraShop?.tabChanged(tab,from);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event)bookEvent(b);if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.barricadeInvite)barricadeEntry={id:b.dataset.barricadeInvite};if(b.dataset.durakInvite)durakInboxRoom=b.dataset.durakInvite;if(b.dataset.tab){const from=tab;tab=b.dataset.tab;window.NoraShop?.tabChanged(tab,from);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event)bookEvent(b);if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
 $('#sheet').addEventListener('close',()=>{
   const dialog=$('#sheet');
   if(dialog.open)return;
@@ -291,8 +330,10 @@ function telegramStartParam() {
 function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
-  const invite = /^nora_inv_(mafia|sea|durak)_([1-9][0-9]{0,15})_([A-Za-z0-9_-]{16,22})$/.exec(param);
+  const invite = /^nora_inv_(mafia|sea|durak|barricade)_([1-9][0-9]{0,15})_([A-Za-z0-9_-]{16,22})$/.exec(param);
   if (invite) return {view: invite[1], invite: {game: invite[1], recipient: Number(invite[2]), room_id: invite[3]}};
+  const barricade = /^nora_b_([A-Za-z0-9_-]{22})$/.exec(param);
+  if (barricade) return {view: 'barricade', code: barricade[1]};
   if (/^nora_(?:d_[A-Za-z0-9_-]{22}|i_[a-f0-9]{16})$/.test(param)) return {view: 'durak'};
   const event = /^nora_event_([A-Za-z0-9_-]{1,64})$/.exec(param);
   if (event) return {view: 'events', eventId: event[1]};
@@ -390,15 +431,17 @@ async function openApp(result) {
     try {
       const {room_id} = await api('games/invite', linked.invite);
       if (view === 'durak') durakInboxRoom = room_id;
+      if (view === 'barricade') barricadeEntry = {id: room_id};
     } catch (error) {
       view = 'games';
       inviteError = error.message;
     }
   }
-  if (linked?.invite) window.NoraIntro?.finish(true);
+  if (linked?.code && !blockedLink) barricadeEntry = {code: linked.code};
+  if (linked?.invite || linked?.code) window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
-  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','friends','community','events'].includes(view)) tab = view;
+  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','friends','community','events'].includes(view)) tab = view;
   else if (view === 'shop' && data.profile.fill_percent === 100) {
     tab = 'shop';
     window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
@@ -502,7 +545,7 @@ document.addEventListener('change', async e => {
     busy = false;
   }
 });
-async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
+async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.

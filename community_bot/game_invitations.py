@@ -32,7 +32,7 @@ from community_bot.reply_rich import bot_publication
 
 router = Router(name="game_invitations")
 logger = logging.getLogger(__name__)
-_GAME_NAMES = {"mafia": "«Мафию»", "sea": "«Морской бой»", "durak": "«Дурака»"}
+_GAME_NAMES = {"mafia": "«Мафию»", "sea": "«Морской бой»", "durak": "«Дурака»", "barricade": "«Баррикаду»"}
 _DISMISS = "game-invite:close:"
 _DELIVERY_ERRORS = (TelegramAPIError, OSError, TimeoutError)
 
@@ -140,7 +140,7 @@ async def open_invitation(request):
     uid, db, settings = request["actor"]["id"], request.app["db"], request.app["settings"]
     if type(recipient) is not int or uid != recipient:
         return web.json_response({"error": "Приглашение адресовано другому игроку"}, status=403)
-    room_pattern = r"[a-f0-9]{16}" if game == "durak" else r"[A-Za-z0-9_-]{22}"
+    room_pattern = r"[a-f0-9]{16}" if game in ("durak", "barricade") else r"[A-Za-z0-9_-]{22}"
     if not isinstance(game, str) or game not in _GAME_NAMES or not isinstance(rid, str) or not re.fullmatch(
         room_pattern, rid,
     ):
@@ -148,10 +148,10 @@ async def open_invitation(request):
     if not await miniapp_allowed(db, settings, uid):
         return web.json_response({"error": "Миниапка доступна участникам Норы"}, status=403)
 
-    if game == "durak":
+    if game in ("durak", "barricade"):
         async with db.connect() as conn:
             await conn.execute("BEGIN")
-            room = await durak._room(conn, rid)
+            room = await durak._room(conn, rid, game)
             own = await durak.one(conn, "SELECT 1 FROM durak_members WHERE room=? AND uid=? AND active=1", (rid, uid))
             if not own and (room["status"] != "waiting" or room["deadline"] <= time.time()
                             or not await durak._invited(conn, rid, uid)

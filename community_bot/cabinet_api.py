@@ -351,11 +351,14 @@ async def notices(request):
 
     invitations = {item["room_id"]: item for item in (await read_status(db, user["user_id"]))["invites"]}
     sea_invitations = {item["room_id"]: item for item in (await read_sea_status(db, user["user_id"]))["invites"]}
-    durak_invitations = {i["notice_id"]: i["room"] for i in await db.fetchall(
-        "SELECT i.notice_id,i.room FROM durak_invites i JOIN durak_rooms r ON r.id=i.room "
+    table_invitations = {i["notice_id"]: i for i in await db.fetchall(
+        "SELECT i.notice_id,i.room,COALESCE(json_extract(r.config,'$.game'),'durak') AS game "
+        "FROM durak_invites i JOIN durak_rooms r ON r.id=i.room "
         "WHERE i.uid=? AND r.status='waiting' AND r.deadline>strftime('%s','now')", (user["user_id"],))}
     for row in rows:
-        row["durak_invite"] = durak_invitations.get(row["id"])
+        row["durak_invite"] = None
+        if table_invite := table_invitations.get(row["id"]):
+            row[table_invite["game"] + "_invite"] = table_invite["room"]
         room_id = await db.get_bot_state(f"mafia_notice:{row['id']}")
         row["mafia_invite"] = invitations.get(room_id)
         sea_id = await db.get_bot_state(f"sea_notice:{row['id']}")

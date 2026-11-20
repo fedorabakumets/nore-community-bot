@@ -2104,6 +2104,10 @@ body:has(#home-story-viewer[open]) { overflow: hidden; }
   }
 }
 .game-durak { --game-surface: #210a11; --game-art: url('/home-art/game-tile-durak.webp'); }
+.game-barricade { --game-surface:#24131a; --game-art:url('/home-art/game-tile-barricade.webp'); }
+.game-barricade.game-shortcut { animation:barricade-tile-in 420ms ease-out both; }
+@keyframes barricade-tile-in { from { opacity:.7; box-shadow:inset 0 0 16px #ff637d55; } }
+@media (prefers-reduced-motion:reduce) { .game-barricade.game-shortcut { animation:none; } }
 .game-sea { --game-surface: #07182b; --game-art: url('/home-art/game-tile-sea.webp'); }
 .game-mafia { --game-surface: #1c1024; --game-art: url('/home-art/game-tile-mafia.webp'); }
 .game-rocket { --game-surface: #130f1c; --game-art: url('/home-art/game-tile-rocket.webp'); }

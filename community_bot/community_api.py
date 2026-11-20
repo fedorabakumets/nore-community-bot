@@ -186,6 +186,11 @@ async def lobbies(request):
              config=r['config'])
         for r in await durak_api.lobbies(db, uid)
     ]
-    result = [*sea_rooms.values(), *mafia_rooms.values(), *cards]
+    barricades = [
+        dict(id=r['id'], title=r['host_name'], game='barricade', players=r['count'], capacity=2,
+             locked=r['config']['private'], stake=r['config']['stake'], action='resume' if r['own'] else 'invite')
+        for r in await durak_api.lobbies(db, uid, game='barricade')
+    ]
+    result = [*sea_rooms.values(), *mafia_rooms.values(), *cards, *barricades]
     result.sort(key=lambda r: {'resume': 0, 'invite': 1}.get(r['action'], 2))
     return web.json_response({'rooms': result})

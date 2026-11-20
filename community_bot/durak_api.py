@@ -11,6 +11,7 @@ from collections import deque
 
 from aiohttp import web
 
+from community_bot import barricade_rules as barricade
 from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
@@ -33,6 +34,7 @@ SUMMARY_FIELDS = """
 """
 SUMMARY_FROM = " FROM durak_rooms r JOIN users u ON u.user_id=r.host "
 SUMMARY = SUMMARY_FIELDS + SUMMARY_FROM
+DURAK_ONLY = f"{rooms.GAME_KIND}='durak'"
 NO_BLOCKED_MEMBERS = """
     NOT EXISTS(SELECT 1 FROM durak_members m JOIN mini_friend_blocks b ON
         (b.blocker_id=m.uid AND b.blocked_id=?) OR (b.blocked_id=m.uid AND b.blocker_id=?)
@@ -45,21 +47,23 @@ async def menu(db, uid, *, before=None):
     async with db.connect() as conn:
         await conn.execute("BEGIN")
         balance, restriction = await rooms._wallet(conn, uid)
-        public = await rooms.rows(conn, SUMMARY + """
-            WHERE r.status='waiting' AND json_extract(r.config,'$.private')=0 AND r.deadline>?
+        public = await rooms.rows(conn, SUMMARY + " WHERE " + DURAK_ONLY + " AND " + """
+            r.status='waiting' AND json_extract(r.config,'$.private')=0 AND r.deadline>?
               AND """ + NO_BLOCKED_MEMBERS + """
               AND (? IS NULL OR (r.created,r.id)<(?,?))
             ORDER BY r.created DESC,r.id DESC LIMIT 41
         """, (time.time(), uid, uid, cutoff, cutoff, last_id))
         mine = await rooms.rows(conn, SUMMARY + """
-            JOIN durak_members own ON own.room=r.id WHERE own.uid=?
+            JOIN durak_members own ON own.room=r.id WHERE """ + DURAK_ONLY + """ AND own.uid=?
             ORDER BY own.active DESC,r.updated DESC LIMIT 40
         """, (uid,))
         invites = await rooms.rows(conn, SUMMARY + """
-            JOIN durak_invites i ON i.room=r.id WHERE i.uid=? AND r.status='waiting' AND r.deadline>?
+            JOIN durak_invites i ON i.room=r.id WHERE """ + DURAK_ONLY + """ AND i.uid=?
+              AND r.status='waiting' AND r.deadline>?
             ORDER BY r.updated DESC LIMIT 40
         """, (uid, time.time()))
-        active = await rooms.one(conn, "SELECT room FROM durak_members WHERE uid=? AND active=1", (uid,))
+        active = await rooms.one(conn, "SELECT m.room FROM durak_members m JOIN durak_rooms r ON r.id=m.room "
+                                 "WHERE " + DURAK_ONLY + " AND m.uid=? AND m.active=1", (uid,))
         valid_invites = [_summary(row) for row in invites if await rooms._invited(conn, row["id"], uid)]
         next_page = None
         if len(public) > 40:
@@ -70,15 +74,17 @@ async def menu(db, uid, *, before=None):
                 "items": items.view(await items.equipped(conn, uid))}
 
 
-async def lobbies(db, uid):
+async def lobbies(db, uid, *, game="durak"):
+    game_filter = DURAK_ONLY if game == "durak" else f"{rooms.GAME_KIND}='barricade'"
     async with db.connect() as conn:
         await conn.execute("BEGIN")
         rows = await rooms.rows(conn, SUMMARY_FIELDS + ", own.uid IS NOT NULL AS own" + SUMMARY_FROM + """
             LEFT JOIN durak_members own ON own.room=r.id AND own.uid=? AND own.active=1
             LEFT JOIN durak_invites i ON i.room=r.id AND i.uid=?
-            WHERE r.status='waiting' AND r.deadline>? AND (
+            WHERE """ + game_filter + """ AND r.status='waiting' AND r.deadline>? AND (
                 own.uid IS NOT NULL OR (
-                    (json_extract(r.config,'$.private')=0 OR i.uid IS NOT NULL)
+                    ((json_extract(r.config,'$.private')=0 AND COALESCE(json_extract(r.config,'$.quick'),0)=0)
+                      OR i.uid IS NOT NULL)
                     AND """ + NO_BLOCKED_MEMBERS + """
                 )
             )
@@ -97,7 +103,7 @@ async def lobbies(db, uid):
 async def snapshot(db, rid, uid, after=-1):
     async with db.connect() as conn:
         await conn.execute("BEGIN")
-        r = await rooms._room(conn, rid)
+        r = await rooms._room(conn, rid, "durak")
         members = await rooms._members(conn, rid)
         own = next((m for m in members if m["uid"] == uid), None)
         if own is None:
@@ -182,12 +188,16 @@ class Updates:
             await conn.execute("BEGIN IMMEDIATE")
             await conn.execute("""
                 UPDATE durak_rooms SET deadline=MIN(expires,MAX(deadline,?+CASE
-                    WHEN json_extract(game,'$.phase')='review' THEN ?
-                    WHEN json_extract(config,'$.speed')='fast' THEN ? ELSE ? END)),rev=rev+1
+                    WHEN (CASE WHEN json_valid(config) THEN json_extract(config,'$.game') END)='barricade' THEN ?
+                    WHEN (CASE WHEN json_valid(game) THEN json_extract(game,'$.phase') END)='review' THEN ?
+                    WHEN (CASE WHEN json_valid(config) THEN json_extract(config,'$.speed') END)='fast' THEN ?
+                    ELSE ? END)),rev=rev+1
                 WHERE status='playing'
-            """, (now, rules.REVIEW_SECONDS, rules.SECONDS["fast"], rules.SECONDS["normal"]))
-            active = await rooms.rows(conn, "SELECT * FROM durak_rooms WHERE status='playing' "
-                                      "AND json_extract(game,'$.phase') IN ('throw','defend')")
+            """, (now, barricade.TURN_SECONDS, rules.REVIEW_SECONDS, rules.SECONDS["fast"], rules.SECONDS["normal"]))
+            active = await rooms.rows(conn, f"SELECT r.*,'durak' AS kind FROM durak_rooms r WHERE {DURAK_ONLY} "
+                                      "AND status='playing' "
+                                      "AND (CASE WHEN json_valid(game) THEN json_extract(game,'$.phase') END) "
+                                      "IN ('throw','defend')")
             for row in active:
                 await rooms.resume_forced_round(conn, rooms._load(row), now)
             await conn.commit()
@@ -238,7 +248,8 @@ async def preview(request):
         raise ValueError("Проверь код приглашения")
     async with request.app["db"].connect() as conn:
         await conn.execute("BEGIN")
-        row = await rooms.one(conn, SUMMARY + " WHERE r.code=? AND r.status='waiting' AND r.deadline>?",
+        row = await rooms.one(conn, SUMMARY + " WHERE " + DURAK_ONLY
+                              + " AND r.code=? AND r.status='waiting' AND r.deadline>?",
                               (code, time.time()))
         if not row or await rooms._blocked(conn, row["id"], request["actor"]["id"]):
             raise ValueError("Приглашение истекло или стол уже занят")
@@ -279,8 +290,9 @@ async def table(request):
 async def link(request):
     rid, uid = request.match_info["rid"], request["actor"]["id"]
     async with request.app["db"].connect() as conn:
-        row = await rooms.one(conn, """SELECT r.code FROM durak_rooms r JOIN durak_members m ON m.room=r.id
-                               WHERE r.id=? AND m.uid=? AND m.active=1 AND r.status='waiting'""", (rid, uid))
+        row = await rooms.one(conn, f"""SELECT r.code FROM durak_rooms r JOIN durak_members m ON m.room=r.id
+                               WHERE {DURAK_ONLY} AND r.id=? AND m.uid=? AND m.active=1
+                                 AND r.status='waiting'""", (rid, uid))
     if not row:
         raise ValueError("Приглашать можно из открытой комнаты")
     bot = request.app["bot"]
@@ -320,7 +332,7 @@ async def reaction(request, db, uid, body):
         raise ValueError("Выбери эмоцию за своим столом")
     member = await db.fetchone(
         "SELECT 1 FROM durak_members m JOIN durak_rooms r ON r.id=m.room "
-        "WHERE m.room=? AND m.uid=? AND r.status='playing'", (rid, uid))
+        f"WHERE {DURAK_ONLY} AND m.room=? AND m.uid=? AND r.status='playing'", (rid, uid))
     if not member:
         return web.json_response({"error": "Ты не участвуешь в текущей партии"}, status=403)
     if emoji > 25:
