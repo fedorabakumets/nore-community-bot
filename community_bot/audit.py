@@ -16,6 +16,7 @@ SYSTEM_ACTOR_ID = 0
 ACTION_LABELS: dict[str, str] = {
     "mute": "Мут",
     "unmute": "Снятие мута",
+    "unmute_all": "Массовое снятие мутов",
     "warn": "Предупреждение",
     "unwarn": "Снятие предупреждения",
     "kick": "Кик",
@@ -56,7 +57,7 @@ ACTION_LABELS: dict[str, str] = {
 }
 
 PUNITIVE_ACTIONS = {"mute", "warn", "kick", "ban"}
-REVERSAL_ACTIONS = {"unmute", "unwarn", "unban"}
+REVERSAL_ACTIONS = {"unmute", "unmute_all", "unwarn", "unban"}
 _DOUBTFUL_WITHOUT_REASON = {
     "give_cookies",
     "set_cookies",

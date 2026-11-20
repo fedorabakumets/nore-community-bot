@@ -447,7 +447,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
     from community_bot.nora_game_chat import GameChatMiddleware
-    from community_bot.routers.group import CommunityModerationMiddleware
+    from community_bot.routers.group import CommunityModerationMiddleware, moderation_router
 
     dispatcher.message.outer_middleware(CommunityModerationMiddleware())
     dispatcher.message.outer_middleware(memory_middleware)
@@ -473,6 +473,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(sea_notifications_router)
     dispatcher.include_router(birthday_router)
     dispatcher.include_router(event_router)
+    dispatcher.include_router(moderation_router)
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)
     dispatcher.include_router(flows_router)

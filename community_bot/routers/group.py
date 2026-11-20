@@ -14,11 +14,13 @@ from zoneinfo import ZoneInfo
 from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command
+from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
+    ChatMemberRestricted,
     ChatMemberUpdated,
     ChatPermissions,
     FSInputFile,
@@ -123,6 +125,8 @@ from community_bot.texts import REPUTATION_HELP_TEXT, STORE_HELP_TEXT
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="community")
+moderation_router = Router(name="community_moderation")
+_bulk_unmute_lock = asyncio.Lock()
 
 
 @router.chat_member()
@@ -154,8 +158,9 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
     was_outside = previous.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED} or (
         previous.status == ChatMemberStatus.RESTRICTED and not previous.is_member
     )
-    if joined and was_outside:
+    if joined and (was_outside or isinstance(member, ChatMemberRestricted) and not member.can_send_messages):
         await register_telegram_user(db, member.user)
+    if joined and was_outside:
         moscow_day = event.date.astimezone(ZoneInfo("Europe/Moscow")).date()
         await db.remember_community_join(event.chat.id, uid, moscow_day.isoformat())
         from community_bot.welcome import send_member_welcome
@@ -397,19 +402,7 @@ async def _can_manage_target(
 
 
 def _full_permissions() -> ChatPermissions:
-    return ChatPermissions(
-        can_send_messages=True,
-        can_send_audios=True,
-        can_send_documents=True,
-        can_send_photos=True,
-        can_send_videos=True,
-        can_send_video_notes=True,
-        can_send_voice_notes=True,
-        can_send_polls=True,
-        can_send_other_messages=True,
-        can_add_web_page_previews=True,
-        can_invite_users=True,
-    )
+    return ChatPermissions(**dict.fromkeys(ChatPermissions.model_fields, True))
 
 
 async def _take_target(
@@ -789,6 +782,86 @@ async def profile_transfer(callback: CallbackQuery, db: Database, settings: Sett
         parse_mode="HTML",
         reply_markup=transfer_keyboard(transfer_id),
     )
+
+
+async def _lift_community_mutes(bot: Bot, db: Database, settings: Settings, actor_id: int) -> str:
+    chat_id = settings.community_chat_id
+    chat = await bot.get_chat(chat_id)
+    bot_member = await bot.get_chat_member(chat_id, bot.id)
+    if bot_member.status != ChatMemberStatus.CREATOR and not getattr(bot_member, "can_restrict_members", False):
+        return "Норе нужно право «Блокировка участников» в Telegram."
+
+    opened_text = chat.permissions is not None and not chat.permissions.can_send_messages
+    if opened_text:
+        permissions = chat.permissions.model_copy(update={"can_send_messages": True})
+        await bot.set_chat_permissions(chat_id, permissions, use_independent_chat_permissions=True)
+
+    lifted = skipped = errors = 0
+    wait_seconds = 0
+    if chat.type == "supergroup":
+        for row in await db.list_all_users():
+            uid = int(row["user_id"])
+            if uid <= 0 or uid == bot.id:
+                continue
+            try:
+                member = await bot.get_chat_member(chat_id, uid)
+                if not isinstance(member, ChatMemberRestricted) or not member.is_member or member.can_send_messages:
+                    continue
+                if not await can_manage_user(db, settings, actor_id, uid) or await needs_reapplication(db, uid):
+                    skipped += 1
+                    continue
+                await bot.restrict_chat_member(
+                    chat_id, uid, permissions=_full_permissions(), use_independent_chat_permissions=True,
+                )
+                lifted += 1
+            except TelegramRetryAfter as error:
+                wait_seconds = error.retry_after
+                break
+            except TelegramAPIError:
+                errors += 1
+
+    text = (
+        f"{'Отправка текста в чате открыта.' if opened_text else 'Общего запрета на текст не было.'}\n"
+        f"Личных мутов снято: {lifted}."
+    )
+    if skipped:
+        text += f"\nПропущено по рангу или статусу допуска: {skipped}."
+    if errors:
+        text += f"\nОшибок Telegram при проверке или снятии: {errors}."
+    if wait_seconds:
+        text += f"\nTelegram прервал проверку по лимиту. Повтори команду через {wait_seconds} сек."
+    return text
+
+
+@moderation_router.message(command_or_alias("unmute_all"), F.text)
+async def unmute_all_members(
+    message: Message, command: CommandObject, db: Database, settings: Settings, bot: Bot,
+) -> None:
+    chat_id = settings.community_chat_id
+    if message.sender_chat or not message.from_user or message.from_user.is_bot:
+        return
+    if message.chat.type != "private" and message.chat.id != chat_id:
+        return
+    if not await _require_perm(message, db, settings, PERM_MUTE):
+        return
+    if command.args:
+        await _respond(message, "Напиши «Нора размут всех» без дополнительных слов.")
+        return
+    if not chat_id:
+        await _respond(message, "ID чата сообщества не настроен.")
+        return
+    if _bulk_unmute_lock.locked():
+        await _respond(message, "Нора уже проверяет муты в чате.")
+        return
+    async with _bulk_unmute_lock:
+        try:
+            result = await _lift_community_mutes(bot, db, settings, message.from_user.id)
+        except TelegramAPIError:
+            result = "Telegram не дал проверить или изменить общие права чата."
+        await db.log_admin_action(
+            message.from_user.id, "unmute_all", str(chat_id), result, actor_name=message.from_user.full_name,
+        )
+    await _respond(message, result)
 
 
 @router.message(command_or_alias("unmute"), F.chat.type.in_({"group", "supergroup"}))

@@ -56,6 +56,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "lotterydraw": ("розыгрышитог", "итогрозыгрыша"),
     "mute": ("мут",),
     "unmute": ("размут",),
+    "unmute_all": ("размут всех",),
     "warn": ("варн", "пред"),
     "unwarn": ("разварн",),
     "kick": ("кик", "кикнуть"),
