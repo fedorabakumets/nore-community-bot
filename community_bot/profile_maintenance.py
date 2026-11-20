@@ -13,6 +13,7 @@ from community_bot.access import private_allowed, sync_menu
 from community_bot.audit import SYSTEM_ACTOR_ID
 from community_bot.database import utcnow
 from community_bot.profile_fill import profile_fill_percent
+from community_bot.profile_track import track_key
 from community_bot.release_backup import _snapshot
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ async def reset_profile(db, settings, bot, raw):
             (' | Повторное анкетирование по запросу владельца; '+nonce, uid),
         )
         await conn.execute('DELETE FROM mini_presence WHERE user_id=?', (uid,))
+        await conn.execute('DELETE FROM bot_state WHERE key=?', (track_key(uid),))
         result = {'status': 'done', 'user_id': uid, 'role': 'member', 'fill_percent': 0,
                   'archived_applications': archived.rowcount, 'backup': backup.name,
                   'balances_preserved': True, 'history_preserved': True}

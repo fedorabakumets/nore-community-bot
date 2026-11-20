@@ -76,7 +76,7 @@ async def protection(request, handler):
                 request['application_ban'] = ban
             profile_optional = path in {
                 '/api/me', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
-                '/api/profile/privacy', '/api/notices', '/api/admin',
+                '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
             } or path.startswith(('/api/notices/', '/api/admin/'))
             if not profile_optional:
                 from community_bot.events_api import allowed
@@ -228,6 +228,7 @@ async def overview(request):
     today = datetime.now(ZoneInfo(getattr(settings, 'timezone', 'Europe/Moscow'))).date()
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
+    from community_bot.profile_track import get_track, track_summary
     from community_bot.role_prefixes import prefix_for
     from community_bot.social_likes import count
 
@@ -271,6 +272,7 @@ async def overview(request):
         ),
         'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
+        'profile_track': track_summary(await get_track(db, user['user_id'])),
         'privacy_owned': await db.owns_profile_privacy(user['user_id']),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
@@ -543,6 +545,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people', social_profiles.profile)
     app.router.add_get('/api/people/{user_id}', social_profiles.profile)
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
+    app.router.add_get('/api/people/{user_id}/track', social_profiles.track_audio)
+    app.router.add_get('/api/profile/track', social_profiles.track_audio)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
     from community_bot import lobby_widget, music_api, nora_burrows, nora_cinema, nora_game_api, nora_game_chat
@@ -624,7 +628,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-burrow.js', 'nora-burrow-models.js', 'nora-burrow-items.json',
                  'nora-burrow-trail.js', 'nora-burrow-trail.json',
-                 'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js',
+                 'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js', 'profile-track.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'durak.js', 'durak.css', 'style.css'):

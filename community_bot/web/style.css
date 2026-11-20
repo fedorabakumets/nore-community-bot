@@ -2220,3 +2220,116 @@ button.lobby-entry:active { background: #ffffff13; }
   :is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::before,
   :is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::after { animation: none; }
 }
+
+.profile-track {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  margin: 10px 0;
+  padding: 10px 12px 5px;
+  border: 1px solid color-mix(in srgb, var(--red) 28%, var(--line));
+  border-radius: 14px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--red) 12%, var(--panel)), var(--panel));
+}
+.profile-track .profile-track-toggle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--red);
+  color: #140b0e;
+}
+.profile-track-toggle::before {
+  content: "";
+  width: 0;
+  height: 0;
+  margin-left: 3px;
+  border: 7px solid transparent;
+  border-right: 0;
+  border-left: 11px solid currentColor;
+}
+.profile-track[data-playing="true"] .profile-track-toggle::before {
+  width: 12px;
+  height: 14px;
+  margin: 0;
+  border: solid currentColor;
+  border-width: 0 4px;
+}
+.profile-track[data-loading="true"] .profile-track-toggle::before {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: profile-track-loading .75s linear infinite;
+}
+@keyframes profile-track-loading { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .profile-track[data-loading="true"] .profile-track-toggle::before { animation: none; }
+}
+.profile-track-copy { min-width: 0; text-align: left; }
+.profile-track-copy strong, .profile-track-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-track-copy strong { font-size: .92rem; }
+.profile-track-copy small { color: var(--muted); font-size: .78rem; }
+.profile-track-timeline {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+}
+.profile-track input[type="range"] {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.profile-track input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--red) var(--track-progress, 0%), var(--line) var(--track-progress, 0%));
+}
+.profile-track input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--red) var(--track-progress, 0%), var(--line) var(--track-progress, 0%));
+}
+.profile-track input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--red);
+}
+.profile-track input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--red);
+}
+.profile-track input[type="range"]:disabled { cursor: default; opacity: .55; }
+.profile-track :is(button, input):focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }

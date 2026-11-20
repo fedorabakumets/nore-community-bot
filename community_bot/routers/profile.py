@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InputRichMessage, Message
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file, replace_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.group_friendship import DECISION_PREFIX, group_friend_decision, group_profile_friend
-from community_bot.group_profile import FRIEND_PREFIX, send_group_profile
+from community_bot.group_profile import FRIEND_PREFIX, _avatar, send_group_profile
 from community_bot.helpers import (
     can_view_profile,
     format_warn_entry,
@@ -27,7 +27,9 @@ from community_bot.keyboards import (
     public_profile_keyboard,
 )
 from community_bot.media_cache import profile_photo_input
+from community_bot.private_rich import text_blocks
 from community_bot.profile_fields import parse_birth_date
+from community_bot.profile_track import audio_block, get_track
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 from community_bot.ui_owner import bind_ui_owner
@@ -56,6 +58,30 @@ async def send_profile_card(
         )
     )
     sent: Message | None = None
+    if db and message.chat.type == "private" and (editable or not user.get("profile_private")):
+        track = await get_track(db, user_id)
+        if track:
+            name, closing_tag, details = text.partition("</b>")
+            if not closing_tag:
+                name, details = "", text
+            lines = details.split("\n", 2)
+            avatar = await _avatar(db, user)
+            blocks = [
+                *([avatar] if avatar else []), *text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML"),
+                audio_block(track), *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
+            ]
+            rich = InputRichMessage(blocks=blocks)
+            try:
+                if replace:
+                    sent = await message.edit_text(rich_message=rich, reply_markup=markup)
+                else:
+                    sent = await message.answer(rich_message=rich, reply_markup=markup)
+            except (TelegramBadRequest, TelegramNotFound):
+                pass
+            else:
+                if message.from_user:
+                    await bind_ui_owner(db, sent, user_id if editable else message.from_user.id, "profile")
+                return sent
     if replace:
         sent = await replace_block(message, "profile", text, parse_mode="HTML", reply_markup=markup)
         if db and message.from_user:

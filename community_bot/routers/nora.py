@@ -36,6 +36,7 @@ from community_bot.openrouter_chat import OpenRouterChat, archive_question
 from community_bot.pet_progress import level
 from community_bot.pet_video import PetVideoQueue, video_command
 from community_bot.private_rich import standalone_rich_message
+from community_bot.profile_track import save_from_message, track_command
 from community_bot.reply_rich import bot_publication
 
 router = Router(name="nora")
@@ -272,6 +273,11 @@ async def nora_video(message: Message, settings: Settings, pet_video_queue: PetV
         return
     if pet_video_queue is not None:
         await pet_video_queue.enqueue(message, video_command(message.text))
+
+
+@router.message(track_command, F.chat.type.in_({"private", "group", "supergroup"}), StateFilter(None))
+async def nora_profile_track(message: Message, db: Database, settings: Settings) -> None:
+    await save_from_message(message, db, settings)
 
 
 class CustomCommand(Filter):

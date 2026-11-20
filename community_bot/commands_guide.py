@@ -89,10 +89,18 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
                      "Карточки записей закрываются по ❌ и исчезают через две минуты.",
             ),
         ]),
-        InputRichBlockDetails(summary="🎥 Как скачать видео", blocks=[
+        InputRichBlockDetails(summary="🎵 Видео и музыка", blocks=[
             InputRichBlockParagraph(
                 text="Видео · С 3-го уровня отправь «Нора» и публичную ссылку на TikTok, Reels или Shorts. "
                      "Нора пришлёт MP4, который можно сохранить из Telegram.",
+            ),
+            InputRichBlockParagraph(
+                text="Музыка · Так же отправь ссылку на отдельный трек Яндекс Музыки. Нора пришлёт доступный MP3 "
+                     "и подпишет фрагмент, если источник отдаёт только его. Лимит общий: 5 файлов в сутки.",
+            ),
+            InputRichBlockParagraph(
+                text="Трек профиля · Ответь «Нора добавить», «добавить» или «+» на файл MP3 или M4A до 20 МБ. "
+                     "Новый трек заменит предыдущий. Плеер появится под возрастом.",
             ),
         ]),
         InputRichBlockDetails(summary="🎮 Кинотеатр, Дурак и гости", blocks=[

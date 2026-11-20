@@ -7,11 +7,12 @@ import time
 from io import BytesIO
 
 from aiogram.exceptions import TelegramAPIError
-from aiohttp import web
+from aiohttp import ClientError, web
 
 from community_bot.friends_api import _recipient, accepted
 from community_bot.helpers import can_view_profile, effective_role, role_title
 from community_bot.profile_fields import profile_age
+from community_bot.profile_track import download_track, get_track, track_summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -178,7 +179,8 @@ async def profile(request):
         tier = reputation_tier(target["reputation"], settings.restricted_reputation_threshold)
         result.update(bio=target["profile_bio"], hobbies=target["hobbies"],
                       reputation=target["reputation"], tier=tier.label, cookies=target["cookies"],
-                      likes=await count(db, target["user_id"]))
+                      likes=await count(db, target["user_id"]),
+                      track=track_summary(await get_track(db, target["user_id"])))
     return web.json_response(result)
 
 
@@ -210,3 +212,32 @@ async def avatar(request):
     except (TelegramAPIError, ValueError):
         raise web.HTTPNotFound() from None
     return web.Response(body=photo, content_type="image/jpeg")
+
+
+async def _profile_track_target(request):
+    if request.path == "/api/profile/track":
+        target = await request.app["db"].get_user(request["actor"]["id"])
+        if not target:
+            raise web.HTTPNotFound()
+        return target
+    target = await target_for(request)
+    if target["profile_private"] and target["user_id"] != request["actor"]["id"]:
+        raise web.HTTPNotFound()
+    return target
+
+
+async def track_audio(request):
+    db, bot = request.app["db"], request.app.get("bot")
+    target = await _profile_track_target(request)
+    track = await get_track(db, target["user_id"])
+    if not bot or not track or track["revision"] != request.query.get("v"):
+        raise web.HTTPNotFound()
+    try:
+        audio = await download_track(bot, track["file_id"])
+    except (TelegramAPIError, ClientError, OSError, ValueError):
+        raise web.HTTPBadGateway() from None
+    fresh = await _profile_track_target(request)
+    latest = await get_track(db, fresh["user_id"])
+    if not audio or not latest or latest["revision"] != track["revision"]:
+        raise web.HTTPNotFound()
+    return web.Response(body=audio, content_type=track["mime"])

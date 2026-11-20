@@ -37,6 +37,7 @@ from community_bot.keyboards import ibtn
 from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import _reusable
 from community_bot.profile_fields import profile_age
+from community_bot.profile_track import audio_block, get_track
 from community_bot.reply_rich import bot_publication
 from community_bot.ui_owner import bind_ui_owner
 
@@ -120,6 +121,7 @@ async def send_group_profile(
         for label, field in (("О себе", "profile_bio"), ("Увлечения", "hobbies"))
         if (value := str(user.get(field) or "").strip())
     ]
+    track = await get_track(db, uid) if not user.get("profile_private") else None
     body = [
         reputation,
         InputRichBlockParagraph(text=[
@@ -134,17 +136,23 @@ async def send_group_profile(
     avatar = await _avatar(db, user)
     thread = message.message_thread_id if message.is_topic_message else None
     sent = None
-    media_attempts = ([avatar], []) if avatar else ([],)
-    for media in media_attempts:
+    profile_blocks = [*body[:3], audio_block(track), *body[3:]] if track else body
+    attempts = [[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks]
+    if track:
+        attempts.extend([[avatar, *body], body] if avatar else [body])
+    audio_inline = bool(track)
+    for blocks in attempts:
+        audio_inline = bool(track and any(block.type == "audio" for block in blocks))
         try:
             sent = await bot.send_rich_message(
                 message.chat.id, message_thread_id=thread,
-                rich_message=InputRichMessage(blocks=[*media, *body], skip_entity_detection=True),
+                rich_message=InputRichMessage(blocks=blocks, skip_entity_detection=True),
             )
             break
         except (TelegramBadRequest, TelegramNotFound):
             continue
     if sent is None:
+        audio_inline = False
         balance, score = _stats(user, settings)
         text = f"<b>{escape(name)}</b>\n{escape(subtitle)}"
         for detail in details:
@@ -158,6 +166,11 @@ async def send_group_profile(
                     [ibtn(like, f"{LIKE_PREFIX}{uid}")], votes, commands,
                 ]),
             )
+    if track and not audio_inline:
+        try:
+            await sent.reply_audio(track["file_id"], title=track["title"], performer=track["artist"] or None)
+        except TelegramAPIError:
+            pass
     await bind_ui_owner(db, sent, requester_id, "profile")
     return sent
 

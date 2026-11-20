@@ -1,7 +1,8 @@
-"""Bounded asynchronous delivery of public short videos via Telegram."""
+"""Bounded asynchronous delivery of public video and music files via Telegram."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -17,6 +18,9 @@ from aiogram.types import FSInputFile, Message
 
 from community_bot.nora import strip_address
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, VIDEO_MAX_MB, level, moscow_now
+from community_bot.private_rich import standalone_rich_message
+from community_bot.profile_track import MAX_TRACK_MB
+from community_bot.reply_rich import bot_publication
 
 logger = logging.getLogger(__name__)
 WORKERS = 2
@@ -31,6 +35,7 @@ PLATFORMS = {
     "tiktok.com": r"/(?:@[\w.\-]+/video/\d+|t/[\w-]+)/?",
     "instagram.com": r"/reel/[\w-]+/?",
     "youtube.com": r"/shorts/[\w-]{11}/?",
+    "music.yandex.ru": r"/(?:album/[0-9]{1,16}/)?track/[0-9]{1,16}/?",
 }
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pet_video_deliveries (
@@ -71,6 +76,13 @@ def canonical_url(raw):
         return None
     canonical_host = "www.tiktok.com" if domain == "tiktok.com" else domain
     return f"https://{canonical_host}{parts.path.rstrip('/')}/"
+
+
+async def send_media(message, music, media, **options):
+    if music:
+        with standalone_rich_message(), bot_publication():
+            return await asyncio.wait_for(message.reply_audio(media, **options), SEND_SECONDS)
+    return await asyncio.wait_for(message.reply_video(media), SEND_SECONDS)
 
 
 async def download(url, path):
@@ -125,33 +137,34 @@ class PetVideoQueue:
         )
         return row["total"] < VIDEO_DAILY_LIMIT
 
-    async def _access_error(self, user_id):
+    async def _access_error(self, user_id, kind="видео"):
         if not await self.db.feature_enabled("tamagotchi"):
-            return "Скачивание видео недоступно: питомцы временно отключены."
+            return f"Скачивание {kind} недоступно: питомцы временно отключены."
         pet = await self.db.get_pet(user_id)
         if not pet:
-            return "Чтобы скачивать видео, сначала заведи питомца и достигни 3-го уровня."
+            return f"Чтобы скачивать {kind}, сначала заведи питомца и достигни 3-го уровня."
         if await level(self.db, user_id) < 3:
-            return "Скачивание видео открывается на 3-м уровне питомца."
+            return f"Скачивание {kind} открывается на 3-м уровне питомца."
         if pet.get("expedition_until"):
-            return "Пока питомец в походе, скачивание видео недоступно. Его можно вернуть через «Питомец»."
+            return f"Пока питомец в походе, скачивание {kind} недоступно. Его можно вернуть через «Питомец»."
         return None
 
-    async def _delivery_error(self, user_id):
-        error = await self._access_error(user_id)
+    async def _delivery_error(self, user_id, kind="видео"):
+        error = await self._access_error(user_id, kind)
         if error:
             return error
         if not await self._quota(user_id, moscow_now().date().isoformat()):
-            return f"Сегодня уже получено {VIDEO_DAILY_LIMIT} видео. Лимит обновится в 00:00 МСК."
+            return f"Сегодня уже получено {VIDEO_DAILY_LIMIT} видео или треков. Лимит обновится в 00:00 МСК."
         return None
 
     async def enqueue(self, message, raw_url):
         url = canonical_url(raw_url)
         if not url:
-            await message.reply("Пришли ссылку на TikTok, Instagram Reels или YouTube Shorts.")
+            await message.reply("Пришли ссылку на TikTok, Instagram Reels, YouTube Shorts или трек Яндекс Музыки.")
             return
         user_id = message.from_user.id
-        error = await self._access_error(user_id)
+        kind = "музыки" if url.startswith("https://music.yandex.ru/") else "видео"
+        error = await self._access_error(user_id, kind)
         if error:
             await message.reply(error)
             return
@@ -159,7 +172,9 @@ class PetVideoQueue:
         if message.date and message.date.astimezone(moscow_now().tzinfo).date().isoformat() != day:
             return
         if not await self._quota(user_id, day):
-            await message.reply(f"Сегодня уже получено {VIDEO_DAILY_LIMIT} видео. Лимит обновится в 00:00 МСК.")
+            await message.reply(
+                f"Сегодня уже получено {VIDEO_DAILY_LIMIT} видео или треков. Лимит обновится в 00:00 МСК.",
+            )
             return
         if await self.db.fetchone(
             "SELECT 1 FROM pet_video_deliveries WHERE chat_id=? AND message_id=?",
@@ -170,7 +185,7 @@ class PetVideoQueue:
             await message.reply("Предыдущий запрос ещё обрабатывается.")
             return
         if self.queue.full():
-            await message.reply("Очередь видео заполнена. Попробуй чуть позже.")
+            await message.reply("Очередь скачивания заполнена. Попробуй чуть позже.")
             return
         self.active_users.add(user_id)
         self.queue.put_nowait(VideoJob(message, url, user_id))
@@ -189,40 +204,55 @@ class PetVideoQueue:
                 self.queue.task_done()
 
     async def _deliver(self, job):
+        music = job.url.startswith("https://music.yandex.ru/")
+        kind = "музыки" if music else "видео"
         day = moscow_now().date().isoformat()
-        error = await self._delivery_error(job.user_id)
+        error = await self._delivery_error(job.user_id, kind)
         if error:
             await job.message.reply(error)
             return
         cached = await self.db.fetchone("SELECT file_id FROM pet_video_cache WHERE url=?", (job.url,))
         sent = None
+        preview = False
         if cached:
             try:
-                sent = await asyncio.wait_for(job.message.reply_video(cached["file_id"]), SEND_SECONDS)
+                sent = await send_media(job.message, music, cached["file_id"])
             except TelegramBadRequest:
                 await self.db.execute("DELETE FROM pet_video_cache WHERE url=?", (job.url,))
         if sent is None:
             with tempfile.TemporaryDirectory(prefix="nora-video-") as directory:
-                path = Path(directory) / "video.mp4"
+                path = Path(directory) / ("track.mp3" if music else "video.mp4")
+                max_mb = MAX_TRACK_MB if music else VIDEO_MAX_MB
                 try:
                     status = await download(job.url, path)
                 except TimeoutError:
                     await job.message.reply("Источник отвечает слишком долго. Попробуй чуть позже.")
                     return
-                if status == 2 or (path.is_file() and path.stat().st_size > VIDEO_MAX_MB * 1024 * 1024):
-                    await job.message.reply(f"Файл превышает {VIDEO_MAX_MB} МБ.")
+                if status == 2 or (path.is_file() and path.stat().st_size > max_mb * 1024 * 1024):
+                    await job.message.reply(f"Файл превышает {max_mb} МБ.")
                     return
                 if status or not path.is_file() or not path.stat().st_size:
-                    await job.message.reply("Источник не отдал доступное видео в MP4. Проверь, открыта ли публикация.")
+                    await job.message.reply(
+                        "Яндекс Музыка не отдала доступный файл для этого трека." if music else
+                        "Источник не отдал доступное видео в MP4. Проверь, открыта ли публикация.",
+                    )
                     return
-                error = await self._delivery_error(job.user_id)
+                error = await self._delivery_error(job.user_id, kind)
                 if error:
                     await job.message.reply(error)
                     return
+                options = {}
+                if music:
+                    meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+                    preview = meta["preview"]
+                    title = meta["title"]
+                    options = {"title": f"{title} (фрагмент)" if preview else title, "performer": meta["artist"]}
+                    if preview:
+                        options["caption"] = "Яндекс Музыка предоставила только фрагмент трека."
                 try:
-                    sent = await asyncio.wait_for(job.message.reply_video(FSInputFile(path)), SEND_SECONDS)
+                    sent = await send_media(job.message, music, FSInputFile(path), **options)
                 except (TelegramBadRequest, TimeoutError):
-                    await job.message.reply("Не удалось отправить видео. Попробуй чуть позже.")
+                    await job.message.reply("Не удалось отправить файл. Попробуй чуть позже.")
                     return
         async with self.db.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
@@ -231,11 +261,12 @@ class PetVideoQueue:
                 (job.message.chat.id, job.message.message_id, job.user_id, day),
             )
             await db.execute("DELETE FROM pet_video_deliveries WHERE day < date(?, '-2 days')", (day,))
-            if sent.video:
+            media = sent.audio if music else sent.video
+            if media and not preview:
                 await db.execute(
                     "INSERT INTO pet_video_cache VALUES (?,?,?) "
                     "ON CONFLICT(url) DO UPDATE SET file_id=excluded.file_id,updated_at=excluded.updated_at",
-                    (job.url, sent.video.file_id, moscow_now().isoformat()),
+                    (job.url, media.file_id, moscow_now().isoformat()),
                 )
                 await db.execute(
                     "DELETE FROM pet_video_cache WHERE url IN "
