@@ -463,10 +463,12 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.birthday import router as birthday_router
     from community_bot.commands_guide import router as commands_router
     from community_bot.event_access import router as event_router
+    from community_bot.game_invitations import router as game_invitations_router
     from community_bot.mafia_notifications import router as mafia_notifications_router
     from community_bot.routers.member_stats import router as member_stats_router
     from community_bot.sea_notifications import router as sea_notifications_router
 
+    dispatcher.include_router(game_invitations_router)
     dispatcher.include_router(mafia_notifications_router)
     dispatcher.include_router(sea_notifications_router)
     dispatcher.include_router(birthday_router)

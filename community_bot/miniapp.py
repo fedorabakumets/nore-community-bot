@@ -109,7 +109,7 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/seasonal',
+                                    '/api/sea', '/api/durak', '/api/games/invite', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -587,6 +587,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/rocket/cashout', rocket_api.cashout)
     app.router.add_get('/api/sea', sea_api.status)
     app.router.add_post('/api/sea/action', sea_api.action)
+
+    from community_bot.game_invitations import open_invitation
+
+    app.router.add_post('/api/games/invite', open_invitation)
 
     from community_bot.interactive_runtime import lifecycle
 

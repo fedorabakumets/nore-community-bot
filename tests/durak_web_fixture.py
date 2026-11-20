@@ -78,6 +78,9 @@ async def fixture(folder):
         async def me(self):
             return SimpleNamespace(username="nora_durak_fixture_bot")
 
+        async def send_rich_message(self, chat_id, *, rich_message):
+            return SimpleNamespace(chat_id=chat_id, rich_message=rich_message)
+
     async def mock_links(app):
         app["bot"] = FixtureBot()
 

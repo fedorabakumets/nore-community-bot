@@ -1158,12 +1158,11 @@ async def action(request):
     except Conflict as error:
         return web.json_response({"error": str(error)}, status=409)
     if notice:
-        from community_bot.friends_api import deliver_notice
-        from community_bot.sea_notifications import invitation_keyboard
+        from community_bot.game_invitations import deliver_game_invitation
 
-        await deliver_notice(
-            request.app.get("bot"), db, notice["id"], notice["uid"], notice["text"],
-            reply_markup=invitation_keyboard(notice["room_id"]), force=True,
+        await deliver_game_invitation(
+            request.app.get("bot"), db, request.app["settings"], "sea", notice["room_id"],
+            uid, notice["uid"], notice["id"],
         )
     result = await read_status(db, uid, room_id=focus)
     return web.json_response({**result, "message": message})

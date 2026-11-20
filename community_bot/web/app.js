@@ -291,6 +291,8 @@ function telegramStartParam() {
 function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
+  const invite = /^nora_inv_(mafia|sea|durak)_([1-9][0-9]{0,15})_([A-Za-z0-9_-]{16,22})$/.exec(param);
+  if (invite) return {view: invite[1], invite: {game: invite[1], recipient: Number(invite[2]), room_id: invite[3]}};
   if (/^nora_(?:d_[A-Za-z0-9_-]{22}|i_[a-f0-9]{16})$/.test(param)) return {view: 'durak'};
   const event = /^nora_event_([A-Za-z0-9_-]{1,64})$/.exec(param);
   if (event) return {view: 'events', eventId: event[1]};
@@ -380,9 +382,20 @@ async function openApp(result) {
   data = result;
   tab = 'home';
   const linked = botReplyRoute();
-  const view = linked?.view || window.NoraShop?.route()?.view || 'home';
+  let view = linked?.view || window.NoraShop?.route()?.view || 'home';
   const blockedLink = linked && profileTabLocked(view);
   const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
+  let inviteError;
+  if (linked?.invite && !blockedLink) {
+    try {
+      const {room_id} = await api('games/invite', linked.invite);
+      if (view === 'durak') durakInboxRoom = room_id;
+    } catch (error) {
+      view = 'games';
+      inviteError = error.message;
+    }
+  }
+  if (linked?.invite) window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
   else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','friends','community','events'].includes(view)) tab = view;
@@ -402,6 +415,7 @@ async function openApp(result) {
   render();
   loadAvatar();
   if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+  else if (inviteError) toast(inviteError);
   else if (topupClosed) toast('Пополнение временно недоступно');
   else if (linked?.eventId && !data.events?.some(event => event.id === linked.eventId)) {
     toast('Мероприятие больше недоступно');

@@ -9,14 +9,12 @@ import time
 import weakref
 from collections import deque
 
-from aiogram.exceptions import TelegramAPIError
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiohttp import web
 
 from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
-from community_bot.friends_api import deliver_notice
+from community_bot.game_invitations import deliver_game_invitation
 
 REACTION_DURATION = 2.7
 REACTION_COOLDOWN = 2.8
@@ -306,18 +304,10 @@ async def action(request):
         return web.json_response({"error": str(exc)}, status=409)
     request.app["durak_updates"].notify(rid)
     if notice:
-        bot = request.app["bot"]
-        markup = None
-        if bot:
-            try:
-                name = (await bot.me()).username
-            except (TelegramAPIError, OSError, TimeoutError):
-                name = None
-            if name:
-                markup = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="Посмотреть стол", url=f"https://t.me/{name}?startapp=nora_i_{rid}")
-                ]])
-        await deliver_notice(bot, db, *notice, reply_markup=markup)
+        inbox_id, recipient, _ = notice
+        await deliver_game_invitation(
+            request.app["bot"], db, request.app["settings"], "durak", rid, uid, recipient, inbox_id,
+        )
     return web.json_response({"id": rid})
 
 
