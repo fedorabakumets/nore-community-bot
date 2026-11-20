@@ -14,11 +14,11 @@ window.NoraCommunity = (() => {
   function updateClock(){const el=document.getElementById('community-updated');if(el)el.textContent=updatedLabel()}
   function leaders(){
     const buttons=Object.entries(metrics).map(([id,item])=>`<button type="button" data-community-metric="${id}" aria-label="${item.label}" aria-pressed="${metric===id}" title="${item.label}">${item.icon}</button>`).join('');
-    return `<details class="community-table community-leaders" data-board="leaders" data-retain-open="leaders"><summary>Топ участников <span class="community-chevron">⌄</span></summary><div class="community-table-body"><div class="community-top-filters" role="group" aria-label="Фильтр рейтинга">${buttons}</div><div id="community-top-results">${leaderResults()}</div></div></details>${board?`<p class="footer-note" id="community-updated">${updatedLabel()}</p>`:''}`;
+    return `<div class="community-table community-leaders"><h2 id="community-top-title">ТОП</h2><div class="community-table-body"><div class="community-top-filters" role="group" aria-label="Фильтр рейтинга">${buttons}</div><div id="community-top-results">${leaderResults()}</div></div></div>${board?`<p class="footer-note" id="community-updated">${updatedLabel()}</p>`:''}`;
   }
   function leaderResults(){
     if(!board)return boardFailed?'<p class="sub">Таблица не загрузилась.</p><button type="button" class="text-btn" data-community-retry>Повторить</button>':'<p class="sub" role="status">Загружаем рейтинг…</p>';
-    const rows=board.boards?.[metric]||(metric==='messages'?board.leaders:[]);
+    const rows=(board.boards?.[metric]||(metric==='messages'?board.leaders:[])).slice(0,3);
     const winner=board.winner?`Вчера печеньку получил(а) <button class="text-btn" data-person-view="${board.winner.id}">${NoraPrefix(board.winner.prefix)}${esc(board.winner.name)}</button> 🍪`:board.awarded?'Вчера награда начислена участнику со скрытым доступом.':'За вчера печенька пока не начислена.';
     return `<h3 class="community-top-heading">${metrics[metric].title}</h3>${rows.length?rows.map((p,i)=>row(p,'leader',i)).join(''):`<p class="sub">${metrics[metric].empty}</p>`}${metric==='messages'?`<p class="community-winner">${winner}</p>`:''}`;
   }
@@ -45,7 +45,7 @@ window.NoraCommunity = (() => {
       </button>
     </div>`;
   }
-  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}${window.NoraInteractive?.screen('friends')||''}<section id="community-leaders">${leaders()}</section><section id="community-staff">${staff()}</section>${musicCard()}`}
+  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}${window.NoraInteractive?.screen('friends')||''}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><section id="community-staff">${staff()}</section>${musicCard()}`}
   async function load(){
     if(loading)return;
     loading=true;

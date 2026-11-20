@@ -257,7 +257,8 @@ body::after{bottom:0;height:var(--safe-bottom)}
 .season-label{display:block;margin:0 0 8px;color:#ff8898;font-size:12px;line-height:1.4}
 .lk-title h1{color:var(--red)}
 .community-leaders{border-radius:16px}
-.community-leaders .community-table-body{max-height:min(65dvh,520px);overflow-y:auto;overscroll-behavior:contain;padding:0 16px 12px}
+.community-leaders > h2{display:flex;align-items:center;min-height:48px;margin:0;padding:12px 14px;font:600 16px var(--body-font);color:var(--poster-ink)}
+.community-leaders .community-table-body{padding:0 16px 12px}
 .community-leaders .community-person{margin:0;padding:12px 0;border-top:1px solid var(--line);border-bottom:0}
 .community-leaders .person-visit{color:inherit}
 .community-top-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:12px}
