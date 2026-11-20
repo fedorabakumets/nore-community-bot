@@ -12,7 +12,11 @@ ROLE_LABELS = {
     "owner": "владелец",
 }
 
-POSITIVE_REPUTATION_PHRASES = {
+POSITIVE_SOCIAL_ACTIONS = {"обнять", "обнять обнять"}
+NEGATIVE_SOCIAL_ACTIONS = {"пнуть", "пнуть пнуть", "ударить", "ударить ударить"}
+LIKE_PHRASES = {"поцеловать", "поцеловать поцеловать"}
+
+POSITIVE_REPUTATION_PHRASES = POSITIVE_SOCIAL_ACTIONS | {
     "+",
     "+реп",
     "уважаю",
@@ -20,7 +24,7 @@ POSITIVE_REPUTATION_PHRASES = {
     "согласен",
     "ты прав",
 }
-NEGATIVE_REPUTATION_PHRASES = {
+NEGATIVE_REPUTATION_PHRASES = NEGATIVE_SOCIAL_ACTIONS | {
     "-",
     "-реп",
     "не уважаю",

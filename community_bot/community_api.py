@@ -87,11 +87,17 @@ async def status(request):
     rows = await people(db, settings, viewer)
     by_id = {r['user_id']: r for r in rows}
     board = await db.daily_message_board(today.isoformat(), chat, limit=-1)
-    leaders = []
-    for row in board:
-        if row['user_id'] in by_id:
-            leaders.append({**await card(db, settings, viewer, by_id[row['user_id']]), 'messages': row['messages']})
-    leaders = leaders[:5]
+    boards = {}
+    for metric, ranking in (
+        ('messages', board),
+        ('likes', await db.public_profile_board(chat, 'likes')),
+        ('cookies', await db.public_profile_board(chat, 'cookies')),
+    ):
+        visible = [row for row in ranking if row['user_id'] in by_id][:5]
+        boards[metric] = [
+            {**await card(db, settings, viewer, by_id[row['user_id']]), metric: row[metric]}
+            for row in visible
+        ]
     # Show the recipient actually credited by the existing midnight job, never guess or issue another reward.
     winner = await db.fetchone(
         "SELECT user_id FROM transactions WHERE kind='daily_chat' AND details=? AND amount>0 ORDER BY id LIMIT 1",
@@ -117,7 +123,8 @@ async def status(request):
     sea_lobbies = await public_lobbies(db, viewer, admin=sea_admin)
     return web.json_response({'day': today.isoformat(), 'winner_day': day.isoformat(),
                               'revision_day': today.isoformat(),
-                              'timezone': 'Europe/Moscow', 'leaders': leaders, 'staff': staff,
+                              'timezone': 'Europe/Moscow', 'leaders': boards['messages'],
+                              'boards': boards, 'staff': staff,
                               'winner': winner_card, 'awarded': bool(winner), 'sea_invites': sea_invites,
                               'sea_lobbies': sea_lobbies, 'sea_admin': sea_admin,
                               'updated_at': now.isoformat(timespec='seconds')})

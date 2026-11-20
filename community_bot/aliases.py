@@ -19,7 +19,6 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "profile": ("профиль",),
     "stats": ("стата",),
     "top": ("топ",),
-    "millionaires": ("миллионеры",),
     "shop": ("магазин",),
     "store": ("стор", "магазинсправка"),
     "reputation": ("репутация",),

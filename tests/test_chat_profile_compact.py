@@ -43,7 +43,9 @@ async def test_group_profile_card(tmp_path, fallback):
     blocks = bot.send_rich_message.await_args_list[0].kwargs["rich_message"].blocks
     photo, votes, name, _, about, hobbies, table, actions = blocks
     assert photo.type == "photo" and photo.photo.media == "telegram-photo"
-    assert (name.type, name.text) == ("heading", "Анна <3")
+    assert name.type == "paragraph" and name.text[0].text == "Анна <3"
+    assert name.text[2].button.text == "❤️ 0" and name.text[2].button.style == "link"
+    assert name.text[2].button.callback_data == "gprofile:like:2"
     assert [(button.text, button.style) for button in actions.buttons] == [
         ("❌", "danger"), ("📱", "primary"), ("👤", "success"),
     ]
@@ -64,7 +66,8 @@ async def test_group_profile_card(tmp_path, fallback):
         args, kwargs = bot.send_message.await_args
         assert "Анна &lt;3" in args[1] and "Люблю &lt;музыку&gt;" in args[1]
         assert kwargs["message_thread_id"] == 5
-        assert kwargs["reply_markup"].inline_keyboard[0][1].callback_data == "profile_action:rep_down:2"
+        assert kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "gprofile:like:2"
+        assert kwargs["reply_markup"].inline_keyboard[1][1].callback_data == "profile_action:rep_down:2"
     else:
         bot.send_message.assert_not_awaited()
 

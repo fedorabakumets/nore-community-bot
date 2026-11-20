@@ -15,6 +15,7 @@ from aiogram.types import (
     RichTextButton,
     RichTextMention,
     RichTextTextMention,
+    RichTextUrl,
     User,
 )
 
@@ -33,15 +34,17 @@ async def send_member_welcome(bot: Bot, chat_id: int, member: User) -> None:
         mention = RichTextMention(text=f"@{member.username}", username=member.username)
     else:
         mention = RichTextTextMention(text=member.full_name, user=member)
+    photo = InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(WELCOME_ART)))
     blocks = [
+        photo,
         InputRichBlockParagraph(text=["Привет, ", mention, "!"]),
         InputRichBlockParagraph(text=(
-            "Помни! Мы с уважением относимся каждому. Перед общением, не забудь прочитать правила ❤️"
+            "Помни! Мы с уважением относимся к каждому. Перед общением не забудь прочитать правила ❤️"
         )),
         InputRichBlockParagraph(text=[
             RichTextButton(button=RichMessageButton(text="команды", style="link", callback_data=OPEN_COMMANDS_CARD)),
             " · ",
-            RichTextButton(button=RichMessageButton(text="Нора", style="link", url=f"https://t.me/{me.username}?startapp")),
+            RichTextUrl(text="Нора", url=f"https://t.me/{me.username}?startapp"),
         ]),
     ]
     video = InputRichBlockVideo(video=InputMediaVideo(
@@ -52,5 +55,4 @@ async def send_member_welcome(bot: Bot, chat_id: int, member: User) -> None:
             await bot.send_rich_message(chat_id, rich_message=InputRichMessage(blocks=[*blocks, video]))
         except (TelegramBadRequest, OSError):
             logger.warning("Could not send the welcome video, using the welcome image", exc_info=True)
-            photo = InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(WELCOME_ART)))
-            await bot.send_rich_message(chat_id, rich_message=InputRichMessage(blocks=[*blocks, photo]))
+            await bot.send_rich_message(chat_id, rich_message=InputRichMessage(blocks=blocks))

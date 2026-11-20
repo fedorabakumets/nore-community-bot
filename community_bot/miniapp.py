@@ -232,8 +232,10 @@ async def overview(request):
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
     from community_bot.role_prefixes import prefix_for
+    from community_bot.social_likes import count
 
     stats = {
+        'likes': await count(db, user['user_id']),
         'prefix': await prefix_for(db, settings, user['user_id']),
         'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
         'tier': tier.label, 'discount': tier.discount, 'daily_actions': tier.daily_actions,

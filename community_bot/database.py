@@ -2478,10 +2478,13 @@ class Database:
                 (nxt, user_id),
             )
         elif item == "reset_limits":
+            from community_bot.social_likes import DAY_PREFIX
+
             await db.execute(
                 "DELETE FROM reputation_actions WHERE actor_id = ? AND action_date = ?",
                 (user_id, datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()),
             )
+            await db.execute("DELETE FROM bot_state WHERE key=?", (f"{DAY_PREFIX}{user_id}",))
         elif item == "forgive":
             await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
         elif item == "rep_shield":
@@ -4259,6 +4262,36 @@ class Database:
             LIMIT ?
             """,
             (day, through or day, chat_id, limit),
+        )
+
+    async def public_profile_board(self, chat_id: int, metric: str) -> list[dict[str, Any]]:
+        if metric == "likes":
+            from community_bot.social_likes import COUNT_PREFIX
+
+            return await self.fetchall(
+                """
+                SELECT u.user_id, u.profile_name, u.telegram_name, u.username, CAST(s.value AS INTEGER) AS likes
+                FROM bot_state s JOIN users u ON s.key = ? || u.user_id
+                WHERE u.user_id > 0 AND u.profile_private = 0 AND likes > 0
+                ORDER BY likes DESC, u.user_id ASC
+                """,
+                (COUNT_PREFIX,),
+            )
+        if metric != "cookies":
+            raise ValueError("Unknown profile ranking")
+        return await self.fetchall(
+            """
+            SELECT u.user_id, u.profile_name, u.telegram_name, u.username, u.cookies
+            FROM users u
+            WHERE u.user_id > 0 AND u.cookies > 0 AND u.profile_private = 0
+              AND (EXISTS (
+                SELECT 1 FROM user_activity a WHERE a.user_id = u.user_id AND a.chat_id = ?
+              ) OR EXISTS (
+                SELECT 1 FROM bot_state s WHERE s.key = ? || u.user_id
+              ))
+            ORDER BY u.cookies DESC, u.user_id ASC
+            """,
+            (chat_id, f"community_join:{chat_id}:"),
         )
 
     async def list_command_overrides(self) -> list[dict[str, Any]]:

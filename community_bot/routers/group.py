@@ -7,6 +7,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from random import choice
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from community_bot import social_likes
 from community_bot.access import needs_reapplication
 from community_bot.aliases import command_or_alias, is_command_message, remainder_args, strip_command_address
 from community_bot.audit import (
@@ -42,15 +44,19 @@ from community_bot.bot_identity import is_bot
 from community_bot.config import COOKIE_PAYMENT_MESSAGE_QR, COOKIE_PAYMENT_URL, Settings
 from community_bot.database import Database
 from community_bot.domain import (
+    LIKE_PHRASES,
+    NEGATIVE_REPUTATION_PHRASES,
+    POSITIVE_REPUTATION_PHRASES,
     cookies_phrase,
     discounted_price,
     is_permanent_duration,
+    reputation_delta,
     reputation_tier,
     transfer_amount,
     transfer_commission_percent,
 )
 from community_bot.ephemeral import delete_user_command, keep_in_chat
-from community_bot.group_profile import refresh_group_profile
+from community_bot.group_profile import LIKE_PREFIX, refresh_group_profile
 from community_bot.helpers import (
     BOT_REPLY_TTL,
     can_manage_user,
@@ -60,11 +66,11 @@ from community_bot.helpers import (
     has_permission,
     rank_of_user,
     register_telegram_user,
-    reputation_interaction,
     resolve_command_target,
     resolve_member_mention,
     resolve_reply_target,
     safe_send,
+    targeted_phrase,
     user_link,
     user_permissions,
 )
@@ -94,6 +100,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
+from community_bot.reply_rich import bot_publication
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
@@ -348,6 +355,26 @@ def _reputation_ping(settings: Settings, target: dict[str, object], value: int, 
     return f"{tier.emoji} {_target_display(target)}: {html.escape(text)}{extra}"
 
 
+_SOCIAL_LINES = {
+    "обнять": ("🫂 {actor} обнимает {target}.", "🤗 {actor} отправляет тёплые объятия {target}."),
+    "пнуть": ("💢 {actor} пинает {target}.", "👟 {actor} отвешивает пинок {target}."),
+    "ударить": ("💥 {actor} ударяет {target}.", "🥊 {actor} наносит удар участнику {target}."),
+}
+
+
+async def _give_like(db: Database, bot: Bot, actor, target) -> str | None:
+    if actor.is_bot or await is_bot(db, target, bot.id):
+        return "Лайки доступны между участниками."
+    return await social_likes.give(db, actor.id, int(target["user_id"]))
+
+
+async def _announce_like(message: Message, actor, target) -> None:
+    sender = user_link(actor.id, "@" + (actor.username or actor.full_name))
+    recipient = user_link(int(target["user_id"]), "@" + (target.get("username") or display_name(target)))
+    with bot_publication(), keep_in_chat():
+        await message.answer(f"❤️ {sender} лайкнул {recipient}", parse_mode="HTML")
+
+
 async def _can_manage_target(
     actor_id: int,
     target: dict[str, object],
@@ -599,6 +626,29 @@ async def mute_member(message: Message, db: Database, settings: Settings, bot: B
         f"🔇 {_target_display(target)} получает мут на {label} · {html.escape(reason)}.",
         parse_mode="HTML",
     )
+
+
+@router.callback_query(
+    F.data.regexp(rf"^{LIKE_PREFIX}[1-9][0-9]{{0,15}}$"), F.message.chat.type.in_({"group", "supergroup"}),
+)
+async def profile_like(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    message = callback.message
+    if not isinstance(message, Message) or not callback.data:
+        await callback.answer("Профиль больше недоступен.")
+        return
+    if settings.community_chat_id and message.chat.id != settings.community_chat_id:
+        await callback.answer("Лайки доступны в основном чате Норы.", show_alert=True)
+        return
+    target_id = int(callback.data.removeprefix(LIKE_PREFIX))
+    target = await db.get_user(target_id)
+    if target is None:
+        await callback.answer("Профиль больше недоступен.")
+        return
+    error = await _give_like(db, bot, callback.from_user, target)
+    await callback.answer(error or "Лайк отправлен ❤️", show_alert=bool(error))
+    if not error:
+        await _announce_like(message, callback.from_user, target)
+    await refresh_group_profile(message, db, settings, target_id)
 
 
 @router.callback_query(F.data.startswith("profile_action:"), F.message.chat.type.in_({"group", "supergroup"}))
@@ -1516,7 +1566,7 @@ async def buy_shop_item(
         "immunity_24h": "Плащ иммунитета на 24 часа.",
         "rep_shield": "Щит на один −реп добавлен.",
         "event_pass": "Заявка на проходку передана владельцу.",
-        "reset_limits": "Лимит действий репутации сброшен.",
+        "reset_limits": "Сегодняшние лимиты лайков и действий с репутацией сброшены.",
         "forgive": "Предупреждения очищены, мут снят.",
         "support": "Спасибо за поддержку проекта!",
         "private_profile": "Профиль скрыт от чужих. Открыть снова можно кнопкой на своей карточке.",
@@ -1810,7 +1860,7 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
 async def group_reply_actions(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     addressed = strip_command_address(message.text or "")
     amount = transfer_amount(addressed) if addressed is not None and message.reply_to_message else None
-    interaction = reputation_interaction(message)
+    interaction = targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES | LIKE_PHRASES)
     if amount is None and interaction is None:
         raise SkipHandler
     if not message.from_user:
@@ -1821,7 +1871,7 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
             await _prepare_transfer(message, db, settings, target, amount)
         return
     assert interaction is not None
-    delta, mention = interaction
+    phrase, mention = interaction
     target = (
         await resolve_member_mention(db, mention) if mention is not None else await resolve_reply_target(message, db)
     )
@@ -1829,6 +1879,17 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         if mention is not None:
             await message.reply("Не нашла участника по @имени. Попробуйте ответить на его сообщение.")
         return
+    if phrase in LIKE_PHRASES:
+        if settings.community_chat_id and message.chat.id != settings.community_chat_id:
+            return
+        error = await _give_like(db, bot, message.from_user, target)
+        if error:
+            await message.reply(error)
+        else:
+            await _announce_like(message, message.from_user, target)
+        return
+    delta = reputation_delta(phrase)
+    assert delta is not None
     actor = await register_telegram_user(db, message.from_user)
     if await is_bot(db, target):
         await message.reply("Репутация ботов не меняется.")
@@ -1847,10 +1908,12 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         from community_bot.life import unlock
 
         await unlock(db, message.from_user.id, "first_plus")
-    await message.reply(
-        _reputation_ping(settings, target, new_value, text, pet_line),
-        parse_mode="HTML",
-    )
+    response = _reputation_ping(settings, target, new_value, text, pet_line)
+    if lines := _SOCIAL_LINES.get(phrase.split()[0]):
+        response = choice(lines).format(
+            actor=user_link(message.from_user.id, message.from_user.full_name), target=_target_display(target),
+        ) + "\n" + response
+    await message.reply(response, parse_mode="HTML")
     if pet_line and "перехватил" in pet_line:
         from community_bot.notify import emit
 

@@ -260,6 +260,12 @@ body::after{bottom:0;height:var(--safe-bottom)}
 .community-leaders .community-table-body{max-height:min(65dvh,520px);overflow-y:auto;overscroll-behavior:contain;padding:0 16px 12px}
 .community-leaders .community-person{margin:0;padding:12px 0;border-top:1px solid var(--line);border-bottom:0}
 .community-leaders .person-visit{color:inherit}
+.community-top-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:12px}
+.community-top-filters button{min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:18px}
+.community-top-filters button[aria-pressed="true"]{border-color:var(--red);box-shadow:inset 0 -2px var(--red)}
+.community-top-filters button:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.community-top-heading{font:600 13px var(--body-font);margin:0 0 8px}
+.social-like-count{display:inline-block;white-space:nowrap;font-variant-numeric:tabular-nums}
 .community-leaders .community-place-1 .community-rank{color:#edc778}
 
 /* Align the main navigation headings and season labels. */

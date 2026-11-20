@@ -18,8 +18,7 @@ BUILTIN_TITLES: dict[str, tuple[str, str]] = {
     "close": ("Закрыть", "Закрыть открытый тикет."),
     "profile": ("Профиль", "Карточка участника."),
     "stats": ("Стата", "Сообщения, время в сообществе и уровень питомца участника."),
-    "top": ("Топ", "Лидеры по сообщениям за сегодня, неделю и месяц."),
-    "millionaires": ("Миллионеры", "Лидеры по балансу печенек."),
+    "top": ("Топ", "Лидеры по лайкам, сообщениям и печенькам."),
     "shop": ("Магазин", "Полки магазина."),
     "store": ("Стор", "Справка по полкам."),
     "reputation": ("Репутация", "Уровни и лимиты репутации."),
@@ -216,7 +215,7 @@ def _reindex() -> None:
 
 def apply_override_row(row: dict[str, object]) -> None:
     slug = str(row.get("slug") or "").strip()
-    if not slug or slug == "setstatus":
+    if not slug or slug in {"setstatus", "millionaires"}:
         return
     kind = str(row.get("kind") or "builtin")
     base = _COMMANDS.get(slug) if kind == "builtin" else None

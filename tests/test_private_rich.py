@@ -1274,11 +1274,14 @@ async def test_commands_card_rich_photo_close_and_expiry(setup, monkeypatch, cha
     expected_deletes = [event.message_id] if chat_id < 0 and not from_welcome else []
     assert [call.message_id for call in command_deletes] == expected_deletes
     blocks = content(send)
-    assert [block["type"] for block in blocks] == ["photo", "details", "buttons", "buttons"]
-    assert [entry["text"].split(" · ")[0] for entry in blocks[1]["blocks"]] == [
-        "Нора ИИ", "Голосовое", "Кружок", "Видео",
+    assert [block["type"] for block in blocks] == ["photo", *["details"] * 5, "buttons", "buttons"]
+    assert "Поцеловать" in blocks[1]["blocks"][0]["text"]
+    assert "Нора топ" in blocks[2]["blocks"][0]["text"]
+    assert [entry["text"].split(" · ")[0] for entry in blocks[3]["blocks"]] == [
+        "Нора ИИ", "Голосовое", "Кружок",
     ]
-    guide_button = blocks[2]["buttons"][0]
+    assert blocks[4]["blocks"][0]["text"].startswith("Видео · ")
+    guide_button = blocks[-2]["buttons"][0]
     assert guide_button["text"] == "гайд по командам"
     assert guide_button["url"] == "https://t.me/test_nora_bot?startapp=nora_to_commands"
     assert send.rich_message.blocks[0].photo.media.path.is_file()

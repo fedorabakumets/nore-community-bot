@@ -396,7 +396,7 @@ async def test_existing_commands_and_fsm_win_in_the_production_dispatcher(db, se
 
         await dispatch("Нора, профиль")
         cards = [call for call in session.calls if isinstance(call, SendRichMessage)]
-        assert len(cards) == 1 and cards[0].rich_message.blocks[1].text == "Участник 7"
+        assert len(cards) == 1 and cards[0].rich_message.blocks[1].text[0].text == "Участник 7"
         await dispatch("Нора, любимый факт")
         assert replies()[0].text == "Штатная команда"
         await dispatch("Нора, какая погода?")

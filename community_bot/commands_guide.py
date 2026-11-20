@@ -56,7 +56,25 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
     app = await nora_link_block(bot, "commands_guide", set(), "")
     rich_message = InputRichMessage(blocks=[
         InputRichBlockPhoto(photo=InputMediaPhoto(media=FSInputFile(COMMANDS_ART))),
-        InputRichBlockDetails(summary="Как пользоваться Норой ИИ, читать записи и скачивать видео", blocks=[
+        InputRichBlockDetails(summary="❤️ Лайки и репутация", blocks=[
+            InputRichBlockParagraph(
+                text="Открой «Нора профиль @имя» и нажми ❤️ рядом с именем. Или напиши «Поцеловать» ответом "
+                     "на сообщение участника. Можно написать «Поцеловать @имя». На кнопку и команду один лайк "
+                     "до полуночи по Москве. В магазине «Сброс всех лимитов» возвращает лайк и действия с репутацией.",
+            ),
+            InputRichBlockParagraph(
+                text="«Обнять» работает как +реп. «Пнуть» и «Ударить» — как −реп. Напиши слово ответом или добавь "
+                     "@имя. Те же правила действуют, если повторить слово дважды.",
+            ),
+        ]),
+        InputRichBlockDetails(summary="💬 Статистика и топы", blocks=[
+            InputRichBlockParagraph(
+                text="«Нора топ» открывает рейтинг. Кнопки ❤️ 💬 🍪 переключают лайки, сообщения и печеньки. "
+                     "«Нора топ неделя» и «Нора топ месяц» меняют период для сообщений.",
+            ),
+            InputRichBlockParagraph(text="«Нора стата @имя» показывает сообщения, дни в чате и уровень питомца."),
+        ]),
+        InputRichBlockDetails(summary="🐾 Нора ИИ и расшифровка", blocks=[
             InputRichBlockParagraph(
                 text="Нора ИИ · Со 2-го уровня начни вопрос с «Нора» в основном чате или в личке. "
                      "Ответь на её сообщение, чтобы продолжить разговор.",
@@ -68,9 +86,21 @@ async def send_commands_card(message: Message, bot: Bot, *, requester_id: int | 
                 text="Кружок · Ответь на видеокружок фразой «Нора, расшифруй». Под ним раскрой «Текст кружка». "
                      "Карточки записей закрываются по ❌ и исчезают через две минуты.",
             ),
+        ]),
+        InputRichBlockDetails(summary="🎥 Как скачать видео", blocks=[
             InputRichBlockParagraph(
                 text="Видео · С 3-го уровня отправь «Нора» и публичную ссылку на TikTok, Reels или Shorts. "
                      "Нора пришлёт MP4, который можно сохранить из Telegram.",
+            ),
+        ]),
+        InputRichBlockDetails(summary="🎮 Кинотеатр, Дурак и гости", blocks=[
+            InputRichBlockParagraph(
+                text="Кинотеатр · Ответь «Нора, в кино» на MP4 до 20 МБ. В 3D-кинотеатре открой «Проектор» "
+                     "и выбери ролик в разделе «Видео из Telegram».",
+            ),
+            InputRichBlockParagraph(
+                text="В Mini App открой «Коммьюнити» → «Игры». Там общие лобби «Дурака», «Мафии» и «Морского боя». "
+                     "В 3D-игре можно обустроить свою нору и пригласить друзей посмотреть видео по телевизору.",
             ),
         ]),
         *([app] if app else []),

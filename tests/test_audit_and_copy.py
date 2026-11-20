@@ -224,7 +224,7 @@ def test_post_templates_and_buttons() -> None:
 
 def test_updates_are_admin_only_and_numbered() -> None:
     latest = latest_update()
-    assert latest.number == 23
+    assert latest.number == 24
     text = updates_text()
     assert "№15" in text
     assert "№14" in text
@@ -253,17 +253,19 @@ def test_updates_are_admin_only_and_numbered() -> None:
     assert any(button.callback_data == "admin:restart" for button in owner_buttons)
     from community_bot.keyboards import games_menu_keyboard
     from community_bot.staff_guide import staff_guide_text
-    from community_bot.updates import community_announcement, member_details_text, staff_announcement
+    from community_bot.updates import UPDATES, community_announcement, member_details_text, staff_announcement
 
     pin = community_announcement(latest)
     assert "Админ" not in pin
     assert "очередь" not in pin.casefold()
     assert f"Обновление №{latest.number}" in pin
-    details = member_details_text(latest)
+    assert "Сброс всех лимитов" in member_details_text(latest)
+    speech_release = next(item for item in UPDATES if item.number == 23)
+    details = member_details_text(speech_release)
     assert "5 и 10" in details
     assert "Нора, во сколько предложили встретиться?" in details
     assert "админка" not in details.casefold()
-    staff = staff_announcement(latest)
+    staff = staff_announcement(speech_release)
     assert "Groq или Gemini" in staff
     assert "Админка" not in details
     labels = " ".join(button.text for row in games_menu_keyboard().inline_keyboard for button in row).casefold()

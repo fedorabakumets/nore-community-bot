@@ -76,7 +76,12 @@ def rename_pet_catalogue(text: str) -> str:
 def catalogue_row(row):
     if row is None:
         return None
-    return {
+    result = {
         key: rename_pet_catalogue(clean_shop_text(value)) if key in {'title', 'description'} else value
         for key, value in row.items()
     }
+    if result.get('sku') == 'reset_limits':
+        from community_bot.social_likes import RESET_DESCRIPTION, RESET_LABEL
+
+        result.update(title=RESET_LABEL, description=RESET_DESCRIPTION)
+    return result

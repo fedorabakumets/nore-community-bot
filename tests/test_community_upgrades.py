@@ -170,14 +170,14 @@ def test_pet_keyboard_has_no_talk() -> None:
 
 def test_member_announcement_omits_staff() -> None:
     from community_bot.updates import (
+        UPDATES,
         community_announcement,
-        latest_update,
         member_details_nodes,
         member_details_text,
         staff_announcement,
     )
 
-    item = latest_update()
+    item = next(item for item in UPDATES if item.number == 23)
     pin = community_announcement(item)
     details = member_details_text(item)
     nodes = str(member_details_nodes(item))
@@ -295,6 +295,7 @@ async def test_announce_pins_rich_post_with_personal_pages(tmp_path, monkeypatch
 
     from community_bot.database import Database
     from community_bot.main import announce_latest_update
+    from community_bot.updates import announcement_key, latest_update
 
     db = Database(Path(tmp_path) / "announce.db")
     await db.initialize()
@@ -331,9 +332,9 @@ async def test_announce_pins_rich_post_with_personal_pages(tmp_path, monkeypatch
     await announce_latest_update(FakeBot(), db, settings)
     assert pinned == [7]
     assert "Админ" not in sent[0].text
-    assert "Нора читает голосовые и кружки" in sent[0].text
+    assert latest_update().title in sent[0].text
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "23:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == announcement_key(latest_update())
     await announce_latest_update(FakeBot(), db, settings)
     assert len(sent) == 1
 
@@ -348,7 +349,7 @@ async def test_announce_pins_rich_post_with_personal_pages(tmp_path, monkeypatch
     await announce_latest_update(NoPinBot(), db, settings)
     assert not pinned
     assert sent[0].reply_markup.inline_keyboard[0][0].callback_data == "updates:dm"
-    assert await db.get_bot_state("last_announced_update") == "23:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == announcement_key(latest_update())
 
 
 async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeypatch) -> None:
@@ -358,13 +359,15 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
 
     from community_bot.database import Database
     from community_bot.main import announce_latest_update
+    from community_bot.updates import announcement_key, latest_update
 
     db = Database(Path(tmp_path) / "repost.db")
     await db.initialize()
     await db.ensure_user(10, telegram_name="Owner")
     await db.set_role(10, "owner")
     today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
-    await db.set_bot_state("last_announced_update", "23:photo-v1")
+    old_layout = f"{latest_update().number}:photo-v1"
+    await db.set_bot_state("last_announced_update", old_layout)
     await db.set_bot_state("morning_digest_day", today)
     await db.set_bot_state("morning_pin_message_id", "42")
     pinned: list[int] = []
@@ -394,9 +397,9 @@ async def test_repost_keeps_only_todays_digest_and_skips_staff(tmp_path, monkeyp
     assert cleared == []
     assert pinned == [9]
     assert 10 not in dms
-    assert await db.get_bot_state("last_announced_update") == "23:photo-v2"
+    assert await db.get_bot_state("last_announced_update") == announcement_key(latest_update())
 
-    await db.set_bot_state("last_announced_update", "23:photo-v1")
+    await db.set_bot_state("last_announced_update", old_layout)
     await db.set_bot_state("morning_digest_day", "2020-01-01")
     pinned.clear()
     cleared.clear()

@@ -17,16 +17,17 @@ from aiogram.types import (
     InputRichBlockDetails,
     InputRichBlockParagraph,
     InputRichBlockPhoto,
-    InputRichBlockSectionHeading,
     InputRichBlockTable,
     InputRichBlockVideo,
     InputRichMessage,
     Message,
     RichBlockTableCell,
     RichMessageButton,
+    RichTextBold,
+    RichTextButton,
 )
 
-from community_bot import friends_api
+from community_bot import friends_api, social_likes
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import reputation_tier
@@ -40,6 +41,7 @@ from community_bot.reply_rich import bot_publication
 from community_bot.ui_owner import bind_ui_owner
 
 FRIEND_PREFIX = "gprofile:friend:"
+LIKE_PREFIX = "gprofile:like:"
 _EDIT_LOCKS: WeakValueDictionary[tuple[int, int], Lock] = WeakValueDictionary()
 
 
@@ -107,6 +109,7 @@ async def send_group_profile(
     commands.append(ibtn(await _friend_icon(db, requester_id, uid), f"{FRIEND_PREFIX}{uid}", "success"))
     votes = [ibtn("👍", f"profile_action:rep_up:{uid}"), ibtn("👎", f"profile_action:rep_down:{uid}")]
     keyboard = InlineKeyboardMarkup(inline_keyboard=[votes, commands])
+    like = f"❤️ {await social_likes.count(db, uid)}"
     reputation, actions = [
         InputRichBlockButtons(align="center", buttons=[
             RichMessageButton(**button.model_dump(exclude_none=True)) for button in row
@@ -119,7 +122,10 @@ async def send_group_profile(
     ]
     body = [
         reputation,
-        InputRichBlockSectionHeading(text=name, size=2),
+        InputRichBlockParagraph(text=[
+            RichTextBold(text=name), "  ",
+            RichTextButton(button=RichMessageButton(text=like, style="link", callback_data=f"{LIKE_PREFIX}{uid}")),
+        ]),
         InputRichBlockParagraph(text=subtitle),
         *details,
         _table(user, settings),
@@ -147,7 +153,10 @@ async def send_group_profile(
         text += f"\n🍪 {balance} · Репутация {escape(score)}"
         with bot_publication():
             sent = await bot.send_message(
-                message.chat.id, text, message_thread_id=thread, parse_mode="HTML", reply_markup=keyboard,
+                message.chat.id, text, message_thread_id=thread, parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [ibtn(like, f"{LIKE_PREFIX}{uid}")], votes, commands,
+                ]),
             )
     await bind_ui_owner(db, sent, requester_id, "profile")
     return sent
@@ -155,14 +164,18 @@ async def send_group_profile(
 
 async def refresh_group_profile(message: Message, db: Database, settings: Settings, target_id: int) -> None:
     rich = message.rich_message
-    if not rich:
-        return
-    blocks = _reusable(rich.model_dump(exclude_none=True)["blocks"])
+    blocks = _reusable(rich.model_dump(exclude_none=True)["blocks"]) if rich else []
     friend = next((
         button for block in blocks if block["type"] == "buttons" for button in block["buttons"]
         if button.get("callback_data") == f"{FRIEND_PREFIX}{target_id}"
     ), None)
-    if friend is None:
+    like_data = f"{LIKE_PREFIX}{target_id}"
+    like = next((
+        part["button"] for block in blocks if block["type"] == "paragraph" and isinstance(block["text"], list)
+        for part in block["text"] if isinstance(part, dict) and part.get("type") == "button"
+        and part["button"].get("callback_data") == like_data
+    ), None)
+    if friend is None and (rich or not message.reply_markup):
         return
     lock = _EDIT_LOCKS.setdefault((message.chat.id, message.message_id), Lock())
     async with lock:
@@ -170,14 +183,24 @@ async def refresh_group_profile(message: Message, db: Database, settings: Settin
         user = await db.get_user(target_id)
         if owner is None or not user or user.get("profile_private"):
             return
-        friend["text"] = await _friend_icon(db, owner, target_id)
-        blocks = [_table(user, settings) if block["type"] == "table" else block for block in blocks]
         try:
-            with keep_in_chat():
-                await message.edit_text(
-                    parse_mode=None,
-                    rich_message=InputRichMessage(blocks=blocks, skip_entity_detection=True),
-                )
+            with keep_in_chat(), bot_publication():
+                if friend is not None:
+                    friend["text"] = await _friend_icon(db, owner, target_id)
+                    if like is not None:
+                        like["text"] = f"❤️ {await social_likes.count(db, target_id)}"
+                    blocks = [_table(user, settings) if block["type"] == "table" else block for block in blocks]
+                    await message.edit_text(
+                        parse_mode=None, rich_message=InputRichMessage(blocks=blocks, skip_entity_detection=True),
+                    )
+                else:
+                    markup = message.reply_markup.model_copy(deep=True)
+                    for row in markup.inline_keyboard:
+                        for button in row:
+                            if button.callback_data == like_data:
+                                button.text = f"❤️ {await social_likes.count(db, target_id)}"
+                                await message.edit_reply_markup(reply_markup=markup)
+                                return
         except TelegramAPIError:
             # The action already succeeded, even if this card has since expired.
             pass

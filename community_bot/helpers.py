@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import secrets
 from datetime import UTC, date, datetime
 from typing import Any
@@ -19,6 +20,7 @@ from community_bot.domain import (
     POSITIVE_REPUTATION_PHRASES,
     ROLE_LABELS,
     ROLE_LEVELS,
+    normalize_phrase,
     reputation_delta,
     reputation_tier,
 )
@@ -444,15 +446,28 @@ async def resolve_command_target(
     return await resolve_reply_target(message, db), args.split(), False
 
 
-def reputation_interaction(message: Message) -> tuple[int, str | User | None] | None:
+def targeted_phrase(message: Message, phrases: set[str]) -> tuple[str, str | User | None] | None:
     text = (message.text or "").strip()
-    delta = reputation_delta(text)
-    if delta is not None and message.reply_to_message:
-        return delta, None
-    for phrase in POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES:
-        if not text.casefold().startswith(phrase + " "):
-            continue
-        mention, rest = split_target_argument(message, text[len(phrase):].strip())
-        if mention is not None and not rest:
-            return (5 if phrase in POSITIVE_REPUTATION_PHRASES else -5), mention
+    normalized = normalize_phrase(text)
+    if normalized in phrases and message.reply_to_message:
+        return normalized, None
+    max_words = max(phrase.count(" ") + 1 for phrase in phrases)
+    for index, match in enumerate(re.finditer(r"\s+", text)):
+        if index == max_words:
+            break
+        phrase = normalize_phrase(text[:match.start()])
+        if phrase in phrases:
+            mention, rest = split_target_argument(message, text[match.end():])
+            if mention is not None and not rest:
+                return phrase, mention
     return None
+
+
+def reputation_interaction(message: Message) -> tuple[int, str | User | None] | None:
+    action = targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES)
+    if action is None:
+        return None
+    phrase, mention = action
+    delta = reputation_delta(phrase)
+    assert delta is not None
+    return delta, mention

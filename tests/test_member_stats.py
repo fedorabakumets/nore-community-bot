@@ -1,16 +1,18 @@
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Bot, Dispatcher, Router
-from aiogram.methods import SendMessage, SendRichMessage
-from aiogram.types import MessageEntity, Update, User
+from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
+from aiogram.types import CallbackQuery, MessageEntity, RichMessage, Update, User
 from test_nora_commands_release import message
 from test_studio_rsvp import TelegramSession
 
-from community_bot.command_registry import restore_defaults
+from community_bot import social_likes
+from community_bot.command_registry import apply_rows, get_command, restore_defaults
 from community_bot.config import load_settings
 from community_bot.database import Database
 from community_bot.ephemeral import GroupHousekeepingMiddleware
@@ -35,6 +37,7 @@ async def env(tmp_path, monkeypatch):
     for source in (nora.router, life.router, member_stats.router, group.router, nora.assistant_router):
         router = Router()
         router.message.handlers.extend(source.message.handlers)
+        router.callback_query.handlers.extend(source.callback_query.handlers)
         dispatcher.include_router(router)
     session = TelegramSession()
     bot = Bot(settings.bot_token, session=session)
@@ -45,8 +48,12 @@ async def env(tmp_path, monkeypatch):
         nonlocal calls
         calls += 1
         session.calls.clear()
-        event = message(text, **kwargs).model_copy(update={"message_id": calls + 1000})
-        await dispatcher.feed_update(bot, Update(update_id=calls, message=event), db=db, settings=settings)
+        if isinstance(text, CallbackQuery):
+            update = Update(update_id=calls, callback_query=text)
+        else:
+            event = message(text, **kwargs).model_copy(update={"message_id": calls + 1000})
+            update = Update(update_id=calls, message=event)
+        await dispatcher.feed_update(bot, update, db=db, settings=settings)
         return session.calls.copy()
 
     yield db, dispatch, session
@@ -128,11 +135,25 @@ async def test_chat_rankings_and_stats_use_main_chat_history(env, monkeypatch):
         )
         assert all(row[1].text != "Бот" for row in table)
         assert next(row[2].text for row in table if row[1].text == "Анна <тест>") == value
-    calls = await dispatch("Нора миллионеры")
-    table = next(call.rich_message.blocks[1].cells for call in calls if isinstance(call, SendRichMessage))
-    assert [[cell.text for cell in row] for row in table] == [
-        ["№", "Участник", "Печеньки"], ["1", "Анна <тест>", "799"],
-    ]
+    await social_likes.give(db, 10, 8)
+    await db.set_bot_state(f"{social_likes.COUNT_PREFIX}9", "100")
+    sent = message(None, uid=123456).model_copy(update={
+        "rich_message": RichMessage.model_validate(board.model_dump(exclude_none=True)),
+    })
+    for metric, header, rank in (("likes", "Лайки", "1"), ("cookies", "Печеньки", "799")):
+        button = next(b for b in board.blocks[-1].buttons if b.callback_data == f"nora_top:{metric}:month")
+        calls = await dispatch(CallbackQuery(id=metric, chat_instance="test", data=button.callback_data,
+                                             from_user=User(id=7, first_name="Тест", is_bot=False), message=sent))
+        edited = next(call for call in calls if isinstance(call, EditMessageText))
+        assert edited.message_id == sent.message_id
+        table = edited.rich_message.blocks[1].cells
+        assert [[cell.text for cell in row] for row in table] == [
+            ["№", "Участник", header], ["1", "Анна <тест>", rank],
+        ]
+        assert all(not isinstance(call, SendRichMessage) for call in calls)
+    apply_rows([{"slug": "millionaires", "aliases_json": '["миллионеры"]'}])
+    assert get_command("millionaires") is None
+    assert not any(isinstance(call, SendRichMessage) for call in await dispatch("Нора миллионеры"))
     calls = await dispatch("Нора стата @alice")
     stats = next(call.text for call in calls if isinstance(call, SendMessage))
     assert "Сообщений в чате · <b>1" in stats
@@ -158,3 +179,46 @@ async def test_chat_rankings_and_stats_use_main_chat_history(env, monkeypatch):
     session.fail = lambda method: isinstance(method, SendRichMessage)
     calls = await dispatch("Нора топ")
     assert any("Анна &lt;тест&gt;" in call.text for call in calls if isinstance(call, SendMessage))
+
+
+async def test_likes_share_daily_quota_and_purchase_restores_it(env, monkeypatch):
+    db, dispatch, _ = env
+    await db.ensure_user(7, username="test_user", telegram_name="Участник")
+    await db.add_cookies(7, 50, "test", "")
+    await db.execute("UPDATE users SET reputation=80 WHERE user_id=7")
+    calls = await dispatch("Поцеловать поцеловать @alice")
+    post = next(call.text for call in calls if isinstance(call, SendMessage))
+    assert post == '❤️ <a href="tg://user?id=7">@Участник 7</a> лайкнул <a href="tg://user?id=8">@alice</a>'
+    assert await social_likes.count(db, 8) == 1
+
+    sent = message(None, uid=123456)
+    button = CallbackQuery(id="like", chat_instance="test", data="gprofile:like:9", message=sent,
+                           from_user=User(id=7, first_name="Участник", is_bot=False))
+    assert not any(isinstance(call, SendMessage) for call in await dispatch(button))
+    assert await social_likes.count(db, 9) == 0
+
+    day = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    await db.apply_reputation(7, 8, 0, day)
+    await db.execute("UPDATE shop_items SET title=? WHERE sku='reset_limits'", ("Сброс лимитов репутации",))
+    assert (await db.get_shop_item("reset_limits"))["title"] == "Сброс всех лимитов"
+    ok, _ = await db.buy_item(7, "reset_limits", 15)
+    assert ok and await db.reputation_actions_today(7, day) == 0
+    assert any(isinstance(call, SendMessage) for call in await dispatch(button))
+    assert await social_likes.count(db, 9) == await social_likes.count(db, 8) == 1
+
+    next_day = datetime(day.year, day.month, day.day, tzinfo=ZoneInfo("Europe/Moscow"))
+    monkeypatch.setattr(social_likes, "datetime", SimpleNamespace(now=lambda tz: next_day + timedelta(days=1)))
+    results = await asyncio.gather(social_likes.give(db, 7, 8), social_likes.give(db, 7, 9))
+    assert results.count(None) == 1
+    assert await social_likes.count(db, 8) + await social_likes.count(db, 9) == 3
+
+
+async def test_social_verbs_share_reputation_rules(env):
+    db, dispatch, _ = env
+    await db.ensure_user(7, telegram_name="Участник")
+    await db.execute("UPDATE users SET reputation=CASE WHEN user_id=7 THEN 80 ELSE 60 END")
+    for text, value in (("Обнять @alice", 65), ("Пнуть пнуть @alice", 60), ("Ударить", 55)):
+        await dispatch(text, reply_to_message=message("Ответ", uid=8))
+        assert (await db.get_user(8))["reputation"] == value
+    await dispatch("Обнять @alice")
+    assert (await db.get_user(8))["reputation"] == 55

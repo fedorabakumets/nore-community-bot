@@ -7,6 +7,7 @@ import pytest
 from aiohttp import web
 from PIL import Image
 
+from community_bot import social_likes
 from community_bot.cabinet_api import wallet_confirm, wallet_prepare
 from community_bot.database import Database
 from community_bot.friends_api import mutate, snapshot
@@ -108,10 +109,12 @@ async def test_presence_privacy_and_private_profile_hide_all_activity(env):
 
 async def test_public_profile_shows_balance_omits_secrets_and_nonfriend_online(env):
     await heartbeat(env.db, 9, "b" * 20, 1, True)
+    assert await social_likes.give(env.db, 8, 9) is None
     result = json.loads((await profile(Request(env))).body)
     assert result["id"] == 9 and result["bio"] == "Био участника" and not result["hidden"]
     assert not result["presence"]["visible"]
     assert result["cookies"] == 100
+    assert result["likes"] == 1
     assert not {"cookie_debt", "moderator_note", "avatar_file_id", "warnings", "fill_percent"} & result.keys()
     assert "secret note" not in json.dumps(result)
     await befriend(env, 8, 9)
@@ -131,7 +134,7 @@ async def test_hidden_and_blocked_profiles_and_avatars_are_enforced_on_server(en
     # Existing see-private permission still works for the configured owner.
     privileged = json.loads((await profile(Request(env, uid=7))).body)
     assert not privileged["hidden"] and privileged["private"]
-    assert not {"bio", "hobbies", "cookies", "reputation", "tier", "fill_percent"} & privileged.keys()
+    assert not {"bio", "hobbies", "cookies", "reputation", "tier", "fill_percent", "likes"} & privileged.keys()
     own = json.loads((await profile(Request(env, uid=9))).body)
     assert own["cookies"] == 100 and own["bio"] == "Био участника"
     lookup = Request(env, uid=7, target=None)

@@ -10,7 +10,7 @@ from community_bot.life import (
     vitrine_active,
 )
 from community_bot.shop_catalog import BASE_SHOP_PRICES, GIFTABLE_ITEMS
-from community_bot.updates import community_announcement, latest_update, staff_announcement
+from community_bot.updates import UPDATES, community_announcement, staff_announcement
 
 
 def test_gift_aliases_and_remainder() -> None:
@@ -35,7 +35,7 @@ def test_vitrine_and_stop_words() -> None:
 
 
 def test_public_update_omits_staff_and_has_member_copy() -> None:
-    item = latest_update()
+    item = next(item for item in UPDATES if item.number == 23)
     pin = community_announcement(item)
     staff = staff_announcement(item)
     assert item.number == 23
@@ -137,6 +137,9 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
 
     from community_bot.database import Database
     from community_bot.main import announce_latest_update
+
+    item = next(item for item in UPDATES if item.number == 23)
+    monkeypatch.setattr("community_bot.main.latest_update", lambda: item)
 
     db = Database(Path(tmp_path) / "staff.db")
     await db.initialize()

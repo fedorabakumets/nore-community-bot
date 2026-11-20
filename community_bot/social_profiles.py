@@ -173,9 +173,12 @@ async def profile(request):
         presence=presence,
     )
     if not target["profile_private"] or uid == target["user_id"]:
+        from community_bot.social_likes import count
+
         tier = reputation_tier(target["reputation"], settings.restricted_reputation_threshold)
         result.update(bio=target["profile_bio"], hobbies=target["hobbies"],
-                      reputation=target["reputation"], tier=tier.label, cookies=target["cookies"])
+                      reputation=target["reputation"], tier=tier.label, cookies=target["cookies"],
+                      likes=await count(db, target["user_id"]))
     return web.json_response(result)
 
 

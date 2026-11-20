@@ -186,11 +186,12 @@ async def test_new_member_gets_one_rich_welcome(tmp_path: Path, username: str | 
 
     bot.send_rich_message.assert_awaited_once()
     assert bot.send_rich_message.call_args.args == (chat.id,)
-    greeting, reminder, links, media = bot.send_rich_message.call_args.kwargs["rich_message"].blocks
+    photo, greeting, reminder, links, media = bot.send_rich_message.call_args.kwargs["rich_message"].blocks
+    assert photo.type == "photo" and photo.photo.media.path.is_file()
     assert greeting.text[1].text == ("@new_member" if username else "Новичок")
     assert "прочитать правила ❤️" in reminder.text
     assert links.text[0].button.callback_data == "commands:open"
-    assert links.text[2].button.url == "https://t.me/nora_bot?startapp"
+    assert links.text[2].url == "https://t.me/nora_bot?startapp"
     assert media.type == "video"
     assert media.video.media.path.is_file()
     assert media.video.supports_streaming is True
@@ -219,8 +220,8 @@ async def test_welcome_keeps_greeting_when_telegram_rejects_video() -> None:
     video_call, fallback_call = bot.send_rich_message.await_args_list
     original = video_call.kwargs["rich_message"].blocks
     fallback = fallback_call.kwargs["rich_message"].blocks
-    assert original[:-1] == fallback[:-1]
-    assert fallback[-1].type == "photo"
+    assert original[:-1] == fallback
+    assert fallback[0].type == "photo"
 
 
 async def test_cookie_contest_join_count_and_draw(tmp_path: Path) -> None:

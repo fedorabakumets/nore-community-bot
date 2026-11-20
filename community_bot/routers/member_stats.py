@@ -8,11 +8,16 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.filters.command import CommandObject
 from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichBlockButtons,
     InputRichBlockParagraph,
     InputRichBlockTable,
     InputRichMessage,
     Message,
     RichBlockTableCell,
+    RichMessageButton,
     RichTextBold,
 )
 
@@ -28,6 +33,8 @@ router = Router(name="member_stats")
 _GROUP = F.chat.type.in_({"group", "supergroup"})
 _MOSCOW = ZoneInfo("Europe/Moscow")
 _LIMIT = 10
+_METRICS = {"likes": ("❤️", "Лайки"), "messages": ("💬", "Сообщения"), "cookies": ("🍪", "Печеньки")}
+_PERIODS = {"неделя": "week", "месяц": "month"}
 
 
 def _number(value: int) -> str:
@@ -84,37 +91,67 @@ async def member_stats(message: Message, db: Database, settings: Settings) -> No
 
 
 def _period(today: date, period: str) -> tuple[date, str]:
-    if period == "неделя":
+    if period == "week":
         return today - timedelta(days=today.weekday()), "за неделю"
-    if period == "месяц":
+    if period == "month":
         return today.replace(day=1), "за месяц"
     return today, "за сегодня"
 
 
-async def _send_board(message: Message, bot: Bot, title: str, heading: str, rows: list[tuple[str, str]]) -> None:
-    if not rows:
-        await message.answer(f"{title}\nПока нет данных.")
-        return
+async def _show_board(message: Message, bot: Bot, db: Database, metric: str, period: str, *, edit=False) -> None:
+    icon, heading = _METRICS[metric]
+    if metric == "messages":
+        today = datetime.now(_MOSCOW).date()
+        start, label = _period(today, period)
+        span = today.strftime("%d.%m") if start == today else f"{start:%d.%m}–{today:%d.%m}"
+        title = f"{icon} Топ сообщений {label} · {span}"
+        rows = await db.daily_message_board(start.isoformat(), message.chat.id, limit=-1, through=today.isoformat())
+    else:
+        title = f"{icon} Топ по {'лайкам' if metric == 'likes' else 'печенькам'}"
+        rows = await db.public_profile_board(message.chat.id, metric)
+    leaders = _leader_rows(rows, await marked_bots(db) | {str(bot.id)}, metric)
     data = [("№", "Участник", heading)]
-    data.extend((str(rank), name, amount) for rank, (name, amount) in enumerate(rows, 1))
+    data.extend((str(rank), name, amount) for rank, (name, amount) in enumerate(leaders, 1))
     cells = [
         [RichBlockTableCell(text=text, align=align, valign="middle", is_header=(row == 0))
          for text, align in zip(values, ("right", "left", "right"), strict=True)]
         for row, values in enumerate(data)
     ]
+    options = [
+        (key, f"{emoji} {label}", f"nora_top:{key}:{period}") for key, (emoji, label) in _METRICS.items()
+    ]
+    buttons = InputRichBlockButtons(buttons=[
+        RichMessageButton(text=label, style="primary" if key == metric else "link", callback_data=callback)
+        for key, label, callback in options
+    ], align="center")
+    content = (InputRichBlockTable(cells=cells, is_bordered=True, is_striped=True, is_compact=True)
+               if leaders else InputRichBlockParagraph(text="Пока нет данных."))
+    rich = InputRichMessage(blocks=[InputRichBlockParagraph(text=RichTextBold(text=title)), content, buttons],
+                            skip_entity_detection=True)
     try:
-        await bot.send_rich_message(
-            message.chat.id,
-            message_thread_id=message.message_thread_id if message.is_topic_message else None,
-            rich_message=InputRichMessage(blocks=[
-                InputRichBlockParagraph(text=RichTextBold(text=title)),
-                InputRichBlockTable(cells=cells, is_bordered=True, is_striped=True, is_compact=True),
-            ]),
-        )
+        if edit and message.rich_message:
+            await message.edit_text(parse_mode=None, rich_message=rich)
+            return
+        if not edit:
+            await bot.send_rich_message(
+                message.chat.id, rich_message=rich,
+                message_thread_id=message.message_thread_id if message.is_topic_message else None,
+            )
+            return
     except (TelegramBadRequest, TelegramNotFound):
-        lines = [f"{rank}. {html.escape(name)} · <b>{amount}</b>" for rank, name, amount in data[1:]]
-        with bot_publication():
-            await message.answer(f"<b>{title}</b>\n{heading}\n" + "\n".join(lines), parse_mode="HTML")
+        if edit and message.rich_message:
+            raise
+    lines = [f"{rank}. {html.escape(name)} · <b>{amount}</b>" for rank, name, amount in data[1:]]
+    text = f"<b>{title}</b>\n" + ("\n".join(lines) or "Пока нет данных.")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=label, style="primary" if key == metric else None, callback_data=callback)
+        for key, label, callback in options
+    ]])
+    with bot_publication():
+        if edit:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 def _leader_rows(rows, known_bots, value):
@@ -132,31 +169,24 @@ def _leader_rows(rows, known_bots, value):
 async def message_top(message: Message, command: CommandObject, bot: Bot, db: Database, settings: Settings) -> None:
     if not await _community_chat(message, settings):
         return
-    today = datetime.now(_MOSCOW).date()
-    start, label = _period(today, (command.args or "").casefold())
-    rows = await db.daily_message_board(start.isoformat(), message.chat.id, limit=-1, through=today.isoformat())
-    leaders = _leader_rows(rows, await marked_bots(db) | {str(bot.id)}, "messages")
-    span = today.strftime("%d.%m") if start == today else f"{start:%d.%m}–{today:%d.%m}"
-    await _send_board(message, bot, f"📊 Топ сообщений {label} · {span}", "Сообщения", leaders)
+    await _show_board(message, bot, db, "messages", _PERIODS.get((command.args or "").casefold(), "day"))
 
 
-@router.message(command_or_alias("millionaires"), _GROUP)
-async def cookie_top(message: Message, bot: Bot, db: Database, settings: Settings) -> None:
-    if not await _community_chat(message, settings):
+@router.callback_query(F.data.regexp(r"^nora_top:(likes|messages|cookies):(day|week|month)$"),
+                       F.message.chat.type.in_({"group", "supergroup"}))
+async def change_top(callback: CallbackQuery, bot: Bot, db: Database, settings: Settings) -> None:
+    message = callback.message
+    if not isinstance(message, Message) or not callback.data:
+        await callback.answer("Таблица больше недоступна.")
         return
-    rows = await db.fetchall(
-        """
-        SELECT u.user_id, u.profile_name, u.telegram_name, u.username, u.cookies
-        FROM users u
-        WHERE u.user_id > 0 AND u.cookies > 0 AND u.profile_private = 0
-          AND (EXISTS (
-            SELECT 1 FROM user_activity a WHERE a.user_id = u.user_id AND a.chat_id = ?
-          ) OR EXISTS (
-            SELECT 1 FROM bot_state s WHERE s.key = ? || u.user_id
-          ))
-        ORDER BY u.cookies DESC, u.user_id ASC
-        """,
-        (message.chat.id, f"community_join:{message.chat.id}:"),
-    )
-    leaders = _leader_rows(rows, await marked_bots(db) | {str(bot.id)}, "cookies")
-    await _send_board(message, bot, "🍪 Миллионеры Норы", "Печеньки", leaders)
+    if settings.community_chat_id and message.chat.id != settings.community_chat_id:
+        await callback.answer("Таблица доступна в основном чате Норы.")
+        return
+    _, metric, period = callback.data.split(":")
+    try:
+        await _show_board(message, bot, db, metric, period, edit=True)
+    except (TelegramBadRequest, TelegramNotFound) as error:
+        if "message is not modified" not in str(error).casefold():
+            await callback.answer("Таблица больше недоступна. Напиши «Нора топ».", show_alert=True)
+            return
+    await callback.answer()

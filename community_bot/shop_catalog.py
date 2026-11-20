@@ -4,13 +4,14 @@ import html
 import re
 
 from community_bot.domain import cookie_word, discounted_price, reputation_tier
+from community_bot.social_likes import RESET_LABEL
 
 ITEM_LABELS = {
     "nora_wings_raven": "Крылья «Ворон»",
     "nora_wings_flame": "Крылья «Пламя»",
     "nora_wings_frost": "Крылья «Иней»",
     "restore_rep": "Поднять репутацию +10",
-    "reset_limits": "Сброс лимитов репутации",
+    "reset_limits": RESET_LABEL,
     "forgive": "Прости меня…",
     "rep_shield": "Щит на 1 удар −репа",
     "immunity_24h": "Плащ иммунитета · 24 часа",
