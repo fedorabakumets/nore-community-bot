@@ -13,9 +13,10 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, MagicData
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     ChatPermissions,
     FSInputFile,
@@ -28,6 +29,7 @@ from aiogram.types import (
 )
 
 from community_bot.aliases import command_or_alias
+from community_bot.application_form import validate_application_age
 from community_bot.audit import format_audit_log, person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
@@ -49,7 +51,6 @@ from community_bot.helpers import (
 from community_bot.keyboards import (
     STYLE_CLOSE,
     STYLE_GO,
-    YES_NO_KEYBOARD,
     admin_chat_keyboard,
     admin_mail_keyboard,
     admin_panel_keyboard,
@@ -70,6 +71,7 @@ from community_bot.keyboards import (
     feature_reset_keyboard,
     features_panel_text,
     flow_reply_keyboard,
+    ibtn,
     private_menu_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
@@ -104,9 +106,7 @@ from community_bot.routers.flows import restore_private_menu
 from community_bot.staff_guide import staff_guide_text
 from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, TicketForm
 from community_bot.texts import (
-    APPLICATION_INTRO,
-    APPLICATION_QUESTIONS,
-    APPLICATION_REJECTED_INTERVIEW,
+    APPLICATION_PHOTO_PROMPT,
     REPUTATION_HELP_TEXT,
     STORE_HELP_TEXT,
     WELCOME_MEMBER_TEXT,
@@ -153,10 +153,12 @@ async def private_menu_content(db: Database, settings: Settings, user_id: int) -
         )
         return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
     help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
-    pending = await db.has_pending_application(user_id)
-    markup = start_apply_keyboard(pending=pending)
-    return (WELCOME_PENDING_TEXT if pending else WELCOME_TEXT,
-            InlineKeyboardMarkup(inline_keyboard=[*markup.inline_keyboard, help_row]))
+    pending = await db.pending_application_photo_status(user_id)
+    markup = start_apply_keyboard(pending=bool(pending))
+    text = WELCOME_PENDING_TEXT if pending else WELCOME_TEXT
+    if pending and not pending["has_photo"]:
+        text += f"\n\n{APPLICATION_PHOTO_PROMPT}"
+    return text, InlineKeyboardMarkup(inline_keyboard=[*markup.inline_keyboard, help_row])
 
 
 async def _send_welcome(message: Message, db: Database, settings: Settings) -> None:
@@ -1204,23 +1206,20 @@ async def _start_application(message: Message, state: FSMContext, db: Database, 
     reason = await application_block_reason(db, user.id)
     if reason:
         await state.clear()
-        if await db.has_pending_application(user.id):
+        pending = await db.pending_application_photo_status(user.id)
+        if pending:
+            if not pending["has_photo"]:
+                reason += f"\n\n{APPLICATION_PHOTO_PROMPT}"
             markup = start_apply_keyboard(pending=True)
             await message.answer(reason, reply_markup=markup if markup.inline_keyboard else None)
         else:
             await message.answer(reason)
         return False
     await register_telegram_user(db, user)
-    markup = start_apply_keyboard()
-    if markup.inline_keyboard[0][0].web_app:
-        if (await state.get_state() or "").startswith("ApplicationForm:"):
-            await state.clear()
-        await message.answer("Открой анкету в Норе и ответь на все вопросы.", reply_markup=markup)
-        return True
     await state.set_state(ApplicationForm.name)
     ban = await db.ban_reset_state(user.id)
     await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
-    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    await message.answer("Как тебя зовут?", reply_markup=flow_reply_keyboard())
     return True
 
 
@@ -1256,99 +1255,100 @@ async def application_name(message: Message, state: FSMContext) -> None:
     if (text := await _validate_text(message, maximum=50)) is None:
         return
     await state.update_data(name=text)
-    await state.set_state(ApplicationForm.birth_date)
-    await message.answer(APPLICATION_QUESTIONS["birth_date"], reply_markup=flow_reply_keyboard())
+    await state.set_state(ApplicationForm.age)
+    await message.answer("Сколько тебе лет?", reply_markup=flow_reply_keyboard())
 
 
-@router.message(ApplicationForm.birth_date)
-async def application_birth_date(message: Message, state: FSMContext) -> None:
+@router.message(ApplicationForm.age)
+async def application_age(message: Message, state: FSMContext) -> None:
     try:
-        value = parse_birth_date(message.text or "")
+        value = validate_application_age(message.text)
     except ValueError as error:
         await message.answer(str(error))
         return
-    await state.update_data(birth_date=value)
-    await state.set_state(ApplicationForm.referral)
-    await message.answer(APPLICATION_QUESTIONS["referral"], reply_markup=flow_reply_keyboard())
+    await state.update_data(age=value)
+    await state.set_state(ApplicationForm.city)
+    await message.answer("Из какого ты города?", reply_markup=flow_reply_keyboard())
 
 
-@router.message(ApplicationForm.referral)
-async def application_referral(message: Message, state: FSMContext) -> None:
+@router.message(ApplicationForm.city)
+async def application_city(message: Message, state: FSMContext) -> None:
     if (text := await _validate_text(message, maximum=100)) is None:
         return
-    await state.update_data(referral=text)
-    await state.set_state(ApplicationForm.expectations)
-    await message.answer(APPLICATION_QUESTIONS["expectations"], reply_markup=flow_reply_keyboard())
-
-
-@router.message(ApplicationForm.expectations)
-async def application_expectations(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message)) is None:
-        return
-    await state.update_data(expectations=text)
+    await state.update_data(city=text)
     await state.set_state(ApplicationForm.bio)
-    await message.answer(APPLICATION_QUESTIONS["bio"], reply_markup=flow_reply_keyboard())
+    await message.answer("Расскажи немного о себе.", reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.bio)
-async def application_bio(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message)) is None:
+async def application_bio(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot
+) -> None:
+    if not message.from_user or (bio := await _validate_text(message, maximum=1000)) is None:
         return
-    await state.update_data(bio=text)
-    await state.set_state(ApplicationForm.interview)
-    await message.answer(APPLICATION_QUESTIONS["interview"], reply_markup=YES_NO_KEYBOARD)
+    user = message.from_user
+    values = await state.get_data()
+    fields = ("name", "age", "city")
+    if not all(field in values for field in fields):
+        return
+    answers = {field: values[field] for field in fields}
+    answers["bio"] = bio
+    application_id = await db.create_application(user.id, answers, ban_version=values.get("ban_version"))
+    await state.clear()
+    if not application_id:
+        reason = await application_block_reason(db, user.id) or "Начни анкету заново."
+        await message.answer(reason)
+        await restore_private_menu(message, db, settings)
+        return
+    markup = start_apply_keyboard(pending=True)
+    markup.inline_keyboard.insert(0, [ibtn("Пропустить фото", "application:skip-photo")])
+    with fresh_private_panel(user.id):
+        await safe_send(
+            bot, user.id,
+            f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт сюда.\n\n{APPLICATION_PHOTO_PROMPT}",
+            reply_markup=markup,
+        )
+    await notify_application_reviewers(bot, settings, application_id, user.id, user.username, answers)
+
+
+@router.message(F.photo, MagicData(F.application_photo_target))
+async def attach_application_photo(message: Message, db: Database, application_photo_target: dict) -> None:
+    if not message.from_user or not message.photo:
+        return
+    if application_photo_target["has_photo"]:
+        await message.answer("Фото уже прикреплено к анкете.")
+        return
+    attached = await db.attach_application_photo(
+        application_photo_target["id"], message.from_user.id, message.photo[-1].file_id,
+    )
+    text = "Фото прикреплено. Анкета на проверке." if attached else "Анкета изменилась. Проверь её статус."
+    await message.answer(text)
+
+
+@router.callback_query(F.data == "application:skip-photo")
+async def skip_application_photo(callback: CallbackQuery, db: Database) -> None:
+    await callback.answer()
+    if callback.message and await db.has_pending_application(callback.from_user.id):
+        markup = start_apply_keyboard(pending=True)
+        await callback.message.answer("Анкета на проверке. Решение придёт сюда.",
+                                      reply_markup=markup if markup.inline_keyboard else None)
 
 
 def _application_text(application_id: int, user_id: int, username: str | None, answers: dict[str, Any]) -> str:
-    who = f"@{html.escape(username)}" if username else user_link(user_id, answers["name"])
+    name = answers.get("name", "не указано")
+    who = f"@{html.escape(username)}" if username else user_link(user_id, name)
     birth = answers.get("birth_date")
     birth_line = (
-        f"<b>Дата рождения:</b> {'.'.join(reversed(birth.split('-')))}"
+        f"<b>Дата рождения:</b> {html.escape('.'.join(reversed(birth.split('-'))))}"
         if birth else f"<b>Возраст:</b> {html.escape(str(answers.get('age', 'не указан')))}"
     )
     return (
         f"📝 <b>Новая анкета №{application_id}</b>\n"
         f"Пользователь: {who} (<code>{user_id}</code>)\n\n"
-        f"<b>Имя:</b> {html.escape(answers['name'])}\n"
+        f"<b>Имя:</b> {html.escape(name)}\n"
         f"{birth_line}\n"
-        f"<b>Откуда узнал:</b> {html.escape(answers['referral'])}\n\n"
-        f"<b>Ожидания:</b>\n{html.escape(answers['expectations'])}\n\n"
-        f"<b>О себе:</b>\n{html.escape(answers['bio'])}\n\n"
-        "<b>Онлайн-интервью:</b> да"
-    )
-
-
-@router.callback_query(ApplicationForm.interview, F.data.startswith("application:interview:"))
-async def finish_application(
-    callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot
-) -> None:
-    if not callback.from_user or not callback.data or not callback.message:
-        return
-    await callback.answer()
-    if callback.data.endswith(":no"):
-        await state.clear()
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(APPLICATION_REJECTED_INTERVIEW)
-        await restore_private_menu(callback.message, db, settings)
-        return
-    answers = await state.get_data()
-    ban_version = answers.pop("ban_version", None)
-    application_id = await db.create_application(callback.from_user.id, answers, ban_version=ban_version)
-    if not application_id:
-        await state.clear()
-        reason = await application_block_reason(db, callback.from_user.id) or "Начни анкету заново."
-        await callback.message.answer(reason)
-        await restore_private_menu(callback.message, db, settings)
-        return
-    await state.clear()
-    with fresh_private_panel(callback.from_user.id):
-        await safe_send(
-            bot,
-            callback.from_user.id,
-            f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт отдельным сообщением.",
-        )
-    await notify_application_reviewers(
-        bot, settings, application_id, callback.from_user.id, callback.from_user.username, answers,
+        f"<b>Город:</b> {html.escape(answers.get('city', 'не указан'))}\n\n"
+        f"<b>О себе:</b>\n{html.escape(answers.get('bio', ''))}"
     )
 
 
@@ -1375,6 +1375,21 @@ async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -
         return True
     await callback.answer("Недостаточно прав.", show_alert=True)
     return False
+
+
+@router.callback_query(F.data.regexp(r"^application:photo:[0-9]+$"))
+async def admin_application_photo(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _reviewer(callback, db, settings):
+        return
+    application_id = int(callback.data.rsplit(":", 1)[1])
+    photo = await db.application_photo(application_id)
+    if not photo:
+        await callback.answer("К анкете пока не прикрепили фото.", show_alert=True)
+        return
+    await callback.answer()
+    source = BufferedInputFile(photo, filename="application.jpg") if isinstance(photo, bytes) else photo
+    await callback.message.answer_photo(source, caption=f"Фото к анкете №{application_id}",
+                                        reply_markup=application_review_keyboard(application_id))
 
 
 async def _notify_application_decision(

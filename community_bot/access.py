@@ -137,10 +137,10 @@ class PrivateAccessMiddleware(BaseMiddleware):
             action = event.data or ''
             allowed = action in {
                 'start:apply', 'menu:apply', 'menu:question', 'flow:cancel', 'flow:restart', 'ui:close',
+                'application:skip-photo',
             }
             allowed |= not ban and action.startswith('birthday:claim:')
             allowed |= action.startswith('updates:page:')
-            allowed |= current == 'ApplicationForm:interview' and action.startswith('application:interview:')
             if allowed:
                 return await handler(event, data)
             await event.answer('Сначала заполни анкету и дождись одобрения.', show_alert=True)
@@ -163,6 +163,13 @@ class PrivateAccessMiddleware(BaseMiddleware):
                 return
             if command in {'/start', '/apply'} or text in {'старт', 'анкета', '📝 заполнить анкету'}:
                 return await handler(event, data)
+            if event.photo and (not current or current.startswith('ApplicationForm:')):
+                pending = await db.pending_application_photo_status(uid)
+                if pending:
+                    if current:
+                        await state.clear()
+                    data['application_photo_target'] = pending
+                    return await handler(event, data)
             blocked_nav = text in {'📋 меню', '🛒 магазин', '💼 кошелёк', '🎫 тикет', '👤 мой профиль',
                                    'магазин', 'кошелек', 'кошелёк', 'профиль', 'меню'}
             if current.startswith(('ApplicationForm:', 'TicketForm:')) and not blocked_nav:

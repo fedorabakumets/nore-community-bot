@@ -1775,6 +1775,11 @@ class Database:
                     "UPDATE users SET profile_name=?, birth_date=?, age=NULL, updated_at=? WHERE user_id=?",
                     (fields["profile_name"], fields["birth_date"], now, user_id),
                 )
+            elif "age" in answers:
+                await db.execute(
+                    "UPDATE users SET profile_name=?, updated_at=? WHERE user_id=?",
+                    (answers["name"], now, user_id),
+                )
             await db.commit()
             return int(cursor.lastrowid)
 
@@ -1791,6 +1796,31 @@ class Database:
             (user_id,),
         )
         return bool(row)
+
+    async def pending_application_photo_status(self, user_id: int) -> dict[str, Any] | None:
+        return await self.fetchone(
+            """SELECT a.id, p.key IS NOT NULL AS has_photo
+               FROM applications a LEFT JOIN bot_state p ON p.key = 'application-photo:' || a.id
+               WHERE a.user_id = ? AND a.status = 'pending' LIMIT 1""",
+            (user_id,),
+        )
+
+    async def attach_application_photo(self, application_id: int, user_id: int, photo: bytes | str) -> bool:
+        async with self.connect() as db:
+            cursor = await db.execute(
+                """INSERT OR IGNORE INTO bot_state(key, value)
+                   SELECT 'application-photo:' || id, ? FROM applications
+                   WHERE id = ? AND user_id = ? AND status = 'pending'""",
+                (photo, application_id, user_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def application_photo(self, application_id: int) -> bytes | str | None:
+        row = await self.fetchone(
+            "SELECT value FROM bot_state WHERE key = ?", (f"application-photo:{application_id}",),
+        )
+        return row["value"] if row else None
 
     async def get_application(self, application_id: int) -> dict[str, Any] | None:
         row = await self.fetchone(

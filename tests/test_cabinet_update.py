@@ -137,7 +137,7 @@ async def test_compact_wallet_lists_balance_debt_and_fee() -> None:
 
 def test_private_copy_describes_blocks_not_button_colors() -> None:
     from community_bot.texts import (
-        APPLICATION_INTRO,
+        APPLICATION_PHOTO_PROMPT,
         GROUP_COMMANDS_TEXT,
         STORE_HELP_TEXT,
         WELCOME_MEMBER_TEXT,
@@ -150,7 +150,7 @@ def test_private_copy_describes_blocks_not_button_colors() -> None:
             WELCOME_TEXT,
             WELCOME_PENDING_TEXT,
             WELCOME_MEMBER_TEXT,
-            APPLICATION_INTRO,
+            APPLICATION_PHOTO_PROMPT,
             GROUP_COMMANDS_TEXT,
             STORE_HELP_TEXT,
         ]

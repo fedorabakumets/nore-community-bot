@@ -70,12 +70,12 @@ async def protection(request, handler):
             path = request.path
             ban = await db.ban_reset_state(uid)
             if not await private_allowed(db, settings, uid, ban=ban):
-                if path not in {'/api/me', '/api/application'}:
+                if path not in {'/api/me', '/api/application', '/api/application/photo'}:
                     return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
                                              status=403, headers={'Cache-Control': 'no-store'})
                 request['application_ban'] = ban
             profile_optional = path in {
-                '/api/me', '/api/application', '/api/profile', '/api/profile/avatar',
+                '/api/me', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/notices', '/api/admin',
             } or path.startswith(('/api/notices/', '/api/admin/'))
             if not profile_optional:
@@ -99,7 +99,7 @@ async def protection(request, handler):
             payload = await decorate_game_people(request.app['db'], request.app['settings'], json.loads(response.body))
             response.body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     except web.HTTPRequestEntityTooLarge:
-        if request.path == '/api/profile/avatar':
+        if request.path in {'/api/profile/avatar', '/api/application/photo'}:
             limit = f'Фотография должна быть не больше {AVATAR_MAX_MB} МБ'
         elif request.path.startswith(('/api/admin', '/api/events/upload')):
             limit = 'Файл должен быть не больше 20 МБ'
@@ -138,14 +138,17 @@ async def actor(request):
     return await request.app['db'].ensure_user(u['id'], u.get('username'), u.get('first_name', 'Участник'))
 
 
-async def application_status(db, uid, ban):
+async def application_onboarding(db, uid, ban):
     if db.ban_is_active(ban):
-        return 'blocked'
-    return 'pending' if await db.has_pending_application(uid) else 'form'
+        return {'status': 'blocked'}
+    pending = await db.pending_application_photo_status(uid)
+    if pending:
+        return {'status': 'pending', 'application_id': pending['id'], 'has_photo': bool(pending['has_photo'])}
+    return {'status': 'form'}
 
 
 async def submit_application(request):
-    from community_bot.profile_fields import validate_birth_date
+    from community_bot.application_form import validate_application_age
     from community_bot.routers.private import notify_application_reviewers
 
     if 'application_ban' not in request:
@@ -153,9 +156,9 @@ async def submit_application(request):
     db, settings = request.app['db'], request.app['settings']
     uid = request['actor']['id']
     ban = request['application_ban']
-    status = await application_status(db, uid, ban)
-    if status != 'form':
-        return web.json_response({'status': status})
+    onboarding = await application_onboarding(db, uid, ban)
+    if onboarding['status'] != 'form':
+        return web.json_response(onboarding)
 
     try:
         body = await request.json()
@@ -165,18 +168,15 @@ async def submit_application(request):
             return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
         answers = {}
         for field, label, limit in (
-            ('name', 'имя', 50),
-            ('referral', 'откуда ты о нас узнал', 100),
-            ('expectations', 'ожидания от сообщества', 1000),
-            ('bio', 'рассказ о себе', 1000),
+            ('name', 'Имя', 50),
+            ('city', 'Город', 100),
+            ('bio', 'О себе', 1000),
         ):
             value = body.get(field)
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
                 raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
             answers[field] = value.strip()
-        answers['birth_date'] = validate_birth_date(body.get('birth_date'))
-        if body.get('interview') != 'yes':
-            raise ValueError('Для вступления нужно согласие на онлайн-интервью.')
+        answers['age'] = validate_application_age(body.get('age'))
     except (ValueError, TypeError) as error:
         message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'
         return web.json_response({'error': message}, status=400)
@@ -185,27 +185,24 @@ async def submit_application(request):
     application_id = await db.create_application(uid, answers, ban_version=ban.get('version'))
     if not application_id:
         # Another tab may already have submitted or a moderator may have changed access.
-        status = await application_status(db, uid, await db.ban_reset_state(uid))
-        if status != 'form':
-            return web.json_response({'status': status})
+        onboarding = await application_onboarding(db, uid, await db.ban_reset_state(uid))
+        if onboarding['status'] != 'form':
+            return web.json_response(onboarding)
         return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
     await notify_application_reviewers(
         request.app['bot'], settings, application_id, uid, request['actor'].get('username'), answers,
     )
-    return web.json_response({'status': 'pending'})
+    return web.json_response({'status': 'pending', 'application_id': application_id, 'has_photo': False})
 
 
 async def overview(request):
     db, settings = request.app['db'], request.app['settings']
     if 'application_ban' in request:
-        from community_bot.texts import APPLICATION_QUESTIONS
-
         uid, ban = request['actor']['id'], request['application_ban']
-        onboarding = {'status': await application_status(db, uid, ban)}
+        onboarding = await application_onboarding(db, uid, ban)
         if onboarding['status'] == 'form':
             user = await db.get_user(uid) or {}
-            onboarding.update(ban_version=ban.get('version'), questions=APPLICATION_QUESTIONS,
-                              name=user.get('profile_name') or '', birth_date=user.get('birth_date') or '')
+            onboarding.update(ban_version=ban.get('version'), name=user.get('profile_name') or '')
         return web.json_response({'onboarding': onboarding})
     from community_bot.cabinet_api import pet_data, wallet_data
     from community_bot.shop_api import shop_data
@@ -414,14 +411,7 @@ async def save_profile(request):
     return web.json_response({'ok': True, 'message': 'Профиль сохранён — изменения уже видны в боте'})
 
 
-async def upload_avatar(request):
-    from community_bot.profile_fields import profile_revision
-
-    user = await actor(request)
-    # Check the version before reading the body, then again in the save transaction.
-    revision = request.headers.get('X-Profile-Revision', '')
-    if revision != profile_revision(user):
-        return web.json_response({'error': 'Профиль изменился. Обнови ЛК и повтори загрузку'}, status=409)
+async def read_profile_photo(request):
     if request.content_length is not None and request.content_length > AVATAR_MAX_BYTES:
         raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, request.content_length)
     from community_bot.media_cache import images
@@ -435,10 +425,38 @@ async def upload_avatar(request):
                     raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, size)
                 source.write(chunk)
             source.seek(0)
-            try:
-                photo = await images(request).normalize(source, profile=True)
-            except ValueError as error:
-                return web.json_response({'error': str(error)}, status=400)
+            return await images(request).normalize(source, profile=True)
+
+
+async def upload_application_photo(request):
+    db, uid = request.app['db'], request['actor']['id']
+    pending = await db.pending_application_photo_status(uid)
+    if not pending or request.headers.get('X-Application-Id') != str(pending['id']):
+        return web.json_response({'error': 'Анкета изменилась. Проверь её статус.'}, status=409)
+    if not pending['has_photo']:
+        try:
+            photo = await read_profile_photo(request)
+        except ValueError as error:
+            return web.json_response({'error': str(error)}, status=400)
+        if not await db.attach_application_photo(pending['id'], uid, photo):
+            current = await db.pending_application_photo_status(uid)
+            if not current or current['id'] != pending['id'] or not current['has_photo']:
+                return web.json_response({'error': 'Анкета изменилась. Проверь её статус.'}, status=409)
+    return web.json_response({'status': 'pending', 'application_id': pending['id'], 'has_photo': True})
+
+
+async def upload_avatar(request):
+    from community_bot.profile_fields import profile_revision
+
+    user = await actor(request)
+    # Check the version before reading the body, then again in the save transaction.
+    revision = request.headers.get('X-Profile-Revision', '')
+    if revision != profile_revision(user):
+        return web.json_response({'error': 'Профиль изменился. Обнови ЛК и повтори загрузку'}, status=409)
+    try:
+        photo = await read_profile_photo(request)
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
     if not await request.app['db'].save_self_profile(user['user_id'], {}, revision, photo=photo):
         return web.json_response({'error': 'Профиль изменился во время загрузки. Обнови ЛК и повтори'}, status=409)
     return web.json_response({'ok': True, 'message': 'Фото профиля обновлено в миниапке и боте'})
@@ -493,6 +511,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
     app.router.add_post('/api/application', submit_application)
+    app.router.add_post('/api/application/photo', upload_application_photo)
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/privacy', profile_privacy)
     app.router.add_post('/api/profile/avatar', upload_avatar)

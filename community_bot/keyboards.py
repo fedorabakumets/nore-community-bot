@@ -122,30 +122,19 @@ def private_menu_keyboard(
 def start_apply_keyboard(*, pending: bool = False) -> InlineKeyboardMarkup:
     url = os.getenv("MINIAPP_URL", "").strip()
     if url.startswith("https://"):
-        return InlineKeyboardMarkup(inline_keyboard=[[
+        rows = [[
             InlineKeyboardButton(
                 text="Проверить статус анкеты" if pending else "📝 Заполнить анкету",
                 web_app=WebAppInfo(url=url),
                 style=STYLE_GO,
             ),
-        ]])
+        ]]
+        if not pending:
+            rows.append([ibtn("Заполнить в чате", "start:apply")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
     if pending:
         return InlineKeyboardMarkup(inline_keyboard=[])
     return InlineKeyboardMarkup(inline_keyboard=[[ibtn("📝 Заполнить анкету", "start:apply", STYLE_GO)]])
-
-
-YES_NO_KEYBOARD = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            ibtn("Да", "application:interview:yes", STYLE_GO),
-            ibtn("Нет", "application:interview:no", STYLE_CLOSE),
-        ],
-        [
-            ibtn(FLOW_RESTART, "flow:restart", STYLE_FUN),
-            ibtn(FLOW_CANCEL, "flow:cancel", STYLE_CLOSE),
-        ],
-    ]
-)
 
 
 def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
@@ -154,7 +143,8 @@ def application_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
             [
                 ibtn("✅ Одобрить", f"application:approve:{application_id}", STYLE_GO),
                 ibtn("❌ Отклонить", f"application:reject:{application_id}", STYLE_CLOSE),
-            ]
+            ],
+            [ibtn("Фото анкеты", f"application:photo:{application_id}")],
         ]
     )
 

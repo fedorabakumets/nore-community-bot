@@ -24,6 +24,7 @@ from aiogram.types import (
     InputRichMessage,
     Message,
     MessageEntity,
+    PhotoSize,
     RichMessageButton,
     Update,
     User,
@@ -33,7 +34,7 @@ from community_bot.access import OnboardingKeyboardMiddleware, PrivateAccessMidd
 from community_bot.blocks import answer_block, edit_block, replace_block
 from community_bot.database import Database
 from community_bot.ephemeral import GroupHousekeepingMiddleware, patch_bot_ephemeral
-from community_bot.keyboards import YES_NO_KEYBOARD, flow_reply_keyboard, ibtn, main_private_keyboard
+from community_bot.keyboards import application_review_keyboard, flow_reply_keyboard, ibtn, main_private_keyboard
 from community_bot.navigation import CabinetNavigationMiddleware
 from community_bot.private_rich import PrivateRichContextMiddleware, PrivateRichMiddleware, button_rows, text_blocks
 from community_bot.reply_rich import ReplyRichContextMiddleware, ReplyRichMiddleware, bot_publication
@@ -217,7 +218,7 @@ async def test_reply_scope_keeps_profile_publications_and_their_pins_in_place(gr
     group = Chat(id=-100123, type="supergroup")
 
     async def answer(message, _data):
-        return await message.answer("Текст", reply_markup=YES_NO_KEYBOARD)
+        return await message.answer("Текст", reply_markup=application_review_keyboard(1))
 
     source = incoming(text="Нора профиль").model_copy(update={"chat": group}).as_(bot)
     await context(answer, source, {})
@@ -334,7 +335,8 @@ async def test_cover_long_text_and_secondary_keyboard_stay_in_one_page(setup):
     _, _, session, _ = setup
 
     async def handler(message, data):
-        await answer_block(message, "wallet", "Большой текст " * 150, parse_mode="HTML", reply_markup=YES_NO_KEYBOARD)
+        await answer_block(message, "wallet", "Большой текст " * 150, parse_mode="HTML",
+                           reply_markup=application_review_keyboard(1))
         await message.answer("Следующий шаг", reply_markup=main_private_keyboard())
 
     await turn(setup, handler)
@@ -344,7 +346,7 @@ async def test_cover_long_text_and_secondary_keyboard_stay_in_one_page(setup):
     assert "Большой текст" in raw and "Следующий шаг" in raw
     assert raw.count("Большой текст") == 150
     assert not any(block["type"] == "photo" for block in content(last))
-    assert actions(last)["application:interview:yes"]["style"] == "success"
+    assert actions(last)["application:approve:1"]["style"] == "success"
 
 
 async def test_guest_and_form_controls_do_not_expose_member_sections(setup):
@@ -373,7 +375,7 @@ async def test_restarted_middleware_reuses_saved_panel_and_cached_photo(setup, t
     assert saved["body"][0]["photo"]["media"] == "photo-cached"
     bot.session.middleware.unregister(bot.session.middleware[1])
     bot.session.middleware.register(PrivateRichMiddleware())
-    await first.edit_reply_markup(reply_markup=YES_NO_KEYBOARD)
+    await first.edit_reply_markup(reply_markup=application_review_keyboard(1))
     assert session.calls[-1].message_id == first.message_id
     assert content(session.calls[-1])[0]["photo"]["media"] == "photo-cached"
 
@@ -525,7 +527,7 @@ async def test_close_keeps_panel_and_group_requests_are_untouched(setup):
     assert session.calls[-1].message_id == 100
     assert "menu:home" in actions(session.calls[-1])
     assert not any(call.__api_method__ == "deleteMessage" for call in session.calls)
-    await bot.send_message(-100, "Группа", reply_markup=YES_NO_KEYBOARD)
+    await bot.send_message(-100, "Группа", reply_markup=application_review_keyboard(1))
     assert session.calls[-1].__api_method__ == "sendMessage"
     await asyncio.gather(*[task for task in _PENDING if task.get_loop() is asyncio.get_running_loop()])
 
@@ -570,25 +572,32 @@ async def test_background_game_updates_respect_the_current_screen(setup, navigat
     assert len(session.calls) == before + (0 if navigate_away else 1)
 
 
-async def test_application_replaces_final_question_and_approval_opens_a_new_interactive_menu(setup):
+@pytest.mark.parametrize("attach_photo", [False, True])
+async def test_application_replaces_final_question_and_approval_opens_a_new_interactive_menu(
+    setup, monkeypatch, attach_photo,
+):
+    from aiogram.filters import MagicData
+
     from community_bot.routers import private
     from community_bot.states import ApplicationForm
 
     db, bot, session, _ = setup
     bot.community_settings.reviewers = frozenset()
     bot.community_settings.community_invite_url = "https://t.me/+community"
+    monkeypatch.delenv("MINIAPP_URL", raising=False)
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
+    dispatcher.message.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
     router = Router()
     router.callback_query.register(private.begin_application_button, F.data == "start:apply")
     router.message.register(private.application_name, ApplicationForm.name)
-    router.message.register(private.application_birth_date, ApplicationForm.birth_date)
-    router.message.register(private.application_referral, ApplicationForm.referral)
-    router.message.register(private.application_expectations, ApplicationForm.expectations)
+    router.message.register(private.application_age, ApplicationForm.age)
+    router.message.register(private.application_city, ApplicationForm.city)
     router.message.register(private.application_bio, ApplicationForm.bio)
-    router.callback_query.register(private.finish_application, ApplicationForm.interview,
-                                    F.data.startswith("application:interview:"))
+    router.message.register(private.attach_application_photo, F.photo, MagicData(F.application_photo_target))
+    router.callback_query.register(private.skip_application_photo, F.data == "application:skip-photo")
     router.callback_query.register(private.approve_application, F.data.startswith("application:approve:"))
     profile_click = AsyncMock()
 
@@ -606,29 +615,41 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
                                      db=db, settings=bot.community_settings)
 
     await callback("start:apply", 1, first)
-    for idx, text in enumerate(["Рома", "01.01.2000", "От друзей", "Общение", "Люблю музыку"], 2):
+    for idx, text in enumerate(["Рома", "13", "24", "Москва", "Люблю музыку"], 2):
         await dispatcher.feed_update(bot, Update(update_id=idx, message=incoming(uid=8, text=text)),
                                      db=db, settings=bot.community_settings)
-    last = Message(message_id=first.message_id, date=datetime.now(UTC), chat=first.chat,
-                   rich_message={"blocks": content(session.calls[-1])})
-    await callback("application:interview:yes", 8, last)
     panels = [call for call in session.calls if isinstance(call, (SendRichMessage, EditMessageText))]
     assert sum(isinstance(call, SendRichMessage) for call in panels) == 2
     assert all(getattr(call, "message_id", first.message_id) == first.message_id for call in panels)
     assert await db.has_pending_application(8)
     profile = await db.get_user(8)
-    assert (profile["profile_name"], profile["birth_date"], profile["age"]) == ("Рома", "2000-01-01", None)
+    assert (profile["profile_name"], profile["birth_date"]) == ("Рома", None)
     assert profile["profile_bio"] == ""
     assert "отправлена на проверку" in panels[-1].rich_message.model_dump_json()
     assert "онлайн-интервью" not in panels[-1].rich_message.model_dump_json()
-    assert set(actions(panels[-1])) == {"menu:question"}
+    assert set(actions(panels[-1])) == {"menu:question", "application:skip-photo"}
     pending_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
     assert pending_id != first.message_id
     assert session.calls[-1].__api_method__ == "deleteMessage"
     assert session.calls[-1].message_id == first.message_id
+    application = (await db.pending_applications())[0]
+    saved = await db.get_application(application["id"])
+    assert saved["answers"] == {"name": "Рома", "age": 24, "city": "Москва", "bio": "Люблю музыку"}
+    if attach_photo:
+        photo = incoming(uid=8, text=None, photo=[
+            PhotoSize(file_id="applicant-photo", file_unique_id="photo", width=320, height=200),
+        ])
+        await dispatcher.feed_update(bot, Update(update_id=7, message=photo),
+                                     db=db, settings=bot.community_settings)
+        assert await db.application_photo(application["id"]) == "applicant-photo"
+    else:
+        waiting = Message(message_id=pending_id, date=datetime.now(UTC), chat=first.chat,
+                          rich_message={"blocks": content(panels[-1])})
+        await callback("application:skip-photo", 7, waiting)
+        assert await db.application_photo(application["id"]) is None
+    assert await db.has_pending_application(8)
 
     review = await show_panel(setup, bot.send_message, 99, "Анкета на проверку")
-    application = (await db.pending_applications())[0]
     await callback(f"application:approve:{application['id']}", 9, review, incoming(uid=99).from_user)
     (notice,) = [call for call in session.calls if call.__api_method__ == "sendMessage" and call.chat_id == 8]
     assert "Заявка одобрена" in notice.text and "https://t.me/+community" in notice.text
@@ -640,8 +661,8 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
     )
     menu_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
     assert menu_id != pending_id
-    assert session.calls[-1].__api_method__ == "deleteMessage"
-    assert session.calls[-1].message_id == pending_id
+    deleted = [call for call in session.calls if call.__api_method__ == "deleteMessage" and call.chat_id == 8]
+    assert deleted[-1].message_id == pending_id
     menu = Message(message_id=menu_id, date=datetime.now(UTC), chat=first.chat,
                    rich_message={"blocks": content(approved)})
     await callback("menu:profile", 10, menu)
@@ -737,7 +758,7 @@ async def test_actual_start_guest_reopens_panel_and_then_edits(setup, monkeypatc
         buttons = [button for block in content(session.calls[0]) if block["type"] == "buttons"
                    for button in block["buttons"]]
         assert [button["web_app"]["url"] for button in buttons if "web_app" in button] == ["https://nora.example"]
-        assert 'start:apply' not in actions(session.calls[0])
+        assert actions(session.calls[0])['start:apply']['text'] == 'Заполнить в чате'
     else:
         assert 'start:apply' in actions(session.calls[0])
     await turn(setup, handler, incoming(uid=8))
@@ -793,7 +814,7 @@ async def test_first_start_and_application_work_when_optional_telegram_requests_
         )
         await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback), db=db, settings=settings)
         last = [call for call in session.calls if isinstance(call, SendMessage)][-1]
-        assert last.reply_markup.inline_keyboard[0][0].web_app.url == "https://nora.example"
+        assert "Как тебя зовут?" in last.text
     finally:
         await dispatcher.storage.close()
 
@@ -1103,7 +1124,7 @@ async def test_widget_rejects_forged_and_stale_submissions(setup, change):
     elif change == 'message':
         event = event.model_copy(update={'message_id': 4})
     else:
-        flow = 'ApplicationForm:birth_date'
+        flow = 'ApplicationForm:age'
     assert not submission(event, page, flow)
 
 

@@ -334,6 +334,10 @@ async def test_queue_approval_is_once_and_notifies_applicant_not_the_admin_ui(en
                                                   'expectations': 'Общение', 'bio': 'Обо мне', 'interview': 'yes'})
     view = await click(env, await env.bridge.open(env.actor), 'Очередь')
     view = await click(env, view, 'Анкеты')
+    assert await env.db.attach_application_photo(app_id, 8, env.telegram.media)
+    view = await click(env, view, 'Фото анкеты')
+    card = next(c for c in view['cards'] if 'media' in c)
+    assert (await env.bridge.get_media(env.actor, card['media']['id'])).content_type == 'image/jpeg'
     approve = button(view, 'Одобрить')
     await env.bridge.action(env.actor, approve)
     with pytest.raises(web.HTTPConflict):

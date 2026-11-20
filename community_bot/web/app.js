@@ -18,10 +18,10 @@ function profileTabLocked(target) {
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 async function api(path,body,signal){const r=await fetch('/api/'+path,{signal,method:body?'POST':'GET',headers:{Authorization:'tma '+auth,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let j;try{j=await r.json()}catch{throw Error('Сервис пока недоступен. Попробуй ещё раз')}if(!r.ok)throw Object.assign(Error(j.error||j.message||'Не удалось выполнить действие'),{status:r.status});return j}
-let applicationScreen = '';
+let applicationScreen = null;
 
 function showApplication(application) {
-  applicationScreen = application.status;
+  applicationScreen = application;
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -32,45 +32,41 @@ function showApplication(application) {
 
   if (application.status !== 'form') {
     const waiting = application.status === 'pending';
+    const canAttach = waiting && application.application_id && !application.has_photo;
     app.innerHTML = `<section class="application-panel card">
       <h1>${waiting ? 'Анкета на проверке' : 'Анкета пока недоступна'}</h1>
-      <p>${waiting ? 'Мы получили твою анкету. Когда модераторы её рассмотрят, Нора напишет тебе в Telegram. Приложение можно закрыть.'
+      <p>${waiting ? 'Нора сообщит решение в Telegram.'
         : 'Ты сможешь подать анкету после разбана.'}</p>
-      <button type="button" class="primary" id="application-close">Вернуться в чат</button>
+      ${canAttach ? `<form id="application-photo-form">
+        <label>Фото (необязательно)
+          <input type="file" name="photo" accept="${AVATAR_ACCEPT}" required>
+        </label>
+        <button type="submit" class="primary">Прикрепить фото</button>
+      </form>` : application.has_photo ? '<p role="status">Фото прикреплено.</p>' : ''}
+      <button type="button" class="${canAttach ? 'secondary' : 'primary'}" id="application-close">${canAttach ? 'Пропустить фото' : 'Вернуться в чат'}</button>
       <button type="button" class="secondary" id="application-check">Проверить статус</button>
       <p class="application-error" id="application-error" role="status"></p>
     </section>`;
     $('#application-close').onclick = () => tg?.close?.();
     $('#application-check').onclick = event => refreshApplication(event.currentTarget);
+    if (canAttach) $('#application-photo-form').onsubmit = event => attachApplicationPhoto(event, application);
     return;
   }
 
-  const q = application.questions;
   app.innerHTML = `<section class="application-panel card">
     <h1>Анкета на вступление</h1>
-    <p>Ответь на вопросы, чтобы подать заявку в сообщество Норы.</p>
     <form id="application-form">
-      <label>Как тебя зовут?
+      <label>Имя
         <input name="name" autocomplete="given-name" maxlength="50" required value="${esc(application.name)}">
       </label>
-      <label>Дата рождения
-        <input name="birth_date" type="date" autocomplete="bday" required value="${esc(application.birth_date)}">
+      <label>Возраст
+        <input name="age" type="number" inputmode="numeric" min="14" max="120" step="1" required>
       </label>
-      <label>${esc(q.referral)}
-        <input name="referral" maxlength="100" required>
+      <label>Город
+        <input name="city" autocomplete="address-level2" maxlength="100" required>
       </label>
-      <label>${esc(q.expectations)}
-        <textarea name="expectations" rows="3" maxlength="1000" required></textarea>
-      </label>
-      <label>${esc(q.bio)}
+      <label>О себе
         <textarea name="bio" rows="3" maxlength="1000" required></textarea>
-      </label>
-      <label>${esc(q.interview)}
-        <select name="interview" required>
-          <option value="">Выбери ответ</option>
-          <option value="yes">Да</option>
-          <option value="no">Нет</option>
-        </select>
       </label>
       <p class="application-error" id="application-error" role="alert"></p>
       <button type="submit" class="primary">Отправить анкету</button>
@@ -99,6 +95,28 @@ function showApplication(application) {
   };
 }
 
+async function attachApplicationPhoto(event, application) {
+  event.preventDefault();
+  if (busy) return;
+  const form = event.currentTarget;
+  const file = form.elements.photo.files[0];
+  if (!file) return;
+  const submit = form.querySelector('[type="submit"]');
+  const error = $('#application-error');
+  busy = submit.disabled = true;
+  submit.textContent = 'Загружаем фото…';
+  error.textContent = '';
+  try {
+    const result = await uploadPhoto(file, 'application/photo', {'X-Application-Id': application.application_id});
+    showApplication(result);
+  } catch (err) {
+    error.textContent = err.message;
+  } finally {
+    busy = submit.disabled = false;
+    submit.textContent = 'Прикрепить фото';
+  }
+}
+
 async function refreshApplication(button) {
   if (busy) return;
   busy = true;
@@ -109,8 +127,10 @@ async function refreshApplication(button) {
   }
   try {
     const result = await api('me');
-    if (result.onboarding?.status !== applicationScreen) await openApp(result);
-    else if (button) message.textContent = applicationScreen === 'pending' ? 'Модераторы ещё проверяют анкету.' : 'Анкета пока недоступна.';
+    const next = result.onboarding;
+    if (next?.status !== applicationScreen.status || next?.application_id !== applicationScreen.application_id
+      || next?.has_photo !== applicationScreen.has_photo) await openApp(result);
+    else if (button) message.textContent = applicationScreen.status === 'pending' ? 'Модераторы ещё проверяют анкету.' : 'Анкета пока недоступна.';
   } catch (err) {
     if (button) message.textContent = err.message;
   } finally {
@@ -354,7 +374,7 @@ async function openApp(result) {
     return;
   }
   await memberScreensReady;
-  applicationScreen = '';
+  applicationScreen = null;
   data = result;
   tab = 'home';
   const linked = botReplyRoute();
@@ -415,12 +435,12 @@ function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
 const AVATAR_MAX_MB = 64;
 const AVATAR_ACCEPT = 'image/*,.heic,.heif';
-async function uploadProfilePhoto(file, revision) {
+async function uploadPhoto(file, endpoint, headers) {
   if (!file.size) throw Error('Файл пустой. Выбери другое фото');
   if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw Error(`Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
-  const response = await fetch('/api/profile/avatar', {
+  const response = await fetch('/api/' + endpoint, {
     method: 'POST',
-    headers: {Authorization: 'tma ' + auth, 'Content-Type': 'application/octet-stream', 'X-Profile-Revision': revision},
+    headers: {Authorization: 'tma ' + auth, 'Content-Type': 'application/octet-stream', ...headers},
     body: file,
   }).catch(() => {
     throw Error('Не удалось отправить фото. Проверь интернет и попробуй ещё раз');
@@ -455,7 +475,7 @@ document.addEventListener('change', async e => {
   if (button) button.disabled = true;
   try {
     toast('Загружаем фото…');
-    const result = await uploadProfilePhoto(file, data.revision);
+    const result = await uploadPhoto(file, 'profile/avatar', {'X-Profile-Revision': data.revision});
     toast(result.message);
     data = await api('me');
     render();
@@ -466,7 +486,7 @@ document.addEventListener('change', async e => {
     busy = false;
   }
 });
-async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
+async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.

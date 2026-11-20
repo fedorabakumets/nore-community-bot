@@ -113,8 +113,8 @@ async def test_miniapp_gate_accepts_staff_and_approved_members(db):
 async def test_web_application_uses_signed_identity_and_existing_review_queue(db):
     bot = SimpleNamespace(send_message=AsyncMock())
     answers = {
-        'name': '  Ника ', 'birth_date': '2000-01-01', 'referral': 'Из чата', 'expectations': 'Друзей',
-        'bio': 'Люблю музыку <3', 'interview': 'yes', 'user_id': 8, 'ban_version': None,
+        'name': '  Ника ', 'age': '26', 'city': 'Москва',
+        'bio': 'Люблю музыку <3', 'user_id': 8, 'ban_version': None,
     }
 
     async def call(path, handler, body=None, *, signed_in=True):
@@ -135,23 +135,27 @@ async def test_web_application_uses_signed_identity_and_existing_review_queue(db
         assert (await call(path, handler))[0] == 403
     handler.assert_not_awaited()
 
-    for invalid in ({'name': ' '}, {'birth_date': '2025-01-01'}, {'interview': 'no'}, {'bio': 'x' * 1001}):
+    for invalid in (
+        {'name': ' '}, {'age': '2000-01-01'}, {'age': 13}, {'age': 121}, {'age': True},
+        {'city': ''}, {'bio': 'x' * 1001},
+    ):
         assert (await call('/api/application', submit_application, answers | invalid))[0] == 400
     assert await db.get_user(42) is None
     submissions = await asyncio.gather(*[call('/api/application', submit_application, answers) for _ in range(2)])
-    assert submissions == [(200, {'status': 'pending'})] * 2
     (row,) = await db.pending_applications()
     assert row['user_id'] == 42
     application = await db.get_application(row['id'])
-    assert application['answers']['name'] == 'Ника'
-    assert 'user_id' not in application['answers']
-    assert (await db.get_user(42))['birth_date'] == '2000-01-01'
+    assert application['answers'] == {'name': 'Ника', 'age': 26, 'city': 'Москва', 'bio': 'Люблю музыку <3'}
+    pending = {'status': 'pending', 'application_id': row['id'], 'has_photo': False}
+    assert submissions == [(200, pending)] * 2
+    profile = await db.get_user(42)
+    assert profile['profile_name'] == 'Ника' and profile['birth_date'] is None
     bot.send_message.assert_awaited_once()
     assert bot.send_message.call_args.args[0] == 99
     assert '&lt;3' in bot.send_message.call_args.args[1]
     review = bot.send_message.call_args.kwargs['reply_markup']
     assert review.inline_keyboard[0][0].callback_data == f"application:approve:{row['id']}"
-    assert (await call('/api/me', overview))[1] == {'onboarding': {'status': 'pending'}}
+    assert (await call('/api/me', overview))[1] == {'onboarding': pending}
     # Approving an existing row restores the same API access as accepting a chat application.
     assert (await call('/api/profile', handler))[0] == 403
     await db.decide_application(row['id'], 99, 'approved', None)
@@ -214,7 +218,9 @@ async def test_profile_save_is_atomic_validated_and_protects_bot_edits(db):
     assert (await db.get_user(7))['profile_name'] == 'Изменено в боте'
 
 
-def avatar_request(app, user, *chunks, content_type='application/octet-stream', content_length=None):
+def avatar_request(
+    app, user, *chunks, content_type='application/octet-stream', content_length=None, application_id=None,
+):
     from aiohttp.test_utils import make_mocked_request
 
     from community_bot.profile_fields import profile_revision
@@ -231,8 +237,44 @@ def avatar_request(app, user, *chunks, content_type='application/octet-stream', 
     }
     if content_length is not None:
         headers['Content-Length'] = str(content_length)
-    return make_mocked_request('POST', '/api/profile/avatar', headers=headers, app=app,
+    path = '/api/profile/avatar'
+    if application_id is not None:
+        path = '/api/application/photo'
+        headers['X-Application-Id'] = str(application_id)
+    return make_mocked_request('POST', path, headers=headers, app=app,
                                payload=SimpleNamespace(iter_chunked=iter_chunked))
+
+
+async def test_application_photo_is_optional_and_bound_to_the_pending_application(db):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from community_bot.miniapp import create_app, upload_application_photo
+
+    raw = BytesIO()
+    Image.new('RGB', (32, 24), 'blue').save(raw, 'PNG')
+    app = create_app(db, Request(db).app['settings'], bot=None)
+    application_id = await db.create_application(7, {'name': 'Анна', 'age': 25})
+    user, other = await db.get_user(7), await db.get_user(8)
+
+    async def upload(actor, data, *, target=application_id):
+        request = avatar_request(app, actor, data, application_id=target)
+        return await protection(request, upload_application_photo)
+
+    assert (await upload(other, raw.getvalue())).status == 409
+    assert (await upload(user, raw.getvalue(), target=application_id + 1)).status == 409
+    assert (await upload(user, b'not an image')).status == 400
+    assert await db.application_photo(application_id) is None
+    first, second = await asyncio.gather(upload(user, raw.getvalue()), upload(user, raw.getvalue()))
+    assert first.status == second.status == 200
+    assert json.loads(first.body) == {'status': 'pending', 'application_id': application_id, 'has_photo': True}
+    photo = await db.application_photo(application_id)
+    assert Image.open(BytesIO(photo)).format == 'JPEG'
+    assert await db.pending_application_photo_status(7) == {'id': application_id, 'has_photo': 1}
+    assert (await db.get_user(7))['avatar_file_id'] is None
+    await db.decide_application(application_id, 99, 'rejected', None)
+    assert (await upload(user, raw.getvalue())).status == 409
 
 
 async def test_avatar_upload_works_without_bot_dm_and_is_visible_to_bot(db):

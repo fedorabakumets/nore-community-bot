@@ -3,11 +3,9 @@ from aiogram.fsm.state import State, StatesGroup
 
 class ApplicationForm(StatesGroup):
     name = State()
-    birth_date = State()
-    referral = State()
-    expectations = State()
+    age = State()
+    city = State()
     bio = State()
-    interview = State()
 
 
 class TicketForm(StatesGroup):
