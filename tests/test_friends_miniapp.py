@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from community_bot import social_likes
 from community_bot.database import Database
 from community_bot.friends_api import (
     SCHEMA,
@@ -54,6 +55,8 @@ async def test_mutual_consent_owns_actions_and_private_snapshot(env):
     await env.db.update_profile(1, "profile_private", 1)
     await env.db.update_profile(1, "moderator_note", "private note must never leave database")
     await env.db.set_cookies(1, 777, 1)
+    await env.db.set_bot_state(social_likes.COUNT_PREFIX + '1', '50')
+    await env.db.set_bot_state(social_likes.COUNT_PREFIX + '2', '49')
     message, notices = await do(env, 1, "request", recipient="@PeRsOn2")
     assert "подтверждения" in message and len(notices) == 1
     assert not await accepted(env.db, 1, 2)
@@ -71,6 +74,8 @@ async def test_mutual_consent_owns_actions_and_private_snapshot(env):
     await do(env, 2, "accept", 1, token=row["token"])
     assert await accepted(env.db, 1, 2) and await accepted(env.db, 2, 1)
     assert (await relation(env, 1, "friends"))["id"] == 2
+    assert (await relation(env, 1, "friends"))["likes"] == 49
+    assert (await relation(env, 2, "friends"))["likes"] is None
     assert (await env.db.get_user(1))["cookies"] == 777
 
 

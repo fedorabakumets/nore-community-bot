@@ -72,6 +72,7 @@ async def test_board_today_top_five_actual_yesterday_reward_no_new_credit(env):
     await social_likes.give(env.db, 16, 18)
     await social_likes.give(env.db, 17, 18)
     await social_likes.give(env.db, 18, 17)
+    await env.db.set_bot_state(social_likes.COUNT_PREFIX + '18', '50')
     await env.db.update_profile(17, 'profile_private', 1)
     # Recipient comes from ledger, even if ranking was corrected later.
     await env.db.add_cookies(3, 1, 'daily_chat', yesterday.isoformat())
@@ -79,8 +80,11 @@ async def test_board_today_top_five_actual_yesterday_reward_no_new_credit(env):
         result = json.loads((await status(Request(env))).body)
         assert result['winner']['id'] == 3 and result['day'] == today.isoformat()
         assert result['winner_day'] == yesterday.isoformat()
-        assert [(item['id'], item['likes']) for item in result['boards']['likes']] == [(18, 2)]
+        assert [(item['id'], item['likes']) for item in result['boards']['likes']] == [(18, 50)]
+        messages = {item['id']: item['likes'] for item in result['boards']['messages']}
+        assert messages[17] is None and messages[18] == 50
         assert [(item['id'], item['cookies']) for item in result['boards']['cookies']] == [(3, 1)]
+        assert result['boards']['cookies'][0]['likes'] == 0
     assert (await env.db.get_user(3))['cookies'] == 1
     assert [p['id'] for p in result['staff']] == [1, 2, 6, 3, 4]
 

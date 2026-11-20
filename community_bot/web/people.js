@@ -30,7 +30,7 @@ window.NoraPeople = (() => {
     const initials=(p.name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase();
     const locked=p.private;
     const stats=`<div class="stats"><div class="stat"><span class="eyebrow">Репутация</span><b class="num">${locked?'🔒':number(p.reputation)}</b>${locked?'':`<small>${esc(p.tier)}</small>`}</div><div class="stat"><span class="eyebrow">Печеньки</span><b class="num">${locked?'🔒':number(p.cookies)+' 🍪'}</b></div></div>`;
-    return `<div id="person-profile" data-person-id="${p.id}"><span class="eyebrow">Участник Норы</span><div class="profile-heading"><button type="button" class="profile-photo person-photo" data-view-avatar aria-label="Открыть фото профиля" disabled>${esc(initials)}</button><div><h2>${esc(p.name)}</h2>${p.likes==null?'':`<span class="social-like-count" data-person-likes aria-label="Лайки: ${number(p.likes)}">❤️ ${number(p.likes)}</span>`}<p class="sub">${p.username?'@'+esc(p.username):'Участник сообщества'}</p></div></div>${p.prefix?`<p class="person-role">${NoraPrefix(p.prefix)}</p>`:p.role?`<p class="sub person-role">${esc(p.role)}</p>`:''}${p.hidden?'<section class="card person-locked"><h3>Профиль скрыт</h3><p class="sub">Владелец ограничил просмотр профиля.</p></section>':`<p class="person-presence ${p.presence?.online?'online':''}" title="Это активность в миниапке, не статус Telegram">${esc(p.friend?presenceLine(p.presence):'Активность видна друзьям')}</p>${locked?'<p class="sub">Закрытый профиль</p>':''}${locked?'':`<p class="bio">${esc(p.bio||'Пока без описания.')}</p>`}<p class="sub">Возраст: ${p.age?number(p.age):'не указан'}${locked?'':`<br>Увлечения: ${esc(p.hobbies||'не указаны')}`}</p>`}${stats}<div class="person-actions">${p.friend?`<button class="primary" data-friend-transfer="${p.id}" data-friend-name="${esc(p.name)}">Перевести печеньки</button><button class="secondary" data-friend-play="${p.id}">Пригласить в игру</button>`:`<button class="secondary" data-person-add="${p.id}">Добавить в друзья</button>`}</div></div>`;
+    return `<div id="person-profile" class="${hasProfileFire(p.likes)?'profile-fire-card':''}" data-person-id="${p.id}"><span class="eyebrow">Участник Норы</span><div class="profile-heading"><button type="button" class="profile-photo person-photo" data-view-avatar aria-label="Открыть фото профиля" disabled>${esc(initials)}</button><div><h2>${esc(p.name)}</h2>${p.likes==null?'':`<span class="social-like-count" data-person-likes aria-label="Лайки: ${number(p.likes)}">${profileLikeText(p.likes)}</span>`}<p class="sub">${p.username?'@'+esc(p.username):'Участник сообщества'}</p></div></div>${p.prefix?`<p class="person-role">${NoraPrefix(p.prefix)}</p>`:p.role?`<p class="sub person-role">${esc(p.role)}</p>`:''}${p.hidden?'<section class="card person-locked"><h3>Профиль скрыт</h3><p class="sub">Владелец ограничил просмотр профиля.</p></section>':`<p class="person-presence ${p.presence?.online?'online':''}" title="Это активность в миниапке, не статус Telegram">${esc(p.friend?presenceLine(p.presence):'Активность видна друзьям')}</p>${locked?'<p class="sub">Закрытый профиль</p>':''}${locked?'':`<p class="bio">${esc(p.bio||'Пока без описания.')}</p>`}<p class="sub">Возраст: ${p.age?number(p.age):'не указан'}${locked?'':`<br>Увлечения: ${esc(p.hobbies||'не указаны')}`}</p>`}${stats}<div class="person-actions">${p.friend?`<button class="primary" data-friend-transfer="${p.id}" data-friend-name="${esc(p.name)}">Перевести печеньки</button><button class="secondary" data-friend-play="${p.id}">Пригласить в игру</button>`:`<button class="secondary" data-person-add="${p.id}">Добавить в друзья</button>`}</div></div>`;
   }
   async function avatar(p,version) {
     if(!p.has_avatar||p.hidden)return;
@@ -58,13 +58,16 @@ window.NoraPeople = (() => {
     if(document.hidden||!$('#sheet').open||!document.querySelector('#person-profile')||loading||!person)return;
     const version=generation;
     try {
-      const p=await api('people/'+person.id);if(version!==generation||!document.querySelector('#person-profile'))return;
+      const p=await api('people/'+person.id);
+      const profile=$('#person-profile');
+      if(version!==generation||!$('#sheet').open||!profile)return;
       if(p.role!==person.role||p.hidden!==person.hidden||p.private!==person.private||p.friend!==person.friend||p.has_avatar!==person.has_avatar||JSON.stringify(p.prefix)!==JSON.stringify(person.prefix)){
         discardAvatar();person=p;$('#sheet-content').innerHTML=profileHTML(p);avatar(p,version);
       } else {
         person=p;const likes=document.querySelector('[data-person-likes]');
         if(likes&&p.likes!=null){
-          likes.textContent='❤️ '+number(p.likes);
+          profile.classList.toggle('profile-fire-card',hasProfileFire(p.likes));
+          likes.textContent=profileLikeText(p.likes);
           likes.setAttribute('aria-label','Лайки: '+number(p.likes));
         }
         const el=document.querySelector('.person-presence');

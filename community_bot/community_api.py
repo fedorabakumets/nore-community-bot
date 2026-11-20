@@ -7,6 +7,7 @@ from aiohttp import web
 
 from community_bot.helpers import can_view_profile
 from community_bot.role_prefixes import prefix_for
+from community_bot.social_likes import COUNT_PREFIX
 from community_bot.social_profiles import presence_map
 
 
@@ -20,13 +21,15 @@ async def people(db, settings, viewer):
     chat = int(getattr(settings, 'community_chat_id', 0) or 0)
     rows = await db.fetchall(
         "SELECT u.*,r.name role_name,COALESCE(r.rank,0) rank,"
+        "CASE WHEN u.profile_private=0 THEN COALESCE(CAST(l.value AS INTEGER),0) END likes,"
         "EXISTS(SELECT 1 FROM applications a WHERE a.user_id=u.user_id AND a.status='approved') approved,"
         "(EXISTS(SELECT 1 FROM user_activity a WHERE a.user_id=u.user_id AND a.chat_id=?) OR "
         "EXISTS(SELECT 1 FROM daily_scores a WHERE a.user_id=u.user_id AND a.chat_id=?)) active_member "
-        "FROM users u LEFT JOIN staff_roles r ON r.slug=u.role WHERE u.user_id>0 AND NOT EXISTS("
+        "FROM users u LEFT JOIN staff_roles r ON r.slug=u.role "
+        "LEFT JOIN bot_state l ON l.key=(? || u.user_id) WHERE u.user_id>0 AND NOT EXISTS("
         "SELECT 1 FROM mini_friend_blocks b WHERE (b.blocker_id=? AND b.blocked_id=u.user_id) "
         "OR (b.blocked_id=? AND b.blocker_id=u.user_id))",
-        (chat, chat, viewer, viewer),
+        (chat, chat, COUNT_PREFIX, viewer, viewer),
     )
     from community_bot.bot_identity import likely_bot, marked_bots
 
@@ -95,7 +98,8 @@ async def status(request):
     ):
         visible = [row for row in ranking if row['user_id'] in by_id][:5]
         boards[metric] = [
-            {**await card(db, settings, viewer, by_id[row['user_id']]), metric: row[metric]}
+            {**await card(db, settings, viewer, by_id[row['user_id']]),
+             'likes': by_id[row['user_id']]['likes'], metric: row[metric]}
             for row in visible
         ]
     # Show the recipient actually credited by the existing midnight job, never guess or issue another reward.

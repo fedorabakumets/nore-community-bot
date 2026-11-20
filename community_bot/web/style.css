@@ -2146,3 +2146,76 @@ button.lobby-entry:active { background: #ffffff13; }
 #app .sea-create-actions button { min-height: 44px; margin: 0; padding: 6px; font-size: 12px; }
 .sea-create .stake-note { margin: 0 0 8px; }
 .sea-setup .sea-resume { margin: 0 0 8px; }
+
+.person-avatar.profile-fire-avatar {
+  overflow: visible;
+  box-shadow: 0 0 0 1px #ea632b, 0 0 9px #f35b2d73;
+}
+.profile-fire-avatar::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -16%;
+  pointer-events: none;
+  background: url('/home-art/profile-fire-ring.webp') center / contain no-repeat;
+  animation: profile-fire-ring 2.8s ease-in-out infinite alternate;
+}
+.community-place-2 .profile-fire-avatar::after { animation-delay: -.9s; }
+.community-place-3 .profile-fire-avatar::after { animation-delay: -1.8s; }
+@keyframes profile-fire-ring {
+  0% { transform: rotate(-9deg) scale(.98); opacity: .82; }
+  56% { transform: rotate(3deg) scale(1.02, 1.08); opacity: 1; }
+  100% { transform: rotate(11deg) scale(1.04, 1.01); opacity: .92; }
+}
+
+#app[data-screen="lk"] .lk-identity.profile-fire-card,
+#sheet:has(#person-profile.profile-fire-card) {
+  isolation: isolate;
+  background: #22151a;
+  box-shadow: inset 0 0 0 1px #ed743a72, 0 0 22px #e84b2328;
+}
+#app[data-screen="lk"] .lk-identity.profile-fire-card {
+  position: relative;
+  overflow: hidden;
+}
+#sheet:has(#person-profile.profile-fire-card) { border-color: #a85836; }
+:is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::before,
+:is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+:is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::before {
+  background: linear-gradient(90deg, #22151a30, #22151aa1 23%, #22151a8c 78%, #22151a24),
+    url('/home-art/profile-fire-card.webp') center bottom / 100% 100% no-repeat;
+  animation: profile-fire-card 4s ease-in-out infinite alternate;
+}
+:is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::after {
+  background: radial-gradient(circle at 6% 78%, #ffd693 0 1px, #f77833a8 2px, transparent 4px),
+    radial-gradient(circle at 16% 84%, #ffad60 0 1px, transparent 2px),
+    radial-gradient(circle at 91% 74%, #ffb876 0 1px, #ed391b80 2px, transparent 4px),
+    radial-gradient(circle at 96% 62%, #ffcf86 0 1px, transparent 2px);
+  background-repeat: no-repeat;
+  animation: profile-fire-sparks 3.2s ease-out infinite;
+}
+.profile-fire-card .social-like-count { color: #deb8ff; font-weight: 700; }
+#app[data-screen="lk"] .profile-fire-card #profile-photo,
+#sheet .profile-fire-card .person-photo { box-shadow: 0 0 0 1px #ee8551, 0 0 14px #ef5f3459; }
+@keyframes profile-fire-card {
+  0% { background-size: auto, 100% 100%; opacity: .76; }
+  62% { background-size: auto, 103% 107%; opacity: .98; }
+  100% { background-size: auto, 102% 104%; opacity: .87; }
+}
+@keyframes profile-fire-sparks {
+  0% { background-position: 0 18px; opacity: 0; }
+  24% { opacity: .88; }
+  100% { background-position: 4px -80px; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-fire-avatar::after,
+  :is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::before,
+  :is(.lk-identity.profile-fire-card, #sheet:has(#person-profile.profile-fire-card))::after { animation: none; }
+}

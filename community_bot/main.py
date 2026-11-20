@@ -501,6 +501,7 @@ async def main() -> None:
     db = Database(settings.database_path)
     from community_bot import profile_access_rollout
     from community_bot.community_reset import apply_reset, prepare_reset, reset_settings
+    from community_bot.profile_likes_grant import apply_profile_likes_grant
     from community_bot.wallet_reset import apply_wallet_reset_release
 
     await profile_access_rollout.prepare(db)
@@ -519,6 +520,7 @@ async def main() -> None:
         logger.critical("Бот заблокирован аварийным выключателем")
         await asyncio.Event().wait()
         return
+    await apply_profile_likes_grant(db, settings)
     settings = await profile_access_rollout.apply(db, settings)
     await profile_access_rollout.queue_notices(db)
     for owner_id in settings.owner_ids:

@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
+from community_bot.social_likes import COUNT_PREFIX
+
 logger = logging.getLogger(__name__)
 MAX_FRIENDS = 100
 MAX_PENDING = 20
@@ -167,11 +169,14 @@ async def snapshot(db, settings, uid: int) -> dict:
     now = time.time()
     rows = await db.fetchall(
         "SELECT f.*,u.user_id,u.profile_name,u.telegram_name,u.username,"
-        "u.avatar_file_id,u.avatar_media_type,u.profile_private FROM mini_friendships f "
+        "u.avatar_file_id,u.avatar_media_type,u.profile_private,"
+        "CASE WHEN u.profile_private=0 THEN COALESCE(CAST(l.value AS INTEGER),0) END likes "
+        "FROM mini_friendships f "
         "JOIN users u ON u.user_id=CASE WHEN f.low_id=? THEN f.high_id ELSE f.low_id END "
+        "LEFT JOIN bot_state l ON l.key=(? || u.user_id) AND f.status='accepted' "
         "WHERE (f.low_id=? OR f.high_id=?) AND "
         "(f.status='accepted' OR (f.status='pending' AND f.expires_at>?)) ORDER BY f.updated_at DESC",
-        (uid, uid, uid, now),
+        (uid, COUNT_PREFIX, uid, uid, now),
     )
     blocks = await db.fetchall(
         "SELECT b.token,b.created_at,u.user_id,u.profile_name,u.telegram_name,u.username,"
@@ -203,6 +208,8 @@ async def snapshot(db, settings, uid: int) -> dict:
         category = "blocked" if "status" not in row else (
             "friends" if row["status"] == "accepted" else "outgoing" if row["requester_id"] == uid else "incoming"
         )
+        if category == "friends":
+            item["likes"] = row["likes"]
         result[category].append(item)
     from community_bot.social_profiles import presence_map
 

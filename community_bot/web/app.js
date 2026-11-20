@@ -16,6 +16,8 @@ function profileTabLocked(target) {
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
+const hasProfileFire=likes=>likes>=50;
+const profileLikeText=likes=>`${hasProfileFire(likes)?'💜':'❤️'} ${number(likes)}`;
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 async function api(path,body,signal){const r=await fetch('/api/'+path,{signal,method:body?'POST':'GET',headers:{Authorization:'tma '+auth,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let j;try{j=await r.json()}catch{throw Error('Сервис пока недоступен. Попробуй ещё раз')}if(!r.ok)throw Object.assign(Error(j.error||j.message||'Не удалось выполнить действие'),{status:r.status});return j}
 let applicationScreen = null;
