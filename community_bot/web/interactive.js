@@ -53,9 +53,6 @@ window.NoraInteractive = (() => {
     sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M19 5l-2 2 M7 17l-2 2",
     eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6",
     arrow: "M5 19 19 5 M5 5h14v14",
-    sea: "M3 13h18l-3 6H6z M7 13V8h10v5 M12 8V4h5 M2 21c2 0 2-1 4-1s2 1 4 1 2-1 4-1 2 1 4 1 2-1 4-1",
-    durak: "M8 3h10v15H8z M6 6H4v15h10v-1 M13 7l2 3-2 3-2-3z",
-    world: "M4 21V8l4-4h8l4 4v13 M8 21V10l2-2h4l2 2v11 M2 21h20",
     locked: "M7 10V7a5 5 0 0 1 10 0v3 M6 10h12v10H6z M12 14v2",
     unlocked: "M7 10V7a5 5 0 0 1 9.4-2.4 M6 10h12v10H6z M12 14v2",
     refresh: "M20 9a8 8 0 1 0 0 6 M20 4v5h-5",
@@ -104,16 +101,55 @@ window.NoraInteractive = (() => {
   function interactiveScreen() {
     return `${mafiaInvites()}<p class="eyebrow">У каждого свой способ</p><h1>Побудем<br><em>вместе</em></h1><p class="sub play-intro">Заботься, играй, собирай своих.</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">Твой маленький спутник</span><strong><em>Питомец</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + " ждёт тебя. Забота, походы и маленькие находки." : "Заведи питомца. Заботься о нём и отправляй за приключениями."}</span><span class="play-hero-cta">${data.pet ? "К питомцу" : "Знакомиться"} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">Один или всей компанией</span><strong><em>Игры</em></strong><span class="play-hero-description">У города есть тайны.<br>У ракеты — свой предел.</span><span class="play-hero-cta">Выбрать игру ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>Свои всегда рядом<small>Добавляй друзей и зови играть</small></span>${icon("arrow")}</button>`;
   }
-  const games = { durak: "Дурак", sea: "Морской бой", mafia: "Мафия", rocket: "Ракетка", world: "Мир Норы" };
+  const games = { durak: "Дурак", sea: "Морской бой", mafia: "Мафия", rocket: "Ракетка" };
   const gameChoices = ["durak", "sea", "mafia", "rocket"];
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
 
   function gameShortcut(game, create = false) {
-    const attributes = game === "world" ? 'id="nora-game-open"'
-      : create ? `data-create-match="${game}"` : `data-tab="${game}"`;
-    return `<button type="button" class="game-shortcut game-${game}" ${attributes}>
-      ${icon(game)}<span>${games[game]}</span>
+    const action = create ? "data-create-match" : "data-tab";
+    return `<button type="button" class="game-shortcut game-${game}" ${action}="${game}">
+      <span class="game-shortcut-name">${games[game]}</span>
+    </button>`;
+  }
+
+  function noraGameCard() {
+    return `<button type="button" class="nora-game-card" id="nora-game-open" aria-label="НОРА — войти в воксельный мир">
+      <svg class="nora-game-card-art" viewBox="0 0 320 280" fill="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+        <path fill="#152b2a" d="M0 174h24v-18h32v18h24v-40h24v-20h32v20h24v-16h32v16h24v-34h24v-16h24v16h24v36h32v144H0z"/>
+        <path fill="#213d36" d="M0 214h36v-16h48v12h32v-22h56v12h40v-24h48v20h60v84H0z"/>
+        <path fill="#40523d" d="m76 222 152-30 92 36-140 44z"/>
+        <path fill="#23332c" d="m76 222 104 34v24L76 246z"/>
+        <path fill="#334137" d="m180 256 140-28v24l-140 28z"/>
+        <path fill="#6a6a50" d="m154 228 62-14 22 8-62 16z"/>
+        <path fill="#8c8060" d="m176 238 62-16 14 6-62 16z"/>
+        <path fill="#48554b" d="M154 210V110h12V86h16V74h64v12h16v24h12v100h-24v-96h-12V98h-48v16h-12v96z"/>
+        <path fill="#819080" d="M154 110h12v-8h16V86h64v12h-56v16h-24v96h-12z"/>
+        <path fill="#303f39" d="M246 86h12v24h16v100h-12v-92h-12V98h-4z"/>
+        <path fill="#a89970" d="M166 132h12v8h-12zm0 38h12v8h-12zm84-36h12v8h-12zm0 38h12v8h-12zm-44-86h16v8h-16z"/>
+        <g class="nora-card-portal">
+          <path fill="#681e39" d="M178 210V114h12V98h48v16h12v96z"/>
+          <path fill="#b72e50" d="M184 210v-90h12v-16h36v16h12v90z"/>
+          <path fill="#eb4e65" d="M190 210v-84h12v-16h24v16h12v84z"/>
+          <path fill="#ff9b8e" d="M196 206v-68h6v-12h12v-10h6v20h-12v70z"/>
+          <path fill="#ffcdad" d="M202 148h6v32h-6zm0 42h6v10h-6z"/>
+        </g>
+        <path fill="#977b4b" d="M126 196h8v24h-8zm160-8h8v24h-8z"/>
+        <path fill="#e69c56" d="M122 192h16v12h-16zm160-8h16v12h-16z"/>
+        <path fill="#ffd69a" d="M126 184h8v16h-8zm160-8h8v16h-8z"/>
+        <path fill="#39493b" d="M90 110h8v114h-8zm208-24h8v130h-8z"/>
+        <path fill="#24473a" d="M62 144h16v-24h12V96h12v24h12v24h16v24h-16v18H78v-18H62zm212-22h12V98h12V74h12v24h10v68h-34v-20h-12z"/>
+        <path fill="#346048" d="M78 144h12v-24h12v24h12v12H78zm208-22h12V98h12v36h-24z"/>
+        <path fill="#5a7d55" d="M106 216h12v-8h16v8h8v12h-36zm158-2h12v-8h16v8h12v12h-40z"/>
+        <path fill="#69858a" d="m272 48 8-16 8 16-8 20z"/>
+        <path fill="#a5d4ca" d="m272 48 8-16v36z"/>
+        <g class="nora-card-sparks" fill="#f4cd8d">
+          <path d="M142 72h4v4h-4zm116-20h4v4h-4zm-22 8h4v4h-4zm-98 102h4v4h-4zm142-12h4v4h-4zm-46 84h4v4h-4z"/>
+          <path d="M116 96h4v-4h4v4h4v4h-4v4h-4v-4h-4zm168-12h4v-4h4v4h4v4h-4v4h-4v-4h-4z"/>
+        </g>
+      </svg>
+      <span class="nora-game-logo">N<span>O</span>RA</span>
+      <span class="nora-game-card-bottom"><span>Войти в Нору</span><b aria-hidden="true">→</b></span>
     </button>`;
   }
 
@@ -128,7 +164,7 @@ window.NoraInteractive = (() => {
       : game === "sea" && action === "join" ? `data-sea-join="${roomId}" data-locked="${locked ? 1 : 0}"`
       : game === "mafia" && action === "join" ? `data-mafia-join="${roomId}"`
       : game === "durak" ? `data-durak-lobby="${roomId}"` : "";
-    const contents = `<span class="lobby-icon">${icon(game)}</span>
+    const contents = `<span class="lobby-icon" aria-hidden="true"></span>
       <span class="lobby-copy"><b>${esc(title)}</b><small>${name}${detail ? " · " + detail : ""}${room.stake ? " · " + number(room.stake) + " 🍪" : ""}</small></span>
       <span class="lobby-count"><span class="sr-only">${room.players} из ${room.capacity} игроков</span><span aria-hidden="true">${room.players}/${room.capacity}</span></span>
       <span class="lobby-lock" role="img" aria-label="${locked ? "Закрытое лобби" : "Открытое лобби"}">${icon(locked ? "locked" : "unlocked")}</span>`;
@@ -178,14 +214,17 @@ window.NoraInteractive = (() => {
 
   function gamesScreen() {
     return `<div class="games-heading nora-page-heading">${back(parent("games"), "Коммьюнити")}<h1>Игры</h1></div>
+      <div class="games-catalog">
+        <div class="game-shortcuts" role="group" aria-label="Выбор игры">${gameChoices.map(game => gameShortcut(game)).join("")}</div>
+        ${noraGameCard()}
+      </div>
       <section class="game-lobbies" aria-labelledby="game-lobbies-title">
         <div class="game-lobbies-head"><h2 id="game-lobbies-title">Лобби</h2>
           <button type="button" id="games-refresh" class="lobby-tool" aria-label="Обновить лобби">${icon("refresh")}</button>
           <button type="button" id="games-create" class="lobby-tool" aria-label="Создать матч" aria-haspopup="dialog">${icon("plus")}</button>
         </div>
         <div id="games-lobbies">${lobbyList()}</div>
-      </section>
-      <div class="game-shortcuts" role="group" aria-label="Выбор игры">${[...gameChoices, "world"].map(game => gameShortcut(game)).join("")}</div>`;
+      </section>`;
   }
 
   function chooseMatch() {
