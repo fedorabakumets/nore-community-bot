@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from community_bot.nora import strip_address
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, VIDEO_MAX_MB, level, moscow_now
@@ -27,6 +27,7 @@ WORKERS = 2
 QUEUE_SIZE = 6
 DOWNLOAD_SECONDS = 75
 SEND_SECONDS = 45
+MUSIC_UNAVAILABLE = 3
 CACHE_SIZE = 1000
 COMMAND = re.compile(r"https?://\S+", re.IGNORECASE)
 PLATFORMS = {
@@ -76,6 +77,17 @@ def canonical_url(raw):
         return None
     canonical_host = "www.tiktok.com" if domain == "tiktok.com" else domain
     return f"https://{canonical_host}{parts.path.rstrip('/')}/"
+
+
+def music_alternative():
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Открыть @yndxapp", url="https://t.me/yndxapp"),
+    ]])
+
+
+async def music_failure(message, text):
+    with standalone_rich_message(), bot_publication():
+        await message.reply(text, reply_markup=music_alternative())
 
 
 async def send_media(message, music, media, **options):
@@ -226,16 +238,28 @@ class PetVideoQueue:
                 try:
                     status = await download(job.url, path)
                 except TimeoutError:
-                    await job.message.reply("Источник отвечает слишком долго. Попробуй чуть позже.")
+                    if music:
+                        logger.info("Yandex Music download timed out")
+                        await music_failure(job.message, "Яндекс Музыка не ответила вовремя. Попробуй чуть позже.")
+                    else:
+                        await job.message.reply("Источник отвечает слишком долго. Попробуй чуть позже.")
                     return
                 if status == 2 or (path.is_file() and path.stat().st_size > max_mb * 1024 * 1024):
                     await job.message.reply(f"Файл превышает {max_mb} МБ.")
                     return
                 if status or not path.is_file() or not path.stat().st_size:
-                    await job.message.reply(
-                        "Яндекс Музыка не отдала доступный файл для этого трека." if music else
-                        "Источник не отдал доступное видео в MP4. Проверь, открыта ли публикация.",
-                    )
+                    if music:
+                        logger.info("Yandex Music download ended without audio (worker status %d)", status)
+                        reason = (
+                            "Яндекс Музыка не предоставила доступный MP3 для этого трека."
+                            if status == MUSIC_UNAVAILABLE else
+                            "Не удалось загрузить файл с Яндекс Музыки. Попробуй чуть позже."
+                        )
+                        await music_failure(job.message, reason)
+                    else:
+                        await job.message.reply(
+                            "Источник не отдал доступное видео в MP4. Проверь, открыта ли публикация.",
+                        )
                     return
                 error = await self._delivery_error(job.user_id, kind)
                 if error:
@@ -249,6 +273,7 @@ class PetVideoQueue:
                     options = {"title": f"{title} (фрагмент)" if preview else title, "performer": meta["artist"]}
                     if preview:
                         options["caption"] = "Яндекс Музыка предоставила только фрагмент трека."
+                        options["reply_markup"] = music_alternative()
                 try:
                     sent = await send_media(job.message, music, FSInputFile(path), **options)
                 except (TelegramBadRequest, TimeoutError):

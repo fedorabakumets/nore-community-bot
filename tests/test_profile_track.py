@@ -1,13 +1,14 @@
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiogram.types import Audio, Chat, Message, User
 from aiohttp import web
+from yt_dlp.networking.exceptions import HTTPError, TransportError
 
-from community_bot import pet_video
+from community_bot import pet_video, pet_video_worker
 from community_bot.database import Database
 from community_bot.group_profile import send_group_profile
 from community_bot.profile_track import get_track, save_from_message, track_command
@@ -105,5 +106,51 @@ async def test_music_shares_download_queue_and_labels_preview(tmp_path, monkeypa
     await queue._deliver(queue.queue.get_nowait())
     assert message.reply_audio.await_args.kwargs["title"] == "Темп (фрагмент)"
     assert "только фрагмент" in message.reply_audio.await_args.kwargs["caption"]
+    keyboard = message.reply_audio.await_args.kwargs["reply_markup"]
+    assert keyboard.inline_keyboard[0][0].url == "https://t.me/yndxapp"
     assert await db.fetchone("SELECT 1 FROM pet_video_deliveries WHERE user_id=8")
     assert not await db.fetchone("SELECT 1 FROM pet_video_cache WHERE url=?", (url,))
+
+
+
+def test_music_retries_other_api_host_and_keeps_audio_without_catalog_metadata(tmp_path, monkeypatch):
+    track_id = "150607144"
+    primary, alternate = pet_video_worker.MUSIC_APIS
+    info = "https://storage.mds.yandex.net/download-info/fixture?format=json"
+    media = b"ID3" + b"a" * 16
+    urls = []
+
+    def json_response(_, url):
+        urls.append(url)
+        if f"https://{primary}/" in url or url == f"https://{alternate}/tracks/{track_id}":
+            raise TransportError("test timeout")
+        if url == f"https://{alternate}/tracks/{track_id}/download-info":
+            return {"result": [{"codec": "mp3", "preview": True, "downloadInfoUrl": info}]}
+        assert url == info
+        return {"host": "mds.storage.yandex.net", "path": "/rmusic/fixture", "ts": "ab12", "s": "test"}
+
+    def save_media(_, source, path, limit, *, mp3=False):
+        assert source["url"].startswith("https://mds.storage.yandex.net/get-mp3/")
+        assert source["url"].endswith(f"?track-id={track_id}")
+        assert mp3 and len(media) <= limit
+        path.write_bytes(media)
+
+    monkeypatch.setattr(pet_video_worker, "music_json", json_response)
+    monkeypatch.setattr(pet_video_worker, "stream", save_media)
+    path = tmp_path / "track.mp3"
+    pet_video_worker.download_music(f"https://music.yandex.ru/album/41732563/track/{track_id}/", path)
+    assert urls[:2] == [f"https://{host}/tracks/{track_id}/download-info" for host in (primary, alternate)]
+    assert path.read_bytes() == media
+    assert json.loads(path.with_suffix(".json").read_text(encoding="utf-8")) == {
+        "title": "Трек Яндекс Музыки", "artist": "", "preview": True,
+    }
+
+
+def test_music_stops_on_explicit_access_denial(monkeypatch):
+    response = SimpleNamespace(status=403, reason="Forbidden", close=Mock())
+    read = Mock(side_effect=HTTPError(response))
+    monkeypatch.setattr(pet_video_worker, "music_json", read)
+    with pytest.raises(pet_video_worker.MusicUnavailable):
+        pet_video_worker.music_variants(object(), "150607144")
+    read.assert_called_once()
+    response.close.assert_called_once()

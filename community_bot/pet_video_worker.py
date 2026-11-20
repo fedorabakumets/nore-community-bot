@@ -14,10 +14,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from yt_dlp import YoutubeDL
 from yt_dlp.networking import Request
 from yt_dlp.networking import _urllib as transport
-from yt_dlp.networking.exceptions import RequestError
+from yt_dlp.networking.exceptions import HTTPError, RequestError
 from yt_dlp.utils import DownloadError
 
 from community_bot.pet_progress import VIDEO_MAX_MB
+from community_bot.pet_video import MUSIC_UNAVAILABLE
 from community_bot.profile_track import MAX_TRACK_MB
 
 MAX_BYTES = VIDEO_MAX_MB * 1024 * 1024
@@ -26,7 +27,8 @@ CDN_DOMAINS = (
     "ibytedtos.com", "ibyteimg.com", "muscdn.com", "instagram.com", "cdninstagram.com", "fbcdn.net",
     "facebook.com", "youtube.com", "youtubei.googleapis.com", "googlevideo.com", "ytimg.com",
 )
-MUSIC_API = "api.music.yandex.ru"
+MUSIC_APIS = ("api.music.yandex.ru", "api.music.yandex.net")
+MUSIC_UNAVAILABLE_HTTP = {401, 403, 404, 451}
 MUSIC_CDN = ("storage.mds.yandex.net", "mds.storage.yandex.net")
 _getaddrinfo = socket.getaddrinfo
 
@@ -36,7 +38,7 @@ def check_url(url):
     host = parts.hostname or ""
     if (parts.scheme != "https" or parts.username is not None or parts.password is not None
             or parts.port not in (None, 443)
-            or not (host in ("music.yandex.ru", MUSIC_API, *MUSIC_CDN)
+            or not (host in ("music.yandex.ru", *MUSIC_APIS, *MUSIC_CDN)
                     or any(host == root or host.endswith("." + root) for root in CDN_DOMAINS))):
         raise ValueError("Video host is not allowed")
 
@@ -68,6 +70,10 @@ class SafeYoutubeDL(YoutubeDL):
 
 
 class VideoTooLarge(Exception):
+    pass
+
+
+class MusicUnavailable(Exception):
     pass
 
 
@@ -110,7 +116,50 @@ def download(url, path):
 
 def music_json(ydl, url):
     with ydl.urlopen(url) as response:
-        return json.loads(response.read(1024 * 1024 + 1))
+        limit = 1024 * 1024
+        body = response.read(limit + 1)
+        if len(body) > limit:
+            raise ValueError("Oversized music response")
+        result = json.loads(body)
+        if not isinstance(result, dict):
+            raise ValueError("Unexpected music response")
+        return result
+
+
+def music_variants(ydl, track_id):
+    for host in MUSIC_APIS:
+        api = f"https://{host}/tracks/{track_id}"
+        try:
+            variants = music_json(ydl, f"{api}/download-info").get("result")
+            if not isinstance(variants, list):
+                raise ValueError("Invalid music variant list")
+        except HTTPError as error:
+            error.close()
+            if error.status in MUSIC_UNAVAILABLE_HTTP:
+                raise MusicUnavailable from None
+            if error.status < 500 or host == MUSIC_APIS[-1]:
+                raise
+        except (RequestError, OSError, ValueError):
+            if host == MUSIC_APIS[-1]:
+                raise
+        else:
+            return api, variants
+
+
+def music_metadata(ydl, api):
+    try:
+        track = music_json(ydl, api)["result"][0]
+        name = " ".join(track["title"].split())
+        version = " ".join((track.get("version") or "").split())
+        if version:
+            name = f"{name} ({version})"
+        artist = ", ".join(item["name"] for item in track.get("artists", []) if item.get("name"))
+        return name[:120] or "Трек Яндекс Музыки", " ".join(artist.split())[:120]
+    except HTTPError as error:
+        error.close()
+    except (RequestError, OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
+        pass
+    return "Трек Яндекс Музыки", ""
 
 
 def download_music(url, path):
@@ -118,16 +167,16 @@ def download_music(url, path):
     if urlsplit(url).hostname != "music.yandex.ru" or not match:
         raise ValueError("Not a Yandex Music track")
     track_id = match[1]
-    api = f"https://{MUSIC_API}/tracks/{track_id}"
-    options = {"quiet": True, "proxy": "", "socket_timeout": 12, "cachedir": False, "remote_components": []}
+    options = {"quiet": True, "proxy": "", "socket_timeout": 8, "cachedir": False, "remote_components": []}
     with SafeYoutubeDL(options) as ydl:
-        variants = music_json(ydl, f"{api}/download-info")["result"]
+        api, variants = music_variants(ydl, track_id)
         candidate = min(
-            (item for item in variants if item.get("codec") == "mp3" and type(item.get("preview")) is bool),
+            (item for item in variants if isinstance(item, dict) and item.get("codec") == "mp3"
+             and type(item.get("preview")) is bool and item.get("downloadInfoUrl")),
             key=lambda item: (item["preview"], -int(item.get("bitrateInKbps") or 0)), default=None,
         )
         if not candidate:
-            raise ValueError("No MP3 variant")
+            raise MusicUnavailable
         source = urlsplit(candidate["downloadInfoUrl"])
         if source.hostname not in MUSIC_CDN:
             raise ValueError("Unrecognized music CDN")
@@ -141,12 +190,10 @@ def download_music(url, path):
         # Public CDN signature used by the upstream Yandex Music extractor.
         key = hashlib.md5(("XGRlBW9FXlekgbPrRHuSiA" + resource[1:] + salt).encode()).hexdigest()
         media = f"https://{host}/get-mp3/{key}/{stamp}{resource}?track-id={track_id}"
-        track = music_json(ydl, api)["result"][0]
-        title = " ".join(track["title"].split())[:120] or "Трек Яндекс Музыки"
-        artist = ", ".join(item["name"] for item in track.get("artists", []) if item.get("name"))
         stream(ydl, {"url": media}, path, MAX_TRACK_MB * 1024 * 1024, mp3=True)
+        title, artist = music_metadata(ydl, api)
         path.with_suffix(".json").write_text(json.dumps({
-            "title": title, "artist": " ".join(artist.split())[:120], "preview": candidate["preview"],
+            "title": title, "artist": artist, "preview": candidate["preview"],
         }), encoding="utf-8")
 
 
@@ -188,6 +235,13 @@ def main():
             download(url, path)
     except VideoTooLarge:
         return 2
+    except MusicUnavailable:
+        return MUSIC_UNAVAILABLE
+    except HTTPError as error:
+        error.close()
+        if path.suffix == ".mp3" and error.status in MUSIC_UNAVAILABLE_HTTP:
+            return MUSIC_UNAVAILABLE
+        return 1
     except (
         DownloadError, RequestError, OSError, ValueError, KeyError, TypeError, IndexError, subprocess.SubprocessError,
     ):
