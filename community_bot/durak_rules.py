@@ -96,7 +96,13 @@ def _throwers(game):
 def _thrower(game):
     if len(game["table"]) >= _cap(game):
         return None
-    return next(iter(_throwers(game)), None)
+    ranks = _table_ranks(game)
+    return next((p for p in _throwers(game) if _relaxed(game, p)
+                 or any(c // 4 in ranks for c in game["hands"][p])), None)
+
+
+def _relaxed(game, seat):
+    return game["config"]["honesty"] == "cheats" and seat not in game["marked"]
 
 
 def turn(game):
@@ -130,7 +136,7 @@ def moves(game, seat):
     if not _in(game, seat) or game["phase"] in ("review", "finished"):
         return result
     phase, hand, table = game["phase"], game["hands"][seat], game["table"]
-    relaxed = game["config"]["honesty"] == "cheats" and seat not in game["marked"]
+    relaxed = _relaxed(game, seat)
     if phase == "attack" and seat == game["attacker"]:
         return [{"kind": "attack", "card": c} for c in hand]
     if phase == "defend" and seat == game["defender"]:
@@ -200,6 +206,8 @@ def play(game, seat, move):
     kind = move["kind"]
     if kind == "challenge" and move.keys() == {"kind", "card"}:
         _challenge(game, seat, move["card"])
+        if game["phase"] == "throw":
+            advance(game)
         return
     if move not in moves(game, seat):
         raise ValueError("Сейчас такой ход невозможен")
@@ -212,6 +220,8 @@ def play(game, seat, move):
         game["passed"] = []
     game["events"].append({"seat": seat, **move})
     if kind == "attack":
+        if not game["table"]:
+            game["events"][-1]["opening"] = True
         game["table"].append([card, None])
     elif kind == "defend":
         game["table"][move["slot"]][1] = card
@@ -226,7 +236,7 @@ def play(game, seat, move):
         game["passed"] = []
     elif kind == "pass":
         game["passed"].append(seat)
-    _advance(game)
+    advance(game)
 
 
 def _play_many(game, seat, move):
@@ -253,11 +263,20 @@ def _classic_end(game):
             all(not game["hands"][p] for p in _ring(game, 0) if p != game["defender"]))
 
 
-def _advance(game):
+def forced_take(game):
+    """The defender cannot play a card and no attacker can add one."""
+    if game["phase"] != "defend" or game["config"]["honesty"] != "fair" or _thrower(game) is not None:
+        return False
+    return not any(move["kind"] in ("defend", "transfer") for move in moves(game, game["defender"]))
+
+
+def advance(game):
     if not _classic_end(game):
         if not game["taking"] and any(d is None for _, d in game["table"]):
             game["phase"] = "defend"
-            return
+            if not forced_take(game):
+                return
+            game["taking"] = True
         if _thrower(game) is not None:
             game["phase"] = "throw"
             return
@@ -287,7 +306,7 @@ def close_round(game):
         game["discard"].extend(cards)
         game["last_discard"] = cards
         game["first_beaten"] = True
-        game["events"].append({"kind": "discard", "cards": cards})
+        game["events"].append({"kind": "discard", "seat": defender, "cards": cards})
     game["table"] = []
     game["journal"] = []
     order = [p for p in _ring(game, attacker) if p != defender] + [defender]

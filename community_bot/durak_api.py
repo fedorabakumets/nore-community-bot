@@ -13,6 +13,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiohttp import web
 
+from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
 from community_bot.friends_api import deliver_notice
@@ -67,7 +68,8 @@ async def menu(db, uid, *, before=None):
             next_page = f"{public[39]['created']}_{public[39]['id']}"
         return {"open": [_summary(row) for row in public[:40]], "next": next_page,
                 "mine": [_summary(row) for row in mine], "invites": valid_invites, "balance": balance,
-                "restriction": restriction, "active": active["room"] if active else None}
+                "restriction": restriction, "active": active["room"] if active else None,
+                "items": items.view(await items.equipped(conn, uid))}
 
 
 async def lobbies(db, uid):
@@ -110,6 +112,8 @@ async def snapshot(db, rid, uid, after=-1):
             invited = [x["uid"] for x in await rooms.rows(conn, "SELECT uid FROM durak_invites WHERE room=?", (rid,))]
         now = time.time()
         game = rules.public_view(g, own["seat"]) if g else None
+        mask = g.get("table_cosmetics", 0) if g else (await items.equipped(conn, r["host"]) or 0)
+        witch = bool((await items.equipped(conn, uid) or 0) & items.PARTS["witch"]) if g else False
         if game and rooms.can_undo(r, own["seat"], now):
             game["moves"].append({"kind": "undo"})
             game["undo_until"] = min(g["undo"]["deadline"], r["deadline"])
@@ -117,7 +121,8 @@ async def snapshot(db, rid, uid, after=-1):
                 "deadline": r["deadline"], "now": now, "own": own["seat"],
                 "members": public, "invited": invited,
                 "code": r["code"] if r["status"] == "waiting" else None, "result": r["result"],
-                "game": game,
+                "game": game, "cosmetics": {"felt": bool(mask & items.PARTS["felt"]),
+                                             "back": bool(mask & items.PARTS["back"]), "witch": witch},
                 "frames": [f for f in r["frames"] if f["rev"] > after] if after >= 0 else []}
 
 
@@ -183,6 +188,10 @@ class Updates:
                     WHEN json_extract(config,'$.speed')='fast' THEN ? ELSE ? END)),rev=rev+1
                 WHERE status='playing'
             """, (now, rules.REVIEW_SECONDS, rules.SECONDS["fast"], rules.SECONDS["normal"]))
+            active = await rooms.rows(conn, "SELECT * FROM durak_rooms WHERE status='playing' "
+                                      "AND json_extract(game,'$.phase') IN ('throw','defend')")
+            for row in active:
+                await rooms.resume_forced_round(conn, rooms._load(row), now)
             await conn.commit()
 
     async def tick(self, db, now=None):
@@ -316,7 +325,7 @@ async def reaction(request, db, uid, body):
     rid, emoji, nonce = body.get("room"), body.get("emoji_id"), body.get("nonce")
     if (body.keys() != {"action", "room", "emoji_id", "nonce"}
             or not isinstance(rid, str) or not re.fullmatch(r"[a-f0-9]{16}", rid)
-            or type(emoji) is not int or not 1 <= emoji <= 25
+            or type(emoji) is not int or not 1 <= emoji <= 34
             or not isinstance(nonce, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{16,64}", nonce)):
         raise ValueError("Выбери эмоцию за своим столом")
     member = await db.fetchone(
@@ -324,6 +333,10 @@ async def reaction(request, db, uid, body):
         "WHERE m.room=? AND m.uid=? AND r.status='playing'", (rid, uid))
     if not member:
         return web.json_response({"error": "Ты не участвуешь в текущей партии"}, status=403)
+    if emoji > 25:
+        async with db.connect() as conn:
+            if not ((await items.equipped(conn, uid) or 0) & items.PARTS["witch"]):
+                raise ValueError("Включи эмоции ведьмы в разделе «Предметы»")
     now = time.time()
     try:
         event = request.app["durak_updates"].react(rid, uid, emoji, nonce, now)
@@ -334,10 +347,17 @@ async def reaction(request, db, uid, body):
     return web.json_response({"reactions": [event], "reaction_now": now})
 
 
+async def change_items(request):
+    if request.content_length and request.content_length > 4096:
+        raise ValueError("Слишком большая команда")
+    return web.json_response(await items.change(request.app["db"], request["actor"]["id"], await request.json()))
+
+
 def register(app):
     app["durak_updates"] = Updates()
     app.router.add_get("/api/durak", index)
     app.router.add_post("/api/durak/preview", preview)
     app.router.add_post("/api/durak/action", action)
+    app.router.add_post("/api/durak/items", change_items)
     app.router.add_get("/api/durak/room/{rid}", table)
     app.router.add_get("/api/durak/room/{rid}/link", link)

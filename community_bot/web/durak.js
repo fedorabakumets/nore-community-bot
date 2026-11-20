@@ -19,6 +19,7 @@ let challenge=false, batch=null, pending=false, message='', watch, refreshTimer,
 let clockDeadline=0, undoDeadline=0, menuRequest=0, activeParam='', lastTap, handledPointer;
 let reactionCursor='', reactionReady=0, reactionPending=false, sortRank, hints, showReactions;
 let lobbyEntry=false;
+let itemsPending=false;
 const landing=new Map(), receivedReactions=new Map();
 let reactionsPreloaded=false;
 const store = (name,value) => { try { if(value===null)sessionStorage.removeItem(key+name);else sessionStorage.setItem(key+name,value); } catch {} };
@@ -52,24 +53,82 @@ function row(r,kind){
     <span><strong>Стол ${esc(r.host_name)}</strong><small>${esc(blurb(c))}</small><small>${timeLabel}${denied?' · '+esc(denied):''}</small></span>
     <span class="dk-price">${chips(c.stake)}<small>${own?'Открыть':c.private?'Приватный':'Войти'} ›</small></span></button>`;
 }
+function playerHeader(){
+  const u=data.user,name=u.profile_name||u.telegram_name||'Участник';
+  return `<div class="dk-player-strip">${portrait({id:u.user_id,name,avatar:data.has_avatar&&!data.avatar_video})}
+    <strong>${esc(name)}</strong><span>${chips(list?.balance??u.cookies)}</span>
+    ${actionButton('topup','+','dk-topup','aria-label="Пополнить печеньки"')}</div>`;
+}
 function menuScreen(){
-  const mine=mode==='mine';
-  const items=mine?list?.mine:list?.open;
-  const quick=mine?null:list?.open.filter(r=>!why(r.config)).sort((a,b)=>
+  return `${header('Дурак','Игры')}${playerHeader()}<div class="dk-main-menu">
+    ${actionButton('quick','<span aria-hidden="true">▷</span>Быстрая игра','dk-main-quick')}
+    <button type="button" data-tab="friends"><span aria-hidden="true">♧</span>Друзья</button>
+    ${actionButton('items','<span aria-hidden="true">♢</span>Предметы','')}
+    ${actionButton('create-form','<span aria-hidden="true">＋</span>Создать комнату','dk-main-create')}</div>`;
+}
+function quickScreen(){
+  const open=list?.open||[];
+  const quick=open.filter(r=>!why(r.config)).sort((a,b)=>
     a.config.stake-b.config.stake||(a.config.players-a.count)-(b.config.players-b.count))[0];
-  return `${header('Дурак','Игры')}<div class="dk-cover">
-      <div><span class="dk-caption">Карточный стол</span><strong>Сыграем?</strong>
-      <small>${list?`В кошельке ${chips(list.balance)}`:'Загружаем кошелёк…'}</small></div>
-      <span class="dk-cover-fan" aria-hidden="true">${[43,46,51].map(c=>cardImg(c)).join('')}</span></div>
-    <div class="dk-tools">${actionButton('create-form','Создать стол','dk-primary')}${actionButton('code-form','Приватные игры')}</div>
-    <div class="dk-tabs" aria-label="Список игр">${actionButton('open','Открытые игры','',`aria-pressed="${!mine}"`)}
-    ${actionButton('mine',`Мои игры${list?.invites.length?' · '+list.invites.length:''}`,'',`aria-pressed="${mine}"`)}</div>
-    ${mine&&list?.invites.length?`<h2>Приглашения</h2>${list.invites.map(r=>row(r,'invite')).join('')}`:''}
-    ${!mine&&list?.active?`${actionButton('current','Вернуться за свой стол','dk-current')}`:''}
-    ${quick?actionButton('quick',`Быстрый вход за ${chips(quick.config.stake)}<small>${esc(blurb(quick.config))} · ${quick.count}/${quick.config.players}</small>`,'dk-current',`data-id="${quick.id}"`):''}
-    <div class="dk-rooms">${items?.length?items.map(r=>row(r,mine?'mine':'open')).join(''):
-      `<p class="dk-empty">${!list?'Ищем столы…':mine?'Здесь появятся твои партии.':'Свободных столов пока нет. Можно создать свой.'}</p>`}</div>
-    ${!mine&&list?.next?actionButton('more','Ещё столы'):''}`;
+  return `${header('Быстрая игра','Дурак')}
+    ${quick?actionButton('preview',`Подобрать стол · ${chips(quick.config.stake)}`,'dk-primary dk-wide',`data-id="${quick.id}"`):''}
+    <div class="dk-tools">${actionButton('code-form','Войти по коду')}${actionButton('mine','Мои игры')}</div>
+    ${open.map(r=>row(r,'open')).join('')||`<p class="dk-empty">${list?'Свободных столов пока нет.':'Ищем столы…'}</p>`}
+    ${list?.next?actionButton('more','Ещё столы'):''}`;
+}
+const itemParts=[
+  ['felt','Фон стола','night-felt.webp'],
+  ['back','Рубашка карт','night-back.webp'],
+  ['witch','Эмоции ведьмы','witch-1.webp'],
+];
+function itemsScreen(){
+  const items=list?.items;
+  return `${header('Предметы','Дурак')}${playerHeader()}${!items?'<p class="dk-empty">Загружаем предметы…</p>':`
+    <section class="dk-pack">
+      <img class="dk-pack-banner" src="/durak-cards/night-felt.webp" alt="">
+      <div class="dk-pack-title"><h2>Ночной комплект</h2><strong>${items.owned?'Куплен':chips(items.price)}</strong></div>
+      ${itemParts.map(([key,label,art])=>`<label class="dk-pack-part">
+        <img src="/durak-cards/${art}" alt=""><strong>${label}</strong>
+        ${items.owned?`<input type="checkbox" data-item="${key}" ${items.equipped[key]?'checked':''} ${itemsPending?'disabled':''}>`:''}</label>`).join('')}
+      <div class="dk-tools">
+        ${items.owned?'':actionButton('buy-night','Купить за '+chips(items.price),'dk-primary',itemsPending?'disabled':'')}
+        ${actionButton('gift-night','Подарить','dk-secondary',itemsPending?'disabled':'')}
+      </div>
+    </section>`}`;
+}
+function giftScreen(){
+  return `${header('Подарить комплект','Предметы')}<div class="dk-panel">
+    ${friends?.map(m=>`<div class="dk-friend">${portrait(m)}<strong>${esc(m.name)}</strong>
+      ${actionButton('gift-friend',chips(list.items.price),'dk-small',`data-id="${m.id}" ${itemsPending?'disabled':''}`)}</div>`).join('')
+      ||`<p class="dk-muted">${friends?'Пока нет друзей, которым можно подарить комплект.':'Загружаем друзей…'}</p>`}</div>`;
+}
+async function saveItems(fields){
+  if(itemsPending)return;
+  const gen=generation;
+  menuRequest++;itemsPending=true;paint();
+  try{
+    const {balance,...items}=await api('durak/items',fields);
+    if(gen!==generation||!host)return;
+    list={...list,balance,items};data.user.cookies=balance;
+    if(fields.action==='buy'){
+      if(fields.recipient){change('items');toast('Комплект подарен')}
+      else toast('Ночной комплект включён');
+    }
+  }catch(err){if(gen===generation){message=err.message;toast(message)}}
+  finally{
+    itemsPending=false;
+    if(host&&['items','gift'].includes(mode))paint();
+  }
+}
+function confirmPack(friend){
+  const price=chips(list.items.price);
+  sheet(`<h2>${friend?'Подарить комплект':'Купить комплект'}</h2>
+    <p>«Ночной комплект» ${friend?'для '+esc(friend.name)+' ':''}за <b>${price}</b></p>
+    <button type="button" class="primary" id="dk-confirm-pack">Подтвердить</button>`);
+  document.getElementById('dk-confirm-pack').onclick=()=>{
+    document.getElementById('sheet').close();
+    saveItems({action:'buy',...(friend?{recipient:friend.id}:{})});
+  };
 }
 function group(name,title){
   const options = Array.isArray(labels[name])?labels[name].map(v=>[v,v]):Object.entries(labels[name]);
@@ -137,7 +196,9 @@ const emotions = ['Привет рукой','Безразличие','Громк
   'Дразнит','В очках','Воздушный поцелуй','Удивление','Неловкость',
   'Грусть','Вызов картой','Нейтральное выражение','Скепсис','Озадаченность',
   'Хитрая улыбка','Злость','Злорадство','Фейспалм','Задумчивость'];
-const reactionImage = id => '/durak-cards/reaction-'+id+'.webp';
+const witchEmotions=['Подмигнула','Хохочет','Удивилась','Надулась','Ухмыляется','Воздушный поцелуй',
+  'Смутилась','Разозлилась','Аплодирует'];
+const reactionImage = id => '/durak-cards/'+(id>25?'witch-'+(id-25):'reaction-'+id)+'.webp';
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const randomNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('');
 const storedPreference = name => {try{return localStorage.getItem(key+name)}catch{return null}};
@@ -191,7 +252,10 @@ function chair(m,g){
     'aria-label="Эмоции" aria-controls="dk-reaction-panel" aria-expanded="false"'):portrait(m);
   return `<div class="dk-chair ${own?'dk-own':''} ${g.turn===m.seat?'is-turn':''} ${role==='Защита'?'is-defender':''}"
     data-seat="${m.seat}" data-player="${m.id}">
-    <span class="dk-seat-emblem">${avatar}<i class="dk-direction" aria-label="Защищается">▸</i><span class="dk-bubble" aria-hidden="true"></span></span>
+    <span class="dk-seat-emblem">${avatar}<svg class="dk-seat-ring" viewBox="0 0 44 44" aria-hidden="true">
+      <circle cx="22" cy="22" r="20"/><circle cx="22" cy="22" r="20" pathLength="100"/></svg>
+      <i class="dk-direction" aria-label="Защищается">▸</i><span class="dk-bubble" aria-hidden="true"></span>
+      <span class="dk-say" role="status"></span></span>
     <span class="dk-seat-detail"><strong>${own?'Ты':esc(m.name)}</strong><small>${backs}${own?'':count}${role?`<span>${role}</span>`:''}${g.marked.includes(m.seat)?'<b title="Уличён в шулерстве">!</b>':''}</small></span>
   </div>`;
 }
@@ -202,7 +266,9 @@ function gameScreen(){
   const ownHand=[...g.hand].sort(sortRank?(a,b)=>a-b:bySuit);
   const rows=Math.ceil(ownHand.length/12)||1,columns=Math.ceil(ownHand.length/rows)||1;
   const cardMoves=new Set(batch?groupCandidates(g,batch[0]):g.moves.map(m=>m.card));
-  return `<header class="dk-gamehead">${actionButton('back','← Столы','dk-back')}<strong>${labels.variant[c.variant]}</strong><span>${chips(c.stake)}</span>
+  const exit=lobbyEntry?'<button type="button" class="dk-back" data-tab="games">← Столы</button>':
+    actionButton('back','← Столы','dk-back');
+  return `<header class="dk-gamehead">${exit}<strong>${labels.variant[c.variant]}</strong><span>${chips(c.stake)}</span>
     ${actionButton('game-info','⋯','dk-back','aria-label="Настройки и правила стола"')}</header>
     <div class="dk-felt" data-players="${room.members.length}">
       <div class="dk-opponents">${others.map(m=>chair(m,g)).join('')}</div>
@@ -289,6 +355,8 @@ function paint(){
   host.setAttribute('aria-live',playing?'off':'polite');
   host.dataset.revision=room?String(room.rev):'';
   host.dataset.mode=mode;
+  host.toggleAttribute('data-night-felt',playing&&Boolean(room.cosmetics?.felt));
+  host.toggleAttribute('data-night-back',playing&&Boolean(room.cosmetics?.back));
   if(playing){
     const html=gameScreen();
     if(host.querySelector('.dk-felt'))syncScene(html);
@@ -309,7 +377,12 @@ function paint(){
     return;
   }
   let html;
-  if(mode==='open'||mode==='mine')html=menuScreen();
+  if(mode==='open')html=menuScreen();
+  if(mode==='quick')html=quickScreen();
+  if(mode==='mine')html=`${header('Мои игры','Дурак')}${list?.invites.map(r=>row(r,'invite')).join('')||''}
+    ${list?.mine.map(r=>row(r,'mine')).join('')||'<p class="dk-empty">Здесь появятся твои партии.</p>'}`;
+  if(mode==='items')html=itemsScreen();
+  if(mode==='gift')html=giftScreen();
   if(mode==='create')html=createScreen();
   if(mode==='code')html=privateScreen();
   if(mode==='preview'&&target)html=confirmJoin();
@@ -336,7 +409,11 @@ function resultScreen(){
 function clockTick(){
   const el=host?.querySelector('#dk-clock');
   if(!el)return;
-  const left=Math.max(0,Math.ceil(clockDeadline-performance.now()/1000));
+  const remaining=Math.max(0,clockDeadline-performance.now()/1000);
+  const left=Math.ceil(remaining);
+  const portion=Math.min(1,remaining/seconds(room.config));
+  host.style.setProperty('--dk-time',String(portion*100));
+  host.style.setProperty('--dk-time-color',`hsl(${portion*130} 85% ${portion>0.45?57:62}%)`);
   if(el.textContent!==left+' с')el.textContent=left+' с';
   el.classList.toggle('urgent',left<=5);
   const undo=host.querySelector('[data-undo]');
@@ -376,7 +453,7 @@ async function readMenu(append=false){
     if(append)fresh.open=[...list.open,...fresh.open.filter(r=>!list.open.some(o=>o.id===r.id))];
     list=fresh;message='';paint();
   }catch(err){if(gen===generation)errorText(err)}
-  if(gen===generation&&seq===menuRequest&&['open','mine'].includes(mode)&&!document.hidden){
+  if(gen===generation&&seq===menuRequest&&['open','quick','mine'].includes(mode)&&!document.hidden){
     clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>readMenu(),12000);
   }
 }
@@ -385,6 +462,22 @@ function flash(event){
   const text=event.kind==='challenge'?`${nameAt(event.marked)} уличён в шулерстве`:
     ['surrender','timeout'].includes(event.kind)?`${nameAt(event.seat)} ${event.kind==='timeout'?'пропустил ход':'сдался'}`:'';
   if(text)toast(text);
+}
+function showActions(frames){
+  const labels={attack:'Подкинул',defend:'Отбиваю',transfer:'Перевод',pass:'Пас',take:'Беру',
+    discard:'Бито',collect:'Беру',challenge:'Проверяю',undo:'Отмена',surrender:'Сдаюсь',timeout:'Время вышло'};
+  const recent=new Map();
+  for(const frame of frames)for(const event of frame.events){
+    if(event.seat!=null&&labels[event.kind])recent.set(event.seat,
+      event.kind==='attack'&&event.opening?'Хожу':labels[event.kind]);
+  }
+  for(const [seat,text] of recent){
+    const node=host.querySelector(`[data-seat="${seat}"] .dk-say`);
+    if(!node)continue;
+    const badge=document.createElement('b');
+    badge.textContent=text;node.replaceChildren(badge);
+    setTimeout(()=>badge.remove(),2300);
+  }
 }
 function box(el){
   if(!el)return null;
@@ -510,7 +603,7 @@ function setReactionPanel(open,focus=false){
   if(open&&!panel.children.length){
     panel.innerHTML=`<div class="dk-reaction-head"><strong>Эмоции</strong>
       ${actionButton('reactions-close','×','dk-back','aria-label="Закрыть эмоции"')}</div>
-      <div class="dk-emotions">${emotions.map((name,i)=>actionButton('react',`<img src="${reactionImage(i+1)}" alt="" width="96" height="96">`,'',
+      <div class="dk-emotions">${(room.cosmetics?.witch?[...emotions,...witchEmotions]:emotions).map((name,i)=>actionButton('react',`<img src="${reactionImage(i+1)}" alt="" width="96" height="96">`,'',
         `data-emoji="${i+1}" aria-label="${name}" title="${name}"`)).join('')}</div>
       <label><input type="checkbox" id="dk-react-show" ${showReactions?'checked':''}> Показывать эмоции в игре</label>`;
   }
@@ -546,11 +639,12 @@ function accept(view,old){
   }
   if(was==='playing'&&room.status!=='playing'&&host.querySelector('.dk-felt')&&!reducedMotion()){
     const gen=generation;host.dataset.revision=String(view.rev);
+    showActions(frames);
     motion(frames,before,before,previous);
     host.querySelector('.dk-felt').animate([{opacity:1},{opacity:.35}],{delay:90,duration:260,fill:'forwards'});
     setTimeout(()=>{if(gen===generation)paint()},490);
   }else{
-    paint();motion(frames,before,positions(),previous);syncReactions(view);
+    paint();showActions(frames);motion(frames,before,positions(),previous);syncReactions(view);
   }
   if(!['playing','waiting'].includes(room.status))clearInterval(timer);
 }
@@ -676,7 +770,9 @@ function back(){
   if(!host)return false;
   if(host.querySelector('#dk-reaction-panel:not([hidden])')){setReactionPanel(false,true);return true}
   if(mode==='friends'&&room){openRoom(room.id);return true}
-  if(!lobbyEntry&&!['open','mine'].includes(mode)){change('open');readMenu();return true}
+  if(mode==='gift'){change('items');readMenu();return true}
+  if(mode==='items'){change('open');readMenu();return true}
+  if(!lobbyEntry&&mode!=='open'){change('open');readMenu();return true}
   return false;
 }
 function pick(card,quick=false){
@@ -723,14 +819,33 @@ function click(e){
   }
   const act=b.dataset.dk;
   switch(act){
-    case 'open':case 'mine':change(act);readMenu();break;
+    case 'mine':change(act);readMenu();break;
     case 'more':readMenu(true);break;
     case 'back':back();break;
     case 'create-form':case 'new-private':config={...initial,private:act==='new-private'};change('create');readMenu();break;
     case 'again':config={...room.config};room=null;change('create');readMenu();break;
     case 'create':send('create',{config:{...config}},id=>{room=null;openRoom(id)});break;
-    case 'current':if(list?.active)openRoom(list.active);break;
-    case 'quick':send('join',{room:b.dataset.id},id=>{room=null;openRoom(id)});break;
+    case 'quick':{
+      if(list?.active){openRoom(list.active);break}
+      change('quick');readMenu();break;
+    }
+    case 'topup':
+      if(data.cookie_shop?.enabled)window.NoraShop?.openCategory('__cookies');
+      else errorText(Error('Пополнение временно недоступно'));
+      break;
+    case 'items':change('items');readMenu();break;
+    case 'buy-night':confirmPack();break;
+    case 'gift-night':{
+      friends=null;change('gift');const gen=generation;
+      api('friends').then(result=>{if(gen===generation){friends=result.friends;paint()}})
+        .catch(err=>{if(gen===generation)errorText(err)});
+      break;
+    }
+    case 'gift-friend':{
+      const friend=friends?.find(m=>m.id===Number(b.dataset.id));
+      if(friend)confirmPack(friend);
+      break;
+    }
     case 'resume':openRoom(b.dataset.id);break;
     case 'code-form':inviteCode='';change('code');readMenu();break;
     case 'preview':target=[...list.open,...list.invites].find(r=>r.id===b.dataset.id);inviteCode='';if(target)change('preview');break;
@@ -782,6 +897,9 @@ function click(e){
   }
 }
 function input(e){
+  if(e.target.dataset.item){
+    saveItems({action:'equip',part:e.target.dataset.item,enabled:e.target.checked});return;
+  }
   if(e.target.id==='dk-react-show'){
     showReactions=e.target.checked;savePreference('reactions',String(showReactions));
     if(!showReactions)host.querySelectorAll('.dk-bubble').forEach(b=>b.replaceChildren());
@@ -919,7 +1037,7 @@ function visibility(){
   cancelDrag();stopNetwork();
   if(document.hidden)return;
   if(room&&['room','friends'].includes(mode)){openRoom(room.id,mode==='friends')}
-  else if(['open','mine','create','preview'].includes(mode))readMenu();
+  else if(['open','quick','mine','create','preview','items','gift'].includes(mode))readMenu();
 }
 function keydown(e){
   if(e.key==='Escape'&&host.querySelector('#dk-reaction-panel:not([hidden])')){

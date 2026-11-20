@@ -127,11 +127,8 @@ def test_neighbours_take_throw_and_first_successful_bout_limit():
     play(g, 0, "attack", 16)
     play(g, 1, "take")
     play(g, 0, "attack", 17)
-    play(g, 0, "pass")
     assert game.turn(g) == 2 and not game.moves(g, 3)
     play(g, 2, "attack", 18)
-    play(g, 0, "pass")
-    play(g, 2, "pass")
     assert {16, 17, 18} <= set(g["hands"][1]) and g["attacker"] == 2
     assert not g["first_beaten"]
 
@@ -143,6 +140,13 @@ def test_last_attack_and_optional_draw(ending, reason):
     if ending == "draw":
         play(g, 1, "defend", 20, 0)
     assert g["result"]["reason"] == reason
+
+
+def test_forced_take_without_defence_or_additions():
+    g = position([[16, 40], [21, 25]])
+    play(g, 0, "attack", 16)
+    assert g["phase"] == "attack" and g["round"] == 2
+    assert 16 in g["hands"][1] and g["events"][-1]["kind"] == "collect"
 
 
 def test_cheat_rewind_suffix_mark_and_false_accusation():
@@ -179,7 +183,6 @@ def test_refill_order_and_view_secrecy():
     g = position([[16, 42], [20, 46], [22, 41]], stock=[4, 5, 6, 7, 8, 9])
     play(g, 0, "attack", 16)
     play(g, 1, "defend", 20, 0)
-    play(g, 0, "pass")
     play(g, 2, "pass")
     assert g["hands"] == [[4, 5, 6, 7, 8, 42], [46], [9, 22, 41]]
     v = game.public_view(g, 0)

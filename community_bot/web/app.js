@@ -148,10 +148,10 @@ function mountDurak() {
   if (window.NoraDurak) { window.NoraDurak.mount(root); return; }
   if (!document.getElementById('durak-style')) {
     const css = document.createElement('link');
-    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=2';
+    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=night';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=lobbies').catch(() => {
+  durakModule ??= import('/durak.js?v=night').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');

@@ -10,6 +10,7 @@ import secrets
 import time
 from datetime import UTC, datetime
 
+from community_bot import durak_items as items
 from community_bot import durak_rules as rules
 from community_bot.database import Database
 from community_bot.friends_api import accepted_in_connection, inbox_in_connection
@@ -157,6 +158,8 @@ async def _join(conn, r, uid, code, now):
     await _seat(conn, r, uid, free, now)
     if len(occupied) + 1 == seats:
         r.update(status="playing", game=rules.deal(r["config"]), expires=now + GAME_TTL)
+        r["game"]["table_cosmetics"] = (await items.equipped(conn, r["host"]) or 0) & (
+            items.PARTS["felt"] | items.PARTS["back"])
         r["deadline"] = now + rules.SECONDS[r["config"]["speed"]]
         await conn.execute("DELETE FROM durak_invites WHERE room=?", (r["id"],))
 
@@ -292,12 +295,26 @@ async def _expire(conn, r, now):
         if phase == "review":
             g["events"] = []
             rules.close_round(g)
+        elif (phase == "throw" and previous is None) or rules.forced_take(g):
+            g["events"] = []
+            rules.advance(g)
         else:
             rules.forfeit(g, previous, "timeout")
             await conn.execute("UPDATE durak_members SET active=0 WHERE room=? AND seat=?", (r["id"], previous))
         await _update_turn(conn, r, now, previous, phase)
     await _save(conn, r, now)
     return True
+
+
+async def resume_forced_round(conn, r, now):
+    g = r["game"]
+    phase, player = g["phase"], rules.turn(g)
+    if now >= r["expires"] or not ((phase == "throw" and player is None) or rules.forced_take(g)):
+        return
+    g["events"] = []
+    rules.advance(g)
+    await _update_turn(conn, r, now, player, phase)
+    await _save(conn, r, now)
 
 
 async def expire(db, rid, now):

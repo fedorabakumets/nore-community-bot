@@ -43,7 +43,8 @@ async function shot(page,name){
 }
 async function enterOpen(p,uid,id){
   await openGame(p,uid);
-  const card=p.locator(`[data-dk=preview][data-id="${id}"]`);
+  await clicks(p,'quick');
+  const card=p.locator(`.dk-room[data-dk=preview][data-id="${id}"]`);
   await card.click();await clicks(p,'join');await ready(p,'[data-dk=friends],.dk-gamehead');
 }
 async function hitPoint(page,selector){
@@ -291,7 +292,11 @@ async function main(){
     await a.locator('#app [data-tab=games]').first().click();
     await ready(a,'[data-tab=durak]');
     assert.equal(await a.evaluate(()=>performance.getEntriesByType('resource').filter(e=>/\/durak(?:\.js|\.css|-cards\/)/.test(e.name)).length),0);
-    await a.locator('[data-tab=durak]').click();await clicks(a,'create-form');
+    await a.locator('[data-tab=durak]').click();
+    await ready(a,'.dk-main-menu');
+    assert.equal(await a.locator('.dk-main-menu button').count(),4);
+    assert.equal(await a.locator('#nav').isVisible(),false);
+    await clicks(a,'create-form');
     for(const size of [{width:320,height:568},{width:390,height:844},{width:412,height:915}]){
       await a.setViewportSize(size);await bounds(a);
     }
@@ -309,9 +314,9 @@ async function main(){
     assert.equal(param,'nora_d_'+waiting.code);
     await clicks(a,'friends');await a.locator('[data-dk=invite][data-id="2"]').click();
     await ready(a,'[data-dk=invite][data-id="2"]:disabled');
-    await openGame(b,2);await clicks(b,'mine');await ready(b,`[data-kind=invite][data-id="${privateId}"]`);
+    await openGame(b,2);await clicks(b,'quick');await clicks(b,'mine');await ready(b,`[data-kind=invite][data-id="${privateId}"]`);
     await b.goto(base+'/?player=2&view=notices');await b.locator('[data-durak-invite]').click();await ready(b,'[data-dk=join]');
-    await openGame(players[2],3);await clicks(players[2],'code-form');await players[2].locator('#dk-code').fill(waiting.code);
+    await openGame(players[2],3);await clicks(players[2],'quick');await clicks(players[2],'code-form');await players[2].locator('#dk-code').fill(waiting.code);
     await players[2].locator('#dk-code-form button').click();await ready(players[2],'[data-dk=join]');
     await openGame(b,2,'&startapp='+param);
     await ready(b,'[data-dk=join]');
@@ -348,8 +353,7 @@ async function main(){
     for(let i=1;i<players.length;i++){
       const p=players[i];
       if(i<=2)await clicks(p,'back');
-      if(i===5){await openGame(p,i+1);await p.locator(`[data-dk=quick][data-id="${six}"]`).click();await ready(p,'.dk-gamehead')}
-      else await enterOpen(p,i+1,six);
+      await enterOpen(p,i+1,six);
     }
     await Promise.all(players.map(p=>ready(p,'.dk-gamehead')));
     for(const p of players){
