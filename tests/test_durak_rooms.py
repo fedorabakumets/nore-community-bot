@@ -55,12 +55,15 @@ async def friends(db, a, b):
 async def test_night_pack_gift_and_duplicate_charge(db):
     await friends(db, 1, 2)
     with pytest.raises(ValueError, match="друга"):
-        await items.change(db, 1, {"action": "buy", "recipient": 3})
-    gift = {"action": "buy", "recipient": 2}
+        await items.change(db, 1, {"action": "buy", "recipient": 3, "price": 149})
+    gift = {"action": "buy", "recipient": 2, "price": 149}
+    with pytest.raises(ValueError, match="Цена комплекта изменилась"):
+        await items.change(db, 1, {**gift, "price": 90})
+    assert await balance(db, 1) == 1000
     attempts = await asyncio.gather(items.change(db, 1, gift), items.change(db, 1, gift),
                                     return_exceptions=True)
     assert sum(isinstance(result, ValueError) for result in attempts) == 1
-    assert await balance(db, 1) == 910 and await balance(db, 2) == 1000
+    assert await balance(db, 1) == 851 and await balance(db, 2) == 1000
     assert len(await db.fetchall("SELECT id FROM notify_inbox WHERE user_id=2")) == 1
     state = (await api.menu(db, 2))["items"]
     assert state["owned"] and not any(state["equipped"].values())
@@ -69,7 +72,7 @@ async def test_night_pack_gift_and_duplicate_charge(db):
 
 
 async def test_host_table_cosmetics_shared_and_fixed_at_deal(db):
-    await items.change(db, 1, {"action": "buy"})
+    await items.change(db, 1, {"action": "buy", "price": 149})
     await items.change(db, 1, {"action": "equip", "part": "felt", "enabled": False})
     rid = await run(db, 1, "create", config={})
     await run(db, 2, "join", room=rid)

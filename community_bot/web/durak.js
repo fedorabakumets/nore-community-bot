@@ -79,7 +79,7 @@ function quickScreen(){
 const itemParts=[
   ['felt','Фон стола','night-felt.webp'],
   ['back','Рубашка карт','night-back.webp'],
-  ['witch','Эмоции ведьмы','witch-1.webp'],
+  ['witch','Эмоции ведьмы','witch-1.webp?v=2'],
 ];
 function itemsScreen(){
   const items=list?.items;
@@ -121,13 +121,13 @@ async function saveItems(fields){
   }
 }
 function confirmPack(friend){
-  const price=chips(list.items.price);
+  const price=list.items.price;
   sheet(`<h2>${friend?'Подарить комплект':'Купить комплект'}</h2>
-    <p>«Ночной комплект» ${friend?'для '+esc(friend.name)+' ':''}за <b>${price}</b></p>
+    <p>«Ночной комплект» ${friend?'для '+esc(friend.name)+' ':''}за <b>${chips(price)}</b></p>
     <button type="button" class="primary" id="dk-confirm-pack">Подтвердить</button>`);
   document.getElementById('dk-confirm-pack').onclick=()=>{
     document.getElementById('sheet').close();
-    saveItems({action:'buy',...(friend?{recipient:friend.id}:{})});
+    saveItems({action:'buy',price,...(friend?{recipient:friend.id}:{})});
   };
 }
 function group(name,title){
@@ -198,7 +198,7 @@ const emotions = ['Привет рукой','Безразличие','Громк
   'Хитрая улыбка','Злость','Злорадство','Фейспалм','Задумчивость'];
 const witchEmotions=['Подмигнула','Хохочет','Удивилась','Надулась','Ухмыляется','Воздушный поцелуй',
   'Смутилась','Разозлилась','Аплодирует'];
-const reactionImage = id => '/durak-cards/'+(id>25?'witch-'+(id-25):'reaction-'+id)+'.webp';
+const reactionImage = id => '/durak-cards/'+(id>25?'witch-'+(id-25)+'.webp?v=2':'reaction-'+id+'.webp');
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const randomNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('');
 const storedPreference = name => {try{return localStorage.getItem(key+name)}catch{return null}};

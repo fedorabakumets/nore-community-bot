@@ -151,7 +151,7 @@ function mountDurak() {
     css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=night';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=night').catch(() => {
+  durakModule ??= import('/durak.js?v=night-witch').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');

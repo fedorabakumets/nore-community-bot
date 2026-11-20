@@ -7,7 +7,7 @@ from community_bot.database import Database
 from community_bot.friends_api import accepted_in_connection, inbox_in_connection
 from community_bot.sea_api import _one as one
 
-PRICE = 90
+PRICE = 149
 PARTS = {"felt": 1, "back": 2, "witch": 4}
 ALL = sum(PARTS.values())
 
@@ -41,6 +41,8 @@ async def change(db, uid, body):
             await conn.execute("UPDATE bot_state SET value=? WHERE key=?",
                                (mask | bit if enabled else mask & ~bit, key(uid)))
         elif action == "buy":
+            if type(body.get("price")) is not int or body["price"] != PRICE:
+                raise ValueError("Цена комплекта изменилась. Открой «Предметы» заново")
             target = body.get("recipient", uid)
             if (type(target) is not int or not 0 < target < 2**63
                     or (target != uid and not await accepted_in_connection(conn, uid, target))):
