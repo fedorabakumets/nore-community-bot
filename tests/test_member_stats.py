@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
@@ -7,7 +7,16 @@ from zoneinfo import ZoneInfo
 import pytest
 from aiogram import Bot, Dispatcher, Router
 from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
-from aiogram.types import CallbackQuery, MessageEntity, RichMessage, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    MessageEntity,
+    MessageReactionUpdated,
+    ReactionTypeCustomEmoji,
+    ReactionTypeEmoji,
+    RichMessage,
+    Update,
+    User,
+)
 from test_nora_commands_release import message
 from test_studio_rsvp import TelegramSession
 
@@ -16,6 +25,7 @@ from community_bot.command_registry import apply_rows, get_command, restore_defa
 from community_bot.config import load_settings
 from community_bot.database import Database
 from community_bot.ephemeral import GroupHousekeepingMiddleware
+from community_bot.reaction_authors import ReactionAuthors
 from community_bot.routers import group, life, member_stats, nora
 
 
@@ -33,11 +43,15 @@ async def env(tmp_path, monkeypatch):
     await db.ensure_user(9, "boris", "Борис")
     restore_defaults()
     dispatcher = Dispatcher()
+    reaction_authors = ReactionAuthors()
+    dispatcher["reaction_authors"] = reaction_authors
+    dispatcher.message.outer_middleware(reaction_authors)
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     for source in (nora.router, life.router, member_stats.router, group.router, nora.assistant_router):
         router = Router()
         router.message.handlers.extend(source.message.handlers)
         router.callback_query.handlers.extend(source.callback_query.handlers)
+        router.message_reaction.handlers.extend(source.message_reaction.handlers)
         dispatcher.include_router(router)
     session = TelegramSession()
     bot = Bot(settings.bot_token, session=session)
@@ -50,8 +64,10 @@ async def env(tmp_path, monkeypatch):
         session.calls.clear()
         if isinstance(text, CallbackQuery):
             update = Update(update_id=calls, callback_query=text)
+        elif isinstance(text, MessageReactionUpdated):
+            update = Update(update_id=calls, message_reaction=text)
         else:
-            event = message(text, **kwargs).model_copy(update={"message_id": calls + 1000})
+            event = message(text, **kwargs).model_copy(update={"message_id": calls + 1000, "date": datetime.now(UTC)})
             update = Update(update_id=calls, message=event)
         await dispatcher.feed_update(bot, update, db=db, settings=settings)
         return session.calls.copy()
@@ -186,6 +202,8 @@ async def test_likes_share_daily_quota_and_purchase_restores_it(env, monkeypatch
     await db.ensure_user(7, username="test_user", telegram_name="Участник")
     await db.add_cookies(7, 50, "test", "")
     await db.execute("UPDATE users SET reputation=80 WHERE user_id=7")
+    day = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    await db.set_bot_state(f"{social_likes.DAY_PREFIX}7", day.isoformat())
     calls = await dispatch("Поцеловать поцеловать @alice")
     post = next(call.text for call in calls if isinstance(call, SendMessage))
     assert post == '❤️ <a href="tg://user?id=7">@Участник 7</a> лайкнул <a href="tg://user?id=8">@alice</a>'
@@ -194,23 +212,25 @@ async def test_likes_share_daily_quota_and_purchase_restores_it(env, monkeypatch
     sent = message(None, uid=123456)
     button = CallbackQuery(id="like", chat_instance="test", data="gprofile:like:9", message=sent,
                            from_user=User(id=7, first_name="Участник", is_bot=False))
+    assert any(isinstance(call, SendMessage) for call in await dispatch(button))
     assert not any(isinstance(call, SendMessage) for call in await dispatch(button))
-    assert await social_likes.count(db, 9) == 0
+    assert await social_likes.count(db, 9) == 1
 
-    day = datetime.now(ZoneInfo("Europe/Moscow")).date()
     await db.apply_reputation(7, 8, 0, day)
     await db.execute("UPDATE shop_items SET title=? WHERE sku='reset_limits'", ("Сброс лимитов репутации",))
     assert (await db.get_shop_item("reset_limits"))["title"] == "Сброс всех лимитов"
     ok, _ = await db.buy_item(7, "reset_limits", 15)
     assert ok and await db.reputation_actions_today(7, day) == 0
     assert any(isinstance(call, SendMessage) for call in await dispatch(button))
-    assert await social_likes.count(db, 9) == await social_likes.count(db, 8) == 1
+    assert await social_likes.count(db, 9) == 2 and await social_likes.count(db, 8) == 1
 
     next_day = datetime(day.year, day.month, day.day, tzinfo=ZoneInfo("Europe/Moscow"))
     monkeypatch.setattr(social_likes, "datetime", SimpleNamespace(now=lambda tz: next_day + timedelta(days=1)))
-    results = await asyncio.gather(social_likes.give(db, 7, 8), social_likes.give(db, 7, 9))
-    assert results.count(None) == 1
-    assert await social_likes.count(db, 8) + await social_likes.count(db, 9) == 3
+    results = await asyncio.gather(
+        social_likes.give(db, 7, 8), social_likes.give(db, 7, 8), social_likes.give(db, 7, 9),
+    )
+    assert results.count(None) == 2
+    assert await social_likes.count(db, 8) + await social_likes.count(db, 9) == 5
 
 
 async def test_social_verbs_share_reputation_rules(env):
@@ -222,3 +242,59 @@ async def test_social_verbs_share_reputation_rules(env):
         assert (await db.get_user(8))["reputation"] == value
     await dispatch("Обнять @alice")
     assert (await db.get_user(8))["reputation"] == 55
+
+
+@pytest.mark.parametrize("text", ["ЛАЙК лАйК", "нОРа,ЛайК", "НОРА лайк", "лайк, НОРА", "🩵💜", "😘", "😽", "👩🏿‍❤️‍💋‍👩"])
+async def test_like_aliases_and_emoji_replies(env, text):
+    db, dispatch, _ = env
+    await dispatch(text, reply_to_message=message("Оригинал", uid=8))
+    assert await social_likes.count(db, 8) == 1
+
+
+async def test_native_reactions_and_textual_thumbs(env):
+    db, dispatch, _ = env
+    author = User(id=7, first_name="Реагирующий", is_bot=False)
+    await db.ensure_user(author.id, telegram_name=author.full_name)
+    await db.execute("UPDATE users SET reputation=CASE WHEN user_id=7 THEN 80 ELSE 60 END")
+    await dispatch("Тема", uid=8, message_thread_id=42, is_topic_message=True)
+    event = MessageReactionUpdated(chat=message(None).chat, message_id=1001, user=author,
+                                   date=datetime.now(UTC), old_reaction=[], new_reaction=[])
+
+    async def react(old, new, source=event):
+        return await dispatch(source.model_copy(update={
+            "old_reaction": [ReactionTypeEmoji(emoji=emoji) for emoji in old],
+            "new_reaction": [ReactionTypeEmoji(emoji=emoji) for emoji in new],
+        }))
+
+    calls = await react([], ["💜", "👍"])
+    posts = [call for call in calls if isinstance(call, SendMessage)]
+    assert len(posts) == 2 and all(call.message_thread_id == 42 for call in posts)
+    assert all(call.reply_parameters.message_id == 1001 for call in posts)
+    assert await social_likes.count(db, 8) == 1 and (await db.get_user(8))["reputation"] == 65
+    assert not await react(["💜", "👍"], ["💙", "👍"])
+    assert not await react(["💙", "👍"], [])
+    assert not await react([], ["👍"], source=event.model_copy(update={"message_id": 999}))
+    await react([], ["👎"])
+    assert (await db.get_user(8))["reputation"] == 60
+    await dispatch("👍🏽", reply_to_message=message("Оригинал", uid=8))
+    assert (await db.get_user(8))["reputation"] == 65
+    await dispatch("👎", reply_to_message=message("Оригинал", uid=8))
+    assert (await db.get_user(8))["reputation"] == 65
+
+
+async def test_native_custom_kiss_can_use_known_author_from_archive(env, monkeypatch):
+    db, dispatch, _ = env
+    chat = message(None).chat
+    now = datetime.now(UTC)
+    await db.save_community_message(chat.id, 201, 8, "Анна", "Оригинал", now.isoformat(), 19)
+    resolve = AsyncMock(return_value=[SimpleNamespace(custom_emoji_id="123", emoji="😽")])
+    monkeypatch.setattr(Bot, "get_custom_emoji_stickers", resolve)
+    event = MessageReactionUpdated(
+        chat=chat, message_id=201, user=User(id=7, first_name="Отправитель", is_bot=False), date=now,
+        old_reaction=[], new_reaction=[ReactionTypeCustomEmoji(custom_emoji_id="123")],
+    )
+    calls = await dispatch(event)
+    assert any(call.message_thread_id == 19 for call in calls if isinstance(call, SendMessage))
+    assert not await dispatch(event)
+    assert await social_likes.count(db, 8) == 1
+    resolve.assert_awaited_once_with(["123"])

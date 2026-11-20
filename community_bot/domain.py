@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 
+from community_bot.social_emoji import interaction_emoji
+
 ROLE_LEVELS = {"member": 0, "moderator": 40, "admin": 70, "owner": 100}
 ROLE_LABELS = {
     "member": "участник",
@@ -14,7 +16,7 @@ ROLE_LABELS = {
 
 POSITIVE_SOCIAL_ACTIONS = {"обнять", "обнять обнять"}
 NEGATIVE_SOCIAL_ACTIONS = {"пнуть", "пнуть пнуть", "ударить", "ударить ударить"}
-LIKE_PHRASES = {"поцеловать", "поцеловать поцеловать"}
+LIKE_PHRASES = {"поцеловать", "поцеловать поцеловать", "лайк", "лайк лайк", "лайк нора", "лайк лайк нора"}
 
 POSITIVE_REPUTATION_PHRASES = POSITIVE_SOCIAL_ACTIONS | {
     "+",
@@ -82,7 +84,7 @@ def reputation_delta(text: str) -> int | None:
         return 5
     if phrase in NEGATIVE_REPUTATION_PHRASES:
         return -5
-    return None
+    return {"plus": 5, "minus": -5}.get(interaction_emoji(phrase))
 
 
 _DURATION_RE = re.compile(r"^(\d+)([mhdwмчдн])$", re.IGNORECASE)

@@ -26,6 +26,10 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     LinkPreviewOptions,
     Message,
+    MessageReactionUpdated,
+    ReplyParameters,
+    Update,
+    User,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -44,7 +48,6 @@ from community_bot.bot_identity import is_bot
 from community_bot.config import COOKIE_PAYMENT_MESSAGE_QR, COOKIE_PAYMENT_URL, Settings
 from community_bot.database import Database
 from community_bot.domain import (
-    LIKE_PHRASES,
     NEGATIVE_REPUTATION_PHRASES,
     POSITIVE_REPUTATION_PHRASES,
     cookies_phrase,
@@ -64,6 +67,8 @@ from community_bot.helpers import (
     display_name,
     effective_role,
     has_permission,
+    is_like_phrase,
+    like_interaction,
     rank_of_user,
     register_telegram_user,
     resolve_command_target,
@@ -100,6 +105,7 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
+from community_bot.reaction_authors import ReactionAuthors
 from community_bot.reply_rich import bot_publication
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
@@ -368,11 +374,15 @@ async def _give_like(db: Database, bot: Bot, actor, target) -> str | None:
     return await social_likes.give(db, actor.id, int(target["user_id"]))
 
 
-async def _announce_like(message: Message, actor, target) -> None:
+def _like_notice(actor: User, target) -> str:
     sender = user_link(actor.id, "@" + (actor.username or actor.full_name))
     recipient = user_link(int(target["user_id"]), "@" + (target.get("username") or display_name(target)))
+    return f"❤️ {sender} лайкнул {recipient}"
+
+
+async def _announce_like(message: Message, actor: User, target) -> None:
     with bot_publication(), keep_in_chat():
-        await message.answer(f"❤️ {sender} лайкнул {recipient}", parse_mode="HTML")
+        await message.answer(_like_notice(actor, target), parse_mode="HTML")
 
 
 async def _can_manage_target(
@@ -1855,15 +1865,22 @@ async def confirm_transfer(callback: CallbackQuery, db: Database, settings: Sett
 
 
 @router.message(
-    F.text, F.reply_to_message | F.text.contains("@") | F.entities, F.chat.type.in_({"group", "supergroup"}),
+    F.text, F.reply_to_message | F.text.contains("@") | F.entities | F.text.func(is_like_phrase),
+    F.chat.type.in_({"group", "supergroup"}),
 )
 async def group_reply_actions(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     addressed = strip_command_address(message.text or "")
     amount = transfer_amount(addressed) if addressed is not None and message.reply_to_message else None
-    interaction = targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES | LIKE_PHRASES)
+    like = like_interaction(message)
+    interaction = like or targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES)
+    if not interaction and message.reply_to_message and reputation_delta(message.text or "") is not None:
+        interaction = (message.text or "", None)
     if amount is None and interaction is None:
+        if is_like_phrase(message.text or ""):
+            await message.answer("Напиши «Лайк» ответом на сообщение участника или отправь «Нора, лайк @имя».")
+            return
         raise SkipHandler
-    if not message.from_user:
+    if not message.from_user or message.from_user.is_bot or message.sender_chat:
         return
     if amount is not None:
         target = await resolve_reply_target(message, db)
@@ -1879,7 +1896,7 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         if mention is not None:
             await message.reply("Не нашла участника по @имени. Попробуйте ответить на его сообщение.")
         return
-    if phrase in LIKE_PHRASES:
+    if like:
         if settings.community_chat_id and message.chat.id != settings.community_chat_id:
             return
         error = await _give_like(db, bot, message.from_user, target)
@@ -1890,10 +1907,16 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         return
     delta = reputation_delta(phrase)
     assert delta is not None
-    actor = await register_telegram_user(db, message.from_user)
-    if await is_bot(db, target):
-        await message.reply("Репутация ботов не меняется.")
-        return
+    await _apply_chat_reputation(db, bot, settings, message.chat.id, message.from_user, target, delta, message.reply,
+                                 phrase=phrase)
+
+
+async def _apply_chat_reputation(db, bot, settings, chat_id, user, target, delta, send, *, phrase=None) -> bool:
+    if await is_bot(db, target, getattr(bot, "id", None)):
+        if phrase:
+            await send("Репутация ботов не меняется.")
+        return False
+    actor = await register_telegram_user(db, user)
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()
     from community_bot.reputation import change_community_reputation
@@ -1902,18 +1925,19 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         db, settings, actor, target, delta, local_date
     )
     if not ok or new_value is None:
-        await message.reply(text)
-        return
+        if phrase:
+            await send(text)
+        return False
     if delta > 0:
         from community_bot.life import unlock
 
-        await unlock(db, message.from_user.id, "first_plus")
+        await unlock(db, user.id, "first_plus")
     response = _reputation_ping(settings, target, new_value, text, pet_line)
-    if lines := _SOCIAL_LINES.get(phrase.split()[0]):
+    if phrase and (lines := _SOCIAL_LINES.get(phrase.split()[0])):
         response = choice(lines).format(
-            actor=user_link(message.from_user.id, message.from_user.full_name), target=_target_display(target),
+            actor=user_link(user.id, user.full_name), target=_target_display(target),
         ) + "\n" + response
-    await message.reply(response, parse_mode="HTML")
+    await send(response, parse_mode="HTML")
     if pet_line and "перехватил" in pet_line:
         from community_bot.notify import emit
 
@@ -1921,10 +1945,44 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
     if new_value < settings.restricted_reputation_threshold:
         try:
             await bot.restrict_chat_member(
-                message.chat.id,
+                chat_id,
                 int(target["user_id"]),
                 permissions=ChatPermissions(can_send_messages=False),
             )
-            await message.answer("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
+            await send("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
         except TelegramBadRequest:
             pass
+    return True
+
+
+@router.message_reaction(F.chat.type.in_({"group", "supergroup"}))
+async def group_reaction(
+    event: MessageReactionUpdated, event_update: Update, db: Database, settings: Settings, bot: Bot,
+    reaction_authors: ReactionAuthors,
+) -> None:
+    user, chat_id = event.user, event.chat.id
+    if not user or user.is_bot or chat_id != settings.community_chat_id or not event.new_reaction:
+        return
+    if not reaction_authors.claim_update(event_update.update_id):
+        return
+    added = await reaction_authors.added(event, bot)
+    if not added:
+        return
+    target, thread = await reaction_authors.target(db, chat_id, event.message_id)
+    if not target or target["user_id"] == user.id or await needs_reapplication(db, user.id):
+        return
+    async def send(text, **kwargs):
+        return await bot.send_message(
+            chat_id, text, message_thread_id=thread,
+            reply_parameters=ReplyParameters(message_id=event.message_id, allow_sending_without_reply=True), **kwargs,
+        )
+
+    if "like" in added and await _give_like(db, bot, user, target) is None:
+        await send(_like_notice(user, target), parse_mode="HTML")
+    votes = added & {"plus", "minus"}
+    if len(votes) == 1:
+        vote = votes.pop()
+        if await _apply_chat_reputation(db, bot, settings, chat_id, user, target, 5 if vote == "plus" else -5, send):
+            from community_bot.pet_progress import record_telegram_event
+
+            await record_telegram_event(db, user.id, vote, (chat_id, f"reaction:{event_update.update_id}", event.date))

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from asyncio import Lock
 from datetime import date
+from pathlib import Path
+from weakref import WeakValueDictionary
 
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import reputation_tier
 from community_bot.helpers import is_immunity_active, pet_guard_reputation
+
+_ACTOR_LOCKS: WeakValueDictionary[tuple[Path, int], Lock] = WeakValueDictionary()
 
 
 async def change_community_reputation(
@@ -16,6 +21,12 @@ async def change_community_reputation(
     delta: int,
     local_date: date,
 ) -> tuple[bool, str, int | None, str | None]:
+    lock = _ACTOR_LOCKS.setdefault((db.path, int(actor["user_id"])), Lock())
+    async with lock:
+        return await _change_reputation(db, settings, actor, target, delta, local_date)
+
+
+async def _change_reputation(db, settings, actor, target, delta, local_date):
     actor_id = int(actor["user_id"])
     target_id = int(target["user_id"])
     if actor_id == target_id:

@@ -432,7 +432,11 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.update.outer_middleware(CommunityScopeMiddleware())
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     from community_bot.memory_capture import CommunityMemoryMiddleware
+    from community_bot.reaction_authors import ReactionAuthors
 
+    reaction_authors = ReactionAuthors()
+    dispatcher["reaction_authors"] = reaction_authors
+    dispatcher.message.outer_middleware(reaction_authors)
     memory_middleware = CommunityMemoryMiddleware()
     dispatcher.edited_message.outer_middleware(memory_middleware)
     reply_context = ReplyRichContextMiddleware()

@@ -12,10 +12,11 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import Message, User
 
-from community_bot.aliases import message_trigger, parse_trigger, split_target_argument
+from community_bot.aliases import message_trigger, parse_trigger, split_target_argument, strip_command_address
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import (
+    LIKE_PHRASES,
     NEGATIVE_REPUTATION_PHRASES,
     POSITIVE_REPUTATION_PHRASES,
     ROLE_LABELS,
@@ -31,6 +32,7 @@ from community_bot.permissions import (
 )
 from community_bot.profile_fields import profile_age
 from community_bot.profile_fill import profile_fill_percent
+from community_bot.social_emoji import interaction_emoji
 
 BOT_REPLY_TTL = 30.0
 logger = logging.getLogger(__name__)
@@ -446,8 +448,10 @@ async def resolve_command_target(
     return await resolve_reply_target(message, db), args.split(), False
 
 
-def targeted_phrase(message: Message, phrases: set[str]) -> tuple[str, str | User | None] | None:
-    text = (message.text or "").strip()
+def targeted_phrase(
+    message: Message, phrases: set[str], *, text: str | None = None,
+) -> tuple[str, str | User | None] | None:
+    text = (message.text or "").strip() if text is None else text
     normalized = normalize_phrase(text)
     if normalized in phrases and message.reply_to_message:
         return normalized, None
@@ -464,6 +468,8 @@ def targeted_phrase(message: Message, phrases: set[str]) -> tuple[str, str | Use
 
 
 def reputation_interaction(message: Message) -> tuple[int, str | User | None] | None:
+    if message.reply_to_message and (delta := reputation_delta(message.text or "")) is not None:
+        return delta, None
     action = targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES)
     if action is None:
         return None
@@ -471,3 +477,19 @@ def reputation_interaction(message: Message) -> tuple[int, str | User | None] | 
     delta = reputation_delta(phrase)
     assert delta is not None
     return delta, mention
+
+
+def _like_body(text: str) -> str:
+    body = strip_command_address(text) or text.strip()
+    return re.sub(r"^(лайк(?:\s+лайк)?)\s*,\s*(нора)(?=\s|$)", r"\1 \2", body, flags=re.I)
+
+
+def is_like_phrase(text: str) -> bool:
+    return normalize_phrase(_like_body(text)) in LIKE_PHRASES
+
+
+def like_interaction(message: Message) -> tuple[str, str | User | None] | None:
+    text = message.text or ""
+    if message.reply_to_message and interaction_emoji(text) == "like":
+        return "лайк", None
+    return targeted_phrase(message, LIKE_PHRASES, text=_like_body(text))

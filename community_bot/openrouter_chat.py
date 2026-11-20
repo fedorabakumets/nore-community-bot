@@ -27,6 +27,7 @@ from community_bot.chat_memory import (
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import STARTING_REPUTATION, reputation_delta, reputation_tier
+from community_bot.helpers import is_like_phrase, like_interaction
 from community_bot.nora import rule_intent, strip_address
 from community_bot.nora_knowledge import is_nora_topic, is_release_question, nora_knowledge
 from community_bot.nora_speech import TEXT_LIMIT, SpeechError, transcribe
@@ -128,6 +129,7 @@ class OpenRouterChat:
         if (
             not body or parse_trigger(text, include_disabled=True)
             or is_command_message(body, include_disabled=True)
+            or (message.chat.type != "private" and (is_like_phrase(text) or like_interaction(message)))
             or reputation_delta(body) is not None
             or (rule_intent(body) is not None and not (archive_question(body) or is_nora_topic(body)))
         ):
@@ -217,6 +219,7 @@ class OpenRouterChat:
             not body or parse_trigger(text, include_disabled=True)
             or parse_trigger(body, include_disabled=True)
             or is_command_message(body, include_disabled=True)
+            or (message.chat.type != "private" and (is_like_phrase(text) or like_interaction(message)))
             or reputation_delta(body) is not None or reputation_delta(text) is not None
         ):
             return None

@@ -1,5 +1,6 @@
 """Daily like allowance and received totals in the existing SQLite state store."""
 
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -25,13 +26,19 @@ async def give(db, actor_id: int, target_id: int) -> str | None:
         if target is None or target["profile_private"]:
             return "Этот профиль скрыт или недоступен."
         day = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
-        updated = await conn.execute(
+        key = f"{DAY_PREFIX}{actor_id}"
+        row = await (await conn.execute("SELECT value FROM bot_state WHERE key=?", (key,))).fetchone()
+        # The old daily limit stored the date alone, with no recipient to carry over.
+        saved = json.loads(row["value"]) if row and row["value"].startswith("{") else {}
+        recipients = saved["recipients"] if saved.get("day") == day else []
+        if target_id in recipients:
+            return "Ты уже поставил лайк этому участнику сегодня. Можно снова после полуночи по Москве."
+        recipients.append(target_id)
+        await conn.execute(
             "INSERT INTO bot_state(key,value) VALUES (?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE bot_state.value < excluded.value",
-            (f"{DAY_PREFIX}{actor_id}", day),
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps({"day": day, "recipients": recipients}, separators=(",", ":"))),
         )
-        if not updated.rowcount:
-            return "Сегодняшний лайк уже потрачен. Новый будет в полночь по Москве."
         await conn.execute(
             "INSERT INTO bot_state(key,value) VALUES (?,'1') "
             "ON CONFLICT(key) DO UPDATE SET value=CAST(bot_state.value AS INTEGER)+1",
