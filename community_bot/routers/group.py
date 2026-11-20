@@ -368,10 +368,12 @@ _SOCIAL_LINES = {
 }
 
 
-async def _give_like(db: Database, bot: Bot, actor, target) -> str | None:
+async def _give_like(
+    db: Database, bot: Bot, actor, target, *, reaction_message: tuple[int, int] | None = None,
+) -> str | None:
     if actor.is_bot or await is_bot(db, target, bot.id):
         return "Лайки доступны между участниками."
-    return await social_likes.give(db, actor.id, int(target["user_id"]))
+    return await social_likes.give(db, actor.id, int(target["user_id"]), reaction_message=reaction_message)
 
 
 def _like_notice(actor: User, target) -> str:
@@ -1977,7 +1979,8 @@ async def group_reaction(
             reply_parameters=ReplyParameters(message_id=event.message_id, allow_sending_without_reply=True), **kwargs,
         )
 
-    if "like" in added and await _give_like(db, bot, user, target) is None:
+    reaction_message = (chat_id, event.message_id)
+    if "like" in added and await _give_like(db, bot, user, target, reaction_message=reaction_message) is None:
         await send(_like_notice(user, target), parse_mode="HTML")
     votes = added & {"plus", "minus"}
     if len(votes) == 1:

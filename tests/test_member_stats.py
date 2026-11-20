@@ -298,3 +298,36 @@ async def test_native_custom_kiss_can_use_known_author_from_archive(env, monkeyp
     assert not await dispatch(event)
     assert await social_likes.count(db, 8) == 1
     resolve.assert_awaited_once_with(["123"])
+
+
+async def test_readded_heart_never_counts_twice_on_the_same_message(env, monkeypatch):
+    db, dispatch, _ = env
+    await db.ensure_user(7, telegram_name="Участник")
+    await db.add_cookies(7, 50, "test", "")
+    await dispatch("Первое сообщение", uid=8)
+    await dispatch("Второе сообщение", uid=8)
+    event = MessageReactionUpdated(
+        chat=message(None).chat, message_id=1001, date=datetime.now(UTC),
+        user=User(id=7, first_name="Участник", is_bot=False),
+        old_reaction=[], new_reaction=[ReactionTypeEmoji(emoji="❤️")],
+    )
+    assert any(isinstance(call, SendMessage) for call in await dispatch(event))
+    assert await social_likes.count(db, 8) == 1
+    assert not await dispatch(event.model_copy(update={"old_reaction": event.new_reaction, "new_reaction": []}))
+    readded = event.model_copy(update={"new_reaction": [ReactionTypeEmoji(emoji="💜")]})
+    assert not await dispatch(readded)
+    second_message = event.model_copy(update={"message_id": 1002})
+    assert not await dispatch(second_message)
+
+    ok, _ = await db.buy_item(7, "reset_limits", 15)
+    assert ok
+    assert not await dispatch(readded)
+    assert await social_likes.count(db, 8) == 1
+    assert any(isinstance(call, SendMessage) for call in await dispatch(second_message))
+
+    tomorrow = datetime.now(ZoneInfo("Europe/Moscow")) + timedelta(days=1)
+    monkeypatch.setattr(social_likes, "datetime", SimpleNamespace(now=lambda tz: tomorrow))
+    assert not await dispatch(readded.model_copy(update={"date": tomorrow}))
+    assert await social_likes.count(db, 8) == 2
+    assert any(isinstance(call, SendMessage) and "лайкнул" in call.text for call in await dispatch("Лайк @alice"))
+    assert await social_likes.count(db, 8) == 3

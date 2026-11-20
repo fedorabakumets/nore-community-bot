@@ -14,7 +14,7 @@ async def count(db, user_id: int) -> int:
     return int(await db.get_bot_state(f"{COUNT_PREFIX}{user_id}") or 0)
 
 
-async def give(db, actor_id: int, target_id: int) -> str | None:
+async def give(db, actor_id: int, target_id: int, *, reaction_message: tuple[int, int] | None = None) -> str | None:
     """Spend the actor's allowance and increment the recipient's total together."""
     if actor_id == target_id:
         return "Себе поставить лайк нельзя."
@@ -33,6 +33,14 @@ async def give(db, actor_id: int, target_id: int) -> str | None:
         recipients = saved["recipients"] if saved.get("day") == day else []
         if target_id in recipients:
             return "Ты уже поставил лайк этому участнику сегодня. Можно снова после полуночи по Москве."
+        if reaction_message is not None:
+            chat_id, message_id = reaction_message
+            claimed = await conn.execute(
+                "INSERT INTO bot_state(key,value) VALUES (?,'1') ON CONFLICT(key) DO NOTHING",
+                (f"likes_from_reaction:{chat_id}:{message_id}:{actor_id}",),
+            )
+            if not claimed.rowcount:
+                return "Нора уже засчитала твою реакцию на это сообщение."
         recipients.append(target_id)
         await conn.execute(
             "INSERT INTO bot_state(key,value) VALUES (?,?) "
