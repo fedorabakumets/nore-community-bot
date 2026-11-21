@@ -6,6 +6,7 @@ window.NoraCommunity = (() => {
     likes:{icon:'❤️',label:'Лайки',title:'Топ по лайкам',empty:'Пока никто не получил лайков.'},
     messages:{icon:'💬',label:'Сообщения',title:'Топ сообщений сегодня',empty:'Сегодня сообщений пока нет.'},
     cookies:{icon:'🍪',label:'Печеньки',title:'Топ по печенькам',empty:'Пока нет данных по печенькам.'},
+    invites:{icon:'🏆',label:'Конкурс',title:'Топ конкурса приглашений',empty:'Пока никто не пригласил новых участников.'},
   };
   const day=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const avatar=(p,fire=false)=>`<span class="person-avatar${fire?' profile-fire-avatar':''}" data-person-avatar="${p.id}" ${p.has_avatar===false?'data-avatar-unavailable':''}>${esc((p.name.match(/[\p{L}\p{N}]/u)?.[0]||'?').toUpperCase())}</span>`;
@@ -74,7 +75,7 @@ window.NoraCommunity = (() => {
   }
   setInterval(()=>{
     if(document.hidden||tab!=='community')return;
-    if(!board||board.revision_day!==day()||Date.now()-lastBoardUpdate>=60000)load();
+    if(!board||board.revision_day!==day()||Date.now()-lastBoardUpdate>=(metric==='invites'?15000:60000))load();
     else online();
   },15000);
   setInterval(()=>{if(tab==='community'&&!document.hidden)updateClock()},30000);
