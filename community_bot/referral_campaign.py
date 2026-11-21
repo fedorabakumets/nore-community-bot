@@ -105,8 +105,8 @@ async def get_or_create_link(bot: Bot, db, settings, user_id: int) -> str:
         )
         if row:
             return str(row["invite_link"])
-        if not within_window():
-            raise ValueError("Конкурс ещё не начался или уже закончился.")
+        if datetime.now(ZONE) >= END:
+            raise ValueError("Конкурс уже завершён.")
         name = f"NORA26-{user_id}"[:32]
         invite = await bot.create_chat_invite_link(
             settings.community_chat_id, name=name, creates_join_request=True,
@@ -148,8 +148,9 @@ async def record_join(db, event: ChatMemberUpdated) -> bool:
     user = event.new_chat_member.user
     if user.is_bot or not within_window(event.date):
         return False
-    inviter = await link_owner(db, getattr(getattr(event, "invite_link", None), "invite_link", None))
-    if not inviter:
+    event_link = getattr(getattr(event, "invite_link", None), "invite_link", None)
+    inviter = await link_owner(db, event_link)
+    if not inviter and not event_link:
         pending = await db.fetchone(
             "SELECT inviter_id,requested_at FROM referral_campaign_pending "
             "WHERE campaign=? AND user_id=?", (CAMPAIGN, user.id),
@@ -165,6 +166,14 @@ async def record_join(db, event: ChatMemberUpdated) -> bool:
         return False
     # Prior membership (even before this campaign) does not earn an invitation.
     if await db.get_bot_state(f"community_join:{event.chat.id}:{user.id}"):
+        return False
+    prior = await db.fetchone(
+        "SELECT 1 AS seen FROM user_activity WHERE user_id=? AND chat_id=? "
+        "UNION SELECT 1 AS seen FROM daily_scores "
+        "WHERE user_id=? AND chat_id=? AND day<? LIMIT 1",
+        (user.id, event.chat.id, user.id, event.chat.id, START.date().isoformat()),
+    )
+    if prior:
         return False
     async with db.connect() as connection:
         await connection.execute("BEGIN IMMEDIATE")
@@ -187,7 +196,7 @@ async def leaderboard(db, limit: int = 3) -> list[dict]:
         "SELECT l.user_id, COUNT(j.user_id) AS invites, MIN(j.joined_at) AS first_join "
         "FROM referral_campaign_links l "
         "LEFT JOIN referral_campaign_joins j ON j.campaign=l.campaign AND j.inviter_id=l.user_id "
-        "WHERE l.campaign=? GROUP BY l.user_id "
+        "WHERE l.campaign=? GROUP BY l.user_id HAVING COUNT(j.user_id)>0 "
         "ORDER BY invites DESC, (first_join IS NULL) ASC, first_join ASC, l.created_at ASC, l.user_id ASC "
         "LIMIT ?",
         (CAMPAIGN, limit),
@@ -231,7 +240,7 @@ async def issue_personal_link(callback: CallbackQuery, bot: Bot, db, settings) -
             )
     except (TelegramBadRequest, TelegramForbiddenError):
         await callback.answer(
-            "⚠️ Ссылка закреплена за тобой, но ЛС закрыты. Открой @nora_community_bot и нажми кнопку ещё раз.",
+            "⚠️ Ссылка закреплена за тобой, но ЛС закрыты. Открой личный чат с ботом НОРЫ и нажми кнопку ещё раз.",
             show_alert=True,
         )
     else:
@@ -244,10 +253,11 @@ async def issue_personal_link(callback: CallbackQuery, bot: Bot, db, settings) -
 async def publish_poster(bot: Bot, db, settings, file_id: str) -> int:
     """Post the supplied photo as Rich, then pin it; never publish twice."""
     existing = await db.get_bot_state(POST_KEY)
-    if existing:
-        return int(existing)
     if not settings.community_chat_id:
         raise ValueError("Не задан чат сообщества.")
+    if existing:
+        await bot.pin_chat_message(settings.community_chat_id, int(existing), disable_notification=True)
+        return int(existing)
     username = (await bot.me()).username
     if not username:
         raise ValueError("У бота нет имени Telegram.")
