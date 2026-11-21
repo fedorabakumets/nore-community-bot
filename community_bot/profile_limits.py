@@ -18,7 +18,7 @@ from community_bot.routers.song_requests import DAILY_LIMIT as SONG_DAILY_LIMIT
 async def profile_limits(db, settings, user: dict) -> list[tuple[str, str]]:
     user_id = int(user["user_id"])
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
-    local_date = datetime.now(ZoneInfo(settings.timezone)).date()
+    local_date = datetime.now(ZoneInfo(getattr(settings, "timezone", "Europe/Moscow"))).date()
     day = moscow_now().date().isoformat()
 
     ai_record = await db.get_bot_state(f"nora_ai_daily:{user_id}")
