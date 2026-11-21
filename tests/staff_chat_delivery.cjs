@@ -45,7 +45,8 @@ async function run(){
   const third=make();
   third.restore();
   assert.equal(third.pending,true);
-  await third.check();
+  // restore() launches reconciliation asynchronously; wait for its in-flight GET.
+  await new Promise(resolve=>setTimeout(resolve,5));
   assert.equal(third.pending,false);
   assert.deepEqual(confirmed,[false,true]);
   next={ok:false,state:'uncertain'};
