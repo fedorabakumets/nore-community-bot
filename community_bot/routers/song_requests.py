@@ -10,6 +10,7 @@ import asyncio
 import base64
 import binascii
 import logging
+import math
 import os
 import re
 import secrets
@@ -29,6 +30,7 @@ from mutagen.mp3 import MP3
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import delete_user_command
+from community_bot.pet_progress import VIDEO_DAILY_LIMIT, moscow_now
 
 router = Router(name="song_requests")
 logger = logging.getLogger(__name__)
@@ -46,7 +48,8 @@ _SEND_LOCK = asyncio.Lock()
 _CHOICES: dict[str, "Choices"] = {}
 MAX_RESULTS = 5
 MAX_FILE_BYTES = 48 * 1024 * 1024
-COOLDOWN_SECONDS = 300
+COOLDOWN_SECONDS = 60
+DAILY_LIMIT = VIDEO_DAILY_LIMIT
 CHOICE_TTL = 15 * 60
 API_URL = "https://api.music.yandex.ru/search"
 
@@ -288,19 +291,43 @@ def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
     return str(audio)
 
 
+def _daily_key(user_id: int, day: str) -> str:
+    """Count NORA song requests independently of the video download allowance."""
+    return f"song:daily:{user_id}:{day}"
+
+
+async def _daily_used(db: Database, user_id: int) -> int:
+    day = moscow_now().date().isoformat()
+    return int(await db.get_bot_state(_daily_key(user_id, day)) or 0)
+
+
+async def _quota_error(db: Database, user_id: int) -> str | None:
+    if await _daily_used(db, user_id) >= DAILY_LIMIT:
+        return (
+            f"🎵 Сегодня уже отправлено {DAILY_LIMIT} треков. "
+            "Лимит обновится в 00:00 МСК. "
+            "Сбросить количество можно через «Сброс всех лимитов» в магазине."
+        )
+    return None
+
+
 async def _remaining(db: Database, user_id: int, chat_id: int) -> int:
     now = time.time()
     timestamps = (
         await db.get_bot_state(f"song:last_user:{user_id}"),
         await db.get_bot_state(f"song:last_chat:{chat_id}"),
     )
-    return max((max(0, int(float(value) + COOLDOWN_SECONDS - now)) for value in timestamps if value), default=0)
+    return max((max(0, math.ceil(float(value) + COOLDOWN_SECONDS - now)) for value in timestamps if value), default=0)
 
 
 async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
     if bot is None:
         return
     async with _SEND_LOCK:
+        quota_error = await _quota_error(db, choice.user_id)
+        if quota_error:
+            await bot.send_message(choice.chat_id, quota_error)
+            return
         remaining = await _remaining(db, choice.user_id, choice.chat_id)
         if remaining:
             await bot.send_message(choice.chat_id, f"Следующую песню можно запросить через {remaining} сек.")
@@ -350,9 +377,28 @@ async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
 
 
 async def _mark_sent(db: Database, choice: Choices) -> None:
+    """Record only a successfully sent audio file.
+
+    The day counter and both independent 60-second clocks are updated in a
+    single transaction. Store resets delete only the daily counter, never
+    these clock keys.
+    """
     now = str(time.time())
-    await db.set_bot_state(f"song:last_user:{choice.user_id}", now)
-    await db.set_bot_state(f"song:last_chat:{choice.chat_id}", now)
+    day = moscow_now().date().isoformat()
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        await conn.execute(
+            "INSERT INTO bot_state(key,value) VALUES (?,'1') "
+            "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1",
+            (_daily_key(choice.user_id, day),),
+        )
+        for key in (f"song:last_user:{choice.user_id}", f"song:last_chat:{choice.chat_id}"):
+            await conn.execute(
+                "INSERT INTO bot_state(key,value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, now),
+            )
+        await conn.commit()
 
 
 @router.message(F.text.func(is_song_request), F.chat.type.in_({"private", "group", "supergroup"}), StateFilter(None))
