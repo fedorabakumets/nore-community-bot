@@ -645,6 +645,10 @@ class Database:
                 await db.execute(
                     "ALTER TABLE staff_chat_messages ADD COLUMN rich_json TEXT NOT NULL DEFAULT ''"
                 )
+            if 'media_group_id' not in staff_chat_columns:
+                await db.execute(
+                    "ALTER TABLE staff_chat_messages ADD COLUMN media_group_id TEXT NOT NULL DEFAULT ''"
+                )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
             await db.execute(
                 "INSERT OR IGNORE INTO pet_stage_rewards "
