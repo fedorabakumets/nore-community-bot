@@ -8,10 +8,11 @@ import asyncio
 import logging
 import re
 import time
-from pathlib import PurePath
+import tempfile
+from pathlib import Path, PurePath
 
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
-from aiogram.types import BufferedInputFile, ReplyParameters
+from aiogram.types import BufferedInputFile, InputMediaPhoto, ReplyParameters
 from aiohttp import web
 
 from community_bot.staff_chat import capture, staff_allowed
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 MAX_TEXT = 3000
 MAX_CAPTION = 800
 MAX_UPLOAD = 12 * 1024 * 1024
+MAX_ALBUM_ITEMS = 6
+MAX_BATCH_UPLOAD = 30 * 1024 * 1024
 SEND_INTERVAL = 2.0
 _ALLOWED_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif",
@@ -30,6 +33,53 @@ _PHOTO = {".jpg", ".jpeg", ".png"}
 _VIDEO = {".mp4"}
 _AUDIO = {".mp3", ".m4a"}
 _QUIET_ERRORS = "Не удалось отправить в Telegram. Проверь доступность чата и попробуй снова."
+
+
+def _is_photo(filename: str, data: bytes) -> bool:
+    suffix = PurePath(filename).suffix.lower()
+    return (suffix in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8\xff")) or (
+        suffix == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n")
+    )
+
+
+async def _voice_ogg(filename: str, payload: bytes) -> bytes:
+    """Transcode supported browser formats into Telegram-compatible Ogg/Opus.
+
+    FFmpeg is installed in the production image. No shell or caller-controlled
+    options are passed to it, and temporary input/output are always deleted.
+    """
+    if PurePath(filename).suffix.lower() not in {
+        ".m4a", ".mp3", ".ogg", ".oga", ".opus", ".webm",
+    }:
+        raise ValueError("Формат записи не поддерживается")
+    with tempfile.TemporaryDirectory(prefix="nora-voice-") as folder:
+        source = Path(folder) / ("input" + PurePath(filename).suffix.lower())
+        target = Path(folder) / "voice.ogg"
+        source.write_bytes(payload)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-y", "-i", str(source), "-map", "0:a:0", "-vn",
+                "-t", "120", "-ac", "1", "-c:a", "libopus", "-b:a", "48k",
+                "-f", "ogg", str(target),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            logger.error("Voice encoder unavailable: %s", type(exc).__name__)
+            raise ValueError("Запись голосовых временно недоступна") from exc
+        try:
+            _, errors = await asyncio.wait_for(proc.communicate(), timeout=28)
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            await proc.communicate()
+            raise ValueError("Обработка голосового превысила время ожидания") from exc
+        if proc.returncode != 0 or not target.is_file():
+            logger.warning("Voice transcoding failed: %s", errors[-350:].decode("utf-8", "replace"))
+            raise ValueError("Не удалось обработать голосовое. Попробуй записать ещё раз")
+        result = target.read_bytes()
+        if not result or len(result) > MAX_UPLOAD:
+            raise ValueError("Голосовое слишком большое")
+        return result
 
 
 async def _member(request: web.Request):
@@ -82,14 +132,24 @@ def _author(db_user: dict | None, actor: dict) -> str:
 
 
 async def _publish(request: web.Request, *, text: str, reply: object,
-                   file: tuple[str, bytes] | None):
+                   files: list[tuple[str, bytes]] | None, kind: str = "file"):
     credentials, denied = await _member(request)
     if denied is not None:
         return denied
     db, settings, bot, uid = credentials
+    files = files or []
     try:
-        content = _validate_text(text, file is not None)
+        content = _validate_text(text, bool(files))
         reply_to = await _reply(db, settings.community_chat_id, reply)
+        if kind not in {"file", "voice"} or (kind == "voice" and len(files) != 1):
+            raise ValueError("Некорректный тип вложения")
+        if len(files) > 1 and (
+            kind != "file" or len(files) > MAX_ALBUM_ITEMS
+            or not all(_is_photo(name, data) for name, data in files)
+        ):
+            raise ValueError("Альбом может содержать от 2 до 6 изображений JPG или PNG")
+        if sum(len(blob) for _, blob in files) > MAX_BATCH_UPLOAD:
+            raise ValueError("Альбом слишком большой")
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     name = _author(await db.get_user(uid), request["actor"])
@@ -105,33 +165,47 @@ async def _publish(request: web.Request, *, text: str, reply: object,
                 {"error": "Отправлять сообщения можно не чаще одного раза в 2 секунды"},
                 status=429,
             )
-        # Reserve before calling Telegram: a retry during a network timeout
-        # must not immediately produce another message.
+        # Reserve the interval before Telegram: a network timeout can still
+        # mean that Telegram delivered the message successfully.
         request.app["staff_chat_last_sent"][uid] = now
         try:
-            kwargs = {"chat_id": settings.community_chat_id,
-                      "reply_parameters": reply_to}
-            if file:
-                filename, content_bytes = file
+            kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to}
+            if kind == "voice":
+                filename, payload = files[0]
+                normalized = await _voice_ogg(filename, payload)
+                sent = await bot.send_voice(
+                    **kwargs, voice=BufferedInputFile(normalized, filename="nora-voice.ogg"),
+                    caption=body, parse_mode=None,
+                )
+            elif len(files) > 1:
+                media = [
+                    InputMediaPhoto(
+                        media=BufferedInputFile(payload, filename=filename),
+                        caption=body if index == 0 else None, parse_mode=None,
+                    )
+                    for index, (filename, payload) in enumerate(files)
+                ]
+                sent = await bot.send_media_group(**kwargs, media=media)
+            elif files:
+                filename, content_bytes = files[0]
                 upload = BufferedInputFile(content_bytes, filename=filename)
                 extension = PurePath(filename).suffix.lower()
                 if extension in _PHOTO:
-                    sent = await bot.send_photo(**kwargs, photo=upload, caption=body,
-                                                parse_mode=None)
+                    sent = await bot.send_photo(**kwargs, photo=upload, caption=body, parse_mode=None)
                 elif extension in _VIDEO:
-                    sent = await bot.send_video(**kwargs, video=upload, caption=body,
-                                                parse_mode=None, supports_streaming=True)
+                    sent = await bot.send_video(
+                        **kwargs, video=upload, caption=body, parse_mode=None, supports_streaming=True,
+                    )
                 elif extension == ".gif":
-                    sent = await bot.send_animation(**kwargs, animation=upload, caption=body,
-                                                    parse_mode=None)
+                    sent = await bot.send_animation(**kwargs, animation=upload, caption=body, parse_mode=None)
                 elif extension in _AUDIO:
-                    sent = await bot.send_audio(**kwargs, audio=upload, caption=body,
-                                                parse_mode=None)
+                    sent = await bot.send_audio(**kwargs, audio=upload, caption=body, parse_mode=None)
                 else:
-                    sent = await bot.send_document(**kwargs, document=upload, caption=body,
-                                                   parse_mode=None)
+                    sent = await bot.send_document(**kwargs, document=upload, caption=body, parse_mode=None)
             else:
                 sent = await bot.send_message(**kwargs, text=body, parse_mode=None)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
         except TelegramRetryAfter as exc:
             return web.json_response(
                 {"error": f"Telegram просит подождать {min(int(exc.retry_after), 60)} сек."},
@@ -146,13 +220,20 @@ async def _publish(request: web.Request, *, text: str, reply: object,
                 {"error": "Ответ Telegram не получен. Проверь чат, прежде чем повторять отправку."},
                 status=502,
             )
-        # The outgoing middleware normally captures this. Explicit capture also
-        # covers endpoints called with a non-middleware bot in tests.
+        messages = sent if isinstance(sent, (list, tuple)) else [sent]
+        if not messages:
+            return web.json_response(
+                {"error": "Telegram не подтвердил отправку альбома. Проверь чат."}, status=502,
+            )
         try:
-            await capture(db, settings, sent)
+            for message in messages:
+                await capture(db, settings, message)
         except Exception:
             logger.exception("Staff chat composer: message sent but archive failed")
-        return web.json_response({"ok": True, "message_id": sent.message_id})
+        return web.json_response({
+            "ok": True, "message_id": messages[0].message_id,
+            "message_ids": [m.message_id for m in messages],
+        })
 
 
 async def send_text(request: web.Request) -> web.Response:
@@ -169,7 +250,7 @@ async def send_text(request: web.Request) -> web.Response:
         return web.json_response({"error": "Некорректный запрос"}, status=400)
     return await _publish(
         request, text=payload.get("text", ""), reply=payload.get("reply_to"),
-        file=None,
+        files=None,
     )
 
 
@@ -177,20 +258,23 @@ async def send_attachment(request: web.Request) -> web.Response:
     credentials, denied = await _member(request)
     if denied is not None:
         return denied
-    if request.content_length is not None and request.content_length > MAX_UPLOAD + 64 * 1024:
-        return web.json_response({"error": "Размер файла не должен превышать 12 МБ"}, status=413)
+    if request.content_length is not None and request.content_length > MAX_BATCH_UPLOAD + 96 * 1024:
+        return web.json_response({"error": "Вложения превышают 30 МБ"}, status=413)
     if not request.content_type.startswith("multipart/form-data"):
         return web.json_response({"error": "Нужно выбрать файл"}, status=400)
-    values = {}
-    attachment = None
+    values: dict[str, str] = {}
+    attachments: list[tuple[str, bytes]] = []
+    consumed = 0
     try:
         reader = await request.multipart()
         while part := await reader.next():
-            if part.name not in {"text", "reply_to", "file"} or part.name in values:
+            if part.name not in {"text", "reply_to", "file", "kind"} or (
+                part.name != "file" and part.name in values
+            ):
                 raise ValueError("Некорректные поля")
             if part.name == "file":
-                if attachment is not None:
-                    raise ValueError("Можно прикрепить только один файл")
+                if len(attachments) >= MAX_ALBUM_ITEMS:
+                    raise ValueError("В одном альбоме не больше 6 файлов")
                 filename = PurePath(str(part.filename or "").replace("\\", "/")).name[:100]
                 extension = PurePath(filename).suffix.lower()
                 if not filename or extension not in _ALLOWED_EXTENSIONS:
@@ -200,25 +284,27 @@ async def send_attachment(request: web.Request) -> web.Response:
                     chunk = await part.read_chunk(128 * 1024)
                     if not chunk:
                         break
-                    if len(raw) + len(chunk) > MAX_UPLOAD:
-                        raise ValueError("Размер файла не должен превышать 12 МБ")
+                    consumed += len(chunk)
+                    if len(raw) + len(chunk) > MAX_UPLOAD or consumed > MAX_BATCH_UPLOAD:
+                        raise ValueError("Один файл до 12 МБ, все вместе до 30 МБ")
                     raw.extend(chunk)
                 if not raw:
                     raise ValueError("Файл пуст")
-                attachment = (filename, bytes(raw))
+                attachments.append((filename, bytes(raw)))
             else:
                 chunk = await part.read(decode=True)
                 if len(chunk) > 6000:
                     raise ValueError("Слишком длинное поле")
                 values[part.name] = chunk.decode("utf-8")
-        if attachment is None:
+        if not attachments:
             raise ValueError("Выбери файл")
         raw_reply = values.get("reply_to", "")
         if raw_reply and not (raw_reply.isdecimal() and len(raw_reply) <= 12):
             raise ValueError("Некорректный ответ")
         reply = int(raw_reply) if raw_reply else None
+        kind = values.get("kind", "file")
     except (ValueError, UnicodeDecodeError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
     except web.HTTPRequestEntityTooLarge:
-        return web.json_response({"error": "Размер файла не должен превышать 12 МБ"}, status=413)
-    return await _publish(request, text=values.get("text", ""), reply=reply, file=attachment)
+        return web.json_response({"error": "Вложения слишком большие"}, status=413)
+    return await _publish(request, text=values.get("text", ""), reply=reply, files=attachments, kind=kind)
