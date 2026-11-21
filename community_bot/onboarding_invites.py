@@ -5,11 +5,12 @@ import asyncio
 import logging
 from urllib.parse import urlparse
 
-from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 BROADCAST_MARKER = "invite_chat_20261121_v1:"
+BROADCAST_DONE = "invite_chat_20261121_v1:complete"
 
 
 def _telegram_link(url: str) -> bool:
@@ -19,8 +20,9 @@ def _telegram_link(url: str) -> bool:
 
 def entry_keyboard(settings, *, bot_username: str = "") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if _telegram_link(settings.community_invite_url):
-        rows.append([InlineKeyboardButton(text="🚪 Войти в чат НОРЫ", url=settings.community_invite_url)])
+    url = getattr(settings, "community_invite_url", "")
+    if _telegram_link(url):
+        rows.append([InlineKeyboardButton(text="🚪 Войти в чат НОРЫ", url=url)])
     if bot_username:
         rows.append([InlineKeyboardButton(
             text="🎮 Открыть приложение NORA",
@@ -87,10 +89,12 @@ async def accept_waiting_applications(bot, db, settings) -> int:
 
 async def broadcast_entry_once(bot, db, settings) -> tuple[int, int]:
     """Persist per-recipient completion to avoid a repeated blast after a restart."""
+    if await db.get_bot_state(BROADCAST_DONE) == "1":
+        return 0, 0
     if not _telegram_link(settings.community_invite_url):
         logger.warning("Chat invitation broadcast skipped: no valid t.me link")
         return 0, 0
-    sent, blocked = 0, 0
+    sent, blocked, incomplete = 0, 0, False
     for row in await db.list_all_users():
         uid = int(row["user_id"])
         if uid <= 0 or await db.get_bot_state(f"{BROADCAST_MARKER}{uid}"):
@@ -103,17 +107,21 @@ async def broadcast_entry_once(bot, db, settings) -> tuple[int, int]:
                 if attempt == 0:
                     continue
                 logger.warning("Chat invitation rate limited for %s", uid)
-            except TelegramForbiddenError:
+                incomplete = True
+            except (TelegramForbiddenError, TelegramBadRequest):
                 blocked += 1
                 await db.set_bot_state(f"{BROADCAST_MARKER}{uid}", "blocked")
             except TelegramAPIError as error:
+                incomplete = True
                 logger.warning("Chat invitation to %s failed (%s)", uid, type(error).__name__)
             else:
                 sent += 1
                 await db.set_bot_state(f"{BROADCAST_MARKER}{uid}", "sent")
             break
         await asyncio.sleep(0.075)
-    logger.info("Chat invitation: sent=%s blocked=%s", sent, blocked)
+    if not incomplete:
+        await db.set_bot_state(BROADCAST_DONE, "1")
+    logger.info("Chat invitation: sent=%s blocked=%s complete=%s", sent, blocked, not incomplete)
     return sent, blocked
 
 

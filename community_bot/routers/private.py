@@ -151,6 +151,10 @@ async def private_menu_content(db: Database, settings: Settings, user_id: int) -
             await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
             unread=await db.notify_unread_count(user_id),
         )
+        if approved:
+            from community_bot.onboarding_invites import entry_keyboard
+
+            markup.inline_keyboard[:0] = entry_keyboard(settings).inline_keyboard[:1]
         return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
     help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
     pending = await db.pending_application_photo_status(user_id)
@@ -1426,10 +1430,24 @@ async def _notify_application_decision(
             from community_bot.onboarding_invites import send_entry
 
             await send_entry(bot, settings, user_id, new_member=True)
+            if automatic:
+                from community_bot.onboarding_invites import BROADCAST_MARKER
+
+                await db.set_bot_state(f"{BROADCAST_MARKER}{user_id}", "sent")
         else:
             await safe_send(bot, user_id, f"{result}.{reason_text}", parse_mode="HTML")
     with fresh_private_panel(user_id):
         await safe_send(bot, user_id, menu_text, parse_mode="HTML", reply_markup=markup)
+    # A user can have a pending Telegram join request from before submitting the form.
+    if approved and settings.community_chat_id:
+        approve_join = getattr(bot, "approve_chat_join_request", None)
+        if approve_join is not None:
+            try:
+                await approve_join(settings.community_chat_id, user_id)
+            except (TelegramBadRequest, TelegramForbiddenError):
+                pass  # No pending request or Telegram has already processed it.
+            except TelegramAPIError as error:
+                logger.warning("Existing community join request approval failed (%s)", type(error).__name__)
     if not automatic:
         report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
         for reviewer_id in settings.reviewers - {moderator_id, user_id}:
