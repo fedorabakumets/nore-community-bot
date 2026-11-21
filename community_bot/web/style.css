@@ -1188,10 +1188,7 @@ form label{font-size:14px;color:var(--poster-muted)}
   :root { --glass-gutter: 20px; }
   #app .home-meetup { min-height: 220px; }
 }
-@media (prefers-reduced-motion: no-preference) {
-  #sheet[open] { animation: glass-sheet-in .18s var(--poster-ease); }
-  @keyframes glass-sheet-in { from { opacity: 0; transform: translateY(6px); } }
-}
+
 
 /* Team workspace. Unslop by Damir Sokolovsky — https://github.com/heydamir/unslop, CC BY 4.0.
    Brand colors and typography follow the existing NORA poster system. */
@@ -2558,3 +2555,59 @@ body:has(.nora-install-story[open]) { overflow: hidden; }
   .nora-install-footnote { margin-top: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .nora-install-progress b { transition: none; } }
+
+/* Bottom sheets share one slide-up motion, without affecting full-screen stories or game HUD. */
+@media (prefers-reduced-motion: no-preference) {
+  :is(#sheet, #game-exit) {
+    opacity: 0;
+    transform: translate3d(0, 56px, 0) scale(.98);
+    transition:
+      opacity 230ms cubic-bezier(.4, 0, .7, .2),
+      transform 270ms cubic-bezier(.4, 0, .7, .2),
+      display 340ms allow-discrete,
+      overlay 340ms allow-discrete;
+  }
+  :is(#sheet, #game-exit)[open] {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    transition-duration: 325ms, 340ms, 340ms, 340ms;
+    transition-timing-function: cubic-bezier(.16, 1, .3, 1);
+  }
+  @starting-style {
+    :is(#sheet, #game-exit)[open] {
+      opacity: .2;
+      transform: translate3d(0, 72px, 0) scale(.975);
+    }
+  }
+  :is(#sheet, #game-exit)::backdrop {
+    background-color: rgb(8 6 12 / 0%);
+    transition: background-color 300ms ease;
+  }
+  :is(#sheet, #game-exit)[open]::backdrop {
+    background-color: rgb(8 6 12 / 73%);
+  }
+  @starting-style {
+    :is(#sheet, #game-exit)[open]::backdrop { background-color: rgb(8 6 12 / 0%); }
+  }
+  /* Older Telegram WebViews get a stepped opening even without discrete display transitions. */
+  @supports not (transition-behavior: allow-discrete) {
+    :is(#sheet, #game-exit)[open] { animation: nora-sheet-rise 340ms linear both; }
+    @keyframes nora-sheet-rise {
+      0% { opacity: .2; transform: translate3d(0,72px,0) scale(.975); }
+      16% { opacity: .45; transform: translate3d(0,52px,0) scale(.982); }
+      36% { opacity: .72; transform: translate3d(0,29px,0) scale(.990); }
+      60% { opacity: .91; transform: translate3d(0,11px,0) scale(.997); }
+      82% { opacity: .99; transform: translate3d(0,2px,0) scale(1); }
+      100% { opacity: 1; transform: translate3d(0,0,0) scale(1); }
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(#sheet, #game-exit) {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  :is(#sheet, #game-exit)::backdrop { transition: none !important; }
+}
