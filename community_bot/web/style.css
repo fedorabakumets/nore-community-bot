@@ -2948,3 +2948,6 @@ button.staff-chat-author{text-align:left;background:none;padding:0;border:0}
     width:33px;height:34px;
   }
 }
+
+/* The page scroll shortcut must never cover the chat send button. */
+#app[data-screen="staffchat"] ~ #scroll-jump { display: none !important; }
