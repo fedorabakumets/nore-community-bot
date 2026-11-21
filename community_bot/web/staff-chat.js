@@ -544,78 +544,249 @@ window.NoraStaffChat = (() => {
   }
 
 
+
+  const isPhotoUpload = file => /\.(jpe?g|png)$/i.test(file.name);
+  function uploadUrl(file) {
+    if(!previewUrls.has(file))previewUrls.set(file,URL.createObjectURL(file));
+    return previewUrls.get(file);
+  }
+  function forgetUpload(file) {
+    const url=previewUrls.get(file);
+    if(url)URL.revokeObjectURL(url);
+    previewUrls.delete(file);
+  }
+  function clearUploads() {
+    for(const file of attachments)forgetUpload(file);
+    attachments=[];
+    attachmentKind='file';
+    const field=document.getElementById('staff-chat-file');
+    if(field)field.value='';
+  }
+  function chooseFiles(files) {
+    if(sending || recording)return;
+    const chosen=[...files];
+    if(!chosen.length)return;
+    if(attachmentKind==='voice')clearUploads();
+    const combined=[...attachments,...chosen];
+    if(combined.length>maxAlbumItems) {
+      toast('В одном альбоме не больше 6 файлов');return;
+    }
+    if(combined.some(file=>file.size>maxUpload || file.size<=0)){
+      toast('Размер каждого файла должен быть от 1 байта до 12 МБ');return;
+    }
+    if(combined.reduce((size,file)=>size+file.size,0)>maxAlbumUpload){
+      toast('Общий размер альбома не больше 30 МБ');return;
+    }
+    if(combined.length>1&&!combined.every(isPhotoUpload)){
+      toast('Несколько файлов можно отправить только альбомом JPG/PNG');return;
+    }
+    attachments=combined;
+    attachmentKind='file';
+    emojiOpen=false;composeUpdate();
+  }
+  function recordStatus() {
+    const status=document.getElementById('staff-chat-record-status');
+    if(!status)return;
+    status.hidden=!recording;
+    if(!recording){status.replaceChildren();return;}
+    const seconds=Math.min(120,Math.floor((Date.now()-recordStarted)/1000));
+    status.innerHTML='<span class="staff-chat-record-dot" aria-hidden="true"></span>'+
+      '<span>Запись голосового · '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')+'</span>'+
+      '<button type="button" data-chat-record-cancel aria-label="Отменить запись">Отменить</button>'+
+      '<button type="button" data-chat-record-stop>Готово</button>';
+  }
+  function stopRecording(discard=false) {
+    if(!recorder)return;
+    if(discard)recordingCancelled=true;
+    if(recordTimer!==null){clearInterval(recordTimer);recordTimer=null;}
+    const active=recorder;
+    recording=false;
+    recordStatus();
+    composeUpdate();
+    if(active.state!=='inactive')active.stop();
+    else{microphone?.getTracks().forEach(track=>track.stop());microphone=null;recorder=null;}
+  }
+  async function toggleRecording() {
+    if(sending)return;
+    if(recording){stopRecording();return;}
+    if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){
+      toast('Запись голоса недоступна в этом Telegram WebView');return;
+    }
+    let stream;
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({
+        audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+      });
+      if(tab!=='staffchat'){stream.getTracks().forEach(track=>track.stop());return;}
+      const choices=['audio/mp4','audio/ogg;codecs=opus','audio/webm;codecs=opus','audio/webm'];
+      const mime=choices.find(type=>MediaRecorder.isTypeSupported(type));
+      const options=mime?{mimeType:mime,audioBitsPerSecond:64000}:{audioBitsPerSecond:64000};
+      const active=new MediaRecorder(stream,options);
+      const chunks=[];
+      microphone=stream;recorder=active;recordingCancelled=false;
+      active.ondataavailable=event=>{if(event.data?.size)chunks.push(event.data);};
+      active.onerror=()=>{
+        toast('Не удалось записать голосовое');
+        stopRecording(true);
+      };
+      active.onstop=()=>{
+        const discard=recordingCancelled;
+        stream.getTracks().forEach(track=>track.stop());
+        if(recorder===active)recorder=null;
+        if(microphone===stream)microphone=null;
+        if(discard || tab!=='staffchat')return;
+        const actual=active.mimeType||mime||'audio/webm';
+        const extension=actual.includes('mp4')?'m4a':actual.includes('ogg')?'ogg':'webm';
+        const clip=new File(chunks,'nora-voice.'+extension,{type:actual});
+        if(clip.size>maxUpload||!clip.size){
+          toast('Голосовое пустое или превышает 12 МБ');return;
+        }
+        clearUploads();
+        attachments=[clip];attachmentKind='voice';
+        composeUpdate();
+      };
+      active.start(400);
+      recording=true;recordStarted=Date.now();
+      recordStatus();
+      recordTimer=setInterval(()=>{
+        recordStatus();
+        if(Date.now()-recordStarted>=120000)stopRecording();
+      },250);
+      composeUpdate();
+      tg?.HapticFeedback?.impactOccurred?.('medium');
+    }catch(error){
+      stream?.getTracks().forEach(track=>track.stop());
+      recording=false;recorder=null;microphone=null;
+      toast(error?.name==='NotAllowedError'?'Разреши доступ к микрофону в Telegram':
+        'Не удалось включить микрофон');
+      recordStatus();composeUpdate();
+    }
+  }
   function composeUpdate() {
-    const field = document.getElementById('staff-chat-draft');
-    const form = document.getElementById('staff-chat-compose');
-    if(!field || !form)return;
-    field.maxLength = attachment ? 800 : 3000;
-    const send = document.getElementById('staff-chat-submit');
+    const field=document.getElementById('staff-chat-draft');
+    const form=document.getElementById('staff-chat-compose');
+    if(!field||!form)return;
+    field.maxLength=attachments.length?800:3000;
+    const send=document.getElementById('staff-chat-submit');
     if(send){
-      send.disabled = sending || (!draft.trim() && !attachment) || draft.length > (attachment?800:3000);
-      send.textContent = sending ? '…' : '➤';
+      send.disabled=sending||recording||(!draft.trim()&&!attachments.length)||
+        draft.length>(attachments.length?800:3000);
+      send.textContent=sending?(uploadProgress?uploadProgress+'%':'…'):'➤';
     }
-    const back = document.getElementById('staff-chat-compose-reply');
+    const microphoneButton=form.querySelector('[data-chat-record]');
+    if(microphoneButton){
+      microphoneButton.disabled=sending;
+      microphoneButton.classList.toggle('is-recording',recording);
+      microphoneButton.textContent=recording?'■':'🎙';
+      microphoneButton.setAttribute('aria-label',recording?'Завершить запись':'Записать голосовое');
+    }
+    const back=document.getElementById('staff-chat-compose-reply');
     if(back){
-      back.hidden = !replyTarget;
-      back.innerHTML = replyTarget
-        ? `<span><b>↩ ${esc(replyTarget.name)}</b><small>${esc(replyTarget.preview)}</small></span><button type="button" data-chat-cancel-reply aria-label="Отменить ответ">×</button>`
+      back.hidden=!replyTarget;
+      back.innerHTML=replyTarget
+        ? '<span><b>↩ '+esc(replyTarget.name)+'</b><small>'+esc(replyTarget.preview)+
+          '</small></span><button type="button" data-chat-cancel-reply aria-label="Отменить ответ">×</button>'
         : '';
     }
-    const chosen = document.getElementById('staff-chat-compose-file');
+    const chosen=document.getElementById('staff-chat-compose-file');
     if(chosen){
-      chosen.hidden = !attachment;
-      chosen.innerHTML = attachment
-        ? `<span>📎 ${esc(attachment.name)} · ${(attachment.size/1048576).toFixed(1)} МБ</span><button type="button" data-chat-remove-file aria-label="Убрать вложение">×</button>`
-        : '';
+      chosen.hidden=!attachments.length;
+      if(attachments.length){
+        const cards=attachments.map((file,index)=>{
+          const label=esc(file.name),src=esc(uploadUrl(file));
+          const media=attachmentKind==='voice'
+            ? '<audio controls preload="metadata" src="'+src+'" aria-label="Прослушать голосовое"></audio>'
+            : file.type.startsWith('image/') || isPhotoUpload(file)
+              ? '<img src="'+src+'" alt="'+label+'" loading="lazy">'
+              : file.type.startsWith('video/') && file.size<=maxUpload
+                ? '<video src="'+src+'" muted playsinline preload="metadata"></video>'
+                : '<span class="staff-chat-preview-symbol">📎</span>';
+          return '<div class="staff-chat-preview-item">'+media+
+            '<span title="'+label+'">'+(attachmentKind==='voice'?'Голосовое':label)+'</span>'+
+            '<button type="button" data-chat-remove-file="'+index+'" '+(sending?'disabled':'')+
+            ' aria-label="Убрать '+label+'">×</button></div>';
+        }).join('');
+        const size=(attachments.reduce((total,file)=>total+file.size,0)/1048576).toFixed(1);
+        chosen.innerHTML='<div class="staff-chat-preview-header"><span>'+
+          (attachmentKind==='voice'?'🎤 Голосовое':
+            attachments.length>1?'▧ Альбом · '+attachments.length+' фото':'Вложение')+
+          ' · '+size+' МБ</span>'+(sending?'<b>'+(uploadProgress?uploadProgress+'%':'Отправка…')+'</b>':'')+
+          '</div><div class="staff-chat-preview-grid">'+cards+'</div>';
+      }else chosen.replaceChildren();
     }
-    const emoji = document.getElementById('staff-chat-emoji-palette');
-    if(emoji)emoji.hidden = !emojiOpen;
-    field.style.height = 'auto';
-    field.style.height = Math.min(field.scrollHeight, 106) + 'px';
+    const emoji=document.getElementById('staff-chat-emoji-palette');
+    if(emoji)emoji.hidden=!emojiOpen;
+    field.style.height='auto';
+    field.style.height=Math.min(field.scrollHeight,106)+'px';
   }
   function prepareComposer() {
-    const field = document.getElementById('staff-chat-draft');
+    const field=document.getElementById('staff-chat-draft');
     if(!field)return;
-    field.value = draft;
-    composeUpdate();
+    field.value=draft;
+    composeUpdate();recordStatus();
+  }
+  function uploadForm(form){
+    return new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      uploadXHR=xhr;
+      xhr.open('POST','/api/community/chat/upload',true);
+      xhr.setRequestHeader('Authorization','tma '+auth);
+      xhr.upload.onprogress=event=>{
+        if(!event.lengthComputable)return;
+        uploadProgress=Math.min(99,Math.round(100*event.loaded/event.total));
+        composeUpdate();
+      };
+      xhr.onload=()=>{
+        if(uploadXHR===xhr)uploadXHR=null;
+        let response;
+        try{response=JSON.parse(xhr.responseText)}catch{
+          reject(new Error('Нет ответа от сервера Норы'));return;
+        }
+        if(xhr.status<200||xhr.status>=300){
+          reject(new Error(response.error||'Не удалось отправить вложение'));return;
+        }
+        resolve(response);
+      };
+      xhr.onerror=()=>{
+        if(uploadXHR===xhr)uploadXHR=null;
+        reject(new Error('Нет связи с сервером. Перед повтором проверь чат'));
+      };
+      xhr.onabort=()=>{
+        if(uploadXHR===xhr)uploadXHR=null;
+        reject(new Error('Отправка прервана. Проверь чат перед повтором'));
+      };
+      xhr.send(form);
+    });
   }
   async function sendCompose() {
-    if(sending || (!draft.trim() && !attachment))return;
-    const text = draft.trim();
-    const reply_to = replyTarget?.id || null;
-    if(text.length > (attachment ? 800 : 3000)){
-      toast('Слишком длинный текст для сообщения с вложением');
-      return;
+    if(sending||recording||(!draft.trim()&&!attachments.length))return;
+    const text=draft.trim(),reply_to=replyTarget?.id||null;
+    if(text.length>(attachments.length?800:3000)){
+      toast('Слишком длинный текст для сообщения с вложением');return;
     }
-    sending = true;
-    composeUpdate();
-    try {
+    sending=true;uploadProgress=0;composeUpdate();
+    try{
       let result;
-      if(attachment){
-        if(attachment.size > maxUpload)throw new Error('Файл должен быть не больше 12 МБ');
-        const form = new FormData();
-        form.append('file',attachment,attachment.name);
+      if(attachments.length){
+        const size=attachments.reduce((sum,file)=>sum+file.size,0);
+        if(attachments.some(file=>file.size>maxUpload)||size>maxAlbumUpload){
+          throw new Error('Один файл до 12 МБ, альбом до 30 МБ');
+        }
+        const form=new FormData();
+        for(const file of attachments)form.append('file',file,file.name);
         form.append('text',text);
+        form.append('kind',attachmentKind);
         if(reply_to)form.append('reply_to',String(reply_to));
-        const response = await fetch('/api/community/chat/upload',{
-          method:'POST',headers:{Authorization:'tma '+auth},body:form
-        });
-        try {result=await response.json();}catch{throw new Error('Нет ответа от сервера Норы')}
-        if(!response.ok)throw new Error(result.error || 'Не удалось отправить вложение');
-      }else{
-        result=await api('community/chat/send',{text,reply_to});
-      }
+        result=await uploadForm(form);
+      }else result=await api('community/chat/send',{text,reply_to});
       if(!result?.ok)throw new Error('Telegram не подтвердил отправку');
-      draft='';attachment=null;replyTarget=null;emojiOpen=false;contextId=null;
-      signature='';
-      const file=document.getElementById('staff-chat-file');
-      if(file)file.value='';
-      prepareComposer();
-      void load(true);
+      draft='';replyTarget=null;emojiOpen=false;contextId=null;
+      signature='';clearUploads();
+      prepareComposer();void load(true);
     }catch(error){
-      toast(error.message || 'Не удалось отправить сообщение');
+      toast(error.message||'Не удалось отправить сообщение');
     }finally{
-      sending=false;composeUpdate();
+      sending=false;uploadProgress=0;composeUpdate();
     }
   }
   function selectReply(button) {
