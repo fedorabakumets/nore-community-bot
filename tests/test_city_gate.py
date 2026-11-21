@@ -90,6 +90,7 @@ async def test_old_inline_buttons_cannot_bypass_city(city_setup, monkeypatch):
     response = AsyncMock()
     monkeypatch.setattr(CallbackQuery, 'answer', response)
     monkeypatch.setattr(Message, 'answer', AsyncMock())
+    monkeypatch.setattr(Message, 'reply', AsyncMock())
     handler = AsyncMock()
     event = CallbackQuery(
         id='check', chat_instance='check', from_user=make_message('/profile').from_user,
