@@ -1050,6 +1050,63 @@ form label{font-size:14px;color:var(--poster-muted)}
 #app[data-screen="community"] .community-table summary { min-height: 48px; padding: 12px 14px; }
 #app .community-friends .community-find { margin: 0 0 8px; }
 #app[data-screen="community"] .community-person { padding-block: 8px; }
+
+/* Community: leaderboard in the first viewport, with compact distinct friend/staff drawers. */
+#app[data-screen="community"] .nora-page-heading { margin-bottom: 10px; }
+#app[data-screen="community"] .community-leaders > h2 {
+  min-height: 42px; padding-block: 8px; margin: 0; font-size: 26px; line-height: 1.1;
+}
+#app[data-screen="community"] .community-leaders .community-table-body { padding-bottom: 7px; }
+#app[data-screen="community"] .community-top-filters { margin-bottom: 8px; }
+#app[data-screen="community"] .community-top-heading { margin: 0 0 6px; font-size: 16px; }
+#app[data-screen="community"] .community-leaders .community-person { padding-block: 6px; }
+#app[data-screen="community"] .community-winner {
+  margin: 5px 0 0; padding-top: 3px; font-size: 12px; line-height: 1.4;
+}
+#app[data-screen="community"] .community-actions {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start; gap: 8px; margin: 6px 0 0;
+}
+#app[data-screen="community"] .community-actions > :is(#interactive-content, #community-staff) { min-width: 0; }
+#app[data-screen="community"] .community-actions .community-table { margin: 0; }
+#app[data-screen="community"] .community-actions .community-friends {
+  background: linear-gradient(125deg, #233e34, #192823);
+  border: 1px solid #466f5c;
+}
+#app[data-screen="community"] .community-actions .community-staff {
+  background: linear-gradient(125deg, #38293d, #24202d);
+  border: 1px solid #66516e;
+}
+#app[data-screen="community"] .community-actions .community-table > summary {
+  min-height: 50px; padding: 9px 10px; font-size: clamp(12px, 3.5vw, 15px);
+  font-weight: 700; border-bottom: 0; gap: 4px;
+}
+#app[data-screen="community"] .community-actions .community-table[open] > summary {
+  border-bottom: 1px solid rgb(255 243 223 / 13%);
+}
+#app[data-screen="community"] .community-actions .community-chevron {
+  font-size: 20px; flex: none;
+}
+#app[data-screen="community"] .community-friends-label {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0;
+}
+#app[data-screen="community"] .community-friends-online {
+  color: #9ae7b7; font-weight: 800; font-size: 12px;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#app[data-screen="community"] .community-actions > #interactive-content:has(.community-friends[open]),
+#app[data-screen="community"] .community-actions > #community-staff:has(.community-staff[open]) {
+  grid-column: 1 / -1;
+}
+#app[data-screen="community"] .community-actions .community-table[open] .community-table-body { padding-top: 10px; }
+#app[data-screen="community"] #community-updated {
+  margin: 5px 0 0; font-size: 11px; line-height: 1.3;
+}
+@media (max-height: 780px) {
+  #app[data-screen="community"] .community-games-tile { min-height: 90px; }
+  #app[data-screen="community"] .community-pet-tile { min-height: 75px; }
+}
+
 #app[data-screen="community"] .community-music h2 { font-size: 20px; margin: 8px 0; }
 #app[data-screen="community"] .community-music-motto { font-size: 16px; }
 #app[data-screen="community"] .community-music-art { padding: 0; }
@@ -1996,8 +2053,8 @@ body:has(#home-story-viewer[open]) { overflow: hidden; }
 /* Community game entrances */
 #app .community-tiles {
   display: grid;
-  gap: 12px;
-  margin: 12px 0 16px;
+  gap: 9px;
+  margin: 8px 0 10px;
 }
 #app .community-tile {
   position: relative;

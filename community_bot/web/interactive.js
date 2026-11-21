@@ -247,6 +247,7 @@ window.NoraInteractive = (() => {
   function friendsScreen() {
     const f = state.friends;
     const count = f?.friends?.length || 0;
+    const online = f?.friends?.filter((p) => p.presence?.online).length || 0;
     const incoming = f?.incoming?.length || 0;
     const embedded = tab === "community";
     const search = '<button class="secondary community-find" data-community-search>⌕ Найти участников</button>';
@@ -260,7 +261,7 @@ window.NoraInteractive = (() => {
       ${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
     if (embedded) {
       return `<details class="community-table community-friends" data-detail="community-friends" data-retain-open="community-friends">
-        <summary id="community-friends-summary"><span>Друзья ${f ? badge(count) : ""}${incoming ? ` ${badge("Заявки: " + incoming, true)}` : ""}</span><span class="community-chevron" aria-hidden="true">⌄</span></summary>
+        <summary id="community-friends-summary"><span class="community-friends-label">Друзья ${f ? `<span class="community-friends-online" aria-label="Онлайн ${online} из ${count} друзей">${online}/${count}</span>` : ""}${incoming ? ` ${badge("+" + incoming, true)}` : ""}</span><span class="community-chevron" aria-hidden="true">⌄</span></summary>
         <div class="community-table-body">${list}</div>
       </details>`;
     }
