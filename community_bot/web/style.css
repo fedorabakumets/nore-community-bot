@@ -3012,3 +3012,53 @@ body:has(#staff-chat-draft:focus) #nav{
 body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"]{
   padding-bottom:max(10px,var(--tg-content-safe-area-inset-bottom,0px));
 }
+
+
+/* Live staff mirror: compact connection, unread and Mini App-only typing state. */
+#app[data-screen="staffchat"] #staff-chat-live-status {
+  display:flex;align-items:center;flex-wrap:wrap;gap:5px;
+  min-width:0;line-height:1.3;
+  font-size:11px;color:#aaa6b0;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status b{
+  font-weight:500;color:#aaa6b0;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status small{
+  font-size:10px;color:#98939e;font-weight:400;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status i{
+  display:inline-block;flex:none;width:6px;height:6px;
+  border-radius:50%;background:#9e8890;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status[data-live-state="live"] i{
+  background:#70c798;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status[data-live-state="live"] b{
+  color:#b8e0c9;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status[data-live-state="fallback"] i{
+  background:#c8a27e;
+}
+#app[data-screen="staffchat"] #staff-chat-live-status[data-live-state="offline"] i{
+  background:#cc7c91;
+}
+#app[data-screen="staffchat"] .staff-chat-typing {
+  flex:none;min-width:0;
+  padding:0 10px;
+  color:#c0b0c0;
+  font-size:11px;line-height:1.4;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#app[data-screen="staffchat"] .staff-chat-new{
+  align-self:center;flex:none;
+  padding:6px 12px;min-height:27px;
+  border:1px solid rgba(237,149,164,.24);border-radius:20px;
+  color:#f1b2c0;background:rgba(123,51,66,.22);
+  font:600 11px/1.2 Rubik,Arial,sans-serif;
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  cursor:pointer;
+}
+#app[data-screen="staffchat"] .staff-chat-new[hidden],
+#app[data-screen="staffchat"] .staff-chat-typing[hidden]{
+  display:none!important;
+}
