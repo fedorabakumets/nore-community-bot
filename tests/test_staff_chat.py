@@ -508,11 +508,13 @@ async def _ws_until(socket, kind, *, matching=None):
 
 
 @pytest.mark.asyncio
-async def test_staff_live_websocket_auth_events_and_typing(tmp_path):
+async def test_staff_live_websocket_auth_events_and_typing(tmp_path, monkeypatch):
     """Real aiohttp WebSockets, signed Telegram auth, SQLite events and fanout."""
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
+    from community_bot import staff_chat_live
 
+    monkeypatch.setattr(staff_chat_live, "ROLE_CHECK_INTERVAL", 0.25)
     db = Database(tmp_path / "live.db")
     await db.initialize()
     for uid in (8, 20, 21):
@@ -532,6 +534,7 @@ async def test_staff_live_websocket_auth_events_and_typing(tmp_path):
 
     app = web.Application(middlewares=[protection])
     app["db"], app["settings"], app["staff_chat_hub"] = db, settings, hub
+    app["staff_chat_handshake_gate"] = asyncio.Semaphore(24)
     app.router.add_get("/ws/community/chat", connect)
 
     async def cleanup(_app):
@@ -592,6 +595,9 @@ async def test_staff_live_websocket_auth_events_and_typing(tmp_path):
         ) is None
 
         await first.close()
+        await db.set_role(21, "member")
+        expired = await _ws_until(second, "error")
+        assert expired["reason"] == "access"
         await second.close()
     assert hub.closed
 
