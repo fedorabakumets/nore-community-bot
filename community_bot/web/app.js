@@ -348,7 +348,34 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar()}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
+
+
+// Animate route changes only. Refreshes and game-internal renders should remain still.
+const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket']);
+const routeMotionOrder = ['home', 'shop', 'community', 'events', 'lk'];
+let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
+function animateRouteChange(app, selected) {
+  const category = tab === 'shop' ? (window.NoraShop?.route()?.category || '') : '';
+  const key = tab + ':' + category;
+  if (key === previousRouteKey) return;
+  const oldKey = previousRouteKey, oldSection = previousRouteSection;
+  previousRouteKey = key;
+  previousRouteSection = selected;
+  routeMotion?.cancel();
+  routeMotion = null;
+  if (!oldKey || routeMotionExcluded.has(tab) || navReducedMotion.matches || typeof app.animate !== 'function') return;
+  const from = routeMotionOrder.indexOf(oldSection), to = routeMotionOrder.indexOf(selected);
+  const x = from >= 0 && to >= 0 && from !== to ? (to > from ? 8 : -8) : 0;
+  const animation = app.animate([
+    {opacity: .68, transform: 'translate3d(' + x + 'px,' + (x ? 0 : 6) + 'px,0)'},
+    {opacity: 1, transform: 'translate3d(0,0,0)'}
+  ], {duration: 185, easing: 'cubic-bezier(.2,.7,.3,1)'});
+  routeMotion = animation;
+  animation.addEventListener('finish', () => {
+    if (routeMotion === animation) routeMotion = null;
+  }, {once: true});
+}
 
 
 // Keep the dock mounted: polling must not restart the travelling selection.
