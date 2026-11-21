@@ -41,7 +41,7 @@ async def test_group_profile_card(tmp_path, fallback):
     send = bot.send_rich_message.await_args.kwargs
     assert send["message_thread_id"] == 5
     blocks = bot.send_rich_message.await_args_list[0].kwargs["rich_message"].blocks
-    photo, votes, name, _, about, hobbies, table, actions = blocks
+    photo, votes, name, _, about, hobbies, table, limits, actions = blocks
     assert photo.type == "photo" and photo.photo.media == "telegram-photo"
     assert name.type == "paragraph" and name.text[0].text == "Анна <3"
     assert name.text[2].button.text == "❤️ 0" and name.text[2].button.style == "link"
@@ -55,6 +55,13 @@ async def test_group_profile_card(tmp_path, fallback):
     assert table.is_compact and [cell.text for cell in table.cells[0]] == ["🍪 Печеньки", "Репутация"]
     tier = reputation_tier(user["reputation"], 15)
     assert [cell.text for cell in table.cells[1]] == [str(user["cookies"]), f'{user["reputation"]}/100 · {tier.label}']
+    assert limits.type == "details" and limits.summary == "Лимиты" and not limits.is_open
+    limit_table, limit_action = limits.blocks
+    assert limit_table.is_compact
+    assert [row[0].text for row in limit_table.cells] == ["🐩", "📹", "🎧", "⚖️"]
+    assert [row[1].text for row in limit_table.cells] == ["5/5", "5/5", "5/5", "1/1"]
+    assert limit_action.buttons[0].text == "♻️ Восстановить лимиты"
+    assert limit_action.buttons[0].callback_data == "gprofile:limits:restore:2"
     assert (about.summary, hobbies.summary) == ("О себе", "Увлечения")
     assert not about.is_open and not hobbies.is_open
     assert about.blocks[0].text == "Люблю <музыку>"
@@ -68,6 +75,8 @@ async def test_group_profile_card(tmp_path, fallback):
         assert kwargs["message_thread_id"] == 5
         assert kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "gprofile:like:2"
         assert kwargs["reply_markup"].inline_keyboard[1][1].callback_data == "profile_action:rep_down:2"
+        assert "Лимиты" in args[1] and "🐩" in args[1]
+        assert kwargs["reply_markup"].inline_keyboard[2][0].callback_data == "gprofile:limits:restore:2"
     else:
         bot.send_message.assert_not_awaited()
 
