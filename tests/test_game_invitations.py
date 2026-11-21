@@ -106,6 +106,44 @@ async def test_rich_invite_delivers_both_copies_and_opens_the_invited_lobby(db, 
         assert (await api.read_status(db, 2))["room"]["id"] == rid
 
 
+async def test_durak_host_can_announce_open_lobby_in_community_chat(db):
+    rid, _ = await durak_rooms.command(db, 1, {
+        "action": "create", "config": {"stake": 25, "players": 3}, "nonce": secrets.token_hex(16),
+    })
+    bot = SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
+        send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=13)),
+    )
+
+    async def announce(uid):
+        request = Request(db, uid, {}, bot)
+        request.path = f"/api/durak/room/{rid}/announce"
+        request.match_info = {"rid": rid}
+        return await protection(request, durak_api.announce)
+
+    assert (await announce(2)).status == 400
+    bot.send_rich_message.assert_not_awaited()
+    await db.execute("UPDATE durak_rooms SET config=json_set(config,'$.private',json('true')) WHERE id=?", (rid,))
+    assert (await announce(1)).status == 400
+    bot.send_rich_message.assert_not_awaited()
+    await db.execute("UPDATE durak_rooms SET config=json_set(config,'$.private',json('false')) WHERE id=?", (rid,))
+
+    assert json.loads((await announce(1)).body) == {"posted": True}
+    assert json.loads((await announce(1)).body) == {"posted": False}
+    bot.send_rich_message.assert_awaited_once()
+    assert bot.send_rich_message.await_args.args == (-100123,)
+    card = bot.send_rich_message.await_args.kwargs["rich_message"]
+    assert card.blocks[1].text[0].user.id == 1
+    assert card.blocks[2].text[1].text == "25 🍪"
+    assert card.blocks[2].text[2] == " · 1 из 3 игроков"
+    button = card.blocks[-1].buttons[0]
+    assert button.text == "Присоединиться"
+    assert button.url.startswith("https://t.me/test_nora?startapp=nora_d_")
+    guest = Request(db, 2, {"code": button.url.split("nora_d_")[1]})
+    assert json.loads((await durak_api.preview(guest)).body)["id"] == rid
+    assert not (await durak_api.menu(db, 2))["active"]
+
+
 @pytest.mark.parametrize("chat_id", [2, -100123])
 async def test_only_the_recipient_can_delete_the_card_with_its_own_button(chat_id, monkeypatch):
     dismiss = "game-invite:close:2:15"

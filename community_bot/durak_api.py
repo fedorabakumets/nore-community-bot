@@ -15,7 +15,8 @@ from community_bot import barricade_rules as barricade
 from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
-from community_bot.game_invitations import announce_quick_lobby, deliver_game_invitation
+from community_bot.game_invitations import announce_quick_lobby, deliver_game_invitation, send_lobby_post
+from community_bot.game_lobby_posts import has_live_announcement
 
 REACTION_DURATION = 2.7
 REACTION_COOLDOWN = 2.8
@@ -137,6 +138,7 @@ class Updates:
         self.next_due = 0
         self.cleanup_at = 0
         self.watchers = {}
+        self.announcing = set()
         self.reactions = {}
         self.reaction_cleanup_at = 0
 
@@ -301,6 +303,36 @@ async def link(request):
     return web.json_response({"url": f"https://t.me/{name}?startapp=nora_d_{row['code']}"})
 
 
+async def announce(request):
+    rid, uid = request.match_info["rid"], request["actor"]["id"]
+    db, bot, updates = request.app["db"], request.app["bot"], request.app["durak_updates"]
+    chat_id = request.app["settings"].community_chat_id
+    if not bot or not chat_id:
+        return web.json_response({"error": "Основной чат сейчас недоступен"}, status=503)
+
+    row = await db.fetchone(SUMMARY_FIELDS + ", r.code" + SUMMARY_FROM + f"""
+        WHERE {DURAK_ONLY} AND r.id=? AND r.host=? AND r.status='waiting' AND r.deadline>?
+          AND NOT COALESCE(json_extract(r.config,'$.private'), 0)
+          AND NOT COALESCE(json_extract(r.config,'$.quick'), 0)
+    """, (rid, uid, time.time()))
+    if not row:
+        raise ValueError("В основной чат может пригласить только создатель открытого стола")
+    if rid in updates.announcing:
+        return web.json_response({"error": "Приглашение уже отправляется"}, status=409)
+
+    updates.announcing.add(rid)
+    try:
+        if await has_live_announcement(db, "durak", rid, chat_id):
+            return web.json_response({"posted": False})
+        config = json.loads(row["config"])
+        if not await send_lobby_post(bot, db, chat_id, "durak", rid, uid, config["stake"],
+                                     row["count"], config["players"], f"nora_d_{row['code']}"):
+            return web.json_response({"error": "Telegram не принял приглашение. Попробуй ещё раз"}, status=502)
+        return web.json_response({"posted": True})
+    finally:
+        updates.announcing.discard(rid)
+
+
 async def action(request):
     if request.content_length and request.content_length > 4096:
         raise ValueError("Слишком большая команда")
@@ -366,3 +398,4 @@ def register(app):
     app.router.add_post("/api/durak/items", change_items)
     app.router.add_get("/api/durak/room/{rid}", table)
     app.router.add_get("/api/durak/room/{rid}/link", link)
+    app.router.add_post(r"/api/durak/room/{rid:[a-f0-9]{16}}/announce", announce)

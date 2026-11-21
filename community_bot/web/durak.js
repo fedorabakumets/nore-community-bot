@@ -182,6 +182,9 @@ function privateScreen(){
 }
 function waiting(){
   const c=room.config, own=room.members.find(m=>m.seat===room.own);
+  const telegramButton=!c.private && own.id===room.host
+    ? actionButton('announce','В Telegram','dk-secondary','title="Отправить приглашение в основной чат Telegram"')
+    : actionButton('share','Поделиться');
   return `${header('Ждём игроков')}<div class="dk-panel"><div class="dk-stake"><h2>${c.private?'Приватный':'Открытый'} стол</h2><strong>${chips(c.stake)}</strong></div>
     <p class="dk-muted">Партия начнётся, когда займут все ${c.players} места.</p>${settingsLine(c)}
     <div class="dk-seats">${Array.from({length:c.players},(_,i)=>{
@@ -191,7 +194,7 @@ function waiting(){
     }).join('')}</div></div>
     ${c.quick ? '<p class="dk-hint">Нора зовёт соперника в основном чате.</p>' :
       actionButton('friends','Пригласить друзей','dk-primary dk-wide') +
-      `<div class="dk-tools">${actionButton('share','В Telegram')}${actionButton('copy','Ссылка')}</div>` +
+      `<div class="dk-tools">${telegramButton}${actionButton('copy','Ссылка')}</div>` +
       actionButton('copy-code','Скопировать код','dk-text')}${rulesInfo(c)}
     ${actionButton('leave-confirm',own.id===room.host?'Отменить стол':'Выйти с возвратом','dk-text dk-danger')}`;
 }
@@ -400,6 +403,7 @@ function paint(){
   if(mode==='room'&&room)html=room.status==='waiting'?waiting():resultScreen();
   host.innerHTML=(html||`${header('Карточный стол')}<p class="dk-muted">Загружаем стол…</p>`)+
     `<p class="dk-error" role="status">${esc(message)}</p>`;
+  if(pending&&mode==='room')lockActions();
 }
 
 function resultScreen(){
@@ -431,7 +435,7 @@ function clockTick(){
   if(left<=0&&drag)cancelDrag();
 }
 function lockActions(){
-  host?.querySelectorAll('.dk-actions button:not([data-undo]), .dk-quick-form button').forEach(button=>{
+  host?.querySelectorAll('.dk-actions button:not([data-undo]), .dk-quick-form button, [data-dk="announce"]').forEach(button=>{
     if(pending&&!button.disabled){
       button.disabled=true;
       button.dataset.awaitingMove='';
@@ -764,6 +768,18 @@ async function inviteLink(share){
     }else await copyText(url);
   }catch(err){errorText(err)}
 }
+async function announceRoom(){
+  if(pending)return;
+  pending=true;
+  lockActions();
+  const gen=generation;
+  try{
+    const {posted}=await api('durak/room/'+room.id+'/announce',{});
+    if(gen===generation)toast(posted?'Приглашение отправлено в основной чат':'Приглашение уже отправлено');
+  }catch(err){
+    if(gen===generation)errorText(err);
+  }finally{pending=false;lockActions();clockTick()}
+}
 function returnToTables(){
   room=null;
   change('open');
@@ -869,6 +885,7 @@ function click(e){
     case 'copy-code':copyText(room.code);break;
     case 'copy':inviteLink(false);break;
     case 'share':inviteLink(true);break;
+    case 'announce':announceRoom();break;
     case 'leave-confirm':confirmLeave();break;
     case 'sort':{
       cancelDrag();

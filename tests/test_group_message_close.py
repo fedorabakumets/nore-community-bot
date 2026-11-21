@@ -77,8 +77,9 @@ def keyboard(action):
         InputRichBlockParagraph(text="Play"),
         InputRichBlockButtons(buttons=[
             RichMessageButton(text="✕", callback_data="game-invite:close:2:1"),
-            RichMessageButton(text="Join", url="https://t.me/nora_bot"),
+            RichMessageButton(text="✅", url="https://t.me/nora_bot"),
         ]),
+        InputRichBlockParagraph(text="Rules"),
     ])),
 ])
 async def test_group_close_button_and_owner_survive_edits(db, method):
@@ -93,18 +94,21 @@ async def test_group_close_button_and_owner_survive_edits(db, method):
         await middleware(sent, bot, method)
     outgoing = sent.await_args.args[1]
     assert isinstance(outgoing, SendRichMessage) and outgoing.reply_markup is None
-    assert outgoing.rich_message.blocks[-1].buttons[0].callback_data == "nora:close:1:2"
-    assert outgoing.rich_message.blocks[-1].buttons[0].text == "❌"
+    rows = [block.buttons for block in outgoing.rich_message.blocks if isinstance(block, InputRichBlockButtons)]
+    assert len(rows) == 1 and rows[0][-1].callback_data == "nora:close:1:2"
+    assert rows[0][-1].text == "❌"
     if isinstance(method, SendRichMessage):
-        assert [button.text for button in outgoing.rich_message.blocks[-2].buttons] == ["Join"]
+        assert [button.text for button in rows[0]] == ["✅", "❌"]
     with group_message_actors(3):
         await middleware(sent, bot, EditMessageReplyMarkup(
             chat_id=GROUP, message_id=10, reply_markup=keyboard("play:accept"),
         ))
     edited = sent.await_args.args[1]
     assert edited.reply_markup is None
-    assert [b.callback_data for block in edited.rich_message.blocks if isinstance(block, InputRichBlockButtons)
-            for b in block.buttons] == ["play:accept", "nora:close:1:2"]
+    assert [[b.callback_data for b in block.buttons]
+            for block in edited.rich_message.blocks if isinstance(block, InputRichBlockButtons)] == [
+                ["play:accept", "nora:close:1:2"],
+            ]
     private = SendMessage(chat_id=1, text="Hello", reply_markup=keyboard("ui:close"))
     await middleware(sent, bot, private)
     assert sent.await_args.args[1] is private
@@ -186,7 +190,8 @@ async def test_quick_post_expires_at_two_minutes_without_cancelling_waiting_room
     await announce_quick_lobby(bot, db, bot.community_settings, "barricade", rid, 1, 5)
     method = outgoing.await_args.args[1]
     assert method.reply_markup is None
-    assert method.rich_message.blocks[-1].buttons[0].callback_data == "nora:close:1"
+    join, close = method.rich_message.blocks[-1].buttons
+    assert join.text == "Присоединиться" and close.callback_data == "nora:close:1"
     row = await db.fetchone("SELECT json_extract(value,'$[4]') AS until FROM bot_state WHERE key=?",
                             (f"game-lobby-post:{GROUP}:10",))
     await game_lobby_posts.cleanup(db, bot, now=row["until"] - 0.001)
@@ -250,8 +255,8 @@ async def test_only_pinned_posts_get_one_nora_inline_link(db):
     await middleware(telegram, bot, EditMessageReplyMarkup(chat_id=GROUP, message_id=10,
                                                          reply_markup=keyboard("new")))
     assert calls[-1].reply_markup.inline_keyboard[0][0].text == "НОРА"
-    assert [block.buttons[0].callback_data for block in calls[-1].rich_message.blocks
-            if isinstance(block, InputRichBlockButtons)] == ["new", "nora:close:0"]
+    assert [[b.callback_data for b in block.buttons] for block in calls[-1].rich_message.blocks
+            if isinstance(block, InputRichBlockButtons)] == [["new", "nora:close:0"]]
     await middleware(telegram, bot, UnpinChatMessage(chat_id=GROUP, message_id=10))
     assert calls[-1].reply_markup is None
 

@@ -236,7 +236,7 @@ function mountDurak() {
     css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=quick-game';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=game-exit').catch(() => {
+  durakModule ??= import('/durak.js?v=chat-invite').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');

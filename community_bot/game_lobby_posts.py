@@ -32,17 +32,26 @@ _DUE = """
 """
 
 
-async def remember(db, game, room, chat, sent, *, now=None):
+async def remember(db, game, room, chat, sent, *, now=None, announcement=False):
     message_id = getattr(sent, "message_id", None)
     if type(message_id) is not int or message_id <= 0:
         return
     try:
         await db.set_bot_state(
             f"{PREFIX}{chat}:{message_id}",
-            json.dumps([game, room, chat, message_id, (time.time() if now is None else now) + TTL, 0]),
+            json.dumps([game, room, chat, message_id, (time.time() if now is None else now) + TTL, 0, announcement]),
         )
     except Exception:
         logger.exception("Could not track the Telegram lobby post for cleanup")
+
+
+async def has_live_announcement(db, game, room, chat):
+    prefix = f"{PREFIX}{chat}:"
+    return await db.fetchone("""
+        SELECT 1 FROM bot_state WHERE key GLOB ? AND json_valid(value)
+          AND json_extract(value,'$[0]')=? AND json_extract(value,'$[1]')=?
+          AND json_extract(value,'$[4]')>? AND json_extract(value,'$[6]')=1 LIMIT 1
+    """, (prefix + "*", game, room, time.time())) is not None
 
 
 async def cleanup(db, bot, *, now=None):

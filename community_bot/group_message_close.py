@@ -195,9 +195,13 @@ def _rich(blocks, markup, data, original=None):
             buttons.append(button)
         if buttons:
             merged.append(block.model_copy(update={"buttons": buttons}))
-    merged.append(InputRichBlockButtons(align="center", buttons=[
-        RichMessageButton(text="❌", style="danger", callback_data=data),
-    ]))
+    close = RichMessageButton(text="❌", style="danger", callback_data=data)
+    last_row = next((i for i in range(len(merged) - 1, -1, -1) if isinstance(merged[i], InputRichBlockButtons)), None)
+    if last_row is not None and len(merged[last_row].buttons) < 8:
+        row = merged[last_row]
+        merged[last_row] = row.model_copy(update={"buttons": [*row.buttons, close]})
+    else:
+        merged.append(InputRichBlockButtons(align="center", buttons=[close]))
     extra = original.model_dump(exclude={"html", "markdown", "blocks"}, exclude_none=True) if original else {}
     return InputRichMessage(blocks=merged, **extra)
 

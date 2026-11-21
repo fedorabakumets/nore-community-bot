@@ -136,30 +136,36 @@ async def close_game_invitation(callback: CallbackQuery, settings):
 
 
 async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
-    chat_id = settings.community_chat_id
-    if not bot or not chat_id:
+    if not bot or not settings.community_chat_id:
         return
     if not await db.fetchone("SELECT 1 FROM durak_rooms WHERE id=? AND status='waiting' AND deadline>?",
                              (rid, time.time())):
         return
+    await send_lobby_post(bot, db, settings.community_chat_id, game, rid, uid, stake,
+                          1, 2, f"nora_q_{game}_{rid}", quick=True)
+
+
+async def send_lobby_post(bot, db, chat_id, game, rid, uid, stake, players, capacity, startapp, *, quick=False):
     title = "🃏 Дурак" if game == "durak" else "🪵 Баррикада"
     stake_text = f"{stake:,}".replace(",", " ") + " 🍪"
+    line = " открыл лобби для быстрой игры." if quick else " приглашает сыграть в «Дурака»!"
+    seats = f" · {players} из {capacity} игроков"
     try:
         async with asyncio.timeout(6):
             username = (await bot.me()).username
             if not username:
-                return
+                return False
             host = _mention(await db.get_user(uid))
-            url = f"https://t.me/{username}?startapp=nora_q_{game}_{rid}"
+            url = f"https://t.me/{username}?startapp={startapp}"
             button = RichMessageButton(text="Присоединиться", style="success", url=url)
             with standalone_rich_message(), bot_publication(), keep_in_chat(), group_message_actors(uid):
                 try:
                     sent = await bot.send_rich_message(chat_id, rich_message=InputRichMessage(
                         blocks=[
                             InputRichBlockSectionHeading(text=title, size=2),
-                            InputRichBlockParagraph(text=[host, " открыл лобби для быстрой игры."]),
+                            InputRichBlockParagraph(text=[host, line]),
                             InputRichBlockParagraph(
-                                text=["Ставка ", RichTextBold(text=stake_text), " · 1 из 2 игроков"],
+                                text=["Ставка ", RichTextBold(text=stake_text), seats],
                             ),
                             InputRichBlockButtons(align="center", buttons=[button]),
                         ],
@@ -168,15 +174,17 @@ async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
                 except (TelegramBadRequest, TelegramNotFound):
                     sent = await bot.send_message(
                         chat_id,
-                        f"<b>{title}</b>\n{user_link(uid, host.text)} открыл лобби. Ставка <b>{stake_text}</b>",
+                        f"<b>{title}</b>\n{user_link(uid, host.text)}{line}\nСтавка <b>{stake_text}</b>{seats}",
                         parse_mode="HTML",
                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                             InlineKeyboardButton(text=button.text, style=button.style, url=url),
                         ]]),
                     )
-        await remember(db, game, rid, chat_id, sent)
+        await remember(db, game, rid, chat_id, sent, announcement=True)
     except _DELIVERY_ERRORS as error:
-        logger.warning("Quick lobby announcement failed: %s", type(error).__name__)
+        logger.warning("Lobby announcement failed: %s", type(error).__name__)
+        return False
+    return True
 
 
 async def quick_preview(request):
