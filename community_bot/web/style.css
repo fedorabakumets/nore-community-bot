@@ -2830,3 +2830,19 @@ button.staff-chat-author{text-align:left;background:none;padding:0;border:0}
   color:#e9dce4;text-decoration:none;font-size:11px;
 }
 .staff-rich-placeholder{padding:5px 0;color:#ada5b1;font-size:11px}
+
+
+/* Staff chat cleanup: quiet, two-tap action, not a Telegram delete control. */
+.staff-chat-hide{
+  flex:none;min-width:19px;min-height:22px;padding:0 3px;margin-left:1px;
+  color:rgba(178,167,177,.7);border:0;border-radius:6px;
+  background:transparent;font:400 17px/1 Rubik,Arial,sans-serif;
+  cursor:pointer;
+}
+.staff-chat-hide.confirm{
+  padding:4px 6px;width:auto;
+  color:#f1c0c9;background:rgba(188,77,98,.19);
+  font-size:10px;font-weight:600;white-space:nowrap;
+}
+.staff-chat-hide:focus-visible{outline:2px solid #e0a0b0;outline-offset:2px}
+.staff-chat-hide:disabled{opacity:.45}
