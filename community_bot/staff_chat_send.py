@@ -172,7 +172,12 @@ async def _publish(request: web.Request, *, text: str, reply: object,
             kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to}
             if kind == "voice":
                 filename, payload = files[0]
-                normalized = await _voice_ogg(filename, payload)
+                gate = request.app.get("staff_chat_voice_gate")
+                if gate is not None:
+                    async with gate:
+                        normalized = await _voice_ogg(filename, payload)
+                else:
+                    normalized = await _voice_ogg(filename, payload)
                 sent = await bot.send_voice(
                     **kwargs, voice=BufferedInputFile(normalized, filename="nora-voice.ogg"),
                     caption=body, parse_mode=None,
