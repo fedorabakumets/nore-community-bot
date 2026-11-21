@@ -97,6 +97,12 @@ async def test_blocks_privacy_presence_and_thumbnail(env):
     await heartbeat(env.db, 2, 'b' * 20, 1, True)
     online = json.loads((await presence(Request(env))).body)
     assert online['3']['online'] and not online['2']['online']
+    assert online['2']['last_seen'] is None and online['2']['last_exit'] is None
+    await heartbeat(env.db, 3, 'a' * 20, 2, False)
+    directory_result = json.loads((await directory(Request(env, query={'q': '@person3'}))).body)
+    visible = next(p for p in directory_result['items'] if p['id'] == 3)['presence']
+    assert visible['visible'] and not visible['online']
+    assert visible['last_exit'] is not None and visible['last_exit'] == visible['last_seen']
     staff = json.loads((await status(Request(env))).body)['staff']
     assert [p['id'] for p in staff] == [1, 2, 6, 3, 4]
     await env.db.execute("INSERT INTO mini_friend_blocks VALUES(3,5,'token','now')")
