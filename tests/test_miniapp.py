@@ -11,7 +11,15 @@ import pytest
 from aiohttp import web
 
 from community_bot.database import Database
-from community_bot.miniapp import confirm, overview, prepare, protection, set_city, submit_application, validate_init_data
+from community_bot.miniapp import (
+    confirm,
+    overview,
+    prepare,
+    protection,
+    set_city,
+    submit_application,
+    validate_init_data,
+)
 
 
 def signed(uid=7, date=1000, token='test-only'):

@@ -82,7 +82,8 @@ async def protection(request, handler):
                         status=403, headers={'Cache-Control': 'no-store'},
                     )
             profile_optional = path in {
-                '/api/me', '/api/city', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
+                '/api/me', '/api/city', '/api/application', '/api/application/photo',
+                '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
             } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
             if not profile_optional:
