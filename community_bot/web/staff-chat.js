@@ -4,6 +4,9 @@ window.NoraStaffChat = (() => {
 
   let timer = null, loading = false, signature = '', contextId = null, visit = 0, observer = null;
   const cache = new Map();
+  let draft = '', replyTarget = null, attachment = null, sending = false, emojiOpen = false;
+  const maxUpload = 12 * 1024 * 1024;
+  const quickEmoji = ['😂','❤️','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
   const mediaLabels = {
     photo: 'Фото', video: 'Видео', animation: 'GIF',
     voice: 'Голосовое', video_note: 'Кружочек',
@@ -89,10 +92,11 @@ window.NoraStaffChat = (() => {
       </button>` : '';
     const body = m.text ? `<div class="staff-chat-text">${esc(m.text)}</div>` : '';
     const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
+    const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
     const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
     return `<article class="staff-chat-message" data-message-id="${id}">
        ${avatar}<div class="staff-chat-bubble">
-         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}${hideButton}</div>
+         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}${replyButton}${hideButton}</div>
          ${quote}${mediaTile(m)}${richRow(m)}${body}
        </div>
      </article>`;
@@ -101,12 +105,27 @@ window.NoraStaffChat = (() => {
     return `<section class="nora-staff-chat">
       <header class="staff-chat-header">
         <button class="staff-chat-back" type="button" data-tab="community" aria-label="Назад в Коммьюнити">‹</button>
-        <div class="staff-chat-heading"><h1>Чат Норы</h1><span><i aria-hidden="true"></i> Только чтение · тест</span></div>
+        <div class="staff-chat-heading"><h1>Чат Норы</h1><span><i aria-hidden="true"></i> Отправка через бота · тест</span></div>
       </header>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
         <p class="staff-chat-empty">Подключаем чат…</p>
       </div>
-      <footer class="staff-chat-footer"><span>Сообщения из Telegram · режим просмотра</span><button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним сообщениям ↑</button></footer>
+      <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
+        <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
+        <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
+        <div class="staff-chat-compose-row">
+          <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="Прикрепить файл" title="Прикрепить файл">＋</button>
+          <input id="staff-chat-file" type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.mp4,.mov,.webm,.mp3,.m4a,.ogg,.oga,.opus,.aac,.wav,.pdf,.txt" hidden>
+          <textarea id="staff-chat-draft" rows="1" maxlength="3000" placeholder="Сообщение в чат…" aria-label="Сообщение в Telegram-чат"></textarea>
+          <button type="button" class="staff-chat-emoji-toggle" data-chat-emoji-toggle aria-label="Эмодзи" title="Эмодзи">☺</button>
+          <button type="submit" id="staff-chat-submit" class="staff-chat-submit" aria-label="Отправить в чат" disabled>➤</button>
+        </div>
+        <div class="staff-chat-emoji-palette" id="staff-chat-emoji-palette" hidden>
+          ${quickEmoji.map(emoji=>`<button type="button" data-chat-emoji="${esc(emoji)}" aria-label="Добавить ${esc(emoji)}">${emoji}</button>`).join('')}
+        </div>
+        <p class="staff-chat-compose-hint">Отправит бот Нора с подписью твоего имени · 1 файл до 12 МБ</p>
+      </form>
+      <footer class="staff-chat-footer"><span>Чат Telegram · тестовый режим команды</span><button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним сообщениям ↑</button></footer>
     </section>`;
   }
 
