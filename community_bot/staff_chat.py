@@ -229,6 +229,9 @@ async def capture(db, settings, message: Message) -> None:
             message.date.isoformat(), edited,
         ),
     )
+    from community_bot.staff_chat_live import emit
+
+    emit(db, "edit" if edited else "message", [message.message_id])
     # Keep the experimental mirror bounded; Telegram remains the source of truth.
     if not edited and message.message_id % 250 == 0:
         await db.execute(
@@ -460,6 +463,9 @@ async def discard(db, settings, chat_id: Any, message_ids: Any) -> None:
         f"DELETE FROM staff_chat_messages WHERE chat_id=? AND message_id IN ({placeholders})",
         (chat_id, *ids),
     )
+    from community_bot.staff_chat_live import emit
+
+    emit(db, "delete", ids)
 
 
 async def hide(request: web.Request) -> web.Response:
