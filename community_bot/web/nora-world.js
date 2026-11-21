@@ -1,0 +1,1113 @@
+'use strict';
+window.NoraWorld = (() => {
+  const GRAVITY=13, JUMP_SPEED=4.4;
+  const WING_LIFT_SPEED=6.8, GLIDE_GRAVITY=6.5, GLIDE_FALL_SPEED=3.4;
+  const TAVERN_JUMP_LIMIT=1.5; // Keep the avatar below the ceiling beams.
+  const trees = [[-5.7,-5.6], [5.2,-4.7], [-5.6,5.3], [5.5,5.7]];
+  const FURNITURE_RADIUS=.12;
+  const CAMERA_CLEARANCE=.22, MAX_LOOK_UP=85*Math.PI/180;
+  function overlapsBox(x,z,[x0,x1,z0,z1],radius){
+    return x>x0-radius&&x<x1+radius&&z>z0-radius&&z<z1+radius;
+  }
+  function move(position, dx, dz, zone = {limit:8.35,boxes:[]}, feet) {
+    // Substeps prevent tunneling through furniture after a frame stall.
+    const steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/.12));
+    for(let step=0;step<steps;step++)for(const [axis,delta] of [['x',dx/steps],['z',dz/steps]]) {
+      const bound=axis==='x'?(zone.limitX||zone.limit):(zone.limitZ||zone.limit);
+      const max=axis==='x'?(zone.maxX??bound):bound;
+      const next=Math.max(-bound,Math.min(max,position[axis]+delta));
+      const x=axis==='x'?next:position.x,z=axis==='z'?next:position.z;
+      if(!zone.boxes.some(box=>(feet??0)<(box[4]??Infinity)&&overlapsBox(x,z,box,Number.isFinite(box[4])&&feet!==undefined?FURNITURE_RADIUS:.34)))position[axis]=next;
+    }
+    position.y=.017;
+  }
+  function cameraDistance(origin,direction,distance,boxes) {
+    // Swept camera volume: enlarged boxes cover the near plane, not only its center ray.
+    // All locations share a base floor at y=0. Retract along the orbit
+    // ray to clear it without changing the direction the camera faces.
+    let safe=direction.y<0?Math.min(distance,(origin.y-CAMERA_CLEARANCE)/-direction.y):distance;
+    for(const bounds of boxes){
+      let near=0,far=distance;
+      for(const [axis,lo,hi] of [['x',0,1],['y',2,3],['z',4,5]]){
+        const min=bounds[lo]-CAMERA_CLEARANCE,max=bounds[hi]+CAMERA_CLEARANCE,v=direction[axis],p=origin[axis];
+        if(Math.abs(v)<1e-7){if(p<min||p>max){far=-1;break;}}
+        else {const a=(min-p)/v,b=(max-p)/v;near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));}
+      }
+      if(near<=far&&far>=0)safe=Math.min(safe,Math.max(.55,near-.12));
+    }
+    return safe;
+  }
+  function timeOfDay(now=Date.now()) {
+    // Moscow is UTC+3 year-round; independent of the device's selected timezone.
+    const hour=((now/3600000+3)%24+24)%24;
+    const elevation=Math.sin((hour-6)/24*Math.PI*2);
+    const t=Math.max(0,Math.min(1,(elevation+.12)/.48));
+    const daylight=t*t*(3-2*t);
+    return {hour,daylight,twilight:1-Math.abs(daylight*2-1)};
+  }
+  function tavernAcoustics(inside,x,z,yaw=0) {
+    const dx=-x,dz=(inside?0:2.55)-z,distance=Math.hypot(dx,dz);
+    if(inside)return {gain:.9,cutoff:18000,pan:Math.max(-.65,Math.min(.65,(dx*Math.cos(yaw)-dz*Math.sin(yaw))/Math.max(1,distance)))};
+    // Sound escapes through the front doorway; walls muffle side/rear listening.
+    const front=Math.max(0,Math.min(1,(z-1.5)/1.6));
+    const door=front/(1+distance*.65);
+    return {gain:.035+.6*door,cutoff:450+4200*door,pan:Math.max(-.8,Math.min(.8,(dx*Math.cos(yaw)-dz*Math.sin(yaw))/Math.max(1,distance)))};
+  }
+  function createAtmosphere(T,scene,geometry) {
+    const starsMaterial=new T.MeshBasicMaterial({color:'#dce4e0',transparent:true,depthWrite:false,fog:false});
+    const leafMaterial=new T.MeshLambertMaterial({color:'#b6a06a'});
+    const stars=new T.InstancedMesh(geometry,starsMaterial,112);
+    const leaves=new T.InstancedMesh(geometry,leafMaterial,128);
+    stars.name='nora-stars';leaves.name='nora-leaves';
+    stars.frustumCulled=leaves.frustumCulled=false;
+    stars.instanceMatrix.setUsage(T.DynamicDrawUsage);leaves.instanceMatrix.setUsage(T.DynamicDrawUsage);
+    scene.add(stars,leaves);
+    const o=new T.Object3D(),color=new T.Color();
+    const anchors=[...trees,[-7.2,-10.5],[0,-10.5],[7.2,-10.5],[-7.2,10.5],[0,10.5],[7.2,10.5],[-10.5,0],[10.5,0]];
+    const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches||false;
+    let elapsed=0;
+    for(let i=0;i<128;i++){color.set(['#ae965c','#7b9867','#b17858','#647f68'][i%4]);leaves.setColorAt(i,color);}
+    function update(dt,daylight,inside){
+      elapsed+=dt;
+      stars.visible=!inside&&daylight<.99;leaves.visible=!inside;
+      starsMaterial.opacity=(1-daylight)*.85;
+      if(inside)return;
+      if(stars.visible){
+        for(let i=0;i<112;i++){
+          const a=i*2.399963, y=.12+(i+.5)/112*.86, radius=65*Math.sqrt(1-y*y);
+          const pulse=reduced ? .7 : .45+.55*Math.pow(.5+.5*Math.sin(elapsed*(.32+(i%7)*.07)+i*1.7),3);
+          o.position.set(Math.cos(a)*radius,65*y,Math.sin(a)*radius);
+          o.rotation.set(0,a,0);o.scale.setScalar((.07+(i%4)*.025)*pulse);o.updateMatrix();stars.setMatrixAt(i,o.matrix);
+        }
+        stars.instanceMatrix.needsUpdate=true;
+      }
+      for(let i=0;i<128;i++){
+        const leaf=Math.floor(i/4),fragment=i%4,anchor=anchors[leaf%anchors.length];
+        const cycle=(elapsed*(reduced ? .035 : .12)+(leaf*.6180339)%1)%1;
+        const drift=cycle*1.2,spread=Math.max(0,(cycle-.58)/.42);
+        // Each leaf breaks into four separate voxel fragments before vanishing aloft.
+        const visible=cycle<.75+fragment*.055;
+        o.position.set(anchor[0]+Math.sin(leaf*7)*.9+Math.sin(cycle*7+leaf)*.28+drift+(fragment%2-.5)*(.07+spread*.35),
+          3.7-cycle*3.3+(fragment<2?1:-1)*spread*.12,
+          anchor[1]+Math.cos(leaf*3)*.9+Math.cos(cycle*6+leaf)*.35+(fragment<2?-.5:.5)*(.07+spread*.35));
+        o.rotation.set(cycle*5+leaf,cycle*4,Math.sin(cycle*7+leaf)*.6);
+        o.scale.set(visible?.065:0,visible?.025:0,visible?.065:0);o.updateMatrix();leaves.setMatrixAt(i,o.matrix);
+      }
+      leaves.instanceMatrix.needsUpdate=true;
+    }
+    return {update,dispose(){scene.remove(stars,leaves);stars.dispose();leaves.dispose();starsMaterial.dispose();leafMaterial.dispose();}};
+  }
+  function lobbyPlayers(T,scene,player,status,onChallenge,onCinema,onBurst,lobbyLabel){
+    const peers=new Map();
+    const interval=80, playbackDelay=150, maxPrediction=65, correctionSpeed=4.8;
+    let session=null,pending=null,next=0,clockOffset=null,lastReply=0,failures=0;
+    let socket=null,retrySocket=0,room=null;
+    const roomLabel=()=>room==='cinema'?'КИНОТЕАТР':room?.startsWith('burrow:')?'НОРА · '+room.slice(7):room?'ВОСПОМИНАНИЕ':lobbyLabel();
+    function clearPeers(){for(const nickname of peers.keys())remove(nickname);}
+    function setRoom(nextRoom){
+      if(room===nextRoom)return;
+      room=nextRoom;next=0;clearPeers();
+    }
+    function connect(time){
+      if(!window.WebSocket||socket||time<retrySocket)return;
+      retrySocket=time+30000;
+      let ws;
+      try{ws=new window.WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/nora-game/socket`);}
+      catch{return;}
+      socket=ws;
+      ws.onopen=()=>{if(socket===ws)ws.send(JSON.stringify({auth}));};
+      ws.onmessage=event=>{
+        if(socket!==ws||!session)return;
+        try{receive(JSON.parse(event.data),performance.now());}catch{ws.close();}
+      };
+      ws.onclose=()=>{if(socket===ws){socket=null;next=0;}};
+      ws.onerror=()=>ws.close();
+    }
+    function receive({players,time:serverTime,room:receivedRoom=null,challenge,cinema,burst},sentAt){
+      if(room!==receivedRoom)return;
+      const receivedAt=performance.now();
+      lastReply=receivedAt;failures=0;
+      if(status.textContent!==roomLabel())status.textContent=roomLabel();
+      if(Number.isFinite(serverTime)){
+        // Streamed snapshots use arrival time; HTTP snapshots use the RTT midpoint.
+        // Smooth offset changes so clock jitter does not restart the gait.
+        const offset=(sentAt+receivedAt)/2-serverTime;
+        clockOffset=clockOffset===null?offset:clockOffset+(offset-clockOffset)*.1;
+      }
+      const online=new Set();
+      for(const pose of players){
+        online.add(pose.nickname);
+        const peer=peers.get(pose.nickname)||add(pose);
+        const stamp=Number.isFinite(pose.time)?pose.time:null;
+        if(stamp!==null&&peer.stamp!==null&&stamp<=peer.stamp)continue;
+        const samples=peer.samples,last=samples.at(-1);
+        const at=stamp!==null&&clockOffset!==null?Math.min(receivedAt,stamp+clockOffset):receivedAt;
+        // A one-second network stall is ordinary movement, not a teleport.
+        const gap=last?at-last.at:0;
+        if(last&&(gap>3000||Math.hypot(pose.x-last.x,pose.z-last.z)>Math.max(4,gap*.0048+1))){
+          samples.length=0;
+          peer.avatar.group.position.set(pose.x,pose.y,pose.z);
+          peer.avatar.group.rotation.y=pose.heading;
+        }else if(last&&at<=last.at)continue;
+        if(last)peer.delay=Math.max(playbackDelay,Math.min(1000,gap),peer.delay*.5);
+        peer.stamp=stamp;
+        samples.push({...pose,at});
+        if(samples.length>24)samples.shift();
+      }
+      for(const nickname of peers.keys())if(!online.has(nickname))remove(nickname);
+      if(challenge)onChallenge(challenge);
+      if(cinema)onCinema(cinema);
+      if(burst)onBurst?.(burst);
+    }
+    function remove(nickname){
+      const peer=peers.get(nickname);
+      scene.remove(peer.avatar.group);
+      peer.label.material.map.dispose();peer.label.material.dispose();peer.avatar.dispose();
+      peers.delete(nickname);
+    }
+    function add({nickname,outfit,x,y,z,heading}){
+      const avatar=window.NoraVoxel.createCharacter(T,room&&!room.startsWith('burrow:')?{...outfit,wings:null}:outfit);
+      if(room==='observatory')avatar.setArmor(true);
+      avatar.group.scale.setScalar(.32);
+      avatar.group.position.set(x,y,z);avatar.group.rotation.y=heading;
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=48;
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#181424';ctx.fillRect(0,0,256,48);
+      ctx.fillStyle='#f0ddff';ctx.font='bold 23px monospace';ctx.textAlign='center';
+      ctx.fillText(nickname,128,32,236);
+      const label=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthWrite:false}));
+      label.position.y=5.5;label.scale.set(4.5,.84,1);avatar.group.add(label);
+      scene.add(avatar.group);
+      const peer={avatar,label,samples:[],stamp:null,delay:playbackDelay};peers.set(nickname,peer);return peer;
+    }
+    function leave(){
+      if(!session)return Promise.resolve();
+      const departed=session;session=null;
+      if(socket){const ws=socket;socket=null;ws.close();}
+      retrySocket=0;
+      clearPeers();
+      const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000),true).catch(()=>{});
+      pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
+      return pending;
+    }
+    function update(time,dt,grounded,sprinting,boosting,interaction,cinema){
+      if(!session){
+        session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
+        status.textContent=roomLabel()+' · ПОДКЛЮЧЕНИЕ';
+      }
+      connect(time);
+      if(socket&&time-lastReply>2500){socket.close();socket=null;retrySocket=time+30000;next=0;}
+      const streaming=socket?.readyState===1;
+      if((streaming||!pending)&&time>=next){
+        const seated=Number.isInteger(cinema?.seat);
+        next=time+(seated?240:interval);
+        const {x,y,z}=player.position,angle=player.rotation.y;
+        const heading=Math.atan2(Math.sin(angle),Math.cos(angle));
+        const body={session,x,y,z,heading,grounded,sprinting,boosting};
+        if(room)body.room=room;
+        if(cinema)Object.assign(body,cinema);
+        if(room&&interaction)body.interaction=interaction;
+        if(streaming){
+          // Do not wait a round trip before sending the next pose, and do not
+          // accumulate obsolete positions when the connection is congested.
+          if(socket.bufferedAmount<1024)socket.send(JSON.stringify(body));
+        }else{
+          const sentSession=session,sentAt=performance.now();
+          pending=api('nora-game/lobby',body,AbortSignal.timeout(3000)).then(payload=>{
+            if(session===sentSession&&socket?.readyState!==1)receive(payload,sentAt);
+          }).catch(()=>{
+            if(session!==sentSession)return;
+            failures++;
+            next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
+            if(failures>=2)status.textContent=roomLabel()+' · СВЯЗЬ ПОТЕРЯНА';
+          });
+          const sent=pending;
+          sent.finally(()=>{if(pending===sent)pending=null;});
+        }
+      }
+      if(time-lastReply>=8000)for(const nickname of peers.keys())remove(nickname);
+      for(const {avatar,samples,delay} of peers.values()){
+        const playback=time-delay;
+        // Retain the last segment to cover brief gaps in grounded movement.
+        while(samples.length>2&&samples[1].at<=playback)samples.shift();
+        const [a,b=a]=samples;
+        const span=b.at-a.at;
+        const t=span?Math.max(0,Math.min(1,(playback-a.at)/span)):0;
+        const state=t<1?a:b;
+        const lead=span&&b.grounded!==false?Math.min(maxPrediction,Math.max(0,playback-b.at))/Math.max(span,interval):0;
+        const {position,rotation}=avatar.group;
+        const dx=a.x+(b.x-a.x)*(t+lead)-position.x;
+        const dz=a.z+(b.z-a.z)*(t+lead)-position.z;
+        const distance=Math.hypot(dx,dz);
+        // Absorb late corrections over several frames instead of snapping back.
+        const step=Math.min(1,correctionSpeed*dt/Math.max(distance,1e-6));
+        position.set(position.x+dx*step,a.y+(b.y-a.y)*t,position.z+dz*step);
+        const angle=b.heading-a.heading;
+        rotation.y=a.heading+Math.atan2(Math.sin(angle),Math.cos(angle))*t;
+        avatar.setWings(room&&!room.startsWith('burrow:')?null:state.outfit.wings);
+        avatar.setWear?.(state.outfit.wear);avatar.animateWear?.(dt);
+        const airborne=!(state.grounded??(state.y<=.04));
+        const travelled=distance*step;
+        const verticalSpeed=span?(b.y-a.y)*1000/span:0;
+        if(Number.isInteger(state.seat))avatar.animateSeated();
+        else avatar.animateMotion(travelled,dt,state.sprinting??(travelled>2.2*dt),airborne?verticalSpeed:null);
+        avatar.animateWings(dt,airborne,state.boosting);
+      }
+    }
+    return {update,leave,setRoom,session:()=>session,avatar(nickname){return peers.get(nickname)?.avatar.group;},serverSeconds(time){return (time-(clockOffset??0))/1000;}};
+  }
+  async function mount(canvas, root, outfit, sounds, nickname) {
+    const observatory=window.NoraObservatory;
+    const T = await import('/vendor/three.module.js');
+    if (!root.isConnected) { sounds?.stop(); return () => {}; }
+    const cinemaModule=window.NoraCinema;
+    const [layout,cinemaLayout,trailLayout]=await Promise.all([
+      observatory?.load(),cinemaModule?.load(),window.NoraBurrowTrail?.load()
+    ]);
+    if (!root.isConnected) { sounds?.stop(); return () => {}; }
+    const renderer = new T.WebGLRenderer({canvas, alpha:true, antialias:false, powerPreference:'low-power'});
+    const mobile=window.matchMedia?.('(pointer:coarse)').matches||false;
+    let quality=1,frameTotal=0,frameCount=0,qualityAt=0,renderWidth=0,renderHeight=0,renderRatio=0;
+    renderer.outputColorSpace = T.SRGBColorSpace;
+    const scene = new T.Scene(); scene.background = new T.Color('#b2d5d2');
+    scene.fog = new T.Fog('#b2d5d2', 12, 42);
+    const camera = new T.PerspectiveCamera(58, 1, .1, 110);
+    const ambient=new T.HemisphereLight('#fff6df', '#71865f', 2.2);scene.add(ambient);
+    const sunlight = new T.DirectionalLight('#fff1cd', 2.4); sunlight.position.set(-12,22,10);scene.add(sunlight);
+    const geometry = new T.BoxGeometry(1,1,1), material = new T.MeshLambertMaterial({color:'#b9bca4'});
+    const blocks = [], matrix = new T.Object3D(), tint = new T.Color();
+    function block(x,y,z,sx,sy,sz,color) { blocks.push([x,y,z,sx,sy,sz,color]); }
+    // Grass top and layered soil; only exterior earth faces need cubes.
+    for(let x=-9;x<9;x++) for(let z=-9;z<9;z++) {
+      const tone=(Math.abs(x*17+z*13)%5);
+      block(x+.5,-.25,z+.5,1,.5,1,['#70b94c','#7cc653','#83ca57','#79bf4d','#8ace60'][tone]);
+      if (Math.abs(x+.5)>7.5 || Math.abs(z+.5)>7.5) {
+        block(x+.5,-.75,z+.5,1,.5,1,['#94704c','#a57a50','#8e694b'][tone%3]);
+        block(x+.5,-1.25,z+.5,1,.5,1,['#6d5b4c','#766450','#81715c'][tone%3]);
+      }
+    }
+    block(0,-1.5,0,18,.25,18,'#6c5d51');
+    trees.forEach(([x,z],tree)=>{
+      // Trunks, roots and stepped branches built from small cubes.
+      for(let y=0;y<8;y++) for(let a=0;a<2;a++) for(let b=0;b<2;b++)
+        block(x+(a-.5)*.26,.13+y*.26,z+(b-.5)*.26,.26,.26,.26,(a+y)%3?'#87603e':'#aa7745');
+      for(const side of [-1,1]) {block(x+side*.35,.13,z,.4,.26,.3,'#87603e');block(x+side*.4,1.7,z,.5,.24,.24,'#916840');}
+      for(let a=-3;a<=3;a++) for(let b=-2;b<=3;b++) for(let c=-3;c<=3;c++) {
+        if(Math.abs(a)+Math.abs(c)+Math.max(0,b)>7 || (Math.abs(a)<3&&Math.abs(c)<3&&b>-2&&b<3))continue;
+        block(x+a*.42,2.7+b*.42,z+c*.42,.42,.42,.42,['#4c9a4c','#62b657','#75c95b','#8cce65'][Math.abs(a*7+b*3+c+tree)%4]);
+      }
+      // Sparse meadow tufts around the trees, away from the spawn point.
+      for(let i=0;i<5;i++) block(x+Math.sin(i*2)*1.8,.09,z+Math.cos(i*2)*1.8,.12,.18,.12,'#a5d66a');
+    });
+    // Chunky cloud clusters at different depths in the bright sky.
+    for(const [x,y,z] of [[-19,10,-35],[12,12,-45],[32,13,4],[-33,12,16],[0,12,38]])
+      for(let a=-3;a<=3;a++)for(let b=0;b<2;b++)for(let c=-1;c<=1;c++) {
+        if(Math.abs(a)+Math.abs(c)+b>4)continue;
+        block(x+a*1.3,y+b*1.3,z+c*1.3,1.3,1.3,1.3,b?'#fffef2':'#dceaf0');
+      }
+    const landscape = new T.InstancedMesh(geometry,material,blocks.length);
+    blocks.forEach(([x,y,z,sx,sy,sz,color],i)=>{matrix.position.set(x,y,z);matrix.scale.set(sx,sy,sz);matrix.updateMatrix();landscape.setMatrixAt(i,matrix.matrix);tint.set(color);landscape.setColorAt(i,tint);});
+    landscape.instanceMatrix.needsUpdate=true;landscape.computeBoundingSphere();scene.add(landscape);
+    const sunMaterial=new T.MeshBasicMaterial({color:'#efd0a0',fog:false,transparent:true,depthWrite:false}), sun=new T.Mesh(geometry,sunMaterial);
+    sun.position.set(-8,12,-45);sun.scale.set(4,4,1);scene.add(sun);
+    const moonMaterial=new T.MeshBasicMaterial({color:'#c6d4dc',fog:false,transparent:true,depthWrite:false});
+    const moon=new T.Mesh(geometry,moonMaterial);moon.scale.set(2.6,2.6,.8);scene.add(moon);
+    const scenery=window.NoraScenery.create(T,geometry,material,layout?.portal,cinemaLayout,trailLayout);
+    const trail=trailLayout&&window.NoraBurrowTrail.create(T,geometry,material,scenery.lobby,scenery.lobbyZone,trailLayout);
+    scene.add(scenery.outdoor,scenery.indoor);
+    if(scenery.carriedRecord)scene.add(scenery.carriedRecord);
+    if(scenery.cinemaHall)scene.add(scenery.cinemaHall);
+    if(scenery.lobby)scene.add(scenery.lobby);
+    const challenge=layout&&observatory.create(T,geometry,layout);
+    if(challenge)scene.add(challenge.course);
+    const tavernOffset=window.NoraScenery.tavernOffset??0;
+    const {portalZ,lobbyDeck,lobbySpawn}=window.NoraScenery;
+    let homeTv=null,tvKey='',homeRecord=null,hifiPosition=null;
+    const furnishing=window.NoraBurrowModels?.room(T,geometry,material,scenery);
+    let inside=false,inLobby=true,inChallenge=false,inCinema=false,zone;
+    let challengeState=null, interaction=null, interactionSerial=0;
+    const atmosphere=createAtmosphere(T,scene,geometry);
+    const skyNight=new T.Color('#101621'),skyDay=new T.Color('#718982'),skyDusk=new T.Color('#795359');
+    const lightNight=new T.Color('#9aadd0'),lightDay=new T.Color('#f3d8ad');
+    let lightingAt=-Infinity;
+    function updateLighting(now){
+      const phase=timeOfDay(now);
+      if(now-lightingAt>1000||now<lightingAt){
+        lightingAt=now;
+        if(inside){
+          scene.background.set('#241c20');scene.fog.color.set('#382a2b');scene.fog.near=10;scene.fog.far=26;
+          ambient.color.set('#e8c594');ambient.groundColor.set('#534037');ambient.intensity=1.65;
+          sunlight.color.set('#ffc083');sunlight.intensity=1.25;
+        }else if(inChallenge){
+          scene.background.set('#16141e');scene.fog.color.set('#26202c');scene.fog.near=7;scene.fog.far=30;
+          ambient.color.set('#bdb0c8');ambient.groundColor.set('#615361');ambient.intensity=1.25;
+          sunlight.color.set('#c6aec9');sunlight.intensity=.79;sunlight.position.set(-12,22,10);
+        }else if(inCinema){
+          scene.background.set('#1c1422');scene.fog.color.copy(scene.background);
+          scene.fog.near=21;scene.fog.far=36;
+          ambient.color.set('#eed0d8');ambient.groundColor.set('#553842');ambient.intensity=1.75;
+          sunlight.color.set('#e5b3a6');sunlight.intensity=1.05;sunlight.position.set(3,8,3);
+        }else if(inLobby){
+          scene.background.set('#171725');scene.fog.color.copy(scene.background);
+          scene.fog.near=10;scene.fog.far=32;
+          ambient.color.set('#b8b6eb');ambient.groundColor.set('#504363');ambient.intensity=1.28;
+          sunlight.color.set('#a3aeef');sunlight.intensity=.85;sunlight.position.set(-12,22,10);
+        }else{
+          scene.background.copy(skyNight).lerp(skyDay,phase.daylight).lerp(skyDusk,phase.twilight*.45);
+          scene.fog.color.copy(scene.background);scene.fog.near=10;scene.fog.far=phase.daylight*10+32;
+          ambient.color.copy(lightNight).lerp(lightDay,phase.daylight);ambient.groundColor.set('#3e5149');ambient.intensity=1.15+phase.daylight*.7;
+          sunlight.color.copy(lightNight).lerp(lightDay,phase.daylight);sunlight.intensity=.75+phase.daylight*1.35;
+          sunMaterial.opacity=phase.daylight;moonMaterial.opacity=1-phase.daylight;
+          const angle=(phase.hour-6)/24*Math.PI*2;
+          sun.position.set(Math.cos(angle)*38,Math.sin(angle)*38,-45);
+          moon.position.set(-Math.cos(angle)*38,-Math.sin(angle)*38,-45);
+          sunlight.position.lerpVectors(moon.position,sun.position,phase.daylight);sunlight.position.y=Math.max(8,sunlight.position.y);
+        }
+      }
+      return inLobby||inChallenge||inCinema?0:phase.daylight;
+    }
+    const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
+    player.scale.setScalar(.32);player.position.set(lobbySpawn.x,.017,lobbySpawn.z);player.rotation.y=Math.PI;scene.add(player);
+    const locationLabel=root.querySelector('.nora-world-bar small');
+    const lobbyLabel=()=>trail&&player.position.x>trail.start?'ЛЕСНАЯ ДОРОЖКА':'ЛОББИ';
+    const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge,payload=>cinema?.receive(payload),stamp=>furnishing?.burst(stamp),lobbyLabel);
+    // Soft contact patches without costly real-time shadow maps.
+    const shadowCanvas=document.createElement('canvas');shadowCanvas.width=64;shadowCanvas.height=64;
+    const context=shadowCanvas.getContext('2d'), gradient=context.createRadialGradient(32,32,3,32,32,32);
+    gradient.addColorStop(0,'rgba(28,48,30,.3)');gradient.addColorStop(1,'rgba(28,48,30,0)');context.fillStyle=gradient;context.fillRect(0,0,64,64);
+    const shadowTexture=new T.CanvasTexture(shadowCanvas), shadowGeo=new T.PlaneGeometry(1,1), shadowMat=new T.MeshBasicMaterial({map:shadowTexture,transparent:true,depthWrite:false});
+    const groundShadows=new T.InstancedMesh(shadowGeo,shadowMat,trees.length);
+    trees.forEach(([x,z],i)=>{matrix.position.set(x,.006,z);matrix.rotation.set(-Math.PI/2,0,0);matrix.scale.set(4,4,1);matrix.updateMatrix();groundShadows.setMatrixAt(i,matrix.matrix);});scene.add(groundShadows);
+    const playerShadow=new T.Mesh(shadowGeo,shadowMat);playerShadow.rotation.x=-Math.PI/2;playerShadow.scale.set(1.1,1.1,1);scene.add(playerShadow);
+    let yaw=0, targetYaw=0, pitch=.32, targetPitch=.32, raf=0, previous=0, disposed=false, orbitId=null, lastX=0,lastY=0,joyId=null;
+    let mousePosition=null, hoverLook=true, wantsMouseLock=false;
+    let wingBoostUsed=false;
+    let pov=Number(root.dataset.pov ?? 100), actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
+    let lobbyView=0, cinemaDistance=0;
+    const viewButton=root.querySelector('.nora-world-view');
+    const views=['За спиной','От первого лица','Селфи'];
+    function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
+    syncView();
+    const sprintButton=root.querySelector('.nora-world-sprint');
+    const keys=new Set(), jumpButton=root.querySelector('.nora-world-jump');
+    const stick={x:0,z:0}, joystick=root.querySelector('.nora-world-joystick'), knob=root.querySelector('.nora-world-knob');
+    const controls=new AbortController(), on=(el,event,fn)=>el.addEventListener(event,fn,{signal:controls.signal});
+    function resetStick(){stick.x=stick.z=0;joyId=null;knob.style.transform='translate(0px,0px)';}
+    function joystickMove(e){const rect=joystick.getBoundingClientRect();let x=e.clientX-(rect.left+rect.width/2),z=e.clientY-(rect.top+rect.height/2);const max=rect.width*.3,length=Math.hypot(x,z);if(length>max){x*=max/length;z*=max/length;}stick.x=x/max;stick.z=z/max;knob.style.transform=`translate(${x}px,${z}px)`;}
+    on(joystick,'pointerdown',e=>{if(joyId!==null)return;e.preventDefault();joyId=e.pointerId;joystick.setPointerCapture(joyId);joystickMove(e);});
+    on(joystick,'pointermove',e=>{if(e.pointerId===joyId)joystickMove(e);});
+    for(const event of ['pointerup','pointercancel','lostpointercapture'])on(joystick,event,e=>{if(e.pointerId===joyId)resetStick();});
+    function turnCamera(dx,dy){
+      targetYaw-=dx*.006;
+      targetPitch=Math.max(-MAX_LOOK_UP,Math.min(.85,targetPitch+dy*.004));
+    }
+    const mouseLocked=()=>document.pointerLockElement===canvas;
+    function releaseMouse(){
+      wantsMouseLock=false;
+      if(mouseLocked())document.exitPointerLock();
+    }
+    function mouseLockFailed(){
+      if(!wantsMouseLock||mouseLocked())return;
+      wantsMouseLock=false;
+      hoverLook=true;
+      mousePosition=null;
+    }
+    on(document,'pointerlockerror',mouseLockFailed);
+    on(document,'pointerlockchange',()=>{
+      mousePosition=null;
+      if(!mouseLocked()){wantsMouseLock=false;return;}
+      if(!wantsMouseLock||inputPaused()||document.hidden){releaseMouse();return;}
+      hoverLook=false;
+    });
+    on(canvas,'mousemove',e=>{
+      if(mouseLocked()&&wantsMouseLock&&!inputPaused())turnCamera(e.movementX,e.movementY);
+    });
+    on(canvas,'pointerdown',e=>{
+      if(inputPaused()||orbitId!==null)return;
+      if(aimChoiceKey!==null)closeAimChoices();
+      if(e.pointerType==='mouse'){
+        if(e.button!==0||wantsMouseLock||mouseLocked()||!canvas.requestPointerLock)return;
+        wantsMouseLock=true;
+        try{
+          canvas.requestPointerLock()?.then(()=>{if(disposed)releaseMouse();},mouseLockFailed);
+        }
+        catch(_){mouseLockFailed();}
+        return;
+      }
+      mousePosition=null;
+      orbitId=e.pointerId;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(orbitId);
+    });
+    on(canvas,'pointermove',e=>{
+      if(e.pointerType==='mouse'){
+        if(mouseLocked()||!hoverLook)return;
+        if(orbitId!==null||aimChoiceKey!==null||inputPaused()){mousePosition=null;return;}
+        if(mousePosition)turnCamera(e.clientX-mousePosition.x,e.clientY-mousePosition.y);
+        mousePosition={x:e.clientX,y:e.clientY};
+      }else if(e.pointerId===orbitId){
+        if(!inputPaused())turnCamera(e.clientX-lastX,e.clientY-lastY);
+        lastX=e.clientX;lastY=e.clientY;
+      }
+    });
+    on(canvas,'pointerleave',e=>{if(e.pointerType==='mouse')mousePosition=null;});
+    for(const event of ['pointerup','pointercancel','lostpointercapture'])on(canvas,event,e=>{if(e.pointerId===orbitId)orbitId=null;});
+    on(sprintButton,'click',()=>{sprintTouch=!sprintTouch;sprintButton.setAttribute('aria-pressed',String(sprintTouch));sprintButton.blur();});
+    let grounded=true;
+    function jump(){
+      if(inputPaused()||cinema?.movementLocked())return;
+      if(grounded){grounded=false;jumpVelocity=JUMP_SPEED;}
+      else if(!inChallenge&&!inCinema&&outfit.wings&&jumpHeight>0&&!wingBoostUsed){
+        wingBoostUsed=true;
+        jumpVelocity=WING_LIFT_SPEED;
+      } else return;
+      sounds?.jump(inside);
+    }
+    on(root,'nora-pov',e=>{pov=e.detail;view=pov===0?1:0;actualDistance=0;cameraRelease=0;cameraSpeed=0;syncView();});
+    if(pov===0){view=1;syncView();}
+    on(viewButton,'click',()=>{viewButton.blur();view=(view+1)%3;if(view!==1&&pov===0){pov=100;root.dispatchEvent(new CustomEvent('nora-view-pov',{detail:pov}));}cameraRelease=0;cameraSpeed=0;syncView();});
+    on(jumpButton,'pointerdown',e=>{if(e.button===0){e.preventDefault();jump();}});
+    // Keyboard activation has detail=0. A pointer's click follows its pointerdown.
+    on(jumpButton,'click',e=>{if(e.detail===0&&!e.pointerType)jump();});
+    on(jumpButton,'keydown',e=>{if(e.repeat&&['Enter',' '].includes(e.key))e.preventDefault();});
+    on(window,'keydown',e=>{
+      if(inputPaused())return;
+      if(!['KeyW','KeyA','KeyS','KeyD','KeyE','Space','ShiftLeft','ShiftRight'].includes(e.code)||e.ctrlKey||e.metaKey||e.altKey)return;
+      if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+      if(e.code==='KeyE'){
+        if(!e.repeat&&pressAimAction())e.preventDefault();
+        return;
+      }
+      if(cinema?.movementLocked())return;
+      if(e.code==='Space'&&e.target?.closest?.('button'))return;
+      e.preventDefault();
+      if(e.code==='Space'){if(!e.repeat)jump();}else keys.add(e.code);
+    });
+    on(window,'keyup',e=>{if(keys.delete(e.code))e.preventDefault();});
+    function reset(){resetStick();keys.clear();orbitId=null;mousePosition=null;previous=0;frameTotal=frameCount=qualityAt=0;velocityX=velocityZ=0;sprintTouch=false;sprintButton.setAttribute('aria-pressed','false');}
+    function resetAndReleaseMouse(){
+      releaseMouse();reset();
+      aimed=pressedAim=handledAim=null;aimButton.hidden=true;
+      aimButton.classList.remove('is-pressed');
+      closeAimChoices();
+    }
+    on(root,'nora-settings-open',resetAndReleaseMouse);
+    on(window,'blur',resetAndReleaseMouse);
+    on(document,'visibilitychange',resetAndReleaseMouse);
+    window.addEventListener('keydown',e=>{
+      if(e.key==='Escape'&&aimChoiceKey!==null){
+        e.preventDefault();closeAimChoices();return;
+      }
+      if(!wantsMouseLock&&!mouseLocked())return;
+      if(e.key==='Escape'||e.key==='Tab'){
+        if(e.key==='Escape')e.preventDefault();
+        releaseMouse();
+      }
+    },{capture:true,signal:controls.signal});
+    const reticle=root.querySelector('.nora-reticle'), aimButton=root.querySelector('.nora-aim-action');
+    const aimLabel=aimButton.querySelector('.nora-aim-label');
+    const aimChoices=root.querySelector('.nora-aim-choices');
+    const choiceButtons=[...aimChoices.querySelectorAll('button')];
+    let aimed=null, pressedAim=null, handledAim=null, aimChoiceKey=null, pressUntil=0;
+    const challengeHud=challenge&&root.querySelector('.nora-observatory-hud');
+    const challengeProgress=challengeHud?.querySelector('.nora-observatory-progress');
+    const challengeHint=challengeHud?.querySelector('.nora-observatory-hint');
+    const veil=challenge&&root.querySelector('.nora-memory-veil');
+    const resultLabel=challenge&&root.querySelector('.nora-memory-result');
+    const reduceTransition=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let transition=null, resultTime=0;
+    let recordPlaying=true, audioPlaying=true;
+    function inputPaused(){return !!burrow?.panelOpen()||!!cinema?.panelOpen()||!!transition||(inChallenge&&!challengeState)||!!root.querySelector('.nora-settings[open]')||companion.panelOpen()||!!records?.panelOpen()||!!chat?.panelOpen();}
+    function nearLobbyDeck(){
+      return inLobby&&Math.hypot(player.position.x-lobbyDeck.x,player.position.z-lobbyDeck.z)<1.8&&jumpHeight===0&&jumpVelocity===0;
+    }
+    function nearRecord(){
+      return !inputPaused()&&(inLobby?nearLobbyDeck():
+        inside&&(!burrow||burrow.host()===nickname)&&!homeRecord&&Math.hypot(player.position.x,player.position.z)<1.8&&jumpHeight===0&&jumpVelocity===0);
+    }
+    function recordOptions(){
+      if(!nearRecord()||records?.isBusy())return [];
+      const options=[];
+      const canToggle=inLobby?records?.canToggleLobby():!records||records.hasRecord();
+      if(canToggle){
+        const playing=inLobby?records.lobbyPlaying():recordPlaying;
+        options.push({id:'toggle',text:playing?'Выключить':'Включить',run:()=>{
+          if(inLobby)records.toggleLobby();
+          else{recordPlaying=!recordPlaying;audioPlaying=recordPlaying;sounds?.playing(recordPlaying);}
+        }});
+      }
+      const moveRecord=records?.playerAction();
+      if(moveRecord)options.push(moveRecord);
+      return options;
+    }
+    function respawnChallenge(index){
+      const [x,z]=challenge.safe[index];
+      yaw=targetYaw=0;
+      player.position.set(x,.017,z);player.rotation.y=Math.PI;
+      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
+      reset();
+    }
+    function receiveChallenge(state){
+      if(!inChallenge)return;
+      locationLabel.textContent='ВОСПОМИНАНИЕ';
+      const previous=challengeState;
+      if(interaction&&state.action>=interaction.serial)interaction=null;
+      if(state.reset&&(!previous?.reset||previous.checkpoint!==state.checkpoint))respawnChallenge(state.checkpoint);
+      challengeState=state;
+      if(previous?.checkpoint!==state.checkpoint)challenge.checkpoint(state.checkpoint);
+      if(state.reward!==null){
+        beginTransition(false,state.reward);
+        return;
+      }
+      const [title,hint]=observatory.chapters[Math.min(state.checkpoint,3)];
+      const heading=state.checkpoint===1?`${title} · ${state.bells}/3`:title;
+      const message=state.hold!==null?`Круг удерживает тьму. Осталось ${state.hold} с.`:state.notice||hint;
+      if(challengeProgress.textContent!==heading)challengeProgress.textContent=heading;
+      if(challengeHint.textContent!==message)challengeHint.textContent=message;
+    }
+    function syncLocation(){
+      const home=!inside&&!inLobby&&!inChallenge&&!inCinema;
+      zone=inCinema?scenery.cinemaZone:inChallenge?challenge.zone:inside?scenery.indoorZone:inLobby?scenery.lobbyZone:scenery.outdoorZone;
+      scenery.indoor.visible=inside;scenery.outdoor.visible=home;scenery.lobby.visible=inLobby;
+      if(scenery.cinemaHall)scenery.cinemaHall.visible=inCinema;
+      if(challenge)challenge.course.visible=inChallenge;
+      landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
+      locationLabel.textContent=inCinema?'КИНОТЕАТР':inChallenge?'ВОСПОМИНАНИЕ':inside?(burrow?.host()?'НОРА · '+burrow.host():'ТАВЕРНА'):inLobby?lobbyLabel():'ЛЕСНАЯ ПОЛЯНА';
+      canvas.setAttribute('aria-label',inCinema?'Зал кинотеатра Норы':inChallenge?observatory.title:inside?'Интерьер Норы':inLobby?'Общее лобби и лесная дорожка Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
+      lightingAt=-Infinity;updateLighting(Date.now());
+      resize();
+    }
+    function switchChallenge(entering){
+      inChallenge=entering;inLobby=!entering;challengeState=null;interaction=null;
+      lobby.setRoom(entering?observatory.room:null);
+      syncLocation();
+      character.setArmor(entering);character.setWings(entering?null:outfit.wings);
+      challengeHud.hidden=!entering;
+      if(entering){
+        challenge.checkpoint(0);
+        respawnChallenge(0);
+        challengeProgress.textContent=observatory.chapters[0][0];challengeHint.textContent='Воспоминание проступает…';
+      }else{
+        player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
+        player.rotation.y=Math.PI;yaw=targetYaw=0;
+        jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
+        reset();companion.reset();records?.refresh();
+        sounds?.memory?.(false);
+      }
+      for(const g of gusts)g.age=1;
+    }
+    function beginTransition(entering,reward=null){
+      if(transition)return;
+      transition={entering,reward,elapsed:0,switched:false};
+      veil.dataset.phase=entering?'enter':'return';
+      veil.style.opacity='0';
+      veil.querySelector('span').textContent=entering?'Воспоминание':'Ты снова в Норе';
+      resultLabel.hidden=true;resultTime=0;
+      if(entering)sounds?.memory?.(true);
+      reset();
+    }
+    function updateTransition(dt){
+      if(!transition)return;
+      const duration=reduceTransition?.24:1.08;
+      transition.elapsed+=dt;
+      const progress=Math.min(1,transition.elapsed/duration);
+      const opacity=Math.min(1,3.7*Math.min(progress,1-progress));
+      veil.style.opacity=String(reduceTransition?opacity:Math.ceil(opacity*7)/7);
+      if(!transition.switched&&transition.elapsed>=duration*.5){
+        transition.switched=true;
+        switchChallenge(transition.entering);
+      }
+      if(transition.elapsed<duration)return;
+      const {reward}=transition;
+      transition=null;delete veil.dataset.phase;
+      if(reward!==null){
+        resultLabel.textContent=reward>0?`Воспоминание пройдено · +${reward} 🍪`:'Воспоминание пройдено. Награда уже в кошельке.';
+        resultLabel.hidden=false;resultTime=6;
+      }
+    }
+    if(challenge)on(challengeHud.querySelector('button'),'click',()=>{
+      if(inChallenge)beginTransition(false);
+    });
+    function faceCinemaScreen(x,z,eyeHeight){
+      const screen=cinemaLayout.screen;
+      cinemaDistance=Math.max(1,Math.hypot(x-screen.x,z-screen.z)-.22);
+      yaw=targetYaw=Math.atan2(x-screen.x,z-screen.z);
+      pitch=targetPitch=-Math.atan2(screen.y-eyeHeight,cinemaDistance);
+    }
+    function switchCinema(entering){
+      inCinema=entering;inLobby=!entering;
+      lobby.setRoom(entering?cinemaModule.room:null);
+      const {x,z}=entering?cinemaLayout.spawn:cinemaLayout.portal;
+      player.position.set(x,.017,entering?z:z+1.8);
+      player.rotation.y=entering?Math.PI:0;
+      if(entering){
+        lobbyView=view;view=1;
+        faceCinemaScreen(x,z,1.51);
+      }else{
+        view=lobbyView;yaw=targetYaw=Math.PI;pitch=targetPitch=.32;
+      }
+      syncView();
+      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
+      character.setWings(entering?null:outfit.wings);
+      if(entering)cinema.enter();
+      else{cinema.leave();records?.refresh();}
+      syncLocation();
+      reset();companion.reset();
+    }
+    function aimBounds(x,z,halfWidth,height,halfDepth,bottom=0){
+      return [x-halfWidth,x+halfWidth,bottom,height,z-halfDepth,z+halfDepth];
+    }
+    function gateTarget(text,position,scale=.76){
+      return {text, position, box:aimBounds(position.x,position.z,1.3*scale,2.94*scale,.39*scale)};
+    }
+    const lobbyTargets=[
+      cinemaLayout&&gateTarget(cinemaModule.title,cinemaLayout.portal),
+      challenge&&gateTarget(observatory.title,challenge.entrance),
+    ].filter(Boolean);
+    const islandPortal=gateTarget('ЛОББИ',{x:0,z:portalZ.home},1);
+    const tavernEntry={text:'Войти в таверну',box:aimBounds(0,tavernOffset+2.47,.76,2.18,.18)};
+    const tavernExit={text:'Выйти из таверны',box:aimBounds(0,4.99,.8,2.25,.2)};
+    const cinemaExit=cinemaLayout&&gateTarget('В лобби',cinemaLayout.exit);
+    const cinemaSeats=cinemaLayout?.seats.map(([x,z],seat)=>({text:'Сесть',seat,box:aimBounds(x,z,.56,1.15,.55)}));
+    const standUp={text:'Встать'};
+    function nearbyAction(accepts){
+      if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return null;
+      const {x,z}=player.position;
+      if(inChallenge){
+        const relic=!interaction&&challenge.actionAt(player.position,challengeState.checkpoint);
+        if(!relic)return null;
+        const target={...relic,box:aimBounds(relic.x,relic.z,.6,1.82,.5)};
+        return accepts(target)?target:null;
+      }
+      if(inside)return Math.abs(x)<1.5&&z>3.3&&accepts(tavernExit)?tavernExit:null;
+      if(inCinema){
+        if(cinema.movementLocked())return null;
+        const exit=cinemaExit.position;
+        if(Math.hypot(x-exit.x,z-exit.z)<1.62&&accepts(cinemaExit))return cinemaExit;
+        const seat=cinema.nearbySeat(player.position,index=>accepts(cinemaSeats[index]));
+        return cinemaSeats[seat]??null;
+      }
+      if(inLobby)return lobbyTargets.find(target=>Math.hypot(x-target.position.x,z-target.position.z)<1.62&&accepts(target))??null;
+      if(Math.abs(x)<1.65&&Math.abs(z-portalZ.home)<1.85&&accepts(islandPortal))return islandPortal;
+      return Math.abs(x)<1.5&&z-tavernOffset>2.55&&z-tavernOffset<4.8&&accepts(tavernEntry)?tavernEntry:null;
+    }
+    function arriveHome(host){
+      if(tvKey){cinema.leave();tvKey='';homeTv=null;}
+      inLobby=false;inside=true;lobby.setRoom('burrow:'+host);
+      sounds?.door(true);player.position.set(0,.017,3.7);yaw=targetYaw=0;player.rotation.y=Math.PI;
+      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;companion.reset();reset();syncLocation();
+    }
+    function leaveHome(host){
+      lobby.setRoom(null);inLobby=true;inside=false;
+      const door=trail?.doorstep(host);
+      player.position.set((door||lobbySpawn).x,.017,(door||lobbySpawn).z);
+      trail?.update(player.position.x);
+      yaw=targetYaw=door?Math.PI:0;player.rotation.y=door?0:Math.PI;
+      jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
+      sounds?.door(false);syncLocation();reset();companion.reset();records?.refresh();
+    }
+    function performAction(selected){
+      const label=selected.text;
+      if(inChallenge){
+        interaction={id:selected.id,serial:++interactionSerial};
+        return;
+      }
+      if(burrow&&label===tavernEntry.text){burrow.run(()=>burrow.go(nickname));return;}
+      if(burrow&&inside&&label===tavernExit.text){
+        burrow.run(burrow.exit);return;
+      }
+      if(label===cinemaModule?.title){switchCinema(true);return;}
+      if(inCinema){
+        if(label==='В лобби')switchCinema(false);
+        else cinema.requestSeat(selected.seat??null);
+        return;
+      }
+      if(label===observatory?.title){beginTransition(true);return;}
+      if(label==='ЛОББИ'){
+        inLobby=true;
+        player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
+        player.rotation.y=Math.PI;yaw=targetYaw=0;
+      }else{
+        if(inLobby){inLobby=false;lobby.leave().then(()=>records?.refresh());}
+        inside=!inside;sounds?.door(inside);
+        player.position.set(0,.017,inside?3.7:3.6+tavernOffset);
+        yaw=targetYaw=0;player.rotation.y=inside?Math.PI:0;
+      }
+      syncLocation();
+      jumpHeight=0;jumpVelocity=0;grounded=true;wingBoostUsed=false;
+      for(const g of gusts)g.age=1;companion.reset();reset();
+    }
+    on(document,'visibilitychange',()=>{if(document.hidden&&!inChallenge&&!inCinema)lobby.leave();});
+    function resize(){
+      const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;
+      // Bound fill rate independently of orientation / Retina density. CSS stays full resolution.
+      const ratio=Math.min(window.devicePixelRatio||1,mobile?1.25:1.5,Math.sqrt((mobile?420000:1600000)/(w*h)))*quality;
+      let fov=58;
+      if(inCinema){
+        const {width,height}=cinemaLayout.screen;
+        const halfSize=Math.max(height*(w>h&&w>=450?1.35:1),width*h/w)*.54;
+        const fit=2*Math.atan2(halfSize,cinemaDistance)*180/Math.PI;
+        fov=Math.min(100,Math.max(30,fit,Math.min(58,58*h/480)));
+      }else if(inLobby){
+        // Keep the lobby crossroads visible from spawn on narrow screens.
+        fov=Math.max(fov,Math.min(85,2*Math.atan2(.325*h,w)*180/Math.PI));
+      }
+      if(w===renderWidth&&h===renderHeight&&Math.abs(ratio-renderRatio)<.001&&camera.fov===fov)return;
+      renderWidth=w;renderHeight=h;renderRatio=ratio;
+      renderer.setPixelRatio(ratio);renderer.setSize(w,h,false);
+      camera.aspect=w/h;camera.fov=fov;camera.updateProjectionMatrix();
+      frameTotal=frameCount=0;qualityAt=0;
+    }
+    const observer=new ResizeObserver(resize);observer.observe(canvas);
+    const windMaterial=new T.MeshBasicMaterial({color:'#d5e4df',transparent:true,opacity:.09,depthWrite:false});
+    const wind=new T.InstancedMesh(geometry,windMaterial,24);wind.frustumCulled=false;scene.add(wind);
+    const gusts=Array.from({length:24},()=>({age:1,x:0,y:0,z:0,heading:0}));let gustIndex=0,gustTimer=0;
+    function updateWind(dt,running){
+      gustTimer+=dt;
+      if(running&&gustTimer>.035){gustTimer=0;const g=gusts[gustIndex++%24],side=gustIndex%2?-.16:.16;
+        g.age=0;g.heading=player.rotation.y;g.x=player.position.x+Math.cos(g.heading)*side;g.z=player.position.z-Math.sin(g.heading)*side;g.y=player.position.y+.35+(gustIndex%4)*.22;}
+      for(let i=0;i<24;i++){const g=gusts[i];g.age+=dt;const fade=Math.max(0,1-g.age/.32);
+        matrix.position.set(g.x,g.y,g.z);matrix.rotation.set(0,g.heading,0);matrix.scale.set(.012*fade,.012*fade,.16*fade);matrix.updateMatrix();wind.setMatrixAt(i,matrix.matrix);}
+      wind.instanceMatrix.needsUpdate=true;
+    }
+    const target=new T.Vector3(), direction=new T.Vector3();
+    syncLocation();
+    const companion=window.NoraCompanion.mount(T,scene,geometry,root,player,move,()=>zone,reset);
+    const records=window.NoraRecords?.mount(root,scenery,sounds,reset);
+    const recordBounds=aimBounds(0,0,.75,1.22,.57);
+    const lobbyRecordBounds=aimBounds(lobbyDeck.x,lobbyDeck.z,.75,1.22,.57);
+    const shelfBounds=aimBounds(.1,-4.5,1.42,2.98,.55);
+    const burrow=window.NoraBurrow?.mount(root,nickname,{
+      reset:resetAndReleaseMouse,enter:arriveHome,returnToLobby:leaveHome,where:()=>!inChallenge&&!inCinema&&!transition,
+      housesChanged:trail?(houses)=>trail.setHouses(houses,player.position.x):null,
+      equip:id=>character.setWear(id),
+      changed(home,host,catalog){
+        furnishing.apply(home||{layout:{},lamp:false});
+        const hifiSlot=Object.keys(home?.layout||{}).find(k=>home.layout[k]==='hifi');
+        hifiPosition=window.NoraBurrowModels.slots[hifiSlot];
+        homeRecord=catalog?.find(i=>i.id===home?.record)?.media||null;
+        records?.homeMusic(homeRecord,!!host&&host!==nickname);
+        scenery.privateCollection(!host||host===nickname);
+        const slot=Object.entries(home?.layout||{}).find(([,id])=>id==='tv')?.[0];
+        const key=slot===undefined?'':host+'/'+slot;
+        if(key!==tvKey){
+          if(tvKey)cinema?.leave();tvKey=key;homeTv=null;
+          if(key){
+            const [x,z]=window.NoraBurrowModels.slots[slot];
+            homeTv={x:x-.09,y:1,z:z+.395,width:.98,height:.55};
+            cinema?.enter('burrow:'+host,homeTv,host===nickname);
+          }
+          scenery.homeScreen(homeTv);
+        }
+      }
+    });
+    const chat=window.NoraChat?.mount(root,T,player,lobby.avatar,reset,
+      ()=>inCinema?'cinema':inChallenge?'observatory':inside?(burrow?.host()?'burrow:'+burrow.host():'tavern'):inLobby?'lobby':'forest',
+      (note,action)=>burrow.respond(note,action));
+    const cinema=cinemaLayout&&cinemaModule.mount(root,T,cinemaLayout,{
+      reset,sessionId:lobby.session,clock:time=>lobby.serverSeconds(time)*1000,
+      onSeatChange(previous,seat){
+        if(seat){
+          const [x,z]=seat;
+          player.position.set(x,.017,z);
+          player.rotation.y=Math.PI;
+          faceCinemaScreen(x,z,1.19);
+          resize();
+        }else if(previous){
+          player.position.set(previous[0],.017,previous[1]-cinemaLayout.standOffset);
+        }
+        jumpHeight=jumpVelocity=0;grounded=true;wingBoostUsed=false;
+        reset();
+      },
+    });
+    const aimRay=new T.Ray(), aimBox=new T.Box3(), aimHit=new T.Vector3();
+    function hitDistance([minX,maxX,minY,maxY,minZ,maxZ]){
+      aimBox.min.set(minX,minY,minZ);aimBox.max.set(maxX,maxY,maxZ);
+      return aimRay.intersectBox(aimBox,aimHit)?aimRay.origin.distanceTo(aimHit):Infinity;
+    }
+    function visibleHit(box){
+      if(!box)return Infinity;
+      const distance=hitDistance(box);
+      if(!Number.isFinite(distance))return distance;
+      return zone.cameraBoxes.some(bounds=>hitDistance(bounds)<distance-.1)?Infinity:distance;
+    }
+    function worldTarget(selected){
+      const text=burrow&&selected===tavernExit?'Выйти из норы':selected.text;
+      return {key:selected.id??selected.seat??text,text,actions:[{id:'use',text,run:()=>performAction(selected)}]};
+    }
+    function targetInSight(){
+      aimRay.origin.copy(camera.position);
+      aimRay.direction.set(0,0,-1).applyQuaternion(camera.quaternion);
+      const selected=nearbyAction(item=>Number.isFinite(visibleHit(item.box)));
+      let best=selected?worldTarget(selected):null;
+      let bestDistance=selected?visibleHit(selected.box):Infinity;
+      let doorTarget=null;
+      function consider(key,text,box,actions){
+        if(!actions.length)return;
+        const distance=visibleHit(box);
+        if(distance>=bestDistance)return;
+        bestDistance=distance;
+        best={key,text,actions};
+      }
+      if(burrow&&inLobby){
+        const {x,z}=window.NoraBurrowModels.stall;
+        if(Math.hypot(player.position.x-x,player.position.z-z)<3)
+          consider('merchant','Лавка у портала',aimBounds(x,z,1.32,2.9,1.1),[{id:'shop',text:'Торговать',run:()=>burrow.run(()=>burrow.open('shop'))}]);
+        const door=jumpHeight===0&&jumpVelocity===0&&trail?.nearby(player.position);
+        if(door){
+          const {name,likes,cookies,messages}=door.house, owner=name===nickname;
+          const text=owner?'Войти':'Постучать';
+          const key='burrow-door:'+name;
+          const stats=likes===null?'Счётчики скрыты':`Лайки ${likes}, печеньки ${cookies}, сообщения ${messages}`;
+          const description=`${text} · Нора ${name}. ${stats}`;
+          const actions=[{id:'door',text,run:()=>burrow.run(()=>owner?burrow.go(name):burrow.knock(name))}];
+          consider(key,text,aimBounds(door.x,door.z+.2,.63,2.24,.16),actions);
+          if(best?.key===key)best.description=description;
+          else if(Math.abs(player.position.x-door.x)<1.8&&player.position.z<door.z+2.45)
+            doorTarget={key,text,actions,description};
+        }
+      }
+      if(burrow&&inside){
+        for(const [slot,id] of Object.entries(burrow.home()?.layout||{})){
+          const [x,z]=window.NoraBurrowModels.slots[slot];
+          if(Math.hypot(player.position.x-x,player.position.z-z)>2.65)continue;
+          const mine=burrow.host()===nickname;
+          let label,action;
+          if(id==='tv'){label='Телевизор';action=()=>cinema?.openPanel();}
+          if(id==='hifi'&&mine){label='Выбрать пластинку';action=()=>burrow.open('deck');}
+          if(id==='confetti'){label='Завести шкатулку';action=()=>burrow.burst();}
+          if(id==='lamp'&&mine){label=burrow.home().lamp?'Погасить фонарь':'Зажечь фонарь';action=()=>burrow.switchLamp();}
+          if(action)consider(id,label,aimBounds(x,z,(id==='tv'||id==='hifi')?.79:.52,(id==='tv'||id==='lamp')?1.86:.96,.53),[{id,text:label,run:()=>burrow.run(action)}]);
+        }
+      }
+      const shelf=records?.shelfAction();
+      if(shelf)consider('record-shelf','Стеллаж',shelfBounds,[shelf]);
+      if(inLobby||inside){
+        consider('record-player','Проигрыватель',inLobby?lobbyRecordBounds:recordBounds,recordOptions());
+      }
+      const petPosition=companion.aimPosition();
+      if(petPosition)consider('pet','Питомец',aimBounds(petPosition.x,petPosition.z,.51,.92,.51),companion.actions);
+      return best||doorTarget;
+    }
+    function closeAimChoices(){
+      aimChoiceKey=null;aimChoices.hidden=true;
+    }
+    function showAimChoices(target){
+      if(aimChoices.hidden){
+        aimButton.hidden=true;aimChoices.hidden=false;
+        aimChoices.setAttribute('aria-label',target.text);
+      }
+      choiceButtons.forEach((button,index)=>{
+        const option=target.actions[index];
+        if(button.hidden!==!option)button.hidden=!option;
+        const id=option?.id??'';
+        if(button.dataset.action!==id)button.dataset.action=id;
+        if(option&&button.textContent!==option.text)button.textContent=option.text;
+      });
+    }
+    for(const button of choiceButtons)on(button,'click',()=>{
+      if(inputPaused()||aimChoiceKey===null||aimed?.key!==aimChoiceKey)return;
+      const option=aimed.actions.find(item=>item.id===button.dataset.action);
+      if(!option)return;
+      handledAim=aimChoiceKey;closeAimChoices();
+      option.run();
+    });
+    function pressAimAction(){
+      if(!aimed||aimButton.hidden||pressedAim||inputPaused())return false;
+      pressedAim=aimed;
+      pressUntil=performance.now()+150;
+      aimButton.classList.add('is-pressed');
+      aimButton.blur();
+      return true;
+    }
+    on(aimButton,'click',pressAimAction);
+    function syncAim(time){
+      const paused=inputPaused(), seated=!!cinema?.seat();
+      reticle.hidden=paused||seated||view!==1;
+      aimed=paused?null:seated?worldTarget(standUp):targetInSight();
+      if(aimChoiceKey!==null){
+        if(aimed?.key===aimChoiceKey&&aimed.actions.length>1){showAimChoices(aimed);return;}
+        closeAimChoices();
+      }
+      if(pressedAim){
+        if(!paused&&time<pressUntil)return;
+        const key=pressedAim.key;
+        pressedAim=null;aimButton.hidden=true;
+        aimButton.classList.remove('is-pressed');
+        if(aimed?.key===key){
+          if(aimed.actions.length>1){
+            aimChoiceKey=key;releaseMouse();showAimChoices(aimed);choiceButtons[0].focus();
+            return;
+          }
+          handledAim=key;aimed.actions[0].run();
+        }
+      }
+      if(aimed?.key!==handledAim)handledAim=null;
+      const show=!!aimed&&aimed.key!==handledAim;
+      aimButton.hidden=!show;
+      reticle.classList.toggle('is-aimed',show);
+      if(show){
+        const label=aimed.actions.length===1?aimed.actions[0].text:aimed.text;
+        if(aimLabel.textContent!==label)aimLabel.textContent=label;
+        const description=aimed.description||label;
+        if(aimButton.getAttribute('aria-label')!==description)aimButton.setAttribute('aria-label',description);
+      }
+    }
+    // Render at display cadence during movement, and pace idle hall frames independently of the film.
+    let nextCinemaFrame=0;
+    function tick(time){
+      if(disposed)return;const previousFrame=previous;const dt=previous?Math.min((time-previous)/1000,.05):0;previous=time;
+      if(!document.hidden){
+        // Sustained slow frames lower only drawing resolution, never simulation speed.
+        const elapsed=previousFrame? (time-previousFrame)/1000 : 0;
+        if(mobile&&elapsed>0&&elapsed<.25){frameTotal+=elapsed;frameCount++;}
+        if(!qualityAt)qualityAt=time;
+        if(mobile&&time-qualityAt>2500&&frameCount>30){
+          const average=frameTotal/frameCount;
+          const next=average>1/45?Math.max(.6,quality-.1):average<1/58?Math.min(1,quality+.05):quality;
+          frameTotal=frameCount=0;qualityAt=time;
+          if(Math.abs(next-quality)>.001){quality=next;resize();}
+        }
+        updateTransition(dt);
+        if(resultTime>0&&(resultTime-=dt)<=0)resultLabel.hidden=true;
+        const smooth=1-Math.exp(-12*dt);yaw+=(targetYaw-yaw)*smooth;pitch+=(targetPitch-pitch)*smooth;
+        let inputX=stick.x+(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0);
+        let inputZ=stick.z+(keys.has('KeyS')?1:0)-(keys.has('KeyW')?1:0);
+        const paused=inputPaused();
+        if(paused&&mouseLocked()&&root.querySelector('dialog[open]'))releaseMouse();
+        if(paused||cinema?.movementLocked()){inputX=inputZ=0;}
+        const inputLength=Math.hypot(inputX,inputZ);if(inputLength<=.025){inputX=inputZ=0;}if(inputLength>1){inputX/=inputLength;inputZ/=inputLength;}
+        // Movement is always relative to the visible camera, including selfie.
+        // Turning the model must not rotate the camera or the input frame.
+        const basis=yaw+(view===2?Math.PI:0);
+        const sprinting=sprintTouch||keys.has('ShiftLeft')||keys.has('ShiftRight'),speed=sprinting?3.1:1.7;
+        const wantedX=(inputX*Math.cos(basis)+inputZ*Math.sin(basis))*speed;
+        const wantedZ=(-inputX*Math.sin(basis)+inputZ*Math.cos(basis))*speed;
+        const response=1-Math.exp(-(inputLength>.025?20:28)*dt);
+        velocityX+=(wantedX-velocityX)*response;velocityZ+=(wantedZ-velocityZ)*response;
+        if(Math.hypot(velocityX,velocityZ)<.002){velocityX=velocityZ=0;}
+        const dx=velocityX*dt,dz=velocityZ*dt;
+        if(inLobby&&trail){
+          player.position.x=Math.min(player.position.x,zone.maxX);
+          trail.update(player.position.x);
+        }
+        const oldX=player.position.x,oldZ=player.position.z;
+        move(player.position,dx,dz,zone,jumpHeight);
+        let floor=0;
+        for(const box of zone.boxes){
+          const top=box[4];
+          if(top>floor&&top<=jumpHeight&&overlapsBox(player.position.x,player.position.z,box,FURNITURE_RADIUS))floor=top;
+        }
+        grounded=grounded&&jumpHeight===floor;
+        if(dt>0&&!grounded){
+          const gliding=wingBoostUsed&&jumpVelocity<=0;
+          jumpVelocity-=(gliding?GLIDE_GRAVITY:GRAVITY)*dt;
+          if(gliding)jumpVelocity=Math.max(-GLIDE_FALL_SPEED,jumpVelocity);
+          jumpHeight+=jumpVelocity*dt;
+          if(inside&&jumpHeight>TAVERN_JUMP_LIMIT){jumpHeight=TAVERN_JUMP_LIMIT;jumpVelocity=0;}
+          if(jumpHeight<=floor){
+            jumpHeight=floor;jumpVelocity=0;grounded=true;wingBoostUsed=false;sounds?.land(inside);
+          }
+        }
+        player.position.y=.017+jumpHeight;
+        const seat=cinema?.seat();
+        if(seat){player.position.set(seat[0],.017,seat[1]);player.rotation.y=Math.PI;}
+        const serverSeconds=lobby.serverSeconds(time);
+        character.animateWings(dt,!grounded,wingBoostUsed&&jumpVelocity>0);
+        const travelledX=player.position.x-oldX,travelledZ=player.position.z-oldZ;
+        const travelled=Math.hypot(travelledX,travelledZ);
+        if(seat)character.animateSeated();
+        else character.animateMotion(travelled,dt,sprinting,grounded?null:jumpVelocity);
+        // Face actual travel, preserving the last heading when stopped/blocked.
+        const heading=!seat&&travelled>1e-5?Math.atan2(travelledX,travelledZ):player.rotation.y;
+        const turn=Math.atan2(Math.sin(heading-player.rotation.y),Math.cos(heading-player.rotation.y));
+        player.rotation.y+=turn*(1-Math.exp(-12*dt));
+        if(scenery.carriedRecord){const angle=player.rotation.y;scenery.carriedRecord.position.set(player.position.x+Math.cos(angle)*.26+Math.sin(angle)*.2,player.position.y+.64,player.position.z-Math.sin(angle)*.26+Math.cos(angle)*.2);scenery.carriedRecord.rotation.y=angle;}
+        playerShadow.position.set(player.position.x,inChallenge?floor+.008:.008,player.position.z);
+        const targetHeight=inCinema?(seat?1.35:1.7):1.1;
+        target.set(player.position.x,targetHeight+jumpHeight*.65,player.position.z);
+        const wanted=(inCinema?3.6:inside?4.6:(camera.aspect<.7?5.7:5.1))*Math.max(.04,pov/100);
+        if(view===1){
+          player.visible=false;playerShadow.visible=false;
+          camera.position.set(player.position.x-Math.sin(yaw)*.22,(seat?1.19:1.51)+jumpHeight,player.position.z-Math.cos(yaw)*.22);
+          target.set(camera.position.x-Math.sin(yaw)*Math.cos(pitch),camera.position.y-Math.sin(pitch),camera.position.z-Math.cos(yaw)*Math.cos(pitch));
+          camera.lookAt(target);
+        }else{
+          player.visible=true;playerShadow.visible=true;
+          const cameraYaw=yaw+(view===2?Math.PI:0);
+          direction.set(Math.sin(cameraYaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(cameraYaw)*Math.cos(pitch));
+          const safe=cameraDistance(target,direction,wanted,zone.cameraBoxes);
+          if(actualDistance>safe)actualDistance=safe;
+          if(safe<=actualDistance+.001&&safe<wanted-.001){
+            // Never interpolate through a wall. Briefly hold release at corners
+            // so alternating collision hits cannot pump the camera in and out.
+            actualDistance=Math.min(actualDistance,safe);cameraRelease=.12;cameraSpeed=0;
+          }else if(cameraRelease>0){cameraRelease=Math.max(0,cameraRelease-dt);}
+          else{
+            cameraSpeed+=(Math.min(3,(safe-actualDistance)*4)-cameraSpeed)*(1-Math.exp(-8*dt));
+            actualDistance=Math.min(safe,actualDistance+cameraSpeed*dt);
+          }
+          const coverage=Math.max(0,Math.min(1,(actualDistance-1.4)/1.6));
+          const fade=coverage*coverage*(3-2*coverage);
+          // Hide immediately when the camera enters the body; restore only once
+          // it is outside, without blending the thousands of overlapping cubes.
+          opacity=fade<opacity?fade:Math.min(fade,opacity+(fade-opacity)*(1-Math.exp(-5*dt)));
+          if(opacity>.999)opacity=1;
+          character.setOpacity(opacity);
+          camera.position.copy(target).addScaledVector(direction,actualDistance);
+          camera.lookAt(target.copy(camera.position).sub(direction));
+        }
+        const guest=inside&&burrow&&burrow.host()!==nickname;
+        burrow?.tick(time,inside);if(inside)furnishing?.tick(time);character.animateWear?.(dt);
+        records?.update(inside&&!guest,player.position.x,player.position.z,jumpHeight===0&&jumpVelocity===0,companion.panelOpen(),inLobby,nearLobbyDeck());
+        if(inLobby||inChallenge||inCinema||(inside&&burrow))lobby.update(time,dt,grounded,sprinting,wingBoostUsed&&jumpVelocity>0,
+          interaction,inCinema||homeTv?cinema?.packet():null);
+        if(inChallenge){
+          const storm=challenge.update(serverSeconds,player.position);
+          sunlight.intensity=.79+storm.light*.39;
+          if(storm.thunder)sounds?.thunder?.();
+        }
+        wind.visible=!inCinema;
+        if(!inCinema)updateWind(dt,sprinting&&travelled>.001);
+        const daylight=updateLighting(Date.now());
+        const audioYaw=yaw+(view===2?Math.PI:0);
+        const playing=inCinema||inChallenge||transition?.entering?false:inLobby?!!records?.lobbyPlaying():homeRecord?true:guest?false:recordPlaying;
+        if(playing!==audioPlaying){audioPlaying=playing;sounds?.playing(playing);}
+        if(inLobby){
+          const dx=lobbyDeck.x-player.position.x,dz=lobbyDeck.z-player.position.z;
+          const distance=Math.hypot(dx,dz);
+          sounds?.spatial({gain:.85*Math.max(0,1-distance/14),cutoff:16000,
+            pan:.8*(dx*Math.cos(audioYaw)-dz*Math.sin(audioYaw))/Math.max(1,distance)});
+          scenery.updatePortal(dt);
+        }else if(inCinema){
+          scenery.updatePortal(dt);
+        }else if(!inChallenge){
+          sounds?.spatial(tavernAcoustics(inside,player.position.x-(homeRecord?hifiPosition?.[0]||0:0),
+            player.position.z-(inside?(homeRecord?hifiPosition?.[1]||0:0):tavernOffset),audioYaw));
+          if(!inside)scenery.updatePortal?.(dt);
+        }
+        if(!inCinema)scenery.update?.(dt,inside,daylight,camera,playing&&!homeRecord&&(inLobby||!records||records.hasRecord()),inLobby);
+        sounds?.update(inside||inChallenge||inCinema,daylight,travelled,grounded);
+        atmosphere.update(dt,daylight,inside||inLobby||inChallenge||inCinema);
+        companion.update(dt,camera,!inChallenge&&!inCinema&&!guest);
+        chat?.update(time);
+        const movingCamera=travelled>.0001||!grounded||Math.abs(targetYaw-yaw)+Math.abs(targetPitch-pitch)>.0005;
+        if(!inCinema||movingCamera||time>=nextCinemaFrame){
+          if(inCinema){
+            camera.updateMatrixWorld();
+            scenery.setCinemaScreen(cinema.project(camera,renderWidth,renderHeight));
+            const interval=1000/30;
+            if(time>=nextCinemaFrame)nextCinemaFrame=time+interval-(time-nextCinemaFrame)%interval;
+          }
+          if(homeTv&&inside){camera.updateMatrixWorld();scenery.homeScreen(homeTv,cinema.project(camera,renderWidth,renderHeight));}
+          renderer.render(scene,camera);
+        }
+        if(inCinema||homeTv)cinema.sync(time);
+        syncAim(time);
+      }
+      raf=requestAnimationFrame(tick);
+    }tick(0);
+    function stop(){if(disposed)return;disposed=true;controls.abort();releaseMouse();lobby.leave();sounds?.stop();cancelAnimationFrame(raf);observer.disconnect();resetStick();burrow?.dispose();furnishing?.dispose();cinema?.dispose();chat?.dispose();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();trail?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
+    on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
+    return stop;
+  }
+  return {mount,move,cameraDistance,timeOfDay,createAtmosphere,tavernAcoustics};
+})();

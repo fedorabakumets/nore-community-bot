@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import secrets
 from datetime import UTC, date, datetime
 from typing import Any
@@ -11,22 +12,37 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import Message, User
 
+from community_bot.aliases import message_trigger, parse_trigger, split_target_argument, strip_command_address
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.domain import ROLE_LABELS, ROLE_LEVELS, reputation_tier
+from community_bot.domain import (
+    LIKE_PHRASES,
+    NEGATIVE_REPUTATION_PHRASES,
+    POSITIVE_REPUTATION_PHRASES,
+    ROLE_LABELS,
+    ROLE_LEVELS,
+    normalize_phrase,
+    reputation_delta,
+    reputation_tier,
+)
 from community_bot.permissions import (
     PERM_SEE_PRIVATE,
     parse_permissions,
     role_has_permission,
 )
+from community_bot.profile_fields import profile_age
 from community_bot.profile_fill import profile_fill_percent
+from community_bot.social_emoji import interaction_emoji
 
 BOT_REPLY_TTL = 30.0
 logger = logging.getLogger(__name__)
 
 
 async def register_telegram_user(db: Database, user: User) -> dict[str, Any]:
-    return await db.ensure_user(user.id, user.username, user.full_name)
+    row = await db.ensure_user(user.id, user.username, user.full_name)
+    if user.is_bot:
+        await db.set_bot_state(f"telegram_is_bot:{user.id}", "1")
+    return row
 
 
 def lobby_count_ok(count: int, minimum: int, maximum: int, staff: bool) -> bool:
@@ -87,6 +103,8 @@ async def delete_later(message: Message, delay: float = BOT_REPLY_TTL) -> None:
     try:
         await message.delete()
     except (TelegramBadRequest, TelegramForbiddenError) as error:
+        if isinstance(error, TelegramBadRequest) and "message to delete not found" in str(error).casefold():
+            return
         logger.warning(
             "Не удалось удалить сообщение бота %s в чате %s: %s",
             message.message_id,
@@ -108,20 +126,21 @@ async def answer_group_ephemeral(
     return sent
 
 
-def media_from_message(message: Message) -> tuple[str | None, str | None]:
-    if message.photo:
-        return "photo", message.photo[-1].file_id
-    if message.document:
-        return "document", message.document.file_id
-    if message.video:
-        return "video", message.video.file_id
-    if message.audio:
-        return "audio", message.audio.file_id
-    if message.voice:
-        return "voice", message.voice.file_id
-    if message.animation:
-        return "animation", message.animation.file_id
+def message_media(message: Message, *kinds: str):
+    for kind in kinds:
+        if media := getattr(message, kind, None):
+            return kind, media
+    if rich := getattr(message, "rich_message", None):
+        for block in rich.blocks:
+            kind = "voice" if block.type == "voice_note" else block.type
+            if kind in kinds:
+                return kind, getattr(block, block.type)
     return None, None
+
+
+def media_from_message(message: Message) -> tuple[str | None, str | None]:
+    kind, media = message_media(message, "photo", "document", "video", "audio", "voice", "animation")
+    return kind, ((media[-1] if kind == "photo" else media).file_id if media else None)
 
 
 async def safe_send(bot: Bot, chat_id: int, text: str, **kwargs: Any) -> bool:
@@ -212,6 +231,8 @@ async def has_permission(db: Database, settings: Settings, user_id: int, permiss
 
 
 async def application_block_reason(db: Database, user_id: int) -> str | None:
+    if db.ban_is_active(await db.ban_reset_state(user_id)):
+        return "Анкету можно заполнить после разбана."
     if await db.has_approved_application(user_id):
         return "Ты уже проходил анкету — повторно заполнять её нельзя."
     if await db.has_pending_application(user_id):
@@ -258,7 +279,7 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
     role_icons = {"owner": "👑", "admin": "🛡", "moderator": "🔨", "member": "👤"}
     label = role_display_name(role, role_name)
     hobbies = user["hobbies"] or "не указаны"
-    age = user["age"] or "не указан"
+    age = profile_age(user) or "не указан"
     reputation = int(user["reputation"])
     filled = round(max(0, min(100, reputation)) / 10)
     progress = "█" * filled + "░" * (10 - filled)
@@ -268,16 +289,11 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
         f"👤 <b>{user_link(int(user['user_id']), str(name))}</b>",
         f"{role_icons.get(role, '💠')} <b>{html.escape(str(label))}</b>",
     ]
-    if user["custom_status"]:
-        lines.append(f"💬 <i>«{html.escape(str(user['custom_status']))}»</i>")
     bio = str(user.get("profile_bio") or "").strip()
     if bio:
         lines.append(f"📝 {html.escape(bio)}")
     if user.get("profile_private"):
         lines.append("🔒 <i>Профиль скрыт от посторонних</i>")
-    title = str(user.get("profile_title") or "").strip()
-    if title:
-        lines.append(f"🏷 {html.escape(title)}")
     lines.extend(
         [
             f"🔗 {html.escape(username)}",
@@ -304,18 +320,13 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     role = str(user["role"])
     label = role_display_name(role, role_name)
     hobbies = html.escape(str(user["hobbies"] or "пока тайна"))
-    age = user["age"] or "—"
+    age = profile_age(user) or "—"
     reputation = int(user["reputation"])
     filled = round(max(0, min(100, reputation)) / 10)
     progress = "◆" * filled + "◇" * (10 - filled)
     jewels = {"owner": "👑", "admin": "🛡", "moderator": "⚔️", "member": "🌙"}
     jewel = jewels.get(role, "💠")
-    status = (
-        f"\n     <i>❝ {html.escape(str(user['custom_status']))} ❞</i>\n" if user.get("custom_status") else "\n"
-    )
     lock = "  🔒 скрыт от чужих глаз\n" if user.get("profile_private") else ""
-    title = str(user.get("profile_title") or "").strip()
-    title_line = f"  🏷  {html.escape(title)}\n" if title else ""
     bio = str(user.get("profile_bio") or "").strip()
     bio_line = f"  📝  {html.escape(bio)}\n" if bio else ""
     return (
@@ -324,10 +335,8 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         "╭─━━━━━━━━━━━━━━━━━─╮\n"
         f"   {jewel}  {user_link(int(user['user_id']), name)}\n"
         f"   ✦ {html.escape(str(label))} ✦\n"
-        f"{status}"
         "╰─━━━━━━━━━━━━━━━━━─╯\n"
         f"{lock}"
-        f"{title_line}"
         f"{bio_line}"
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"
@@ -344,11 +353,32 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
     )
 
 
-async def render_profile(db: Database, settings: Settings, user: dict[str, Any]) -> str:
+def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: str) -> str:
+    name = str(user.get("profile_name") or user.get("telegram_name") or f"ID {user['user_id']}")
+    tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
+    identity = f" · @{html.escape(str(user['username']))}" if user.get("username") else ""
+    lines = [
+        f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
+        f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {profile_age(user) or '—'}",
+    ]
+    if user.get("profile_private"):
+        lines.append("🔒 Закрытый профиль")
+    if user.get("profile_bio"):
+        lines.append(html.escape(str(user["profile_bio"])))
+    if user.get("hobbies"):
+        lines.append(f"Увлечения: {html.escape(str(user['hobbies']))}")
+    lines.extend([
+        f"Репутация: {int(user['reputation'])}/100 · {tier.label} · скидка {tier.discount}%",
+        f"🍪 {user['cookies']} · Профиль: {profile_fill_percent(user)}% · Варны: {user['warnings']}",
+    ])
+    return "\n".join(lines)
+
+
+async def render_profile(db: Database, settings: Settings, user: dict[str, Any], *, compact: bool = False) -> str:
     from community_bot.life import achievement_lines
 
     title = await role_title(db, str(user["role"]))
-    text = profile_text(user, settings, title)
+    text = compact_profile_text(user, settings, title) if compact else profile_text(user, settings, title)
     extra = achievement_lines(await db.list_achievements(int(user["user_id"])))
     if extra:
         return f"{text}\n{extra}"
@@ -378,7 +408,8 @@ async def pet_guard_reputation(
     today = (action_date or datetime.now(UTC).date()).isoformat()
     if used_on == today:
         return delta, None
-    if secrets.randbelow(100) >= 15:
+    chance = 5 + max(0, min(100, int(pet.get("mood") or 0))) * 25 // 100
+    if secrets.randbelow(100) >= chance:
         return delta, None
     await db.mark_pet_guard(target_id, today)
     name = html.escape(str(pet["name"]))
@@ -390,3 +421,75 @@ async def resolve_reply_target(message: Message, db: Database) -> dict[str, Any]
         return None
     target = message.reply_to_message.from_user
     return await register_telegram_user(db, target)
+
+
+async def resolve_member_mention(db: Database, mention: str | User) -> dict[str, Any] | None:
+    if isinstance(mention, User):
+        return await register_telegram_user(db, mention)
+    matches = await db.fetchall("SELECT * FROM users WHERE username = ? COLLATE NOCASE LIMIT 2", (mention,))
+    return matches[0] if len(matches) == 1 else None
+
+
+async def resolve_command_target(
+    message: Message, db: Database, *, after_first: bool = False,
+) -> tuple[dict[str, Any] | None, list[str], bool]:
+    source = getattr(message, "text", None) or getattr(message, "caption", None) or ""
+    parsed = message_trigger(message) or parse_trigger(source)
+    args = parsed[1] if parsed else ""
+    mention, rest = split_target_argument(message, args)
+    if mention is None and after_first:
+        parts = args.split(maxsplit=1)
+        if len(parts) == 2:
+            candidate, remaining = split_target_argument(message, parts[1])
+            if candidate is not None and not remaining:
+                mention, rest = candidate, parts[0]
+    if mention is not None:
+        return await resolve_member_mention(db, mention), rest.split(), True
+    return await resolve_reply_target(message, db), args.split(), False
+
+
+def targeted_phrase(
+    message: Message, phrases: set[str], *, text: str | None = None,
+) -> tuple[str, str | User | None] | None:
+    text = (message.text or "").strip() if text is None else text
+    normalized = normalize_phrase(text)
+    if normalized in phrases and message.reply_to_message:
+        return normalized, None
+    max_words = max(phrase.count(" ") + 1 for phrase in phrases)
+    for index, match in enumerate(re.finditer(r"\s+", text)):
+        if index == max_words:
+            break
+        phrase = normalize_phrase(text[:match.start()])
+        if phrase in phrases:
+            mention, rest = split_target_argument(message, text[match.end():])
+            if mention is not None and not rest:
+                return phrase, mention
+    return None
+
+
+def reputation_interaction(message: Message) -> tuple[int, str | User | None] | None:
+    if message.reply_to_message and (delta := reputation_delta(message.text or "")) is not None:
+        return delta, None
+    action = targeted_phrase(message, POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES)
+    if action is None:
+        return None
+    phrase, mention = action
+    delta = reputation_delta(phrase)
+    assert delta is not None
+    return delta, mention
+
+
+def _like_body(text: str) -> str:
+    body = strip_command_address(text) or text.strip()
+    return re.sub(r"^(лайк(?:\s+лайк)?)\s*,\s*(нора)(?=\s|$)", r"\1 \2", body, flags=re.I)
+
+
+def is_like_phrase(text: str) -> bool:
+    return normalize_phrase(_like_body(text)) in LIKE_PHRASES
+
+
+def like_interaction(message: Message) -> tuple[str, str | User | None] | None:
+    text = message.text or ""
+    if message.reply_to_message and interaction_emoji(text) == "like":
+        return "лайк", None
+    return targeted_phrase(message, LIKE_PHRASES, text=_like_body(text))

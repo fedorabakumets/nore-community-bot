@@ -4,24 +4,21 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, User
 
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.helpers import application_block_reason, has_permission, render_profile
+from community_bot.helpers import has_permission, render_profile
 from community_bot.keyboards import (
     BTN_MENU,
     BTN_SHOP,
     BTN_TICKET,
     BTN_WALLET,
-    flow_reply_keyboard,
-    main_private_keyboard,
     private_menu_keyboard,
     profile_keyboard,
 )
+from community_bot.media_cache import profile_photo_input
 from community_bot.permissions import PERM_ADMIN_PANEL
-from community_bot.states import ApplicationForm
-from community_bot.texts import APPLICATION_INTRO
 
 router = Router(name="flows")
 
@@ -32,25 +29,22 @@ class InFlow(Filter):
 
 
 async def restore_private_menu(message: Message, db: Database, settings: Settings) -> None:
-    del db, settings
     if message.chat.type != "private":
-        await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Действие отменено.")
         return
-    await message.answer(
-        "Можно открыть профиль, магазин, кошелёк или написать тикет.",
-        reply_markup=main_private_keyboard(),
-    )
+    from community_bot.access import private_allowed
+    from community_bot.routers.private import private_menu_content
 
-
-async def restart_application(message: Message, state: FSMContext, db: Database, user_id: int) -> None:
-    reason = await application_block_reason(db, user_id)
-    if reason:
-        await state.clear()
-        await message.answer(reason)
+    uid = message.chat.id
+    if await private_allowed(db, settings, uid):
+        await message.answer(
+            "Выбери раздел.",
+            reply_markup=private_menu_keyboard(await has_permission(db, settings, uid, PERM_ADMIN_PANEL),
+                                               unread=await db.notify_unread_count(uid)),
+        )
         return
-    await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
-    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    text, markup = await private_menu_content(db, settings, uid)
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 async def cancel_current_flow(
@@ -75,15 +69,17 @@ async def _show_own_profile(message: Message, db: Database, settings: Settings) 
     if not message.from_user:
         return
     user = await db.ensure_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=message.chat.type == "private")
     markup = profile_keyboard(message.from_user.id, bool(user.get("profile_private")))
     if user["avatar_file_id"]:
         try:
             if user.get("avatar_media_type") == "video":
                 await message.answer_video(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
                 return
-            await message.answer_photo(user["avatar_file_id"], caption=text, parse_mode="HTML", reply_markup=markup)
-            return
+            photo = await profile_photo_input(db, user["avatar_file_id"])
+            if photo is not None:
+                await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
+                return
         except Exception:
             pass
     await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -95,15 +91,23 @@ async def _show_inline_menu(
     settings: Settings,
     *,
     replace: bool = False,
+    actor: User | None = None,
 ) -> None:
-    if not message.from_user:
+    actor = actor or message.from_user
+    if not actor or actor.is_bot:
         return
     from community_bot.blocks import answer_block, replace_block
+    from community_bot.cabinet import cabinet_text
+    from community_bot.helpers import register_telegram_user
 
-    show_admin = await has_permission(db, settings, message.from_user.id, PERM_ADMIN_PANEL)
-    unread = await db.notify_unread_count(message.from_user.id)
+    user = await register_telegram_user(db, actor)
+    show_admin = await has_permission(db, settings, actor.id, PERM_ADMIN_PANEL)
+    unread = await db.notify_unread_count(actor.id)
     markup = private_menu_keyboard(show_admin, unread=unread)
-    text = "📋 <b>Меню</b>\nПрофиль, питомец, уведомления. Снизу — магазин, кошелёк и тикет."
+    text = cabinet_text(
+        user, await db.get_pet(actor.id, settle=False), unread=unread,
+        restricted_threshold=settings.restricted_reputation_threshold,
+    )
     if replace:
         await replace_block(message, "cabinet", text, parse_mode="HTML", reply_markup=markup)
         return
@@ -122,7 +126,7 @@ async def menu_home(callback: CallbackQuery, db: Database, settings: Settings) -
         await callback.answer()
         return
     await callback.answer()
-    await _show_inline_menu(callback.message, db, settings, replace=True)
+    await _show_inline_menu(callback.message, db, settings, replace=True, actor=callback.from_user)
 
 
 @router.message(F.chat.type == "private", F.text.in_({BTN_MENU, BTN_SHOP, BTN_WALLET, BTN_TICKET}))
@@ -178,7 +182,9 @@ async def flow_callback_control(
     current = await state.get_state()
     await callback.answer()
     if callback.data == "flow:restart" and current and current.startswith("ApplicationForm:"):
-        await restart_application(callback.message, state, db, callback.from_user.id)
+        from community_bot.routers.private import _start_application
+
+        await _start_application(callback.message, state, db, callback.from_user)
         return
     if callback.data == "flow:restart":
         await callback.message.answer("Здесь можно только отменить.")
@@ -204,8 +210,7 @@ async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
     from aiogram.types import FSInputFile
 
     from community_bot.covers import cover_path_for
-    from community_bot.telegraph import member_dm_text
-    from community_bot.updates import community_announcement, latest_update
+    from community_bot.updates import latest_update, update_keyboard, update_page
 
     item = latest_update()
     user_id = callback.from_user.id
@@ -215,14 +220,45 @@ async def send_update_to_dm(callback: CallbackQuery, bot: Bot) -> None:
             await bot.send_photo(
                 user_id,
                 FSInputFile(cover),
-                caption=community_announcement(item),
+                caption=update_page(item, 0),
                 parse_mode="HTML",
+                reply_markup=update_keyboard(item, 0),
             )
-        await bot.send_message(user_id, member_dm_text(item), parse_mode="HTML")
+        else:
+            await bot.send_message(
+                user_id, update_page(item, 0), parse_mode="HTML", reply_markup=update_keyboard(item, 0),
+            )
     except (TelegramBadRequest, TelegramForbiddenError):
         await callback.answer("Напишите боту /start в личке, затем нажмите снова.", show_alert=True)
         return
     await callback.answer("Обновление отправлено в личный диалог с ботом")
+
+
+@router.callback_query(F.data.startswith("updates:page:"))
+async def switch_update_page(callback: CallbackQuery) -> None:
+    from community_bot.updates import UPDATES, update_keyboard, update_page
+
+    message = callback.message
+    if not message or message.chat.type != "private" or message.chat.id != callback.from_user.id:
+        await callback.answer()
+        return
+    try:
+        _, _, number, raw_page = (callback.data or "").split(":")
+        item = next(item for item in UPDATES if item.number == int(number))
+        page = int(raw_page)
+        text = update_page(item, page)
+    except (ValueError, StopIteration):
+        await callback.answer("Страница недоступна", show_alert=True)
+        return
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=update_keyboard(item, page))
+        else:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=update_keyboard(item, page))
+    except TelegramBadRequest as error:
+        if "message is not modified" not in str(error).lower():
+            raise
+    await callback.answer()
 
 
 @router.callback_query(F.data == "g:hide")
@@ -233,6 +269,9 @@ async def game_hide(callback: CallbackQuery) -> None:
 
 async def _delete_callback_message(callback: CallbackQuery) -> None:
     if not callback.message:
+        return
+    if callback.message.chat.type == "private":
+        await callback.message.answer("Раздел закрыт. Выбери следующий раздел кнопками ниже.")
         return
     try:
         await callback.message.delete()

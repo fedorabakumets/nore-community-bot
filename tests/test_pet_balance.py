@@ -1,0 +1,174 @@
+import asyncio
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from test_nora_game import content, request
+
+from community_bot import cabinet_api, expedition, nora_game_api, pet_progress
+from community_bot.database import Database
+from community_bot.helpers import pet_guard_reputation
+from community_bot.routers.nora import assistant_access_error
+
+
+@pytest.mark.asyncio
+async def test_expedition_requires_both_stats_and_saves_departure_result(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'pet.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    for hunger, thirst in [(49, 50), (50, 49)]:
+        await db.execute('UPDATE pets SET hunger=?, thirst=? WHERE user_id=1', (hunger, thirst))
+        ok, message, _ = await db.start_expedition(1)
+        assert not ok and '50' in message
+    await db.execute('UPDATE pets SET hunger=50, thirst=50, mood=42 WHERE user_id=1')
+    observed = []
+    def roll(mood):
+        observed.append(mood)
+        return expedition.ExpeditionLoot(kind='cookies', amount=0)
+    monkeypatch.setattr(expedition, 'roll_expedition_loot', roll)
+    assert (await db.start_expedition(1))[0]
+    spent = await db.get_pet(1, settle=False)
+    assert (spent['hunger'], spent['thirst'], spent['mood'], spent['sleeping']) == (0, 0, 2, 1)
+    assert not (await db.start_expedition(1))[0]
+    await db.execute('UPDATE pets SET mood=100, expedition_until=? WHERE user_id=1',
+                     ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(),))
+    before = (await db.get_user(1))['cookies']
+    result = await db.settle_pet(1)
+    assert observed == [42]
+    assert result['expedition_loot']['amount'] == 0
+    assert (await db.get_user(1))['cookies'] == before
+    assert 'находок нет' in expedition.result_text(pet_name='Кот', species_words={},
+                                                   loot=expedition.ExpeditionLoot(kind='cookies', amount=0))
+
+
+@pytest.mark.asyncio
+async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'pet.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pet_development SET stage=5,level=2 WHERE user_id=1')
+    monkeypatch.setattr(expedition, 'roll_expedition_loot', lambda _: expedition.ExpeditionLoot('cookies', 10))
+    assert (await db.start_expedition(1))[0]
+    assert 'в походе' in await assistant_access_error(1, db)
+    pet = await db.get_pet(1, settle=False)
+    balance = (await db.get_user(1))['cookies']
+    until = pet['expedition_until']
+    body = {'action': 'return', 'expedition_until': until}
+    token = content(await cabinet_api.pet_prepare(request(db, 1, body)))['token']
+    old_token = content(await cabinet_api.pet_prepare(request(db, 1, body)))['token']
+    calls = await asyncio.gather(
+        cabinet_api.pet_action(request(db, 1, {'token': token})),
+        cabinet_api.pet_action(request(db, 1, {'token': token})),
+    )
+    assert sorted(call.status for call in calls) == [200, 409]
+    assert await assistant_access_error(1, db) is None
+    returned = await db.get_pet(1)
+    assert returned['expedition_until'] is None and returned['expedition_loot'] is None
+    assert all(returned[key] == pet[key] for key in ('hunger', 'thirst', 'mood'))
+    assert (await db.get_user(1))['cookies'] == balance
+    assert await db.claim_expedition_notice(1) is None
+    await db.execute('UPDATE pets SET hunger=100, thirst=100 WHERE user_id=1')
+    assert (await db.start_expedition(1))[0]
+    assert (await cabinet_api.pet_action(request(db, 1, {'token': old_token}))).status == 409
+    assert (await db.get_pet(1, settle=False))['expedition_until'] not in (None, until)
+
+
+@pytest.mark.asyncio
+async def test_stroking_is_private_hourly_and_mood_is_not_overwritten(tmp_path):
+    db = Database(tmp_path / 'pet.db')
+    await db.initialize()
+    for uid in (1, 2):
+        await db.ensure_user(uid)
+        await db.add_cookies(uid, 10, 'test')
+        await db.purchase_pet(uid, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pets SET hunger=80, thirst=80, mood=10 WHERE user_id=1')
+    day = pet_progress.moscow_now().date().isoformat()
+    await pet_progress.dashboard(db, 1)
+    await db.execute(
+        "UPDATE pet_quests SET events='food,stroke',progress=0 WHERE user_id=1 AND day=? AND slot=2", (day,),
+    )
+    care = (await pet_progress.dashboard(db, 1))['quests'][1]
+    assert care['label'] == pet_progress.STROKE_QUEST and care['play_with_pet']
+    with pytest.raises(ValueError):
+        await cabinet_api.pet_prepare(request(db, 1, {'action': 'stroke'}))
+    old_intent = await db.create_wallet_intent(1, 'pet_action', 1, payload={'action': 'stroke'})
+    assert (await cabinet_api.pet_action(request(db, 1, {'token': old_intent}))).status == 409
+    assert (await db.get_pet(1, settle=False))['mood'] == 10
+    assert content(await nora_game_api.stroke_companion(request(db, 1)))['ok']
+    assert (await pet_progress.dashboard(db, 1))['quests'][1]['progress'] == 1
+    assert (await db.get_pet(1))['mood'] == 60
+    assert (await db.get_pet(2))['mood'] == 80
+    assert not content(await nora_game_api.stroke_companion(request(db, 1)))['ok']
+    past = (datetime.now(UTC) - timedelta(hours=1, minutes=1)).isoformat()
+    await db.execute('UPDATE bot_state SET value=? WHERE key=?', (past, 'pet_stroke:1'))
+    await db.execute('UPDATE pets SET last_tick_at=? WHERE user_id=1', (past,))
+    assert (await db.get_pet(1))['mood'] == 61
+    assert content(await nora_game_api.stroke_companion(request(db, 1)))['ok']
+    assert (await db.get_pet(1))['mood'] == 100
+    await db.execute('UPDATE bot_state SET value=? WHERE key=?', (past, 'pet_stroke:1'))
+    assert not (await db.stroke_pet(1))[0]
+    assert await db.get_bot_state('pet_stroke:1') == past
+    await db.execute('UPDATE pets SET expedition_until=? WHERE user_id=1',
+                     ((datetime.now(UTC) + timedelta(hours=1)).isoformat(),))
+    assert not (await db.stroke_pet(1))[0]
+
+
+def test_mood_changes_odds_but_never_guarantees_success(monkeypatch):
+    monkeypatch.setattr(expedition.secrets, 'randbelow', lambda _: 50)
+    assert expedition.roll_expedition_loot(0).amount == 0
+    assert expedition.roll_expedition_loot(100).amount > 0
+    monkeypatch.setattr(expedition.secrets, 'randbelow', lambda n: n - 1)
+    assert expedition.roll_expedition_loot(100).amount == 0
+    monkeypatch.setattr(expedition.secrets, 'randbelow', lambda _: 0)
+    assert expedition.roll_expedition_loot(100).amount == 1
+
+
+@pytest.mark.asyncio
+async def test_mood_changes_guard_chance(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'guard.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    monkeypatch.setattr('community_bot.helpers.secrets.randbelow', lambda _: 20)
+    await db.execute('UPDATE pets SET mood=0 WHERE user_id=1')
+    assert (await pet_guard_reputation(db, 1, -1))[0] == -1
+    await db.execute('UPDATE pets SET mood=100 WHERE user_id=1')
+    assert (await pet_guard_reputation(db, 1, -1))[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_parallel_strokes_and_expedition_time(tmp_path):
+    db = Database(tmp_path / 'race.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pets SET mood=0 WHERE user_id=1')
+    responses = await asyncio.gather(db.stroke_pet(1), db.stroke_pet(1))
+    assert sum(ok for ok, _ in responses) == 1
+    assert (await db.get_pet(1))['mood'] == 50
+    assert (await db.start_expedition(1))[0]
+    await db.execute('UPDATE pets SET last_tick_at=?, expedition_until=? WHERE user_id=1', (
+        (datetime.now(UTC) - timedelta(hours=25)).isoformat(),
+        (datetime.now(UTC) - timedelta(minutes=30)).isoformat(),
+    ))
+    pet = await db.settle_pet(1)
+    assert (pet['hunger'], pet['thirst'], pet['mood']) == (20, 20, 10)
+
+
+@pytest.mark.asyncio
+async def test_parallel_expedition_charges_once(tmp_path):
+    db = Database(tmp_path / 'expedition-race.db')
+    await db.initialize()
+    await db.ensure_user(1)
+    await db.add_cookies(1, 10, 'test')
+    await db.purchase_pet(1, 'cat', 'Кот', 1)
+    await db.execute('UPDATE pets SET hunger=100, thirst=100, mood=100 WHERE user_id=1')
+    results = await asyncio.gather(db.start_expedition(1), db.start_expedition(1))
+    assert sum(result[0] for result in results) == 1
+    pet = await db.get_pet(1, settle=False)
+    assert (pet['hunger'], pet['thirst'], pet['mood']) == (40, 40, 60)

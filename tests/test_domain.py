@@ -36,7 +36,7 @@ def test_discount_rounds_up() -> None:
 
 def test_reputation_phrases() -> None:
     assert reputation_delta(" +РЕП ") == 5
-    assert reputation_delta("пошёл   нахуй") == -5
+    assert reputation_delta("не   согласен") == -5
     assert reputation_delta("обычный текст") is None
 
 

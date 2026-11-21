@@ -1,0 +1,674 @@
+"""Same-process Mini App: Telegram-signed identity, shared economy, no browser secrets."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import hmac
+import json
+import os
+import re
+import time
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryFile
+from urllib.parse import parse_qsl
+from zoneinfo import ZoneInfo
+
+from aiogram.exceptions import TelegramAPIError
+from aiohttp import web
+
+from community_bot.config import COOKIE_PAYMENT_QR
+from community_bot.database import Database
+
+ROOT = Path(__file__).parent / 'web'
+ASSETS = Path(__file__).parent.parent / 'assets'
+AVATAR_MAX_MB = 64
+AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
+
+
+
+def validate_init_data(raw: str, token: str, now: float | None = None) -> dict:
+    if not raw or len(raw) > 8192:
+        raise ValueError('Откройте приложение из Telegram')
+    pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=True)
+    data = dict(pairs)
+    if len(data) != len(pairs):
+        raise ValueError('Некорректная авторизация')
+    received = data.pop('hash', '')
+    check = '\n'.join(f'{k}={v}' for k, v in sorted(data.items()))
+    secret = hmac.new(b'WebAppData', token.encode(), hashlib.sha256).digest()
+    digest = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(digest, received):
+        raise ValueError('Подпись Telegram не совпадает')
+    age = (time.time() if now is None else now) - int(data.get('auth_date', '0'))
+    if not -30 <= age <= 3600:
+        raise ValueError('Вход устарел. Закройте и откройте приложение')
+    user = json.loads(data['user'])
+    if not isinstance(user, dict):
+        raise ValueError('Некорректный пользователь')
+    if type(user.get('id')) is not int or user['id'] <= 0 or user.get('is_bot'):
+        raise ValueError('Некорректный пользователь')
+    return user
+
+
+@web.middleware
+async def protection(request, handler):
+    try:
+        if request.path.startswith('/api/'):
+            raw = request.headers.get('Authorization', '').removeprefix('tma ')
+            try:
+                request['actor'] = validate_init_data(raw, request.app['settings'].bot_token)
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+                return web.json_response(
+                    {'error': 'Откройте приложение из меню Норы в Telegram'},
+                    status=401, headers={'Cache-Control': 'no-store'},
+                )
+            from community_bot.access import private_allowed
+
+            db, settings, uid = request.app['db'], request.app['settings'], request['actor']['id']
+            path = request.path
+            ban = await db.ban_reset_state(uid)
+            if not await private_allowed(db, settings, uid, ban=ban):
+                if path not in {'/api/me', '/api/application', '/api/application/photo'}:
+                    return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
+                                             status=403, headers={'Cache-Control': 'no-store'})
+                request['application_ban'] = ban
+            profile_optional = path in {
+                '/api/me', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
+                '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
+            } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
+            if not profile_optional:
+                from community_bot.events_api import allowed
+                from community_bot.profile_fill import profile_is_complete
+
+                user = await db.get_user(uid)
+                event_editor = path.startswith('/api/events/') and path != '/api/events/join'
+                if not profile_is_complete(user or {}) and not (
+                    event_editor and await allowed(db, settings, uid)
+                ):
+                    return web.json_response({'error': 'Заполни профиль на 100%, чтобы открыть этот раздел'},
+                                             status=403, headers={'Cache-Control': 'no-store'})
+        from community_bot.group_message_close import group_message_actors
+
+        with group_message_actors(request.get('actor', {}).get('id', 0)):
+            response = await handler(request)
+        if (request.path in {'/api/sea', '/api/mafia', '/api/community'}
+            or request.path.startswith(('/api/sea/', '/api/mafia/'))) and (
+            response.content_type == 'application/json' and response.status < 400
+        ):
+            from community_bot.role_prefixes import decorate_game_people
+
+            payload = await decorate_game_people(request.app['db'], request.app['settings'], json.loads(response.body))
+            response.body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    except web.HTTPRequestEntityTooLarge:
+        if request.path in {'/api/profile/avatar', '/api/application/photo'}:
+            limit = f'Фотография должна быть не больше {AVATAR_MAX_MB} МБ'
+        elif request.path.startswith(('/api/admin', '/api/events/upload')):
+            limit = 'Файл должен быть не больше 20 МБ'
+        else:
+            limit = 'Слишком большой запрос'
+        response = web.json_response({'error': limit}, status=413)
+    except ValueError as error:
+        if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
+                                    '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/games/', '/api/seasonal',
+                                    '/api/people', '/api/presence', '/api/community')):
+            return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
+                                     headers={'Cache-Control': 'no-store'})
+        response = web.json_response(
+            {'error': 'Проверь поля профиля'}, status=400,
+        )
+    except (KeyError, TypeError, json.JSONDecodeError):
+        response = web.json_response({'error': 'Проверьте данные запроса'}, status=400)
+    response.headers['Cache-Control'] = ('public, max-age=86400, immutable'
+                                         if request.path.startswith('/seasonal/media/')
+                                         else 'no-store' if request.path.startswith('/api/') else 'no-cache')
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self' https://telegram.org https://www.youtube.com https://s.ytimg.com; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; "
+        "media-src 'self' blob: https:; connect-src 'self'; "
+        "frame-src https://www.youtube.com; font-src 'self'; base-uri 'none'; "
+        "frame-ancestors https://web.telegram.org https://*.telegram.org"
+    )
+    return response
+
+
+async def actor(request):
+    u = request['actor']
+    return await request.app['db'].ensure_user(u['id'], u.get('username'), u.get('first_name', 'Участник'))
+
+
+async def application_onboarding(db, uid, ban):
+    if db.ban_is_active(ban):
+        return {'status': 'blocked'}
+    pending = await db.pending_application_photo_status(uid)
+    if pending:
+        return {'status': 'pending', 'application_id': pending['id'], 'has_photo': bool(pending['has_photo'])}
+    return {'status': 'form'}
+
+
+async def submit_application(request):
+    from community_bot.application_form import validate_application_age
+    from community_bot.routers.private import notify_application_reviewers
+
+    if 'application_ban' not in request:
+        return web.json_response({'status': 'admitted'})
+    db, settings = request.app['db'], request.app['settings']
+    uid = request['actor']['id']
+    ban = request['application_ban']
+    onboarding = await application_onboarding(db, uid, ban)
+    if onboarding['status'] != 'form':
+        return web.json_response(onboarding)
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError('Проверь ответы в анкете.')
+        if body.get('ban_version') != ban.get('version'):
+            return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
+        answers = {}
+        for field, label, limit in (
+            ('name', 'Имя', 50),
+            ('city', 'Город', 100),
+            ('bio', 'О себе', 1000),
+        ):
+            value = body.get(field)
+            if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
+                raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
+            answers[field] = value.strip()
+        answers['age'] = validate_application_age(body.get('age'))
+    except (ValueError, TypeError) as error:
+        message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'
+        return web.json_response({'error': message}, status=400)
+
+    await actor(request)
+    application_id = await db.create_application(uid, answers, ban_version=ban.get('version'))
+    if not application_id:
+        # Another tab may already have submitted or a moderator may have changed access.
+        onboarding = await application_onboarding(db, uid, await db.ban_reset_state(uid))
+        if onboarding['status'] != 'form':
+            return web.json_response(onboarding)
+        return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
+    await notify_application_reviewers(
+        request.app['bot'], settings, application_id, uid, request['actor'].get('username'), answers,
+    )
+    return web.json_response({'status': 'pending', 'application_id': application_id, 'has_photo': False})
+
+
+async def overview(request):
+    db, settings = request.app['db'], request.app['settings']
+    if 'application_ban' in request:
+        uid, ban = request['actor']['id'], request['application_ban']
+        onboarding = await application_onboarding(db, uid, ban)
+        if onboarding['status'] == 'form':
+            user = await db.get_user(uid) or {}
+            onboarding.update(ban_version=ban.get('version'), name=user.get('profile_name') or '')
+        return web.json_response({'onboarding': onboarding})
+    from community_bot.cabinet_api import pet_data, wallet_data
+    from community_bot.shop_api import shop_data
+
+    user = await actor(request)
+    pet = await pet_data(db, user, development=True)
+    user = await db.get_user(user['user_id'])
+    shop = await shop_data(db, user, settings)
+    from community_bot.events_api import allowed, public_events
+
+    events = await public_events(db, user['user_id'])
+    for product in shop['products']:
+        if product['sku'] == 'event_pass':
+            product.update(price=events[0]['price'] if events else None, buyable=bool(events),
+                           description=events[0]['title'] if events else 'Следи за анонсами в сообществе',
+                           reason='' if events else 'Сейчас нет опубликованного мероприятия')
+    from community_bot.domain import reputation_tier
+    from community_bot.helpers import effective_role, has_permission, role_title
+    from community_bot.profile_fields import profile_age, profile_revision
+    from community_bot.profile_fill import profile_block_states, profile_fill_percent, reputation_cap
+
+    tier = reputation_tier(int(user['reputation']), settings.restricted_reputation_threshold)
+    today = datetime.now(ZoneInfo(getattr(settings, 'timezone', 'Europe/Moscow'))).date()
+    used = await db.reputation_actions_today(user['user_id'], today)
+    role = await effective_role(db, settings, user['user_id'])
+    from community_bot.profile_track import get_track, track_summary
+    from community_bot.role_prefixes import prefix_for
+    from community_bot.social_likes import count
+
+    stats = {
+        'likes': await count(db, user['user_id']),
+        'prefix': await prefix_for(db, settings, user['user_id']),
+        'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
+        'tier': tier.label, 'discount': tier.discount, 'daily_actions': tier.daily_actions,
+        'ai_daily_requests': tier.ai_daily_requests,
+        'actions_used': used, 'actions_left': max(0, tier.daily_actions - used), 'can_minus': tier.can_minus,
+        'role': await role_title(db, role), 'timezone': getattr(settings, 'timezone', 'Europe/Moscow'),
+        'blocks': [{'title': label, 'filled': filled} for _, label, filled in profile_block_states(user)],
+    }
+    from community_bot.domain import reputation_tier as tier_for
+
+    levels = [{'label': label, 'range': span, 'discount': tier_for(value).discount,
+               'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus,
+               'ai_daily_requests': tier_for(value).ai_daily_requests}
+              for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
+    history = await db.list_transactions(user['user_id'], 4)
+    from community_bot.economy import describe_transactions
+    from community_bot.updates import UPDATES
+
+    # Only member-facing articles: staff_details and operational notes are never exposed here.
+    news = [{'number': item.number, 'title': item.title, 'summary': item.summary,
+             'intro': item.article_intro or item.summary,
+             'sections': [{'heading': section.heading, 'body': section.body, 'example': section.example}
+                          for section in item.sections],
+             'details': list(item.details) if not item.sections else []}
+            for item in reversed(UPDATES[-5:])]
+    community_url = str(getattr(settings, 'community_invite_url', '') or '').strip()
+    if stats['fill_percent'] < 100 or not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
+        community_url = ''
+    return web.json_response({
+        'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
+                                        'cookies', 'cookie_debt', 'reputation', 'profile_bio',
+                                        'birth_date', 'hobbies', 'warnings', 'profile_private',
+                                        'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
+        'admin_available': await has_permission(
+            db, settings, user['user_id'], 'admin.panel',
+        ),
+        'levels': levels,
+        'profile': stats, 'revision': profile_revision(user),
+        'profile_track': track_summary(await get_track(db, user['user_id'])),
+        'privacy_owned': await db.owns_profile_privacy(user['user_id']),
+        'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
+        **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
+        'unread_notices': await db.notify_unread_count(user['user_id']), 'events': events,
+        'events_admin': await allowed(db, settings, user['user_id']),
+        'home': {'community_url': community_url, 'news': news},
+        'history': await describe_transactions(db, history),
+    })
+
+
+async def prepare(request):
+    from community_bot.shop_api import quote
+
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise ValueError('Ожидается объект')
+    return web.json_response(await quote(request.app['db'], request.app['settings'], await actor(request), data))
+
+
+async def confirm(request):
+    from community_bot.shop_api import purchase
+
+    data = await request.json()
+    if not isinstance(data, dict) or not isinstance(data.get('token'), str):
+        raise ValueError('Открой подтверждение покупки заново')
+    db = request.app['db']
+    from community_bot.rsvp import event_lock
+
+    async with event_lock(db, 'shop:'+data['token']):
+        ok, message = await purchase(
+            db, request.app['settings'], request.app['bot'], await actor(request), data['token'],
+        )
+    return web.json_response({'ok': ok, 'message': message}, status=200 if ok else 409)
+
+
+async def join_event(request):
+    from community_bot.rsvp import event_lock, refresh_event_markup, send_attendance_confirmation
+
+    user = await actor(request)
+    db, bot = request.app['db'], request.app['bot']
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise ValueError("Ожидается объект")
+    event = await db.get_studio_event(str(data.get('event_id', '')))
+    if not event or event['status'] != 'active':
+        return web.json_response({'error': 'Мероприятие изменилось. Обновите экран'}, status=409)
+    eid = event['event_id']
+    async with event_lock(db, eid):
+        offer = await db.get_event_offer(eid)
+        price = int(offer['price']) if offer else 0
+        if type(data.get('price')) is not int or data['price'] != price:
+            return web.json_response({'error': 'Цена изменилась. Обновите экран'}, status=409)
+        if price:
+            ok, message, _ = await db.pay_event_offer(eid, user['user_id'], price)
+        else:
+            ok, message = await db.add_rsvp(eid, user['user_id'], 0, kind='rsvp')
+        if ok and event['rsvp_enabled']:
+            await refresh_event_markup(bot, db, eid)
+    if ok:
+        message = 'Вы в списке участников!'
+        if not price:
+            sent = await send_attendance_confirmation(bot, db, user['user_id'], event)
+            if sent is False:
+                message += ' Подробности здесь, в карточке события.'
+    return web.json_response({'ok': ok, 'message': message}, status=200 if ok else 409)
+
+
+def normalized_photo(raw: bytes) -> bytes:
+    return _normalized_photo(BytesIO(raw), profile_upload=False)
+
+
+def normalized_profile_photo(source) -> bytes:
+    return _normalized_photo(source, profile_upload=True)
+
+
+def _normalized_photo(source, *, profile_upload: bool) -> bytes:
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    formats = ['JPEG', 'PNG', 'WEBP']
+    if profile_upload:
+        from pillow_heif import is_supported, register_heif_opener
+
+        formats += ['AVIF', 'GIF', 'BMP', 'TIFF']
+        if is_supported(source.read(16)):
+            register_heif_opener()
+            formats.append('HEIF')
+    try:
+        with Image.open(source, formats=formats if profile_upload else None) as image:
+            pixels = image.width * image.height
+            if not profile_upload and (image.format not in formats or pixels > 20_000_000):
+                raise ValueError('Нужна фотография JPG, PNG или WebP до 20 мегапикселей')
+            if profile_upload and pixels > (160_000_000 if image.format == 'JPEG' else 64_000_000):
+                raise ValueError('У фото слишком высокое разрешение. Попробуй уменьшить его')
+            image.draft('RGB', (1600, 1600))
+            image.thumbnail((1600, 1600))
+            result = ImageOps.exif_transpose(image)
+            if profile_upload and ('A' in result.getbands() or 'transparency' in result.info):
+                rgba = result.convert('RGBA')
+                result = Image.new('RGB', rgba.size, 'white')
+                result.paste(rgba, mask=rgba.getchannel('A'))
+            width, height = result.size
+            if profile_upload and max(width, height) > 20 * min(width, height):
+                minimum = (max(width, height) + 19) // 20
+                result = ImageOps.pad(result, (max(width, minimum), max(height, minimum)), color='white')
+            output = BytesIO()
+            result.convert('RGB').save(output, 'JPEG', quality=88)
+            return output.getvalue()
+    except UnidentifiedImageError as error:
+        if profile_upload:
+            raise ValueError('Выбери фото JPG, PNG, WebP, HEIC, AVIF, GIF, BMP или TIFF') from error
+        raise ValueError('Не удалось прочитать фотографию') from error
+    except Image.DecompressionBombError as error:
+        raise ValueError('У фото слишком высокое разрешение. Попробуй уменьшить его') from error
+    except (OSError, SyntaxError, EOFError) as error:
+        raise ValueError('Не удалось прочитать фотографию') from error
+
+
+async def profile_privacy(request):
+    user = await actor(request)
+    payload = await request.json()
+    if not isinstance(payload, dict) or set(payload) != {'hidden'} or type(payload['hidden']) is not bool:
+        raise ValueError('Укажи настройку приватности')
+    if not await request.app['db'].set_profile_privacy(user['user_id'], payload['hidden']):
+        return web.json_response({'error': 'Сначала купи закрытый профиль в магазине'}, status=403)
+    return web.json_response({'ok': True, 'message': 'Настройки профиля сохранены'})
+
+
+async def save_profile(request):
+    from community_bot.profile_fields import validate_profile_fields
+
+    user = await actor(request)
+    data = await request.json()
+    if not isinstance(data, dict) or set(data) != {'fields', 'revision'} or not isinstance(data['revision'], str):
+        raise ValueError('Некорректный запрос профиля')
+    fields = validate_profile_fields(data['fields'])
+    if not await request.app['db'].save_self_profile(user['user_id'], fields, data['revision']):
+        return web.json_response({'error': 'Профиль уже изменился в боте. Обнови ЛК перед сохранением'}, status=409)
+    return web.json_response({'ok': True, 'message': 'Профиль сохранён — изменения уже видны в боте'})
+
+
+async def read_profile_photo(request):
+    if request.content_length is not None and request.content_length > AVATAR_MAX_BYTES:
+        raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, request.content_length)
+    from community_bot.media_cache import images
+
+    async with request.app['avatar_uploads']:
+        with TemporaryFile('w+b') as source:
+            size = 0
+            async for chunk in request.content.iter_chunked(256 * 1024):
+                size += len(chunk)
+                if size > AVATAR_MAX_BYTES:
+                    raise web.HTTPRequestEntityTooLarge(AVATAR_MAX_BYTES, size)
+                source.write(chunk)
+            source.seek(0)
+            return await images(request).normalize(source, profile=True)
+
+
+async def upload_application_photo(request):
+    db, uid = request.app['db'], request['actor']['id']
+    pending = await db.pending_application_photo_status(uid)
+    if not pending or request.headers.get('X-Application-Id') != str(pending['id']):
+        return web.json_response({'error': 'Анкета изменилась. Проверь её статус.'}, status=409)
+    if not pending['has_photo']:
+        try:
+            photo = await read_profile_photo(request)
+        except ValueError as error:
+            return web.json_response({'error': str(error)}, status=400)
+        if not await db.attach_application_photo(pending['id'], uid, photo):
+            current = await db.pending_application_photo_status(uid)
+            if not current or current['id'] != pending['id'] or not current['has_photo']:
+                return web.json_response({'error': 'Анкета изменилась. Проверь её статус.'}, status=409)
+    return web.json_response({'status': 'pending', 'application_id': pending['id'], 'has_photo': True})
+
+
+async def upload_avatar(request):
+    from community_bot.profile_fields import profile_revision
+
+    user = await actor(request)
+    # Check the version before reading the body, then again in the save transaction.
+    revision = request.headers.get('X-Profile-Revision', '')
+    if revision != profile_revision(user):
+        return web.json_response({'error': 'Профиль изменился. Обнови ЛК и повтори загрузку'}, status=409)
+    try:
+        photo = await read_profile_photo(request)
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
+    if not await request.app['db'].save_self_profile(user['user_id'], {}, revision, photo=photo):
+        return web.json_response({'error': 'Профиль изменился во время загрузки. Обнови ЛК и повтори'}, status=409)
+    return web.json_response({'ok': True, 'message': 'Фото профиля обновлено в миниапке и боте'})
+
+
+async def avatar(request):
+    from community_bot.media_cache import images
+
+    user = await actor(request)
+    file_id = user.get('avatar_file_id')
+    if not file_id or user.get('avatar_media_type') == 'video':
+        raise web.HTTPNotFound()
+    try:
+        photo = await images(request).avatar(file_id)
+    except (TelegramAPIError, ValueError):
+        raise web.HTTPNotFound() from None
+    return web.Response(body=photo, content_type='image/jpeg')
+
+
+async def index(request):
+    return web.FileResponse(ROOT / 'index.html')
+
+
+def create_app(db: Database, settings, bot, admin_runtime=None):
+    app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
+    app.update(db=db, settings=settings, bot=bot, avatar_uploads=asyncio.Semaphore(2))
+    from community_bot.media_cache import MediaImages
+
+    app['media_images'] = MediaImages(bot, db)
+    async def close_media(_):
+        await app['media_images'].close()
+    app.on_cleanup.append(close_media)
+    app.router.add_get('/', index)
+    app.router.add_get('/game/nora-theme.mp3', lambda _: web.FileResponse(
+        ASSETS / 'game' / 'nora-theme.mp3', headers={'Content-Type': 'audio/mpeg'}))
+    for name in ('nora-memory-intro.mp3', 'nora-memory-loop.mp3'):
+        app.router.add_get('/game/' + name, lambda _, track=name: web.FileResponse(
+            ASSETS / 'game' / track, headers={'Content-Type': 'audio/mpeg'}))
+    app.router.add_get('/healthz', lambda _: web.json_response({'ok': True}))
+    from community_bot import admin_web
+
+    if bot is not None:
+        app['admin_bridge'] = admin_web.AdminBridge(db, settings, bot, admin_runtime)
+        async def close_admin(_):
+            await app['admin_bridge'].dispatcher.storage.close()
+        app.on_cleanup.append(close_admin)
+    app.router.add_get('/api/admin', admin_web.panel)
+    app.router.add_post('/api/admin/reset', admin_web.reset)
+    app.router.add_post('/api/admin/action', admin_web.action)
+    app.router.add_post('/api/admin/input', admin_web.input_text)
+    app.router.add_post('/api/admin/upload', admin_web.upload)
+    app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
+    app.router.add_get('/api/me', overview)
+    app.router.add_post('/api/application', submit_application)
+    app.router.add_post('/api/application/photo', upload_application_photo)
+    app.router.add_post('/api/profile', save_profile)
+    app.router.add_post('/api/profile/privacy', profile_privacy)
+    app.router.add_post('/api/profile/avatar', upload_avatar)
+    app.router.add_get('/api/profile/avatar', avatar)
+    from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, sea_api, seasonal, shop_api
+
+    app.router.add_get('/api/seasonal', seasonal.status)
+    app.router.add_get('/api/seasonal/items', seasonal.items_endpoint)
+    app.router.add_post('/api/seasonal/save', seasonal.save_endpoint)
+    app.router.add_post('/api/seasonal/remove', seasonal.remove_endpoint)
+    app.router.add_post('/api/seasonal/upload', seasonal.upload_image)
+    app.router.add_get('/seasonal/media/{token}', seasonal.image)
+    app.router.add_post('/api/seasonal/buy/prepare', seasonal.buy_prepare_endpoint)
+    app.router.add_post('/api/seasonal/buy/confirm', seasonal.buy_confirm_endpoint)
+    app.router.add_post('/api/seasonal/join', seasonal.participate)
+    app.router.add_get('/api/seasonal/manage', seasonal.manage)
+    app.router.add_post('/api/seasonal/draw/prepare', seasonal.draw_prepare)
+    app.router.add_post('/api/seasonal/draw/confirm', seasonal.draw_confirm)
+    app.router.add_get('/seasonal/pink-guardian-season1.jpg', lambda _: web.FileResponse(
+        ASSETS / 'seasonal' / 'pink-guardian-season1.jpg'))
+    from community_bot import community_api, social_profiles
+
+    app.router.add_get('/api/community', community_api.status)
+    app.router.add_get('/api/community/people', community_api.directory)
+    app.router.add_get('/api/community/lobbies', community_api.lobbies)
+    app.router.add_get('/api/community/presence', community_api.presence)
+    app.router.add_get('/api/presence', social_profiles.status)
+    app.router.add_post('/api/presence', social_profiles.update)
+    app.router.add_get('/api/people', social_profiles.profile)
+    app.router.add_get('/api/people/{user_id}', social_profiles.profile)
+    app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
+    app.router.add_get('/api/people/{user_id}/track', social_profiles.track_audio)
+    app.router.add_get('/api/profile/track', social_profiles.track_audio)
+    app.router.add_get('/api/friends', friends_api.status)
+    app.router.add_post('/api/friends/action', friends_api.action)
+    from community_bot import lobby_widget, music_api, nora_burrows, nora_cinema, nora_game_api, nora_game_chat
+
+    app.router.add_get('/api/community/music', music_api.delivery_status)
+    app.router.add_post('/api/community/music', music_api.send_track)
+    app.router.add_get('/api/nora-game/records', music_api.collection)
+    app.router.add_post('/api/nora-game/records', music_api.record_action)
+    for name in ('dedzytwo-s1.mp3', 'dedzytwo-02.mp3', 'dedzytwo-03.mp3', 'dedzytwo-04.mp3',
+                 'dedzytwo-06.mp3', 'dedzytwo-cover.png'):
+        app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
+    app['nora_lobby'] = {}
+    app['nora_visits'] = nora_burrows.Visits()
+    app.router.add_get('/api/nora-game/burrow', nora_burrows.api)
+    app.router.add_post('/api/nora-game/burrow', nora_burrows.api)
+    app['nora_cinema'] = nora_cinema.Cinema(app['media_images'])
+    app.router.add_get('/api/nora-game/cinema', nora_cinema.cinema_api)
+    app.router.add_post('/api/nora-game/cinema', nora_cinema.cinema_api)
+    app['nora_game_chat'] = nora_game_chat.GameChat(bot, getattr(settings, 'community_chat_id', 0))
+    app.router.add_get('/api/nora-game/chat', nora_game_chat.feed)
+    app.router.add_post('/api/nora-game/chat', nora_game_chat.send)
+    app.router.add_post('/api/nora-game/chat/profile', nora_game_chat.profile_card)
+    app['nora_observatory'] = {}
+    app.cleanup_ctx.append(lobby_widget.lifecycle)
+    app.cleanup_ctx.append(nora_game_api.lobby_record_lifecycle)
+    app.router.add_post('/api/nora-game/lobby', nora_game_api.lobby)
+    app.router.add_get('/nora-game/socket', nora_game_api.lobby_socket)
+    app.router.add_get('/api/nora-game', nora_game_api.status)
+    app.router.add_get('/api/nora-game/pet', nora_game_api.companion)
+    app.router.add_post('/api/nora-game/pet/stroke', nora_game_api.stroke_companion)
+    app.router.add_post('/api/nora-game', nora_game_api.register)
+    app.router.add_post('/api/nora-game/wings', nora_game_api.change_wings)
+    app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
+    app.router.add_get('/api/mafia', mafia_api.status)
+    app.router.add_post('/api/mafia/action', mafia_api.action)
+    from community_bot import barricade_api, durak_api
+
+    durak_api.register(app)
+    barricade_api.register(app)
+    app.router.add_get('/api/rocket', rocket_api.status)
+    app.router.add_post('/api/rocket/prepare', rocket_api.prepare)
+    app.router.add_post('/api/rocket/launch', rocket_api.launch)
+    app.router.add_post('/api/rocket/cashout', rocket_api.cashout)
+    app.router.add_get('/api/sea', sea_api.status)
+    app.router.add_post('/api/sea/action', sea_api.action)
+
+    from community_bot.game_exit import leave as leave_game
+    from community_bot.game_invitations import open_invitation, quick_preview
+
+    app.router.add_post('/api/games/invite', open_invitation)
+    app.router.add_post(r'/api/games/exit/{game:durak|barricade|sea|mafia|rocket}', leave_game)
+    app.router.add_get(r'/api/games/quick/{game:durak|barricade}/{rid:[a-f0-9]{16}}', quick_preview)
+
+    from community_bot.interactive_runtime import lifecycle
+
+    app.cleanup_ctx.append(lifecycle)
+
+    app.router.add_post('/api/pet/prepare', cabinet_api.pet_prepare)
+    app.router.add_post('/api/pet/action', cabinet_api.pet_action)
+    app.router.add_post('/api/wallet/prepare', cabinet_api.wallet_prepare)
+    app.router.add_post('/api/wallet/confirm', cabinet_api.wallet_confirm)
+    app.router.add_get('/api/wallet/history', cabinet_api.wallet_history)
+    app.router.add_get('/api/notices', cabinet_api.notices)
+    app.router.add_get('/api/notices/widget/{notice_id}', cabinet_api.widget_notice)
+    app.router.add_post('/api/notices', cabinet_api.notices_update)
+
+    app.router.add_post('/api/shop/video', shop_api.upload_video)
+    app.router.add_get('/api/shop/media/{sku}', shop_api.product_image)
+    app.router.add_get('/shop/ozon-sbp.jpg', lambda _: web.FileResponse(COOKIE_PAYMENT_QR))
+    app.router.add_post('/api/shop/topup/prepare', shop_api.topup_prepare)
+    app.router.add_post('/api/shop/topup/receipt', shop_api.topup_receipt)
+    app.router.add_post('/api/shop/prepare', prepare)
+    app.router.add_post('/api/shop/confirm', confirm)
+    app.router.add_post('/api/events/join', join_event)
+    app.router.add_get('/api/events/manage', events_api.editor)
+    app.router.add_post('/api/events/save', events_api.save)
+    app.router.add_post('/api/events/publish', events_api.publish)
+    app.router.add_post('/api/events/delete', events_api.delete)
+    app.router.add_post('/api/events/upload', events_api.upload)
+    app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
+    app.router.add_get('/api/events/{event_id}/participants', events_api.participants)
+    for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
+                 'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
+                 'nora-burrow.js', 'nora-burrow-models.js', 'nora-burrow-items.json',
+                 'nora-burrow-trail.js', 'nora-burrow-trail.json',
+                 'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js', 'profile-track.js',
+                 'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
+                 'community.js', 'avatars.js', 'commands.js',
+                 'events.js', 'sea.js', 'durak.js', 'durak.css',
+                 'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
+        app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
+    for name in ('three.module.js', 'three.core.js'):
+        app.router.add_get('/vendor/' + name, lambda r, n=name: web.FileResponse(
+            ROOT / 'vendor' / n, headers={'Content-Type': 'text/javascript'}))
+    app.router.add_get('/fonts/Rubik-Variable.ttf', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Rubik-Variable.ttf', headers={'Content-Type': 'font/ttf'}))
+    app.router.add_get('/fonts/Rubik-OFL.txt', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Rubik-OFL.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
+    app.router.add_get('/fonts/Monocraft.ttf', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Monocraft.ttf', headers={'Content-Type': 'font/ttf'}))
+    app.router.add_get('/fonts/Monocraft-LICENSE.txt', lambda _: web.FileResponse(
+        ASSETS / 'fonts' / 'Monocraft-LICENSE.txt', headers={'Content-Type': 'text/plain; charset=utf-8'}))
+    app.router.add_get('/game/wings-license.txt', lambda _: web.FileResponse(ROOT / 'nora-wings-license.txt'))
+    app.router.add_static('/game/sounds/', ASSETS / 'game' / 'sounds', show_index=False)
+    app.router.add_static('/intro/', ASSETS / 'branding', show_index=False)
+    app.router.add_static('/pet-art/', ASSETS / 'pets' / 'mini', show_index=False)
+    app.router.add_static('/home-art/', ASSETS / 'home', show_index=False)
+    app.router.add_static('/barricade-sfx/', ROOT / 'barricade-sfx', show_index=False)
+    app.router.add_static('/durak-cards/', ROOT / 'durak-cards', show_index=False)
+    app.router.add_static('/art/', ASSETS / 'stickers', show_index=False)
+    return app
+
+
+async def start_server(db, settings, bot, admin_runtime=None):
+    runner = web.AppRunner(create_app(db, settings, bot, admin_runtime), access_log=None)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', '8080'))).start()
+    except BaseException:
+        await runner.cleanup()
+        raise
+    return runner

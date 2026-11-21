@@ -15,14 +15,23 @@ from aiogram.types import (
     Message,
 )
 
-from community_bot.aliases import command_or_alias, remainder_args, remainder_text
+from community_bot.aliases import command_or_alias, remainder_args
 from community_bot.audit import person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import keep_in_chat
-from community_bot.helpers import has_permission, register_telegram_user, resolve_reply_target, user_link
-from community_bot.keyboards import STYLE_GO, ibtn
+from community_bot.helpers import (
+    effective_role,
+    has_permission,
+    media_from_message,
+    register_telegram_user,
+    resolve_command_target,
+    resolve_member_mention,
+    resolve_reply_target,
+    user_link,
+)
+from community_bot.keyboards import STYLE_GO, ibtn, shop_confirm_keyboard
 from community_bot.life import (
     WARN_KICK_AT,
     WARN_MUTE_AT,
@@ -31,12 +40,11 @@ from community_bot.life import (
     unlock,
 )
 from community_bot.permissions import PERM_POST
+from community_bot.rsvp import attendance_action, event_lock, published_event, refresh_event_markup
 from community_bot.shop_catalog import (
     GIFTABLE_ITEMS,
-    IMMUNITY_HOURS,
     ITEM_LABELS,
     PET_SUPPLIES,
-    TITLE_ITEMS,
     shop_prices_for,
 )
 from community_bot.states import GiftFlow, MailboxForm
@@ -44,6 +52,13 @@ from community_bot.states import GiftFlow, MailboxForm
 router = Router(name="life")
 
 _TG_ERRORS = (TelegramBadRequest, TelegramForbiddenError)
+
+
+@router.message(command_or_alias("stickers"))
+async def sticker_pack(message: Message, bot: Bot) -> None:
+    from community_bot.stickers import send_pack_invitation
+
+    await send_pack_invitation(message, bot)
 
 
 def _captcha_markup(chat_id: int) -> InlineKeyboardMarkup:
@@ -75,22 +90,22 @@ async def _deliver_shop(
     target_id: int,
     item: str,
     price: int,
+    *,
+    intent_id: str,
 ) -> tuple[bool, str]:
     if item not in GIFTABLE_ITEMS and item not in ITEM_LABELS:
         return False, "Этот товар нельзя подарить."
     if item in PET_SUPPLIES:
         kind, gain, _ = PET_SUPPLIES[item]
-        ok, error, _ = await db.purchase_pet_supply(target_id, kind, gain, price, item, payer_id=buyer_id)
+        ok, error, _ = await db.purchase_pet_supply(
+            target_id, kind, gain, price, item, payer_id=buyer_id, intent_id=intent_id,
+        )
         if not ok:
             return False, error
     else:
-        ok, error = await db.buy_item(buyer_id, item, price, target_id=target_id)
+        ok, error = await db.buy_item(buyer_id, item, price, target_id=target_id, intent_id=intent_id)
         if not ok:
             return False, error
-        if item in IMMUNITY_HOURS:
-            await db.set_immunity(target_id, datetime.now(UTC) + timedelta(hours=IMMUNITY_HOURS[item]))
-        if item in TITLE_ITEMS:
-            await db.update_profile(target_id, "profile_title", TITLE_ITEMS[item])
         if item == "forgive" and settings.community_chat_id:
             with suppress(*_TG_ERRORS):
                 await bot.restrict_chat_member(
@@ -107,6 +122,28 @@ async def _deliver_shop(
     return True, "ok"
 
 
+async def _confirm_gift(
+    message: Message, db: Database, buyer_id: int, target: dict[str, object], item: str, price: int,
+) -> None:
+    from community_bot.shop_catalog import gift_price
+
+    if buyer_id != int(target["user_id"]):
+        product = await db.get_shop_item(item)
+        if not product or not product["price"]:
+            await message.answer("Цена подарка не задана. Открой магазин заново.")
+            return
+        price = gift_price(product["price"])
+    token = await db.create_wallet_intent(
+        buyer_id, item, price, target_id=int(target["user_id"]), payload={"gift": True},
+    )
+    await message.answer(
+        f"🎁 <b>Подтвердите подарок</b>\n{html.escape(ITEM_LABELS.get(item, item))}\n"
+        f"Получатель: {html.escape(person_label(target))}\n"
+        f"Наценка подарка 10%, без скидки уровня.\nСпишется: <b>{price} 🍪</b>.",
+        parse_mode="HTML", reply_markup=shop_confirm_keyboard(token, price),
+    )
+
+
 @router.message(command_or_alias("gift"))
 async def gift_command(
     message: Message,
@@ -117,11 +154,14 @@ async def gift_command(
 ) -> None:
     if not message.from_user:
         return
-    item = gift_item_from_args(remainder_text(message.text or ""))
+    target, args, explicit = await resolve_command_target(message, db, after_first=True)
+    item = gift_item_from_args(" ".join(args))
     if not item:
-        await message.answer("Ответьте на человека: «подарить щит» / плащ / обед / поилка / набор / сова.")
+        await message.answer("Ответьте «Нора подарить щит» или напишите «Нора подарить @имя щит».")
         return
-    target = await resolve_reply_target(message, db)
+    if explicit and not target:
+        await message.answer("Не нашла участника по @имени. Попробуйте ответить на его сообщение.")
+        return
     buyer = await register_telegram_user(db, message.from_user)
     if not target:
         await state.set_state(GiftFlow.target)
@@ -132,17 +172,7 @@ async def gift_command(
     if item not in prices:
         await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
         return
-    ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
-    if not ok:
-        await message.answer(error)
-        return
-    label = ITEM_LABELS.get(item, item)
-    with keep_in_chat():
-        await message.answer(
-            f"🎁 {user_link(buyer['user_id'], message.from_user.full_name)} дарит "
-            f"{html.escape(label)} → {user_link(int(target['user_id']), person_label(target))}.",
-            parse_mode="HTML",
-        )
+    await _confirm_gift(message, db, int(buyer["user_id"]), target, item, prices[item])
 
 
 @router.message(GiftFlow.target)
@@ -153,9 +183,11 @@ async def gift_target_text(message: Message, state: FSMContext, db: Database, se
     item = str(data.get("gift_item") or "")
     target = await resolve_reply_target(message, db)
     if not target:
-        token = (message.text or "").strip().lstrip("@")
+        token = (message.text or "").strip()
         if token.isdigit():
             target = await db.get_user(int(token))
+        elif token.startswith("@"):
+            target = await resolve_member_mention(db, token[1:])
         else:
             users = await db.search_users(token)
             target = users[0] if users else None
@@ -168,8 +200,7 @@ async def gift_target_text(message: Message, state: FSMContext, db: Database, se
     if item not in prices:
         await message.answer("Цена этого товара ещё не задана. Администратор выставит её в управлении магазином.")
         return
-    ok, error = await _deliver_shop(db, settings, bot, buyer["user_id"], int(target["user_id"]), item, prices[item])
-    await message.answer(error if not ok else f"🎁 Подарок «{ITEM_LABELS.get(item, item)}» доставлен.")
+    await _confirm_gift(message, db, int(buyer["user_id"]), target, item, prices[item])
 
 
 @router.callback_query(F.data.startswith("shop:g:"))
@@ -187,23 +218,62 @@ async def shop_gift_begin(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
 
+@router.message(command_or_alias("bug"), F.chat.type.in_({"group", "supergroup"}))
+async def bug_message(message: Message, db: Database, settings: Settings) -> None:
+    if not message.from_user:
+        return
+    if await effective_role(db, settings, message.from_user.id) not in {"admin", "owner"}:
+        await message.answer("Команда «баг» доступна администраторам и владельцам.")
+        return
+    target, args, explicit = await resolve_command_target(message, db)
+    source = message.reply_to_message
+    if explicit and source and (not target or not source.from_user or source.from_user.id != target["user_id"]):
+        source = None
+    if source is None and (not target or not args):
+        await message.answer("Ответьте на проблемное сообщение «Нора баг» или напишите «Нора баг @имя описание».")
+        return
+    await register_telegram_user(db, message.from_user)
+    # Anonymous/channel posts may have no from_user; the reporter owns this technical note.
+    target_id = int(target["user_id"]) if target else message.from_user.id
+    media_type, file_id, text = None, None, ""
+    if source:
+        media_type, file_id = media_from_message(source)
+        if source.sticker:
+            media_type, file_id = "sticker", source.sticker.file_id
+        elif source.video_note:
+            media_type, file_id = "video_note", source.video_note.file_id
+        elif source.animation:
+            media_type, file_id = "animation", source.animation.file_id
+        text = source.text or source.caption or (f"[{media_type}]" if media_type else "[Сообщение без текста]")
+    note = " ".join(args) or "нужно проверить"
+    report_id = await db.create_report(
+        message.from_user.id, target_id, message.chat.id, source.message_id if source else 0, text, f"БАГ · {note}",
+        attachment=(media_type, file_id) if media_type and file_id else None,
+    )
+    await message.answer(f"🐞 Баг #{report_id} сохранён: админ-панель → Очередь → Репорты.")
+
+
 @router.message(command_or_alias("report"), F.chat.type.in_({"group", "supergroup"}))
 async def report_message(message: Message, db: Database) -> None:
     if not message.from_user:
         return
-    target = await resolve_reply_target(message, db)
-    if not target or not message.reply_to_message:
-        await message.answer("Ответьте «репорт» на сообщение и коротко напишите причину.")
+    target, args, _ = await resolve_command_target(message, db)
+    source = message.reply_to_message
+    if not target:
+        await message.answer("Ответьте «Нора репорт» или напишите «Нора репорт @имя причина».")
         return
-    reason = remainder_text(message.text or "") or "без причины"
-    text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    if source and (not source.from_user or source.from_user.id != target["user_id"]):
+        source = None
+    if not source and not args:
+        await message.answer("Укажите причину жалобы. Пример: «Нора репорт @имя спам».")
+        return
     await db.create_report(
         message.from_user.id,
         int(target["user_id"]),
         message.chat.id,
-        message.reply_to_message.message_id,
-        text,
-        reason,
+        source.message_id if source else 0,
+        (source.text or source.caption or "") if source else "",
+        " ".join(args) or "без причины",
     )
     await message.answer("🚩 Репорт ушёл в очередь модераторов.")
 
@@ -251,7 +321,7 @@ def _format_board(week_id: str, board: dict) -> str:
         f"🏆 <b>Доска недели {html.escape(week_id)}</b>\n\n"
         f"<b>Голос чата</b> (сообщения)\n{lines(board.get('messages') or [], 'messages')}\n\n"
         f"<b>Кого плюсовали</b>\n{lines(board.get('plus') or [], 'score')}\n\n"
-        f"<b>Находки тамагочи</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
+        f"<b>Находки питомца</b> 🍪\n{lines(board.get('farm') or [], 'score')}"
     )
 
 
@@ -310,26 +380,72 @@ async def lottery_join(callback: CallbackQuery, db: Database) -> None:
 
 
 @router.callback_query(F.data.startswith("rsvp:"))
-async def rsvp_join(callback: CallbackQuery, db: Database) -> None:
-    event_id = callback.data.split(":", 1)[1]
-    stake_raw = await db.get_bot_state("rsvp_stake")
-    stake = int(stake_raw) if (stake_raw or "").isdigit() else 0
-    ok, error = await db.add_rsvp(event_id, callback.from_user.id, stake)
-    if not ok:
-        await callback.answer(error, show_alert=True)
+async def rsvp_join(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    event = await published_event(callback, db, settings.community_chat_id)
+    if not event:
+        await callback.answer("Запись доступна только под опубликованным постом сообщества.", show_alert=True)
         return
-    extra = f" Залог {stake} 🍪." if stake else ""
-    await callback.answer(f"Вы в списке.{extra}")
-    title = (await db.get_bot_state("event_title")) or "событие"
-    from community_bot.notify import emit
+    event_id = str(event["event_id"])
+    await register_telegram_user(db, callback.from_user)
+    if await db.has_event_payment(event_id, callback.from_user.id):
+        await callback.answer("Вы уже оплатили участие. Отмена — через администрацию.", show_alert=True)
+        return
+    if await db.has_event_rsvp(event_id, callback.from_user.id):
+        await callback.answer("Вы уже в списке")
+        await callback.message.answer(
+            f"Вы записаны на «{html.escape(event['title'])}». Отменить участие?",
+            parse_mode="HTML",
+            reply_markup=attendance_action(event_id, callback.from_user.id, cancel=True),
+        )
+        return
+    stake = int(event["stake"])
+    if stake:
+        await callback.answer()
+        await callback.message.answer(
+            f"Запись на «{html.escape(event['title'])}»: залог {stake} 🍪.\n"
+            "При отмене записи залог вернётся. При покупке билета он войдёт в оплату.",
+            parse_mode="HTML",
+            reply_markup=attendance_action(event_id, callback.from_user.id, cancel=False, stake=stake),
+        )
+        return
+    await _record_attendance(callback, db, event)
 
-    await emit(
-        callback.bot,
-        db,
-        callback.from_user.id,
-        "events",
-        f"🎟 RSVP на {html.escape(title)}.{extra}",
-    )
+
+async def _record_attendance(callback: CallbackQuery, db: Database, event: dict) -> None:
+    event_id = str(event["event_id"])
+    async with event_lock(db, event_id):
+        ok, error = await db.add_rsvp(event_id, callback.from_user.id, int(event["stake"]), kind="rsvp")
+        await callback.answer("Вы в списке!" if ok else error, show_alert=not ok)
+        await refresh_event_markup(callback.bot, db, event_id)
+    if ok:
+        from community_bot.notify import emit
+        from community_bot.rsvp import send_attendance_confirmation
+
+        sent = await send_attendance_confirmation(callback.bot, db, callback.from_user.id, event)
+        if sent is None:
+            await emit(callback.bot, db, callback.from_user.id, "events",
+                       f"🎟 Вы записаны: {html.escape(event['title'])}.")
+
+
+@router.callback_query(F.data.startswith("rsvpj:") | F.data.startswith("rsvpc:"))
+async def rsvp_confirm_action(callback: CallbackQuery, db: Database) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3 or parts[2] != str(callback.from_user.id):
+        await callback.answer("Эта кнопка предназначена другому участнику.", show_alert=True)
+        return
+    action, event_id, _ = parts
+    event = await db.get_studio_event(event_id)
+    if not event or not event["rsvp_enabled"] or not callback.message or callback.message.chat.id != event["chat_id"]:
+        await callback.answer("Запись недоступна.", show_alert=True)
+        return
+    await register_telegram_user(db, callback.from_user)
+    if action == "rsvpj":
+        await _record_attendance(callback, db, event)
+    else:
+        async with event_lock(db, event_id):
+            ok, text = await db.cancel_event_rsvp(event_id, callback.from_user.id)
+            await callback.answer(text, show_alert=True)
+            await refresh_event_markup(callback.bot, db, event_id)
 
 
 @router.callback_query(F.data.startswith("evpay:"))
@@ -341,7 +457,7 @@ async def event_pay_open(callback: CallbackQuery, db: Database) -> None:
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже в списке участников.", show_alert=True)
         return
     price = int(offer["price"])
@@ -372,16 +488,21 @@ async def event_pay_confirm(callback: CallbackQuery, db: Database) -> None:
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже оплатили участие.", show_alert=True)
         return
     price = int(offer["price"])
+    reservation = await db.get_event_rsvp(event_id, callback.from_user.id)
+    deposit = int(reservation["stake"]) if reservation else 0
+    charge = max(0, price - deposit)
+    refund = max(0, deposit - price)
     from community_bot.posting import event_pay_confirm_keyboard
 
     await callback.answer()
     await callback.message.answer(
-        f"Вы действительно хотите оплатить участие в мероприятии за {price} печенек?",
-        reply_markup=event_pay_confirm_keyboard(event_id),
+        f"Билет стоит {price} 🍪. Внесён залог: {deposit} 🍪.\nСпишется: {charge} 🍪. "
+        + (f"Вернётся остаток залога: {refund} 🍪. " if refund else "") + "Подтвердить оплату?",
+        reply_markup=event_pay_confirm_keyboard(f"{event_id}:{price}"),
     )
 
 
@@ -389,27 +510,35 @@ async def event_pay_confirm(callback: CallbackQuery, db: Database) -> None:
 async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
     if not callback.data or not callback.message:
         return
-    event_id = callback.data.split(":", 1)[1]
+    parts = callback.data.split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        await callback.answer("Откройте оплату заново, чтобы подтвердить актуальную цену.", show_alert=True)
+        return
+    event_id = parts[1]
     offer = await db.get_event_offer(event_id)
     if not offer:
         await callback.answer("Это мероприятие уже недоступно.", show_alert=True)
         return
-    if await db.has_event_rsvp(event_id, callback.from_user.id):
+    if await db.has_event_payment(event_id, callback.from_user.id):
         await callback.answer("Вы уже оплатили участие.", show_alert=True)
         return
-    price = int(offer["price"])
-    ok, error = await db.add_rsvp(event_id, callback.from_user.id, price)
+    await register_telegram_user(db, callback.from_user)
+    async with event_lock(db, event_id):
+        ok, error, charged = await db.pay_event_offer(event_id, callback.from_user.id, int(parts[2]))
+        if ok:
+            await refresh_event_markup(callback.bot, db, event_id)
     if not ok:
         await callback.answer(error, show_alert=True)
         return
     await callback.answer("Участие оплачено.")
+    result = f"Списано {charged} 🍪." if charged >= 0 else f"Возвращён остаток залога {-charged} 🍪."
     try:
         await callback.message.edit_text(
-            f"✅ Участие оплачено: списано {price} 🍪.",
+            f"✅ Участие оплачено. {result}",
             reply_markup=None,
         )
     except Exception:
-        await callback.message.answer(f"✅ Участие оплачено: списано {price} 🍪.")
+        await callback.message.answer(f"✅ Участие оплачено. {result}")
     from community_bot.notify import emit
 
     await emit(
@@ -417,12 +546,19 @@ async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
         db,
         callback.from_user.id,
         "events",
-        f"🎟 Оплачено участие за {price} 🍪.",
+        f"🎟 Участие оплачено. {result}",
     )
 
 
 @router.chat_join_request()
-async def captcha_join_request(event: ChatJoinRequest, db: Database, bot: Bot) -> None:
+async def captcha_join_request(event: ChatJoinRequest, db: Database, bot: Bot, settings: Settings) -> None:
+    from community_bot.access import needs_reapplication
+
+    if event.chat.id == settings.community_chat_id and await needs_reapplication(db, event.from_user.id):
+        await event.decline()
+        with suppress(*_TG_ERRORS):
+            await bot.send_message(event.from_user.id, "Чтобы вернуться в Нору, заполни новую анкету через /start.")
+        return
     if not await db.feature_enabled("join_captcha"):
         await event.approve()
         return
@@ -462,16 +598,22 @@ async def captcha_new_members(message: Message, db: Database, bot: Bot, settings
                 reply_markup=_captcha_markup(message.chat.id),
             )
         except _TG_ERRORS:
-            await message.answer(
-                f"{user_link(member.id, member.full_name)}, подтвердите, что вы человек.",
-                parse_mode="HTML",
-                reply_markup=_captcha_markup(message.chat.id),
-            )
+            from community_bot.group_message_close import group_message_actors
+
+            with group_message_actors(member.id):
+                await message.answer(
+                    f"{user_link(member.id, member.full_name)}, подтвердите, что вы человек.",
+                    parse_mode="HTML",
+                    reply_markup=_captcha_markup(message.chat.id),
+                )
 
 
 @router.callback_query(F.data.startswith("captcha:ok:"))
-async def captcha_ok(callback: CallbackQuery, db: Database, bot: Bot) -> None:
-    chat_id = int(callback.data.rsplit(":", 1)[1])
+async def captcha_ok(callback: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
+    chat_id = settings.community_chat_id
+    if not chat_id or callback.data != f"captcha:ok:{chat_id}":
+        await callback.answer("Эта кнопка больше не действует.")
+        return
     if not await db.pop_captcha(callback.from_user.id, chat_id):
         await callback.answer("Уже подтверждено.")
         return

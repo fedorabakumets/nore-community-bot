@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 
+from community_bot.social_emoji import interaction_emoji
+
 ROLE_LEVELS = {"member": 0, "moderator": 40, "admin": 70, "owner": 100}
 ROLE_LABELS = {
     "member": "участник",
@@ -12,24 +14,25 @@ ROLE_LABELS = {
     "owner": "владелец",
 }
 
-POSITIVE_REPUTATION_PHRASES = {
+POSITIVE_SOCIAL_ACTIONS = {"обнять", "обнять обнять"}
+NEGATIVE_SOCIAL_ACTIONS = {"пнуть", "пнуть пнуть", "ударить", "ударить ударить"}
+LIKE_PHRASES = {"поцеловать", "поцеловать поцеловать", "лайк", "лайк лайк", "лайк нора", "лайк лайк нора"}
+
+POSITIVE_REPUTATION_PHRASES = POSITIVE_SOCIAL_ACTIONS | {
     "+",
     "+реп",
-    "поддерживаю",
-    "обожаю",
-    "целую",
-    "обнимаю",
-    "люблю",
+    "уважаю",
+    "согл",
+    "согласен",
+    "ты прав",
 }
-NEGATIVE_REPUTATION_PHRASES = {
+NEGATIVE_REPUTATION_PHRASES = NEGATIVE_SOCIAL_ACTIONS | {
     "-",
     "-реп",
-    "хуйня",
-    "ударить",
-    "пнуть",
-    "ненавижу",
-    "пошел нахуй",
-    "пошёл нахуй",
+    "не уважаю",
+    "не согл",
+    "не согласен",
+    "ты не прав",
 }
 
 
@@ -48,16 +51,21 @@ class ReputationTier:
     discount: int
     daily_actions: int
     can_minus: bool
+    ai_daily_requests: int
 
 
 def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier:
     if value < restricted_threshold:
-        return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False)
+        return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False, 0)
     if value >= 90:
-        return ReputationTier("gold", "🥇", "золото", 10, 5, True)
+        return ReputationTier("gold", "🥇", "золото", 10, 5, True, 100)
     if value >= 70:
-        return ReputationTier("silver", "🥈", "серебро", 5, 3, True)
-    return ReputationTier("bronze", "🥉", "бронза", 2, 1, False)
+        return ReputationTier("silver", "🥈", "серебро", 5, 3, True, 10)
+    return ReputationTier("bronze", "🥉", "бронза", 2, 1, False, 5)
+
+
+def ai_limits_text() -> str:
+    return ", ".join(f"{tier.label} — {tier.ai_daily_requests}" for tier in map(reputation_tier, (0, 70, 90)))
 
 
 def discounted_price(base_price: int, discount: int) -> int:
@@ -76,7 +84,7 @@ def reputation_delta(text: str) -> int | None:
         return 5
     if phrase in NEGATIVE_REPUTATION_PHRASES:
         return -5
-    return None
+    return {"plus": 5, "minus": -5}.get(interaction_emoji(phrase))
 
 
 _DURATION_RE = re.compile(r"^(\d+)([mhdwмчдн])$", re.IGNORECASE)

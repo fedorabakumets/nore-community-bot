@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from asyncio import Lock
 from datetime import date
+from pathlib import Path
+from weakref import WeakValueDictionary
 
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.domain import reputation_tier
 from community_bot.helpers import is_immunity_active, pet_guard_reputation
+
+_ACTOR_LOCKS: WeakValueDictionary[tuple[Path, int], Lock] = WeakValueDictionary()
 
 
 async def change_community_reputation(
@@ -16,6 +21,12 @@ async def change_community_reputation(
     delta: int,
     local_date: date,
 ) -> tuple[bool, str, int | None, str | None]:
+    lock = _ACTOR_LOCKS.setdefault((db.path, int(actor["user_id"])), Lock())
+    async with lock:
+        return await _change_reputation(db, settings, actor, target, delta, local_date)
+
+
+async def _change_reputation(db, settings, actor, target, delta, local_date):
     actor_id = int(actor["user_id"])
     target_id = int(target["user_id"])
     if actor_id == target_id:
@@ -30,8 +41,8 @@ async def change_community_reputation(
     used = await db.reputation_actions_today(actor_id, local_date)
     if used >= tier.daily_actions:
         return False, f"Дневной лимит исчерпан: {tier.daily_actions} действий.", None, None
-    if await db.reputation_action_today_for_target(actor_id, target_id, local_date):
-        return False, "Этого человека сегодня уже отмечали. Завтра можно снова.", None, None
+    if await db.reputation_actions_today_for_target(actor_id, target_id, local_date) >= 10:
+        return False, "Этого человека можно отметить не более 10 раз в день.", None, None
     if delta < 0 and is_immunity_active(target.get("hate_immunity_until")):
         return False, "У пользователя действует иммунитет от понижения репутации.", None, None
     applied = delta

@@ -3,17 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from community_bot.database import Database
-from community_bot.shop_catalog import ITEM_LABELS, TITLE_ITEMS
+from community_bot.shop_catalog import ITEM_LABELS
 
 GIFT_ALIASES = {
     "щит": "rep_shield",
     "плащ": "immunity_24h",
     "обед": "pet_meal",
     "поилка": "pet_drink",
-    "титул": "title_owl",
-    "сова": "title_owl",
-    "звезда": "title_star",
-    "завсегдатай": "title_regular",
     "набор": "season_pack",
     "прощение": "forgive",
     "реп": "restore_rep",
@@ -22,13 +18,12 @@ GIFT_ALIASES = {
 
 ACHIEVEMENTS = {
     "first_plus": ("Первый плюс", "Выдали первое +реп в чате"),
-    "first_pet": ("Хозяин норки", "Завели тамагочи"),
+    "first_pet": ("Хозяин норки", "Завели питомца"),
     "messages_100": ("Голос норы", "100 сообщений за всё время"),
     "shop_first": ("Покупатель", "Первая покупка в магазине"),
     "gift_first": ("Щедрая лапа", "Подарили товар другому"),
     "expedition": ("Следопыт", "Питомец сходил в экспедицию"),
     "lottery": ("В котле", "Вошли в розыгрыш"),
-    "board": ("На доске", "Попали в недельную доску"),
 }
 
 WARN_MUTE_AT = 3
@@ -65,9 +60,6 @@ async def unlock(db: Database, user_id: int, slug: str) -> str | None:
     if not await db.unlock_achievement(user_id, slug):
         return None
     title, _ = ACHIEVEMENTS[slug]
-    user = await db.get_user(user_id)
-    if user and not str(user.get("profile_title") or "").strip():
-        await db.update_profile(user_id, "profile_title", title)
     return title
 
 
@@ -93,4 +85,4 @@ def matches_stop_word(text: str, words: list[str]) -> str | None:
 
 
 def title_for_item(item: str) -> str:
-    return TITLE_ITEMS.get(item) or ITEM_LABELS.get(item, item)
+    return ITEM_LABELS.get(item, item)

@@ -1,0 +1,975 @@
+// Run with node tests/nora_world_controls.mjs. No browser, network or GPU required.
+import assert from 'node:assert/strict';
+import {readFile, writeFile, mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {setMaxListeners} from 'node:events';
+import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
+
+setMaxListeners(0);
+const web = new URL('../community_bot/web/', import.meta.url);
+const temp = await mkdtemp(join(tmpdir(), 'nora-controls-'));
+try {
+  await writeFile(join(temp, 'three.core.mjs'), await readFile(new URL('vendor/three.core.js', web)));
+  const module = (await readFile(new URL('vendor/three.module.js', web), 'utf8')).replaceAll('./three.core.js', './three.core.mjs');
+  await writeFile(join(temp, 'three.module.mjs'), module);
+  const Three = await import(pathToFileURL(join(temp, 'three.module.mjs')).href);
+  const world = (await readFile(new URL('nora-world.js', web), 'utf8'))
+    .replace("await import('/vendor/three.module.js')", 'THREE')
+    .replace(/    return stop;\r?\n  }/, '    window.worldActions={nearbyAction,performAction,recordOptions,companion};\n    return stop;\n  }');
+  const wings = await readFile(new URL('nora-wings.js', web), 'utf8');
+  const voxel = await readFile(new URL('nora-voxel.js', web), 'utf8');
+  const companion = await readFile(new URL('nora-companion.js', web), 'utf8');
+  class Element extends EventTarget {
+    open=false; dataset = {}; style = {}; clientWidth = 390; clientHeight = 780; isConnected = true;
+    children = new Map(); attributes = new Map();
+    classes = new Set();
+    classList = {
+      add: name=>this.classes.add(name),
+      remove: name=>this.classes.delete(name),
+      toggle: (name,force)=>force?this.classes.add(name):this.classes.delete(name),
+      contains: name=>this.classes.has(name),
+    };
+    querySelector(selector) {
+      if(selector==='.nora-settings[open]')return this.children.get('.nora-settings')?.open?this.children.get('.nora-settings'):null;
+      if(!this.children.has(selector))this.children.set(selector,new Element());
+      return this.children.get(selector);
+    }
+    querySelectorAll(selector){return selector==='button'?[this.querySelector('button:first-child'),this.querySelector('button:last-child')]:[];}
+    setAttribute(key,value){this.attributes.set(key,value);} getAttribute(key){return this.attributes.get(key);}
+    setPointerCapture() {} focus() {} blur() {} click(){this.emit('click');}
+    insertAdjacentHTML() {} replaceChildren() {} reset() {} remove() {}
+    showModal(){this.open=true;} close(){this.open=false;this.emit('close');}
+    getBoundingClientRect() { return {left:0, top:0, width:120, height:120}; }
+    getContext() { return {createRadialGradient:()=>({addColorStop(){}}), fillRect(){}, fillText(){}, strokeRect(){}}; }
+    emit(type, values = {}) { const e = new Event(type, {cancelable:true}); Object.assign(e, values); return this.dispatchEvent(e); }
+  }
+  const sceneryCode=await readFile(new URL('nora-scenery.js',web),'utf8');
+  const sceneryWindow={matchMedia:()=>({matches:false})};
+  vm.runInNewContext(sceneryCode,{window:sceneryWindow,document:{createElement:()=>new Element()}});
+  const memoryLayout=JSON.parse(await readFile(new URL('nora-observatory.json',web),'utf8'));
+  const cinemaLayout=JSON.parse(await readFile(new URL('nora-cinema.json',web),'utf8'));
+  const sharedGeometry=new Three.BoxGeometry(),sharedMaterial=new Three.MeshLambertMaterial();
+  const tavern=sceneryWindow.NoraScenery.create(Three,sharedGeometry,sharedMaterial,memoryLayout.portal,cinemaLayout);
+  const [cinemaGate,memoryGate]=['cinema','observatory'].map(name=>
+    tavern.lobby.getObjectByName('nora-'+name+'-portal').position);
+  assert.equal(cinemaGate.z,memoryGate.z);
+  assert.ok(cinemaGate.x<0&&memoryGate.x<0,'the portals are west of the residential trail');
+  assert.ok(memoryGate.x-cinemaGate.x>3.24,'neighboring portal prompts do not overlap');
+  assert.equal(tavern.lobby.getObjectByName('nora-tavern-portal'),undefined,'the burrow portal is gone');
+  const record=tavern.indoor.getObjectByName('nora-record'),notes=tavern.indoor.getObjectByName('nora-music-notes');
+  assert.ok(record&&notes,'record player and notes are present');
+  assert.equal(tavern.outdoor.getObjectByName('nora-tavern-windows').count,8,'windows on all four facades');
+  const blocked={x:0,y:0,z:1.5};
+  const acousticContext={window:{}};vm.runInNewContext(world,acousticContext);
+  acousticContext.window.NoraWorld.move(blocked,0,-2,tavern.indoorZone);
+  assert.ok(blocked.z>.7,'console blocks walking through its cabinet');
+  const lobbyWalk={x:0,z:2.8};
+  acousticContext.window.NoraWorld.move(lobbyWalk,20,0,tavern.lobbyZone);
+  assert.equal(lobbyWalk.x,16.35,'the lobby is traversable across its wide central path');
+  const movedHouse={x:0,z:0};
+  acousticContext.window.NoraWorld.move(movedHouse,0,-5,tavern.outdoorZone);
+  assert.ok(movedHouse.z < -2 && movedHouse.z > -2.6,'house collision follows its move to the back wall');
+  const camera=new Three.PerspectiveCamera();camera.position.set(2,2,3);camera.lookAt(0,1,0);
+  tavern.update(.5,true,0,camera);assert.ok(record.rotation.y<0,'record rotates');
+  const noteMatrix=new Three.Matrix4();notes.getMatrixAt(0,noteMatrix);const beforeNote=noteMatrix.clone();
+  tavern.update(.5,true,0,camera);notes.getMatrixAt(0,noteMatrix);assert.notDeepEqual(noteMatrix.elements,beforeNote.elements,'notes rise and change scale');
+  const stoppedAngle=record.rotation.y;
+  tavern.update(.5,true,0,camera,false);assert.equal(record.rotation.y,stoppedAngle,'switched-off record stops rotating');
+  assert.equal(notes.visible,false,'off switch hides notes');
+  tavern.update(.5,true,0,camera,true);assert.ok(record.rotation.y<stoppedAngle&&notes.visible,'switch resumes animation');
+  tavern.update(.5,false,0,camera);
+  const lobbyRecord=tavern.lobby.getObjectByName('nora-record');
+  const lobbyNotes=tavern.lobby.getObjectByName('nora-music-notes');
+  assert.equal(lobbyRecord.visible,false,'lobby deck starts empty');
+  tavern.setLobbyRecord('dedzytwo');
+  tavern.update(.5,false,0,camera,true,true);
+  assert.ok(lobbyRecord.visible&&lobbyRecord.rotation.y<0&&lobbyNotes.visible,'lobby deck shows and spins its own disc');
+  const lobbyAngle=lobbyRecord.rotation.y;
+  tavern.update(.5,false,0,camera,false,true);
+  assert.equal(lobbyRecord.rotation.y,lobbyAngle);
+  assert.equal(lobbyNotes.visible,false);
+  tavern.setLobbyRecord(null);
+  assert.equal(lobbyRecord.visible,false,'ejecting clears the lobby deck');
+  const lobbyDeckPosition=sceneryWindow.NoraScenery.lobbyDeck;
+  const lobbyDeckApproach={...sceneryWindow.NoraScenery.lobbySpawn};
+  assert.ok(lobbyDeckPosition.z>lobbyDeckApproach.z,'the lobby deck is behind the spawn');
+  acousticContext.window.NoraWorld.move(lobbyDeckApproach,0,4,tavern.lobbyZone);
+  assert.ok(lobbyDeckApproach.z<lobbyDeckPosition.z-.5,'the relocated cabinet blocks walking through it');
+  const acoustics=acousticContext.window.NoraWorld.tavernAcoustics;
+  const doorway=acoustics(false,0,3.6),rear=acoustics(false,0,-3.6),far=acoustics(false,0,7);
+  assert.ok(doorway.gain>far.gain&&far.gain>rear.gain,'doorway louder than distance and back wall');
+  assert.ok(doorway.cutoff>rear.cutoff,'walls remove high frequencies');
+  assert.ok(acoustics(true,0,2).gain>doorway.gain,'inside louder than outside');
+  assert.ok(acoustics(false,-4,4).pan>0&&acoustics(false,4,4).pan<0,'stereo follows building direction');
+  let geometryDisposed=false;sharedGeometry.addEventListener('dispose',()=>{geometryDisposed=true;});
+  tavern.dispose();assert.equal(geometryDisposed,false,'scenery retains shared geometry ownership');
+  sharedGeometry.dispose();sharedMaterial.dispose();
+  console.log('NORA tavern: console collision, spinning record, animated notes, 8 windows, spatial music and cleanup passed.');
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  async function setup(view = 0, fps = 60, petApi=async()=>({pet:null,players:[]}), sounds, mobile=false, realScenery=false, equipped=null, {observatory=null,cinema=false,warmup=30}={}) {
+    const window = new Element(), document = new Element(), root = new Element(), canvas = new Element();
+    root.querySelector('.nora-aim-choices').hidden=true;
+    document.createElement = () => new Element();
+    window.matchMedia=query=>({matches:query==='(pointer:coarse)'&&mobile});window.devicePixelRatio=3;
+    let resizeCallback;
+    let frame, player, camera, scene, time = 0, now = Date.UTC(2026,10,2,0);
+    const renderer = {ratio:1,resizes:0,setPixelRatio(value){this.ratio=value;}, setSize(w,h){this.width=w;this.height=h;this.resizes++;}, dispose(){}, render(s,c){camera=c;scene=s;}};
+    const zone = {limit:100, boxes:[], cameraBoxes:[]};
+    window.NoraScenery = {
+      ...sceneryWindow.NoraScenery,
+      tavernOffset:0,
+      create:()=>({outdoor:new Three.Group(), indoor:new Three.Group(), lobby:new Three.Group(),
+        outdoorZone:zone, indoorZone:zone, lobbyZone:zone, updatePortal(){}, dispose(){}}),
+    };
+    let randomSeed=42;const seededMath=Object.create(Math);seededMath.random=()=>((randomSeed=(randomSeed*1664525+1013904223)>>>0)/4294967296);
+    const context = vm.createContext({window, document, Math:seededMath, THREE:{...Three, WebGLRenderer:function(){return renderer;}},
+      auth:'test-auth',location:{protocol:'https:',host:'nora.invalid'},crypto:webcrypto, Date:class extends Date {static now(){return now;}}, api:petApi, toast:()=>{}, esc:value=>String(value??'').replaceAll('<','&lt;'), AbortController, AbortSignal, ResizeObserver:class {constructor(callback){resizeCallback=callback;} observe(){} disconnect(){}},
+      performance:{now:()=>time}, requestAnimationFrame:fn=>{frame=fn;return 1;}, cancelAnimationFrame(){}});
+    if(realScenery)vm.runInContext(sceneryCode, context);
+    if(observatory){
+      vm.runInContext(observatory.code,context);
+      window.NoraObservatory.load=async()=>observatory.layout;
+    }
+    if(cinema){
+      vm.runInContext(await readFile(new URL('nora-cinema.js',web),'utf8'),context);
+      window.NoraCinema.load=async()=>cinemaLayout;
+    }
+    vm.runInContext(wings, context);
+    vm.runInContext(voxel, context);
+    const createCharacter = window.NoraVoxel.createCharacter;
+    window.NoraVoxel.createCharacter = (...args) => {const result=createCharacter(...args);player??=result.group;return result;};
+    vm.runInContext(companion, context);
+    vm.runInContext(world, context);
+    const stop = await window.NoraWorld.mount(canvas, root, {shirt:'white',pants:'blue_slim',shoes:'white_stripes',wings:equipped}, sounds);
+    for(let i=0;i<view;i++)root.querySelector('.nora-world-view').emit('click');
+    const frames = count => {for(let i=0;i<count;i++)frame(time+=1000/fps);};
+    await flush();
+    frames(warmup);
+    const key = (code, down=true) => window.emit(down?'keydown':'keyup',{code});
+    const joystick = root.querySelector('.nora-world-joystick');
+    const stick = (x,z,down=false) => joystick.emit(down?'pointerdown':'pointermove',{pointerId:1,clientX:60+x*36,clientY:60+z*36});
+    const delta = count => {const before=player.position.clone();frames(count);return player.position.clone().sub(before);};
+    return {window,document,canvas,root,joystick,player,zone,frames,key,stick,delta,stop,renderer,resize:resizeCallback,setFps:value=>{fps=value;},camera:()=>camera,scene:()=>scene,world:window.NoraWorld,setNow:value=>{now=value;}};
+  }
+  function useNearby(world, label) {
+    const {nearbyAction,performAction}=world.window.worldActions;
+    const action=nearbyAction(()=>true);
+    assert.ok(action,'expected an interaction within reach');
+    if(label)assert.equal(action.text,label);
+    performAction(action);
+  }
+  function goToIsland(world){
+    world.window.worldActions.performAction({text:'Войти в таверну'});
+    useNearby(world,'Выйти из таверны');
+    world.frames(1);
+  }
+  function tiltCamera({canvas}, from, to, pointerType='mouse'){
+    const pointer={pointerType,pointerId:7,clientX:120};
+    canvas.emit(pointerType==='touch'?'pointerdown':'pointerleave',{...pointer,clientY:from});
+    if(pointerType==='mouse')canvas.emit('pointermove',{...pointer,clientY:from});
+    canvas.emit('pointermove',{...pointer,clientY:to});
+    canvas.emit('pointerup',pointer);
+  }
+  function assertCameraAboveFloor(game, location){
+    const camera=game.camera();
+    assert.ok(camera.position.y>=.21,location+': camera stays above the floor');
+    camera.updateMatrixWorld();
+    for(const x of [-1,1])for(const y of [-1,1]){
+      assert.ok(new Three.Vector3(x,y,-1).unproject(camera).y>0,location+': near plane clears the floor');
+    }
+  }
+  function assertSkyView(game, location, pointerType='mouse'){
+    tiltCamera(game,510,20,pointerType);
+    for(let i=0;i<60;i++){
+      game.frames(1);
+      assertCameraAboveFloor(game,location);
+    }
+    for(let i=0;i<3;i++){
+      game.frames(1);
+      const camera=game.camera();
+      assert.ok(camera.getWorldDirection(new Three.Vector3()).y>.98,location+': can look almost straight up in every view');
+      assertCameraAboveFloor(game,location);
+      game.root.querySelector('.nora-world-view').click();
+    }
+  }
+  const cameraWorld=await setup(0,60,undefined,undefined,false,true,null,{cinema:true});
+  cameraWorld.player.position.set(2,.017,2);
+  cameraWorld.root.emit('nora-pov',{detail:180});
+  cameraWorld.frames(240);
+  const orbitRadius=()=>cameraWorld.camera().position.distanceTo(
+    new Three.Vector3(cameraWorld.player.position.x,1.1,cameraWorld.player.position.z));
+  const openRadius=orbitRadius();
+  assert.ok(openRadius>8,'max camera distance in the open lobby');
+  assertSkyView(cameraWorld,'Lobby');
+  cameraWorld.frames(1);
+  assert.ok(orbitRadius()<1,'the steep upward orbit retracts toward the avatar');
+  cameraWorld.key('Space');
+  cameraWorld.frames(12);
+  assert.ok(cameraWorld.player.position.y>.35,'jump lifts the player during a steep orbit');
+  for(let i=0;i<48;i++){
+    cameraWorld.frames(1);
+    assertCameraAboveFloor(cameraWorld,'Lobby jump and landing');
+  }
+  assert.ok(orbitRadius()<1,'camera retracts again on landing');
+  tiltCamera(cameraWorld,20,470);
+  for(let i=0;i<240;i++){
+    cameraWorld.frames(1);
+    assertCameraAboveFloor(cameraWorld,'Lobby');
+  }
+  assert.ok(Math.abs(orbitRadius()-openRadius)<.01,'the camera returns to the configured distance');
+
+  const cinemaPortal=cinemaLayout.portal;
+  cameraWorld.player.position.set(cinemaPortal.x,.017,cinemaPortal.z+1.25);
+  useNearby(cameraWorld,'Кинотеатр');cameraWorld.frames(1);
+  assert.ok(cameraWorld.camera().getWorldDirection(new Three.Vector3()).y>.1,'cinema is initially framed on its screen');
+  assertSkyView(cameraWorld,'Cinema');
+  cameraWorld.player.position.set(cinemaLayout.exit.x,.017,cinemaLayout.exit.z);
+  useNearby(cameraWorld,'В лобби');cameraWorld.frames(1);
+  goToIsland(cameraWorld);
+  assertSkyView(cameraWorld,'Forest');
+  cameraWorld.player.position.set(0,.017,cameraWorld.window.NoraScenery.tavernOffset+3.6);
+  useNearby(cameraWorld,'Войти в таверну');cameraWorld.frames(1);
+  assertSkyView(cameraWorld,'Tavern');
+  cameraWorld.stop();
+  console.log('NORA upward camera: all three views in the lobby, cinema, forest and tavern; floor collision and zoom recovery passed.');
+  const povWorld=await setup();
+  const fullDistance=povWorld.camera().position.distanceTo(povWorld.player.position);
+  povWorld.root.emit('nora-pov',{detail:40});povWorld.frames(180);
+  assert.ok(povWorld.camera().position.distanceTo(povWorld.player.position)<fullDistance*.7,'perspective slider changes camera distance');
+  povWorld.root.emit('nora-pov',{detail:0});povWorld.frames(1);
+  assert.equal(povWorld.player.visible,false,'zero perspective selects first person');
+  povWorld.root.emit('nora-pov',{detail:100});povWorld.frames(180);
+  assert.equal(povWorld.player.visible,true,'perspective restores third person');povWorld.stop();
+  const mobileWorld=await setup(0,30,undefined,undefined,true);
+  const r=mobileWorld.renderer;
+  assert.ok(r.width*r.height*r.ratio**2<=420001,'Retina mobile buffer has a pixel budget');
+  const initial=r.ratio, resizeCount=r.resizes;
+  mobileWorld.resize();assert.equal(r.resizes,resizeCount,'unchanged resize does not reallocate canvas');
+  mobileWorld.frames(180);assert.ok(r.ratio<initial,'sustained low FPS reduces drawing resolution');
+  const low=r.ratio;mobileWorld.setFps(60);mobileWorld.frames(600);
+  assert.ok(r.ratio>low&&r.ratio<=initial,'stable fast frames recover quality within the cap');
+  mobileWorld.canvas.clientWidth=780;mobileWorld.canvas.clientHeight=390;mobileWorld.resize();
+  mobileWorld.frames(1);assert.equal(mobileWorld.camera().aspect,2,'rotation updates projection');
+  assert.ok(r.width*r.height*r.ratio**2<=420001,'landscape retains mobile pixel budget');
+  mobileWorld.canvas.clientWidth=390;mobileWorld.canvas.clientHeight=780;mobileWorld.resize();
+  mobileWorld.frames(240);
+  const previousMobileDistance=mobileWorld.camera().position.distanceTo(mobileWorld.player.position);
+  mobileWorld.root.emit('nora-pov',{detail:180});mobileWorld.frames(400);
+  assert.ok(mobileWorld.camera().position.distanceTo(mobileWorld.player.position)>previousMobileDistance*1.65,
+    'the extended slider keeps the mobile camera farther back');
+  mobileWorld.stop();
+  const desktopAim=await setup(1);
+  goToIsland(desktopAim);
+  const prompt=desktopAim.root.querySelector('.nora-aim-action');
+  const marker=desktopAim.root.querySelector('.nora-reticle');
+  const aimPortal={x:0,z:desktopAim.window.NoraScenery.portalZ.home};
+  desktopAim.player.position.x=3;desktopAim.frames(1);
+  assert.equal(marker.hidden,false,'reticle is visible while exploring');
+  assert.equal(prompt.hidden,true,'a distant portal offers no interaction');
+  desktopAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
+  desktopAim.frames(1);
+  assert.equal(prompt.querySelector('.nora-aim-label').textContent,'ЛОББИ','the centered portal is actionable');
+  const aimPointer=x=>desktopAim.canvas.emit('pointermove',{pointerType:'mouse',pointerId:1,clientX:x,clientY:20});
+  aimPointer(20);aimPointer(260);desktopAim.frames(50);
+  assert.equal(prompt.hidden,true,'turning away hides the interaction within reach');
+  aimPointer(20);desktopAim.frames(70);
+  desktopAim.zone.cameraBoxes.push([-.55,.55,0,3,aimPortal.z+.7,aimPortal.z+.85]);
+  desktopAim.frames(1);
+  assert.equal(prompt.hidden,true,'a wall blocks the reticle from selecting through it');
+  desktopAim.zone.cameraBoxes.pop();desktopAim.frames(1);
+  assert.equal(prompt.hidden,false);
+  desktopAim.window.emit('keydown',{code:'KeyE',repeat:true});desktopAim.frames(12);
+  assert.equal(prompt.classList.contains('is-pressed'),false,'holding E does not retrigger');
+  desktopAim.key('KeyE');desktopAim.frames(4);
+  assert.equal(prompt.classList.contains('is-pressed'),true,'E shows the pressed state');
+  desktopAim.player.position.z=aimPortal.z+3;
+  desktopAim.frames(12);
+  assert.equal(prompt.hidden,true,'walking out of reach cancels an unfinished interaction');
+  desktopAim.player.position.z=aimPortal.z+1.35;desktopAim.frames(1);
+  desktopAim.key('KeyE');desktopAim.frames(12);
+  assert.equal(prompt.hidden,true,'the prompt disappears after interaction');
+  assert.match(desktopAim.root.querySelector('.nora-world-bar small').textContent,/^ЛОББИ/,'E opens the aimed portal');
+  desktopAim.stop();
+  const touchAim=await setup(0,60,undefined,undefined,true);
+  goToIsland(touchAim);
+  touchAim.player.position.set(aimPortal.x,.017,aimPortal.z+1.35);
+  touchAim.frames(1);
+  const touchPrompt=touchAim.root.querySelector('.nora-aim-action');
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,true,'third-person view hides the reticle on touch');
+  assert.equal(touchPrompt.hidden,false,'aiming in third person works on touch');
+  touchPrompt.click();touchAim.frames(12);
+  assert.match(touchAim.root.querySelector('.nora-world-bar small').textContent,/^ЛОББИ/,'tapping the prompt performs the same interaction');
+  touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,false,'first person has a reticle');
+  touchAim.root.querySelector('.nora-world-view').click();touchAim.frames(1);
+  assert.equal(touchAim.root.querySelector('.nora-reticle').hidden,true,'selfie view hides the reticle');
+  touchAim.stop();
+  const petAim=await setup(0,60,async()=>({pet:{name:'Лис',species:'fox'}}));
+  const aimedPet=petAim.scene().getObjectByName('nora-companion');
+  aimedPet.position.set(petAim.player.position.x,.017,petAim.player.position.z-1.2);
+  petAim.frames(2);
+  const petPrompt=petAim.root.querySelector('.nora-aim-action');
+  assert.equal(petAim.root.querySelector('.nora-reticle').hidden,true,'desktop third person hides the reticle');
+  assert.equal(petPrompt.querySelector('.nora-aim-label').textContent,'Питомец');
+  petAim.key('KeyE');petAim.frames(12);
+  const choices=petAim.root.querySelector('.nora-aim-choices');
+  const [stroke,details]=choices.querySelectorAll('button');
+  assert.equal(petPrompt.hidden,true,'the prompt is replaced by choices');
+  assert.equal(choices.hidden,false);
+  assert.deepEqual([stroke.textContent,details.textContent],['Погладить','Открыть питомца']);
+  assert.equal(petAim.window.emit('keydown',{key:'Escape'}),false,'Escape closes the choices first');
+  petAim.frames(1);
+  assert.equal(choices.hidden,true);
+  petPrompt.click();petAim.frames(12);
+  details.click();await flush();
+  assert.equal(choices.hidden,true);
+  assert.equal(petAim.root.querySelector('.nora-pet-panel').open,true,'a specific choice opens the pet panel');
+  petAim.stop();
+  console.log('NORA mobile rendering: Retina budget, resize deduplication, low-FPS adaptation, recovery and rotation passed.');
+  for(const fps of [30,60,120]){
+    const c=await setup(0,fps),meshes=[];c.player.traverse(m=>{if(m.isInstancedMesh)meshes.push(m);});
+    c.zone.cameraBoxes.push([-100,100,-100,100,-100,100]);c.frames(1);
+    assert.ok(meshes.every(m=>!m.visible&&m.material.opacity===0),'camera inside body hides all layers immediately');
+    const distance=()=>c.camera().position.distanceTo(new Three.Vector3(c.player.position.x,1.1,c.player.position.z));
+    assert.ok(distance()<=.551,'camera obeys obstruction');
+    for(let i=0;i<5;i++){c.zone.cameraBoxes.length=0;c.frames(1);assert.ok(distance()<=.551,'single clear frame does not pump camera');c.zone.cameraBoxes.push([-100,100,-100,100,-100,100]);c.frames(1);}
+    c.zone.cameraBoxes.length=0;let previousDistance=distance(),previousOpacity=0;
+    for(let i=0;i<fps*4;i++){
+      c.frames(1);const current=distance(),alpha=meshes[0].material.opacity;
+      assert.ok(current>=previousDistance-1e-6&&current-previousDistance<=3/fps+.001,'camera returns monotonically at bounded speed');
+      assert.ok(alpha>=previousOpacity-1e-6,'model fades back without layer popping');
+      if(current<=1.4)assert.equal(alpha,0,'background fully clear inside body');
+      assert.ok(meshes.every(m=>!m.material.transparent&&m.material.depthWrite),'depth retained throughout fade');
+      previousDistance=current;previousOpacity=alpha;
+    }
+    assert.ok(previousDistance>5&&previousOpacity===1,'camera and opaque character fully recover');c.stop();
+  }
+  console.log('NORA close camera: full hide, stable corners, bounded smooth return and depth-safe recovery at 30/60/120 FPS passed.');
+  const soundEvents=[];
+  const sounds={playing:value=>soundEvents.push(['playing',value]),spatial:()=>{},update:(...args)=>soundEvents.push(['update',...args]), jump:inside=>soundEvents.push(['jump',inside]),
+    land:inside=>soundEvents.push(['land',inside]), door:inside=>soundEvents.push(['door',inside]), stop:()=>soundEvents.push(['stop'])};
+  const audioWorld=await setup(0,60,undefined,sounds);
+  goToIsland(audioWorld);
+  audioWorld.key('Space'); audioWorld.frames(60);
+  assert.ok(soundEvents.some(e=>e[0]==='jump'&&!e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='land'&&!e[1]));
+  audioWorld.player.position.set(0,.017,3.6);useNearby(audioWorld);
+  audioWorld.frames(2);audioWorld.key('Space');audioWorld.frames(60);
+  assert.ok(soundEvents.some(e=>e[0]==='door'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='update'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='jump'&&e[1]));
+  assert.ok(soundEvents.some(e=>e[0]==='land'&&e[1]));
+  const recordOptions=audioWorld.window.worldActions.recordOptions;
+  assert.equal(recordOptions().length,0,'console is out of reach');
+  audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
+  assert.equal(recordOptions()[0].text,'Выключить');
+  recordOptions()[0].run();
+  assert.ok(soundEvents.some(e=>e[0]==='playing'&&e[1]===false));
+  audioWorld.player.position.set(0,.017,3.7);useNearby(audioWorld);audioWorld.frames(2);
+  assert.equal(recordOptions().length,0,'console is unavailable outside');
+  useNearby(audioWorld);audioWorld.player.position.set(0,.017,1.3);audioWorld.frames(2);
+  assert.equal(recordOptions()[0].text,'Включить','door transition preserves off state');
+  recordOptions()[0].run();assert.equal(recordOptions()[0].text,'Выключить');
+  audioWorld.stop();assert.equal(soundEvents.at(-1)[0],'stop');
+  function screenDelta(h, delta) {
+    const forward = h.camera().getWorldDirection(new Three.Vector3()); forward.y=0; forward.normalize();
+    const right = new Three.Vector3(-forward.z,0,forward.x);
+    return {x:delta.dot(right), z:-delta.dot(forward)};
+  }
+  function aligned(actual,x,z,label) {
+    const length=Math.hypot(actual.x,actual.z), input=Math.hypot(x,z);
+    assert.ok(length>.1, label+': moved');
+    assert.ok((actual.x*x+actual.z*z)/(length*input)>.995, label+': screen direction');
+  }
+  const mouseWorld=await setup(1);
+  function aim(){
+    mouseWorld.frames(120);
+    return mouseWorld.camera().getWorldDirection(new Three.Vector3());
+  }
+  const mouseMove=(clientX,clientY)=>mouseWorld.canvas.emit('pointermove',{
+    pointerId:1,pointerType:'mouse',buttons:0,clientX,clientY,
+  });
+  const startAim=aim();
+  mouseMove(60,60);
+  mouseMove(160,60);
+  const turned=aim();
+  assert.ok(turned.x>startAim.x+.4,'moving the mouse right turns the camera right without a button');
+  mouseMove(160,20);
+  const tilted=aim();
+  assert.ok(tilted.y>turned.y+.1,'moving the mouse up tilts the camera up');
+  mouseWorld.canvas.emit('pointerleave',{pointerType:'mouse'});
+  mouseMove(370,300);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'returning to the canvas starts from the new mouse position');
+  const settings=mouseWorld.root.querySelector('.nora-settings');
+  settings.open=true;
+  mouseWorld.root.emit('nora-settings-open');
+  mouseMove(80,80);
+  mouseMove(180,180);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'the camera stays still while settings are open');
+  settings.open=false;
+  mouseMove(180,210);
+  assert.ok(aim().distanceTo(tilted)<1e-5,'the first movement after settings resets the reference position');
+  mouseMove(180,250);
+  assert.ok(aim().y<tilted.y-.1,'the mouse can turn the camera again after settings close');
+  const {canvas:mouseCanvas,document:mouseDocument}=mouseWorld;
+  let lockRequests=0;
+  const clickScene=(button=0)=>mouseCanvas.emit('pointerdown',{pointerType:'mouse',pointerId:1,button});
+  const changeLock=element=>{
+    mouseDocument.pointerLockElement=element;
+    mouseDocument.emit('pointerlockchange');
+  };
+  mouseCanvas.requestPointerLock=()=>{lockRequests++;};
+  mouseDocument.exitPointerLock=()=>changeLock(null);
+  clickScene(2);
+  assert.equal(lockRequests,0,'right click leaves the cursor free');
+  clickScene();
+  clickScene();
+  assert.equal(lockRequests,1,'left click requests lock once until resolved');
+  changeLock(mouseCanvas);
+  const beforeLockTurn=aim();
+  for(let i=0;i<8;i++){
+    mouseCanvas.emit('mousemove',{movementX:100,movementY:0,clientX:195,clientY:200});
+  }
+  const afterLockTurn=aim();
+  assert.ok(afterLockTurn.distanceTo(beforeLockTurn)>1,'relative input turns past the canvas width with fixed cursor coordinates');
+  mouseMove(10,40);mouseMove(200,200);
+  assert.ok(aim().distanceTo(afterLockTurn)<1e-5,'pointermove does not rotate a second time while locked');
+  assert.equal(mouseWorld.window.emit('keydown',{key:'Escape'}),false,'Escape releases the mouse before the game can close');
+  assert.equal(mouseDocument.pointerLockElement,null);
+  mouseMove(10,40);mouseMove(200,200);
+  assert.ok(aim().distanceTo(afterLockTurn)<1e-5,'the freed mouse can reach HUD buttons without turning');
+  clickScene();
+  changeLock(mouseCanvas);
+  assert.equal(mouseWorld.window.emit('keydown',{key:'Tab'}),true,'Tab keeps normal keyboard focus navigation');
+  assert.equal(mouseDocument.pointerLockElement,null);
+  clickScene();
+  changeLock(mouseCanvas);
+  mouseWorld.root.emit('nora-settings-open');
+  assert.equal(mouseDocument.pointerLockElement,null,'settings release the mouse');
+  clickScene();
+  mouseWorld.window.emit('blur');
+  changeLock(mouseCanvas);
+  assert.equal(mouseDocument.pointerLockElement,null,'a lock acquired after blur is released');
+  mouseCanvas.requestPointerLock=()=>Promise.reject(new Error('Pointer lock denied'));
+  clickScene();
+  await flush();
+  mouseMove(10,40);mouseMove(110,40);
+  assert.ok(aim().distanceTo(afterLockTurn)>.4,'a denied request falls back to mouse look');
+  mouseCanvas.requestPointerLock=()=>{lockRequests++;};
+  clickScene();
+  changeLock(mouseCanvas);
+  mouseWorld.stop();
+  assert.equal(mouseDocument.pointerLockElement,null,'closing the world releases the mouse');
+  // Sustained and repeated inputs must stay screen-relative, not merely move
+  // in a fixed world direction while the camera swings away underneath them.
+  for(const view of [0,1,2])for(const device of ['keyboard','touch']) {
+    const h=await setup(view);
+    const speeds=[];
+    for(const [x,z] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]) {
+      const codes=[x<0?'KeyA':x>0?'KeyD':null,z<0?'KeyW':z>0?'KeyS':null].filter(Boolean);
+      if(device==='keyboard')codes.forEach(c=>h.key(c));else h.stick(x,z,true);
+      h.frames(20);
+      const d=h.delta(60);aligned(screenDelta(h,d),x,z,`${device}/${view}/${x},${z}`);speeds.push(d.length());
+      const facing=new Three.Vector3(Math.sin(h.player.rotation.y),0,Math.cos(h.player.rotation.y));
+      assert.ok(facing.dot(d.clone().normalize())>.999,'character faces travel in every view/direction');
+      if(device==='keyboard')codes.forEach(c=>h.key(c,false));else h.joystick.emit('pointerup',{pointerId:1});
+      h.frames(20);
+    }
+    assert.ok(Math.max(...speeds)-Math.min(...speeds)<.01,'no diagonal speed boost');
+    h.stop();
+  }
+  const h=await setup();
+  const startHeading=h.player.rotation.y;
+  h.key('KeyA');h.frames(1);
+  const firstTurn=Math.abs(Math.atan2(Math.sin(h.player.rotation.y-startHeading),Math.cos(h.player.rotation.y-startHeading)));
+  assert.ok(firstTurn>.01&&firstTurn<.5,'turn starts smoothly instead of snapping');
+  h.frames(60);h.key('KeyA',false);h.frames(30);
+  const idleHeading=h.player.rotation.y;
+  h.frames(60);assert.equal(h.player.rotation.y,idleHeading,'idle preserves facing');
+  h.key('KeyA');h.frames(60);h.key('KeyA',false);h.frames(20);
+  h.key('KeyA');aligned(screenDelta(h,h.delta(60)),-1,0,'repeated left');h.key('KeyA',false);
+  h.key('KeyW');h.frames(20);h.key('KeyD');h.frames(20);
+  aligned(screenDelta(h,h.delta(30)),1,-1,'W then W+D');
+  h.key('KeyW',false);h.frames(20);aligned(screenDelta(h,h.delta(30)),1,0,'release W, hold D');
+  h.key('KeyD',false);h.frames(20);
+  h.stick(0,-1,true);
+  for(const angle of [Math.PI/4,Math.PI/2,Math.PI,Math.PI*1.5,Math.PI*2]) {
+    const x=Math.cos(angle),z=Math.sin(angle);h.stick(x,z);h.frames(20);
+    aligned(screenDelta(h,h.delta(20)),x,z,'continuous joystick turn');
+  }
+  h.stick(-1,0);
+  const beforeTouch=h.camera().position.clone().sub(h.player.position);
+  h.canvas.emit('pointermove',{pointerId:2,pointerType:'touch',clientX:200,clientY:0});
+  h.frames(40);
+  assert.ok(h.camera().position.clone().sub(h.player.position).distanceTo(beforeTouch)<.01,'touch movement needs a swipe start');
+  h.canvas.emit('pointerdown',{pointerId:2,pointerType:'touch',clientX:0,clientY:0});
+  h.canvas.emit('pointermove',{pointerId:2,pointerType:'touch',clientX:200,clientY:0});
+  h.frames(40);
+  assert.ok(h.camera().position.clone().sub(h.player.position).distanceTo(beforeTouch)>1,'touch swipe rotates the camera');
+  aligned(screenDelta(h,h.delta(30)),-1,0,'left after manual camera turn while holding');
+  h.joystick.emit('pointercancel',{pointerId:1});h.frames(25);assert.ok(h.delta(30).length()<.001,'touch cancel stops');
+  h.key('KeyW');h.frames(20);h.window.emit('blur');assert.ok(h.delta(30).length()<.001,'blur stops');
+  h.key('Space');h.frames(10);assert.ok(h.player.position.y>.1,'jump');h.frames(60);assert.equal(h.player.position.y,.017,'lands');
+  h.stop();
+  for (const fps of [30,60,120]) {
+    const peaks=[];
+    let normalPeak=0;
+    for (const id of [null,'raven','flame','frost']) {
+      const w=await setup(0,fps,undefined,undefined,fps===30,false,id);
+      const model=w.player.getObjectByName('wings');
+      assert.equal(Boolean(model),Boolean(id));
+      if (model) {
+        assert.equal(model.parent.name,'torso');
+        assert.ok(Math.abs(model.scale.x/model.scale.z-1.5)<1e-9);
+        assert.ok(Math.abs(model.scale.y/model.scale.z-1.5)<1e-9);
+        const meshes=[];
+        model.traverse(mesh=>{if(mesh.isMesh)meshes.push(mesh);});
+        assert.equal(meshes.length,4);
+        assert.equal(meshes[0].material.map.magFilter,Three.NearestFilter);
+        assert.equal(meshes[0].geometry,meshes[2].geometry);
+        assert.equal(meshes[0].material.emissiveMap.magFilter,Three.NearestFilter);
+        const sparks=model.getObjectByName('wing-sparks');
+        assert.equal(sparks.geometry.attributes.position.count,12);
+        assert.equal(sparks.material.transparent,true);
+        assert.equal(sparks.material.depthWrite,false);
+        const beforeSparks=sparks.geometry.attributes.position.array.slice();
+        const idle=model.children[0].rotation.y;
+        w.frames(3);
+        assert.notEqual(model.children[0].rotation.y,idle);
+        assert.notDeepEqual(sparks.geometry.attributes.position.array,beforeSparks);
+      }
+      const jump=()=>{
+        if(fps!==30){w.key('Space');return;}
+        const button=w.root.querySelector('.nora-world-jump');
+        button.emit('pointerdown',{button:0,pointerType:'touch'});
+        w.frames(1);
+        button.emit('click',{detail:1,pointerType:'touch'});
+      };
+      function flight(seconds) {
+        let peak=0, fastestFall=0;
+        for(let i=0;i<fps*seconds;i++){
+          const before=w.player.position.y;
+          w.frames(1);
+          peak=Math.max(peak,w.player.position.y-.017);
+          fastestFall=Math.max(fastestFall,(before-w.player.position.y)*fps);
+        }
+        assert.equal(w.player.position.y,.017);
+        return {peak,fastestFall};
+      }
+      jump();
+      const single=flight(1);
+      if(!id)normalPeak=single.peak;
+      else assert.equal(single.peak,normalPeak,'one tap retains ordinary jump');
+      jump();w.frames(Math.round(fps*.25));jump();
+      w.frames(Math.round(fps*.12));jump(); // A third press cannot add another impulse.
+      const {peak,fastestFall}=flight(2);
+      if (id) {
+        assert.ok(peak>2.2&&peak<2.56);
+        assert.ok(fastestFall<=3.401,'second jump caps descending speed');
+        jump();w.frames(Math.round(fps*.25));jump();
+        assert.ok(flight(2).peak>2.2,'landing recharges the wing boost');
+      } else assert.ok(peak<=normalPeak,'unequipped players cannot double jump');
+      peaks.push(peak);
+      w.stop();
+    }
+    assert.equal(peaks[1],peaks[2]);assert.equal(peaks[2],peaks[3]);
+  }
+  const ceiling=await setup(0,60,undefined,undefined,false,true,'flame');
+  goToIsland(ceiling);
+  ceiling.player.position.set(0,.017,3.6+ceiling.window.NoraScenery.tavernOffset);
+  useNearby(ceiling);
+  ceiling.key('Space');ceiling.frames(15);ceiling.key('Space');
+  let indoorPeak=0;
+  for(let i=0;i<120;i++){
+    ceiling.frames(1);
+    indoorPeak=Math.max(indoorPeak,ceiling.player.position.y);
+  }
+  assert.equal(indoorPeak,1.517,'tavern ceiling stops the second jump');
+  assert.equal(ceiling.player.position.y,.017);
+  ceiling.stop();
+  const env=await setup();
+  goToIsland(env);
+  const api=env.world;
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,0)).hour,3,'Moscow UTC+3');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,22)).hour,1,'Moscow date rollover');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,9)).daylight,1,'Moscow noon');
+  assert.equal(api.timeOfDay(Date.UTC(2026,10,2,21)).daylight,0,'Moscow midnight');
+  let previousDay=api.timeOfDay(Date.UTC(2026,10,2,0)).daylight;
+  for(let minute=1;minute<=1440;minute++){
+    const phase=api.timeOfDay(Date.UTC(2026,10,2,0,minute));
+    assert.ok(Math.abs(phase.daylight-previousDay)<.015,'smooth day/night transition');previousDay=phase.daylight;
+  }
+  const scene=env.scene(),stars=scene.getObjectByName('nora-stars'),leaves=scene.getObjectByName('nora-leaves');
+  assert.equal(stars.count,112);assert.equal(leaves.count,128);
+  const nightLight=scene.children.find(o=>o.isHemisphereLight).intensity;
+  assert.ok(stars.visible&&stars.material.opacity>.5,'stars at night');
+  const beforeStars=stars.instanceMatrix.array.slice(),beforeLeaves=leaves.instanceMatrix.array.slice();
+  env.frames(90);
+  assert.notDeepEqual(stars.instanceMatrix.array,beforeStars,'stars twinkle individually');
+  assert.notDeepEqual(leaves.instanceMatrix.array,beforeLeaves,'leaves drift and fragment');
+  assert.ok([...leaves.instanceMatrix.array].every(Number.isFinite),'finite particle transforms');
+  let vanished=0;
+  for(let i=0;i<leaves.count;i++)if(leaves.instanceMatrix.array[i*16]===0)vanished++;
+  assert.ok(vanished>0&&vanished<128,'some voxel fragments dissolve in flight');
+  env.setNow(Date.UTC(2026,10,2,9));env.frames(1);
+  assert.equal(stars.visible,false,'no daytime stars');
+  assert.ok(scene.children.find(o=>o.isHemisphereLight).intensity>nightLight,'day brighter, night remains playable');
+  env.player.position.set(0,.017,3.6);useNearby(env);env.frames(1);
+  assert.equal(leaves.visible,false,'no outdoor leaves in tavern');assert.equal(stars.visible,false);
+  let disposed=0;
+  stars.material.addEventListener('dispose',()=>disposed++);leaves.material.addEventListener('dispose',()=>disposed++);
+  env.stop();assert.equal(disposed,2,'effect materials released');assert.equal(scene.getObjectByName('nora-stars'),undefined);
+  const motionWorld=await setup();
+  const joint=name=>motionWorld.player.getObjectByName(name);
+  const footY=side=>joint('foot'+side).getWorldPosition(new Three.Vector3()).y;
+  const standingFoot=footY('Left');
+  const thighSplit=()=>Math.abs(joint('thighLeft').rotation.x-joint('thighRight').rotation.x);
+  motionWorld.key('Space');motionWorld.frames(12);
+  assert.ok(motionWorld.player.position.y>.4&&joint('shinLeft').rotation.x>.75,'standing jump tucks both knees');
+  assert.ok(thighSplit()<.01&&joint('armLeft').rotation.x<-.65,'standing jump lifts both arms symmetrically');
+  const tuckedKnee=joint('shinLeft').rotation.x;
+  motionWorld.frames(25);
+  assert.ok(motionWorld.player.position.y>.017&&joint('shinLeft').rotation.x<tuckedKnee-.2,'legs extend during descent');
+  motionWorld.frames(35);
+  assert.ok(Math.abs(joint('shinLeft').rotation.x)<.001,'landing returns to standing');
+  motionWorld.key('KeyW');motionWorld.frames(30);
+  for(const [sprinting,clearance] of [[false,.13],[true,.20]]){
+    motionWorld.key('ShiftLeft',sprinting);motionWorld.frames(45);
+    const lifted=new Set();
+    for(let frame=0;frame<60;frame++){
+      motionWorld.frames(1);
+      for(const [swing,stance] of [['Left','Right'],['Right','Left']]){
+        if(footY(swing)-standingFoot>clearance&&Math.abs(footY(stance)-standingFoot)<.005)lifted.add(swing);
+      }
+    }
+    assert.equal(lifted.size,2,'both feet clear the ground in turn while the other foot supports the avatar');
+  }
+  const beforeJumpZ=motionWorld.player.position.z;
+  motionWorld.key('Space');motionWorld.frames(12);
+  assert.ok(motionWorld.player.position.y>.4&&beforeJumpZ-motionWorld.player.position.z>.55,'running jump travels forward');
+  assert.ok(thighSplit()>.8&&joint('torso').rotation.x>.22,'moving jump splits the legs and leans into travel');
+  motionWorld.frames(60);
+  assert.equal(motionWorld.player.position.y,.017);
+  assert.ok(joint('armLeft').rotation.x>.6,'landing resumes the running pose');
+  motionWorld.stop();
+
+  const runner=await setup();runner.key('KeyD');runner.frames(30);
+  const walking=runner.delta(30).length();runner.key('ShiftLeft');runner.frames(30);
+  assert.ok(runner.delta(30).length()>walking*1.65,'Shift accelerates');
+  assert.ok(runner.player.getObjectByName('torso').rotation.x>.2,'running leans forward');
+  assert.ok(runner.player.getObjectByName('armLeft').rotation.x>.6,'arms trail behind');
+  assert.ok(Math.abs(runner.player.getObjectByName('forearmLeft').rotation.x)<.03,'running elbows straighten');
+  runner.key('ShiftLeft',false);runner.frames(60);
+  assert.ok(runner.player.getObjectByName('torso').rotation.x<.04,'walk pose returns smoothly');
+  runner.root.querySelector('.nora-world-sprint').emit('click');runner.frames(30);
+  assert.ok(runner.delta(30).length()>walking*1.65,'touch sprint accelerates');runner.stop();
+  for(const species of ['cat','dog','fox','raccoon','dragon']) {
+    let current={name:'<Друг>',species,species_label:species,hunger:72,thirst:83,enabled:true,expedition_until:null};
+    const calls=[];
+    const until='2026-11-03T12:00:00Z';
+    let petAction;
+    const petApi=async(path,body)=>{calls.push([path,body]);if(path==='nora-game/pet/stroke')return {ok:true,message:'Настроение повысилось'};if(path==='pet/prepare'){petAction=body;return {token:'owner-token'};}
+      if(path==='pet/action'){current={...current,expedition_until:petAction.action==='return'?null:until};return {ok:true,message:'Поход обновлён'};}
+      return {pet:current};};
+    const h=await setup(0,60,petApi);await flush();h.frames(1);
+    const pet=h.scene().getObjectByName('nora-companion');assert.ok(pet,'existing '+species+' appears');
+    assert.ok(pet.children[0].count<1500,'bounded voxel model');
+    const buddy=h.window.worldActions.companion;
+    assert.ok(buddy.aimPosition(),'nearby pet is available for aiming');
+    buddy.actions[0].run();h.frames(1);
+    await flush();assert.equal(calls.filter(([path])=>path==='nora-game/pet/stroke').length,1,'stroke reaches server');
+    const hearts=h.scene().getObjectByName('nora-pet-hearts');assert.equal(hearts.visible,true,'petting hearts');
+    const alpha=hearts.material.opacity;h.frames(40);assert.ok(hearts.material.opacity<alpha,'hearts fade');
+    h.frames(80);assert.equal(hearts.visible,false,'hearts expire');
+    h.zone.boxes.push([1,2,3,4]);
+    for(const [key,count] of [['KeyD',120],['KeyW',130],['KeyA',100]]){
+      h.key(key);
+      for(let i=0;i<count;i++){h.frames(1);assert.ok(!(pet.position.x>.66&&pet.position.x<2.34&&pet.position.z>2.66&&pet.position.z<4.34),'follower avoids furniture');}
+      h.key(key,false);
+    }
+    h.frames(300);assert.ok(pet.position.distanceTo(h.player.position)<3.5,`follows around corners: ${pet.position.toArray()} / ${h.player.position.toArray()}`);
+    h.player.position.copy(pet.position);h.player.position.x-=.5;h.frames(1);
+    buddy.actions[1].run();await flush();
+    const panel=h.root.querySelector('.nora-pet-panel'),body=panel.querySelector('.nora-pet-content');
+    assert.ok(panel.open);assert.ok(body.innerHTML.includes('72 / 100'));assert.ok(body.innerHTML.includes('&lt;Друг>'),'name escaped');
+    h.key('KeyW');assert.ok(h.delta(40).length()<.001,'panel blocks movement');
+    body.closest=()=>true;body.emit('click');body.emit('click');await flush();
+    assert.equal(calls.filter(([path])=>path==='pet/action').length,1,'one expedition request');
+    assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'away pet disappears');
+    panel.close();h.frames(1);
+    const away=h.root.querySelector('.nora-pet-away');
+    assert.equal(away.hidden,false,'pet panel remains accessible during expedition');
+    away.click();await flush();
+    assert.ok(body.innerHTML.includes('Вернуть из похода'),'return available in panel');
+    body.emit('click');await flush();
+    assert.equal(petAction.action,'return');
+    assert.equal(petAction.expedition_until,until);
+    panel.close();h.frames(1);
+    assert.ok(h.scene().getObjectByName('nora-companion'),'pet returns from expedition');
+    h.player.position.x=0;goToIsland(h);
+    h.player.position.set(0,.017,3.6);useNearby(h);h.frames(1);
+    assert.ok(h.scene().getObjectByName('nora-companion').position.distanceTo(h.player.position)<1,'follows into tavern');
+    h.stop();assert.equal(h.scene().getObjectByName('nora-companion'),undefined,'pet disposed');
+  }
+  const wander=await setup(0,60,async()=>({pet:{name:'Лис',species:'fox',species_label:'лиса',hunger:80,thirst:80,enabled:true,expedition_until:null}}));
+  await flush();wander.frames(1);const wanderingPet=wander.scene().getObjectByName('nora-companion'),start=wanderingPet.position.clone();
+  wander.key('KeyW');wander.frames(30);wander.key('KeyW',false);wander.frames(20);
+  assert.ok(wanderingPet.position.distanceTo(start)<.01,'pet does not follow small owner movement');
+  const idleStart=wanderingPet.position.clone();wander.frames(600);
+  assert.ok(wanderingPet.position.distanceTo(idleStart)>.1,'pet ambles while owner waits');
+  assert.ok(wanderingPet.position.distanceTo(wander.player.position)<3.5,'ambling stays nearby');
+  wander.key('KeyW');wander.frames(160);wander.key('KeyW',false);wander.frames(260);
+  const separation=wanderingPet.position.distanceTo(wander.player.position);
+  assert.ok(separation<3.5&&separation>1.3,'pet catches up from far away but keeps a comfortable distance');
+  wander.stop();console.log('NORA companion: relaxed wandering, delayed following and distance passed.');
+  let resolvePet;
+  const late=await setup(0,60,path=>path==='nora-game/pet'?new Promise(resolve=>{resolvePet=resolve;}):Promise.resolve({players:[]}));late.stop();resolvePet({pet:{species:'cat'}});await flush();
+  assert.equal(late.scene().getObjectByName('nora-companion'),undefined,'late response cannot recreate disposed pet');
+  console.log('NORA companion: 5 species, collision-aware following, panel, expedition, return, hearts and disposal passed.');
+  const exchanges=[];
+  let remoteTime=0,dropReply=false,remoteOffset=0,remoteTakeoff=Infinity;
+  const lobbyWorld=await setup(0,60,async(path,body)=>{
+    if(path!=='nora-game/lobby')return {pet:null};
+    exchanges.push(body);
+    if(dropReply&&!body.leave)throw Error('temporary loss');
+    const jumpTime=(remoteTime-remoteTakeoff)/1000;
+    const height=jumpTime>0?Math.max(0,4.4*jumpTime-6.5*jumpTime**2):0;
+    return {time:remoteTime,players:body.leave?[]:[{
+      nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+      x:2+remoteTime*.003+remoteOffset,y:.017+height,z:4,heading:remoteTime<750?3.13:-3.13,grounded:height===0,time:remoteTime,
+    }]};
+  },undefined,false,true,null,{warmup:0});
+  assert.equal(lobbyWorld.root.querySelector('.nora-aim-action').hidden,true,'portal hint only appears nearby');
+  assert.equal(lobbyWorld.scene().background.getHexString(),'171725','first frame has lobby lighting');
+  assert.equal(lobbyWorld.root.querySelector('.nora-world-bar small').textContent,'ЛОББИ');
+  const [firstPose]=exchanges;
+  assert.deepEqual([firstPose.x,firstPose.y,firstPose.z],[0,.017,6.8],'first pose is sent from the lobby spawn');
+  assert.equal(firstPose.room,undefined,'first pose joins the shared lobby');
+  const hasPeer=()=>lobbyWorld.scene().children.find(node=>node.children.some(child=>child.isSprite)&&node.getObjectByName('gaitRoot'));
+  assert.ok(hasPeer(),'authenticated lobby snapshot creates a labeled avatar');
+  let previousX=hasPeer().position.x;
+  for(let i=0;i<34;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+    const peer=hasPeer();
+    if(i>12){
+      assert.ok(Math.abs(peer.position.x-previousX-.05)<.001,'steady running has constant frame-to-frame speed');
+      assert.ok(Math.abs(2+remoteTime*.003-peer.position.x-.45)<.001,'steady playback trails the sender by 150 ms');
+      assert.ok(Math.abs(peer.rotation.y)>3,'turning across pi uses the short arc');
+    }
+    previousX=peer.position.x;
+  }
+  assert.ok(exchanges.length>=7,'movement is exchanged more often than every 400 ms');
+  dropReply=true;
+  for(let i=0;i<30;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  assert.ok(hasPeer(),'temporary packet loss preserves the remote avatar');
+  assert.ok(hasPeer().position.x-previousX<.8,'prediction stops during a connection gap');
+  dropReply=false;
+  for(let i=0;i<18;i++){
+    previousX=hasPeer().position.x;
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+    assert.ok(Math.abs(hasPeer().position.x-previousX)<=.081,'recovering after delayed data does not snap');
+  }
+  assert.ok(hasPeer().position.x>previousX,'movement resumes after the connection recovers');
+  remoteOffset=8;
+  for(let i=0;i<6;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  assert.ok(hasPeer().position.x>10,'remote teleport discards the old movement samples');
+  remoteTakeoff=remoteTime;
+  for(let i=0;i<25;i++){
+    remoteTime+=1000/60;lobbyWorld.frames(1);await flush();
+  }
+  const peer=hasPeer();
+  const remoteSplit=peer.getObjectByName('thighRight').rotation.x-peer.getObjectByName('thighLeft').rotation.x;
+  assert.ok(peer.position.y>.4&&remoteSplit>.8,'remote movement snapshots drive the forward jump pose');
+  lobbyWorld.window.worldActions.performAction({text:'Войти в таверну'});await flush();
+  assert.ok(exchanges.at(-1).leave,'entering the tavern leaves the shared lobby');
+  lobbyWorld.frames(1);
+  useNearby(lobbyWorld,'Выйти из таверны');
+  assert.ok(!hasPeer(),'remote avatars are removed from the island');
+  lobbyWorld.player.position.set(0,.017,5.6);lobbyWorld.frames(1);
+  useNearby(lobbyWorld,'ЛОББИ');lobbyWorld.frames(1);
+  assert.equal(lobbyWorld.player.position.z,firstPose.z,'returning through the portal shares the initial spawn');
+  lobbyWorld.stop();
+  console.log('NORA lobby: portals, smooth movement, short-arc turning, packet loss and recovery passed.');
+  // Delay all server replies: outgoing poses must still stream at 80 ms.
+  const sockets=[],fallback=[];
+  const streamed=await setup(0,60,async(path,body)=>{
+    if(path==='nora-game/lobby')fallback.push(body);
+    return {players:[]};
+  },undefined,false,true);
+  streamed.window.WebSocket=class {
+    readyState=0;bufferedAmount=0;sent=[];
+    constructor(url){assert.equal(url,'wss://nora.invalid/nora-game/socket');sockets.push(this);}
+    send(raw){this.sent.push(JSON.parse(raw));}
+    close(){this.readyState=3;this.onclose?.();}
+  };
+  streamed.frames(1);await flush();
+  const ws=sockets[0];ws.readyState=1;ws.onopen();
+  assert.deepEqual(ws.sent[0],{auth:'test-auth'},'credentials are in the first frame, never the URL');
+  streamed.frames(60);
+  const poses=ws.sent.filter(body=>body.session);
+  assert.ok(poses.length>=11,'stream sends poses without waiting for delayed replies');
+  const beforeCongestion=ws.sent.length;ws.bufferedAmount=20000;streamed.frames(12);
+  assert.equal(ws.sent.length,beforeCongestion,'congested socket does not queue obsolete poses');
+  ws.bufferedAmount=0;
+  ws.close();streamed.frames(6);await flush();
+  assert.ok(fallback.length>=2,'closed WebSocket falls back to HTTP');
+  streamed.stop();
+
+  let slowTime=0;
+  const slow=await setup(0,60,async(path,body)=>({time:slowTime,players:path==='nora-game/lobby'&&!body.leave?[{
+    nickname:'Slow',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+    x:slowTime*.0017,y:.017,z:4,heading:0,grounded:true,time:Math.floor(slowTime/1100)*1100,
+  }]:[]}),undefined,false,true);
+  let previous=null,movingFrames=0,maxStep=0,legMin=Infinity,legMax=-Infinity;
+  for(let i=0;i<240;i++){
+    slowTime+=1000/60;slow.frames(1);await flush();
+    const avatar=slow.scene().children.find(node=>node.children.some(child=>child.isSprite)&&node.getObjectByName('gaitRoot'));
+    if(!avatar)continue;
+    if(previous!==null){const step=Math.abs(avatar.position.x-previous);maxStep=Math.max(maxStep,step);if(step>.001)movingFrames++;}
+    previous=avatar.position.x;
+    const leg=avatar.getObjectByName('thighRight').rotation.x;legMin=Math.min(legMin,leg);legMax=Math.max(legMax,leg);
+  }
+  assert.ok(maxStep<=.081,'1.1 second snapshot gaps do not teleport the remote avatar');
+  assert.ok(movingFrames>100,'rare snapshots animate movement across many frames');
+  assert.ok(legMax-legMin>.2,'remote legs keep walking when snapshots arrive once a second');
+  slow.stop();
+  console.log('NORA realtime: delayed replies, congestion, HTTP fallback and one-second snapshot animation passed.');
+
+  const memory={
+    code:await readFile(new URL('nora-observatory.js',web),'utf8'),
+    layout:memoryLayout,
+  };
+  const audioChanges=[];
+  const memorySounds={memory:value=>audioChanges.push(value),playing(){},spatial(){},update(){},stop(){}};
+  const course=await setup(0,60,undefined,memorySounds,true,true,'raven',{observatory:memory});
+  const {portal,safe,relics}=memory.layout;
+  const courseHud=course.root.querySelector('.nora-observatory-hud');
+  const veil=course.root.querySelector('.nora-memory-veil');
+  const result=course.root.querySelector('.nora-memory-result');
+  const level=course.scene().getObjectByName('nora-observatory');
+  const gate=course.scene().getObjectByName('nora-observatory-portal');
+  const lobby=gate.parent;
+  assert.ok(!lobby.getObjectByName('nora-parkour-finish'),'the old lobby course is removed');
+  const [memorySign]=lobby.children.filter(node=>node.name==='nora-portal-label');
+  assert.ok(memorySign.position.z>portal.z+.8&&memorySign.material.opacity<1);
+  const signY=memorySign.position.y;
+  course.frames(20);
+  assert.notEqual(memorySign.position.y,signY,'the separated signs bob with the scene');
+
+  let reply={checkpoint:0,bells:0,reward:null,reset:false,action:0,hold:null,notice:''};
+  const used=[];
+  course.window.WebSocket=class {
+    readyState=1;bufferedAmount=0;
+    close(){}
+    send(raw){
+      const {room,interaction}=JSON.parse(raw);
+      if(!room){this.onmessage({data:JSON.stringify({players:[]})});return;}
+      if(interaction&&interaction.serial>reply.action){
+        used.push(interaction.id);reply.action=interaction.serial;
+        if(interaction.id==='seal')reply.checkpoint=1;
+      }
+      const players=[{nickname:'Robin',outfit:{shirt:'white',pants:'blue_slim',shoes:'white_stripes'},
+        x:2,y:.017,z:27,heading:3.14,grounded:true}];
+      this.onmessage({data:JSON.stringify({room,players,challenge:reply})});
+    }
+  };
+  course.player.position.set(portal.x,.017,portal.z+1.25);
+  course.frames(1);useNearby(course,'Воспоминание');assert.equal(veil.dataset.phase,'enter');
+  course.frames(80);
+  assert.equal(level.visible,true);assert.equal(courseHud.hidden,false);
+  assert.deepEqual(course.player.position.toArray(),[safe[0][0],.017,safe[0][1]]);
+  assert.ok(course.player.getObjectByName('memory-armor').visible);
+  const peerInMemory=course.scene().children.find(node=>node!==course.player&&node.getObjectByName('memory-armor'));
+  assert.ok(peerInMemory?.getObjectByName('memory-armor').visible,'other players wear armor too');
+  assert.ok(level.getObjectByName('memory-gate-1').visible);
+  assertSkyView(course,'Memory','touch');
+
+  course.player.position.set(relics.seal[0],.017,relics.seal[1]);
+  course.frames(4);useNearby(course,'Поднять печать');course.frames(8);
+  assert.deepEqual(used,['seal']);
+  assert.equal(level.getObjectByName('memory-gate-1').visible,false,'a confirmed relic opens the first gate');
+  reply={...reply,reset:true,notice:'Удар молнии'};
+  course.frames(8);
+  assert.deepEqual(course.player.position.toArray(),[safe[1][0],.017,safe[1][1]]);
+  reply={...reply,reset:false,checkpoint:4,hold:0,reward:50};
+  course.frames(12);
+  assert.equal(veil.dataset.phase,'return','a server-confirmed finish starts the return automatically');
+  course.frames(80);
+  assert.equal(level.visible,false);assert.equal(courseHud.hidden,true);
+  assert.equal(course.player.getObjectByName('memory-armor').visible,false);
+  assert.equal(result.textContent,'Воспоминание пройдено · +50 🍪');
+  assert.deepEqual(course.player.position.toArray(),[0,.017,6.8]);
+  assert.deepEqual(audioChanges,[true,false]);
+  course.stop();
+  console.log('NORA Memory: centered portals, no lobby parkour, armor, relic, storm respawn, reward and automatic return passed.');
+  const recordsCode=await readFile(new URL('nora-records.js',web),'utf8');
+  function widget(){
+    const children=[],listeners={};
+    return {children,listeners,dataset:{},append(...nodes){children.push(...nodes);},setAttribute(){},
+      addEventListener(type,fn){listeners[type]=fn;},querySelectorAll(){return [];},
+      querySelector(){return null;},showModal(){this.open=true;},close(){this.open=false;},remove(){}};
+  }
+  const recordsRoot=widget(),recordsBar=widget();
+  recordsRoot.querySelector=selector=>selector==='.nora-world-bar'?recordsBar:null;
+  const collection={hand:'dedzytwo',player:'standard',shelf:[],inventory:Array(8).fill(null),revision:0};
+  let shared={record:null,mine:false,playing:false,revision:0};
+  const moves=[],tracks=[];
+  const recordsWindow={};
+  vm.runInNewContext(recordsCode,{window:recordsWindow,Image:class {},document:{createElement:widget},
+    AbortController,AbortSignal,api:async(path,body)=>{
+      if(path.includes('?'))return {...shared};
+      if(body){
+        moves.push(body.action);
+        if(body.action==='pack'){collection.inventory[body.slot]=collection.hand;collection.hand=null;}
+        if(body.action==='unpack'){collection.hand=collection.inventory[body.slot];collection.inventory[body.slot]=null;}
+        if(body.action==='lobby_insert'){
+          shared={record:collection.hand,mine:true,playing:true,revision:1};collection.hand=null;
+          return {...collection,revision:++collection.revision,lobby_deck:shared};
+        }
+        collection.revision++;
+      }
+      return {...collection};
+    }});
+  const recordsController=recordsWindow.NoraRecords.mount(recordsRoot,{setLobbyRecord(){}},
+    {record:url=>tracks.push(url)},()=>{});
+  await flush();
+  const inventoryPanel=recordsRoot.children[0];
+  const recordClick=(attr,dataset={})=>recordsRoot.listeners.click({
+    target:{closest:()=>({hasAttribute:key=>key===attr,dataset})},
+  });
+  await recordClick('data-record-inventory');
+  assert.equal([...inventoryPanel.innerHTML.matchAll(/data-record-slot=/g)].length,8);
+  await recordClick('data-record-slot',{recordSlot:'2'});
+  assert.equal(collection.inventory[2],'dedzytwo');
+  await recordClick('data-record-close');
+  recordsController.update(false,0,-3,true,false,true,true);
+  await flush();
+  await recordClick('data-record-inventory');
+  await recordClick('data-record-slot',{recordSlot:'2'});
+  await recordClick('data-record-close');
+  assert.equal(recordsController.playerAction().id,'insert');
+  await recordsController.playerAction().run();
+  assert.deepEqual(moves,['pack','unpack','lobby_insert']);
+  assert.equal(tracks.at(-1),'/game/dedzytwo-s1.mp3');
+  assert.ok(recordsController.lobbyPlaying());
+  recordsController.update(false,0,0,true,false,false,false);
+  assert.equal(tracks.at(-1),'/game/nora-theme.mp3');
+  recordsController.dispose();
+  console.log('NORA inventory: eight cells, pack, unpack, lobby insert and room audio passed.');
+  const distances=[];
+  for(const fps of [30,60,120]) {
+    const h=await setup(0,fps);h.key('KeyA');h.frames(fps/2);distances.push(h.delta(fps).length());h.stop();
+  }
+  assert.ok(Math.max(...distances)-Math.min(...distances)<.01,'frame-rate independent speed');
+  console.log('NORA atmosphere: Moscow time, smooth cycle, night stars, twinkle, leaf fragments, indoor visibility and disposal passed.');
+  console.log('NORA controls: 8 directions, 3 views, keyboard/touch, chords, repeat, camera turn, stop, jump and 30/60/120 FPS passed.');
+} finally {
+  await rm(temp, {recursive:true, force:true});
+}

@@ -4,10 +4,8 @@ from aiogram.fsm.state import State, StatesGroup
 class ApplicationForm(StatesGroup):
     name = State()
     age = State()
-    referral = State()
-    expectations = State()
+    city = State()
     bio = State()
-    interview = State()
 
 
 class TicketForm(StatesGroup):
@@ -21,12 +19,11 @@ class ModeratorReply(StatesGroup):
 
 class ProfileEdit(StatesGroup):
     name = State()
-    age = State()
+    birth_date = State()
     hobbies = State()
     bio = State()
     avatar = State()
     video_avatar = State()
-    custom_status = State()
 
 
 class CookiePurchase(StatesGroup):
@@ -89,4 +86,9 @@ class AdminFlow(StatesGroup):
     automessage_content = State()
     automessage_interval = State()
     role_name = State()
+    role_prefix = State()
     role_rename = State()
+
+
+class CommandStudio(StatesGroup):
+    value = State()

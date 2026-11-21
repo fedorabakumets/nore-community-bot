@@ -83,7 +83,7 @@ def test_public_profile_shows_warn_count() -> None:
             "role": "member",
             "custom_status": None,
             "hobbies": "чат",
-            "age": 20,
+            "birth_date": '2005-01-01',
             "reputation": 69,
             "cookies": 1,
             "warnings": 3,
