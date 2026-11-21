@@ -20,6 +20,7 @@ from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
+    ChatJoinRequest,
     ChatMemberRestricted,
     ChatMemberUpdated,
     ChatPermissions,
@@ -36,7 +37,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from community_bot import social_likes
-from community_bot.access import needs_reapplication
+from community_bot.access import needs_reapplication, private_allowed
 from community_bot.aliases import command_or_alias, is_command_message, remainder_args, strip_command_address
 from community_bot.audit import (
     SYSTEM_ACTOR_ID,
@@ -127,6 +128,21 @@ from community_bot.ui_owner import bind_ui_owner
 router = Router(name="community")
 moderation_router = Router(name="community_moderation")
 _bulk_unmute_lock = asyncio.Lock()
+
+
+@router.chat_join_request()
+async def auto_approve_join_request(
+    request: ChatJoinRequest, db: Database, settings: Settings, bot: Bot,
+) -> None:
+    """Join-request links no longer require a second manual review after the questionnaire."""
+    if request.chat.id != settings.community_chat_id:
+        return
+    if not await private_allowed(db, settings, request.from_user.id):
+        return
+    try:
+        await bot.approve_chat_join_request(request.chat.id, request.from_user.id)
+    except (TelegramBadRequest, TelegramForbiddenError) as error:
+        logger.warning("Community join request approval failed (%s)", type(error).__name__)
 
 
 @router.chat_member()
