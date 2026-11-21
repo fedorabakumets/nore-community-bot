@@ -1075,7 +1075,11 @@ window.NoraStaffChat = (() => {
     visit++;
     loading=false;signature='';contextId=null;
     newCount=0;unreadIds.clear();
-    if(tab !== 'staffchat'){clearAssets();clearChatViewport();return;}
+    if(tab !== 'staffchat'){
+      if(recorder)stopRecording(true);
+      clearUploads();
+      clearAssets();clearChatViewport();return;
+    }
     syncChatViewport();
     prepareComposer();
     updateUnread();
@@ -1099,13 +1103,10 @@ window.NoraStaffChat = (() => {
   });
   document.addEventListener('change',event=>{
     if(event.target?.id !== 'staff-chat-file')return;
-    const selected=event.target.files?.[0];
-    if(!selected)return;
-    if(selected.size > maxUpload){
-      toast('Файл должен быть не больше 12 МБ');
-      event.target.value='';return;
-    }
-    attachment=selected;emojiOpen=false;composeUpdate();
+    const selected=[...(event.target.files||[])];
+    if(!selected.length)return;
+    chooseFiles(selected);
+    event.target.value='';
   });
 
   document.addEventListener('click',event=>{
@@ -1149,12 +1150,23 @@ window.NoraStaffChat = (() => {
     if(event.target.closest('[data-chat-cancel-reply]')){
       replyTarget=null;composeUpdate();return;
     }
-    if(event.target.closest('[data-chat-remove-file]')){
-      attachment=null;const file=document.getElementById('staff-chat-file');
-      if(file)file.value='';composeUpdate();return;
+    const remove=event.target.closest('[data-chat-remove-file]');
+    if(remove){
+      if(sending)return;
+      const index=Number(remove.dataset.chatRemoveFile);
+      if(Number.isSafeInteger(index)&&index>=0&&index<attachments.length){
+        forgetUpload(attachments[index]);
+        attachments.splice(index,1);
+        if(!attachments.length)attachmentKind='file';
+        composeUpdate();
+      }
+      return;
     }
+    if(event.target.closest('[data-chat-record-stop]')){stopRecording();return;}
+    if(event.target.closest('[data-chat-record-cancel]')){stopRecording(true);return;}
+    if(event.target.closest('[data-chat-record]')){void toggleRecording();return;}
     if(event.target.closest('[data-chat-attach]')){
-      document.getElementById('staff-chat-file')?.click();return;
+      if(!recording&&!sending)document.getElementById('staff-chat-file')?.click();return;
     }
     if(event.target.closest('[data-chat-emoji-toggle]')){
       emojiOpen=!emojiOpen;composeUpdate();return;
@@ -1165,7 +1177,7 @@ window.NoraStaffChat = (() => {
       const field=document.getElementById('staff-chat-draft');
       if(field && symbol){
         const start=field.selectionStart,end=field.selectionEnd;
-        const allowed=attachment ? 800 : 3000;
+        const allowed=attachments.length ? 800 : 3000;
         if(draft.length - (end-start) + symbol.length <= allowed){
           draft=draft.slice(0,start)+symbol+draft.slice(end);
           field.value=draft;
@@ -1276,7 +1288,7 @@ window.NoraStaffChat = (() => {
   },true);
   document.addEventListener('visibilitychange',()=>{
     if(tab!=='staffchat')return;
-    if(document.hidden){stopRealtime();return;}
+    if(document.hidden){if(recorder)stopRecording(true);stopRealtime();return;}
     void load();
     connectLive();
   });
@@ -1287,7 +1299,8 @@ window.NoraStaffChat = (() => {
     }
   });
   window.addEventListener('pagehide',()=>{
-    clearAssets();stopRealtime();
+    if(recorder)stopRecording(true);
+    clearUploads();clearAssets();stopRealtime();
   });
   window.addEventListener('pageshow',()=>{
     if(tab==='staffchat'&&!document.hidden){void load();connectLive();}
