@@ -2523,6 +2523,12 @@ class Database:
                 "DELETE FROM pet_video_deliveries WHERE user_id = ? AND day = ?",
                 (user_id, today),
             )
+            # Only the daily music count is reset. Keep song:last_user and
+            # song:last_chat so a purchase cannot skip the 60-second timer.
+            await db.execute(
+                "DELETE FROM bot_state WHERE key = ?",
+                (f"song:daily:{user_id}:{today}",),
+            )
         elif item == "forgive":
             await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
         elif item == "rep_shield":
