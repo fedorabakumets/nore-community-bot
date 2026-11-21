@@ -684,6 +684,7 @@ async def main() -> None:
             december_meetup_task,
             sticker_delivery_task,
             entry_release_task,
+            referral_reward_task,
             emergency_task,
             restart_task,
         ):
@@ -709,6 +710,7 @@ async def main() -> None:
                 december_meetup_task,
                 sticker_delivery_task,
                 entry_release_task,
+            referral_reward_task,
                 emergency_task,
                 restart_task,
             )
