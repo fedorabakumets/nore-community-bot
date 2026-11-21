@@ -438,6 +438,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.update.outer_middleware(CommunityScopeMiddleware())
     dispatcher.update.outer_middleware(GroupMessageActorsMiddleware())
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+    from community_bot.staff_chat import StaffChatCaptureMiddleware
+    dispatcher.update.outer_middleware(StaffChatCaptureMiddleware())
     from community_bot.memory_capture import CommunityMemoryMiddleware
     from community_bot.reaction_authors import ReactionAuthors
 
@@ -654,7 +656,7 @@ async def main() -> None:
             "polling",
             lambda: dispatcher.start_polling(
                 bot,
-                allowed_updates=sorted({*dispatcher.resolve_used_update_types(), "my_chat_member", "widget_query"}),
+                allowed_updates=sorted({*dispatcher.resolve_used_update_types(), "my_chat_member", "widget_query", "message", "edited_message"}),
                 db=db,
                 settings=settings,
                 emergency_stop=emergency_stop,
