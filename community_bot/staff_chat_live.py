@@ -84,7 +84,7 @@ class StaffChatHub:
 
     def publish(self, operation: str, ids: list[int]) -> None:
         """Called only after the corresponding SQLite write commits."""
-        if operation not in {"message", "edit", "delete"} or not ids:
+        if operation not in {"message", "edit", "delete", "reaction"} or not ids:
             return
         self.broadcast({"type": "change", "operation": operation, "ids": ids[:100]})
 
