@@ -610,7 +610,6 @@ class Database:
             await connection.close()
 
     async def initialize(self) -> None:
-        from community_bot.referral_contest import SCHEMA as referral_schema
         from community_bot.durak_rooms import SCHEMA as durak_schema
         from community_bot.referral_campaign import SCHEMA as referral_schema
         from community_bot.friends_api import SCHEMA as friends_schema
@@ -630,7 +629,6 @@ class Database:
             await db.executescript(
                 friends_schema + mafia_schema + rocket_schema + sea_schema + durak_schema
                 + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
-                + referral_schema
                 + referral_schema
             )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
