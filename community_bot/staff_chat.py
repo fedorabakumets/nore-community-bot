@@ -446,6 +446,49 @@ async def media(request: web.Request) -> web.Response:
         )
 
 
+async def discard(db, settings, chat_id: Any, message_ids: Any) -> None:
+    """Remove only messages from the configured community, never unrelated chats."""
+    if not isinstance(chat_id, int) or chat_id != settings.community_chat_id:
+        return
+    if not isinstance(message_ids, (list, tuple)):
+        return
+    ids = list(dict.fromkeys(mid for mid in message_ids if type(mid) is int and mid > 0))[:100]
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    await db.execute(
+        f"DELETE FROM staff_chat_messages WHERE chat_id=? AND message_id IN ({placeholders})",
+        (chat_id, *ids),
+    )
+
+
+async def hide(request: web.Request) -> web.Response:
+    """Staff can remove a stale entry from the read-only mirror, not from Telegram."""
+    db, settings = request.app["db"], request.app["settings"]
+    if not await staff_allowed(db, settings, request["actor"]["id"]):
+        return web.json_response(
+            {"error": "Тестовый чат доступен только команде Норы"}, status=403,
+        )
+    payload = await request.json()
+    message_id = payload.get("message_id") if isinstance(payload, dict) else None
+    if type(message_id) is not int or message_id <= 0:
+        return web.json_response({"error": "Некорректное сообщение"}, status=400)
+    chat_id = settings.community_chat_id
+    if not isinstance(chat_id, int):
+        return web.json_response({"error": "Чат не настроен"}, status=503)
+    await discard(db, settings, chat_id, [message_id])
+    return web.json_response({"ok": True, "message_id": message_id})
+
+
+def _deleted_by(method: Any) -> tuple[Any, list[int]]:
+    name = getattr(method, "__api_method__", "")
+    if name == "deleteMessage":
+        return getattr(method, "chat_id", None), [getattr(method, "message_id", 0)]
+    if name == "deleteMessages":
+        return getattr(method, "chat_id", None), list(getattr(method, "message_ids", []) or [])
+    return None, []
+
+
 class StaffChatOutgoingMiddleware(BaseRequestMiddleware):
     """Mirror messages emitted by the bot too; Bot API does not echo its own sends."""
 
@@ -454,6 +497,13 @@ class StaffChatOutgoingMiddleware(BaseRequestMiddleware):
         db = getattr(bot, "community_db", None)
         settings = getattr(bot, "community_settings", None)
         if db is None or settings is None:
+            return result
+        deleted_chat, deleted_ids = _deleted_by(method)
+        if result is True and deleted_ids:
+            try:
+                await discard(db, settings, deleted_chat, deleted_ids)
+            except Exception:
+                logger.exception("Could not remove deleted community messages from staff mirror")
             return result
         messages = result if isinstance(result, list) else [result]
         for message in messages:
