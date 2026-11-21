@@ -602,6 +602,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import staff_chat_send
     app['staff_chat_send_locks'] = {}
     app['staff_chat_last_sent'] = {}
+    app['staff_chat_voice_gate'] = asyncio.Semaphore(2)
     app.router.add_post('/api/community/chat/send', staff_chat_send.send_text)
     app.router.add_post('/api/community/chat/upload', staff_chat_send.send_attachment)
     app.router.add_get(r'/api/community/chat/media/{message_id:\d+}', staff_chat.media)
