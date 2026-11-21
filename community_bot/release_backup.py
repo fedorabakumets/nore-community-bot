@@ -169,3 +169,19 @@ async def verify_durak_backup(db: Database) -> bool:
     if not await asyncio.to_thread(_needs_schema_backup, db.path, "durak_rooms"):
         return False
     return await verify_requested_release_backup(db, request="durak-v1")
+
+
+
+async def verify_city_profile_backup(db: Database) -> bool:
+    """Verify a recoverable copy before adding users.city on existing databases."""
+    if not db.path.is_file():
+        return False
+
+    def needs_upgrade() -> bool:
+        with closing(_read_only(db.path)) as source:
+            columns = {row[1] for row in source.execute("PRAGMA table_info(users)")}
+        return bool(columns) and "city" not in columns
+
+    if not await asyncio.to_thread(needs_upgrade):
+        return False
+    return await verify_requested_release_backup(db, request="city-profile-20261121")

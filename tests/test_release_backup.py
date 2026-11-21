@@ -7,6 +7,7 @@ import pytest
 from community_bot.database import Database
 from community_bot.release_backup import (
     REQUEST_VARIABLE,
+    verify_city_profile_backup,
     verify_requested_release_backup,
     verify_widget_notification_backup,
 )
@@ -105,3 +106,20 @@ async def test_widget_release_skips_new_installation(tmp_path):
     await db.initialize()
     assert not await verify_widget_notification_backup(db)
     assert not (tmp_path / ".nora-backups").exists()
+
+
+
+async def test_city_migration_verifies_recovery_before_schema_change(tmp_path):
+    db = await database(tmp_path)
+    await db.execute("ALTER TABLE users DROP COLUMN city")
+    assert await verify_city_profile_backup(db)
+    backup = tmp_path / ".nora-backups" / "before-city-profile-20261121.sqlite3"
+    report = backup.with_suffix(".verified.json")
+    assert backup.is_file() and report.is_file()
+    assert json.loads(report.read_text())["integrity_ok"]
+    cols = {row["name"] for row in await db.fetchall("PRAGMA table_info(users)")}
+    assert "city" not in cols
+    await db.initialize()
+    assert "city" in {row["name"] for row in await db.fetchall("PRAGMA table_info(users)")}
+    assert not await verify_city_profile_backup(db)
+    assert (await db.get_user(7))["cookies"] == 123

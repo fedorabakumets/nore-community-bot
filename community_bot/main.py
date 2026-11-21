@@ -527,6 +527,9 @@ async def main() -> None:
 
     await verify_pet_development_backup(db)
     await verify_durak_backup(db)
+    from community_bot.release_backup import verify_city_profile_backup
+
+    await verify_city_profile_backup(db)
     await db.initialize()
     await apply_reset(db, settings)
     await apply_wallet_reset_release(db)
