@@ -218,7 +218,7 @@ async def test_rich_playlist_from_bot_is_archived_and_playable(tmp_path):
 
     bot = SimpleNamespace(
         get_file=AsyncMock(return_value=SimpleNamespace(file_path="music/track.mp3", file_size=4)),
-        download_file=AsyncMock(side_effect=lambda _path, *, destination, timeout: _write_media(destination)),
+        download_file=AsyncMock(side_effect=lambda _path, *, destination, timeout: destination.write(b"song")),
     )
     class MediaRequest(dict):
         app = {"db": db, "settings": settings, "bot": bot,
@@ -235,9 +235,6 @@ async def test_rich_playlist_from_bot_is_archived_and_playable(tmp_path):
     denied = await media(MediaRequest(actor={"id": 404}))
     assert denied.status == 403
 
-
-async def _write_media(destination):
-    destination.write(b"song")
 
 
 @pytest.mark.asyncio
