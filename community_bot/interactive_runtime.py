@@ -25,6 +25,9 @@ async def settle(db):
 
 async def lifecycle(app):
     """Restore persisted deadlines before HTTP serves; stop gracefully with aiohttp."""
+    from community_bot.game_lobby_posts import cleanup
+    from community_bot.group_message_close import purge_ownership
+
     await settle(app['db'])
     durak = app.get('durak_updates')
     if durak:
@@ -41,13 +44,27 @@ async def lifecycle(app):
                 except Exception:
                     logger.exception('Durak deadline settlement failed')
 
-    task = asyncio.create_task(run(), name='nora-interactive-deadlines')
+    async def retire_posts():
+        next_purge = 0.0
+        while True:
+            try:
+                await cleanup(app['db'], app.get('bot'))
+                now = time.time()
+                if now >= next_purge:
+                    await purge_ownership(app['db'], now)
+                    next_purge = now + 3600
+            except Exception:
+                logger.exception('Game lobby post cleanup failed')
+            await asyncio.sleep(1)
+
+    tasks = [
+        asyncio.create_task(run(), name='nora-interactive-deadlines'),
+        asyncio.create_task(retire_posts(), name='nora-game-lobby-posts'),
+    ]
     logger.info('Interactive games ready: persisted deadlines and payouts restored')
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

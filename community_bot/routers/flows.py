@@ -4,7 +4,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, User
+from aiogram.types import CallbackQuery, Message, User
 
 from community_bot.config import Settings
 from community_bot.database import Database
@@ -30,7 +30,7 @@ class InFlow(Filter):
 
 async def restore_private_menu(message: Message, db: Database, settings: Settings) -> None:
     if message.chat.type != "private":
-        await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Действие отменено.")
         return
     from community_bot.access import private_allowed
     from community_bot.routers.private import private_menu_content

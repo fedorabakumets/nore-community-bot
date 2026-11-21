@@ -15,7 +15,9 @@ from community_bot.blocks import answer_block
 from community_bot.bot_identity import is_bot
 from community_bot.database import Database
 from community_bot.ephemeral import expire_game_result, keep_in_chat
+from community_bot.game_lobby_posts import remember
 from community_bot.game_notify import send_game_finale
+from community_bot.group_message_close import group_message_actors
 from community_bot.helpers import register_telegram_user, resolve_command_target, user_link
 from community_bot.keyboards import close_btn, games_menu_keyboard, roulette_invite_keyboard
 from community_bot.texts import GAMES_HELP_TEXT
@@ -93,8 +95,8 @@ async def roulette_invite(message: Message, db: Database) -> None:
         return
     await register_telegram_user(db, message.from_user)
     game_id = await db.create_roulette(message.chat.id, message.from_user.id, int(target["user_id"]), 0)
-    with keep_in_chat():
-        await answer_block(
+    with keep_in_chat(), group_message_actors(message.from_user.id, int(target["user_id"])):
+        sent = await answer_block(
             message,
             "roulette",
             f"🔫 {user_link(int(target['user_id']), person_label(target))} — вызов на рулетку от "
@@ -103,6 +105,7 @@ async def roulette_invite(message: Message, db: Database) -> None:
             parse_mode="HTML",
             reply_markup=roulette_invite_keyboard(game_id),
         )
+    await remember(db, "roulette", game_id, message.chat.id, sent)
 
 
 @router.callback_query(F.data.startswith("roulette:"))

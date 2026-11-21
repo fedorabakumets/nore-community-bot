@@ -423,6 +423,7 @@ async def memory_cleanup_job(db: Database) -> None:
 
 def create_dispatcher() -> Dispatcher:
     from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
+    from community_bot.group_message_close import GroupCloseCallbackMiddleware, GroupMessageActorsMiddleware
     from community_bot.private_rich import PrivateRichContextMiddleware
     from community_bot.reply_rich import ReplyRichContextMiddleware
 
@@ -430,6 +431,7 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.message_widgets import WidgetUpdateMiddleware
 
     dispatcher.update.outer_middleware(CommunityScopeMiddleware())
+    dispatcher.update.outer_middleware(GroupMessageActorsMiddleware())
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
     from community_bot.memory_capture import CommunityMemoryMiddleware
     from community_bot.reaction_authors import ReactionAuthors
@@ -456,6 +458,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.chat_member.outer_middleware(game_chat_middleware)
     dispatcher.message.outer_middleware(GroupHousekeepingMiddleware())
     dispatcher.message.outer_middleware(ProfileAccessMiddleware())
+    dispatcher.callback_query.outer_middleware(GroupCloseCallbackMiddleware())
     dispatcher.callback_query.outer_middleware(ProfileAccessMiddleware())
     dispatcher.callback_query.outer_middleware(UiOwnerMiddleware())
     dispatcher.callback_query.outer_middleware(CabinetNavigationMiddleware())
@@ -544,6 +547,7 @@ async def main() -> None:
 
     await run_requested_reset(db, settings, bot)
     from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
+    from community_bot.group_message_close import GroupCloseSendMiddleware
     from community_bot.private_rich import PrivateRichMiddleware
     from community_bot.reply_rich import ReplyRichMiddleware
 
@@ -551,6 +555,7 @@ async def main() -> None:
     bot.session.middleware.register(PrivateRichMiddleware())
     patch_bot_ephemeral(bot)
     bot.session.middleware.register(ReplyRichMiddleware())
+    bot.session.middleware.register(GroupCloseSendMiddleware())
     dispatcher = create_dispatcher()
     if settings.openrouter_api_key or settings.deepseek_api_key:
         dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)

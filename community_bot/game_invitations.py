@@ -28,6 +28,8 @@ from aiohttp import web
 
 from community_bot.access import miniapp_allowed
 from community_bot.ephemeral import keep_in_chat
+from community_bot.game_lobby_posts import remember
+from community_bot.group_message_close import group_message_actors
 from community_bot.helpers import display_name, user_link
 from community_bot.private_rich import standalone_rich_message
 from community_bot.reply_rich import bot_publication
@@ -55,7 +57,7 @@ async def _send(bot, chat_id, sender, recipient, line, url, dismiss):
     ]
     with standalone_rich_message(), bot_publication(), keep_in_chat():
         try:
-            await bot.send_rich_message(
+            return await bot.send_rich_message(
                 chat_id,
                 rich_message=InputRichMessage(
                     blocks=[
@@ -67,7 +69,7 @@ async def _send(bot, chat_id, sender, recipient, line, url, dismiss):
             )
         except (TelegramBadRequest, TelegramNotFound):
             plain = "".join(part if isinstance(part, str) else user_link(part.user.id, part.text) for part in text)
-            await bot.send_message(
+            return await bot.send_message(
                 chat_id, plain, parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                     InlineKeyboardButton(**button.model_dump(exclude_none=True)) for button in buttons
@@ -94,7 +96,9 @@ async def deliver_game_invitation(bot, db, settings, game, room_id, sender_id, r
 
     async def deliver(chat_id):
         try:
-            await _send(bot, chat_id, sender, recipient, line, url, dismiss)
+            with group_message_actors(sender_id, recipient_id):
+                sent = await _send(bot, chat_id, sender, recipient, line, url, dismiss)
+            await remember(db, game, room_id, chat_id, sent)
         except _DELIVERY_ERRORS as error:
             logger.warning("Game invitation delivery failed: %s", type(error).__name__)
             return
@@ -148,9 +152,9 @@ async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
             host = _mention(await db.get_user(uid))
             url = f"https://t.me/{username}?startapp=nora_q_{game}_{rid}"
             button = RichMessageButton(text="Присоединиться", style="success", url=url)
-            with standalone_rich_message(), bot_publication(), keep_in_chat():
+            with standalone_rich_message(), bot_publication(), keep_in_chat(), group_message_actors(uid):
                 try:
-                    await bot.send_rich_message(chat_id, rich_message=InputRichMessage(
+                    sent = await bot.send_rich_message(chat_id, rich_message=InputRichMessage(
                         blocks=[
                             InputRichBlockSectionHeading(text=title, size=2),
                             InputRichBlockParagraph(text=[host, " открыл лобби для быстрой игры."]),
@@ -162,7 +166,7 @@ async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
                         skip_entity_detection=True,
                     ))
                 except (TelegramBadRequest, TelegramNotFound):
-                    await bot.send_message(
+                    sent = await bot.send_message(
                         chat_id,
                         f"<b>{title}</b>\n{user_link(uid, host.text)} открыл лобби. Ставка <b>{stake_text}</b>",
                         parse_mode="HTML",
@@ -170,6 +174,7 @@ async def announce_quick_lobby(bot, db, settings, game, rid, uid, stake):
                             InlineKeyboardButton(text=button.text, style=button.style, url=url),
                         ]]),
                     )
+        await remember(db, game, rid, chat_id, sent)
     except _DELIVERY_ERRORS as error:
         logger.warning("Quick lobby announcement failed: %s", type(error).__name__)
 

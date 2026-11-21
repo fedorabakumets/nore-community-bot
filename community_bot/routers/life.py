@@ -598,11 +598,14 @@ async def captcha_new_members(message: Message, db: Database, bot: Bot, settings
                 reply_markup=_captcha_markup(message.chat.id),
             )
         except _TG_ERRORS:
-            await message.answer(
-                f"{user_link(member.id, member.full_name)}, подтвердите, что вы человек.",
-                parse_mode="HTML",
-                reply_markup=_captcha_markup(message.chat.id),
-            )
+            from community_bot.group_message_close import group_message_actors
+
+            with group_message_actors(member.id):
+                await message.answer(
+                    f"{user_link(member.id, member.full_name)}, подтвердите, что вы человек.",
+                    parse_mode="HTML",
+                    reply_markup=_captcha_markup(message.chat.id),
+                )
 
 
 @router.callback_query(F.data.startswith("captcha:ok:"))

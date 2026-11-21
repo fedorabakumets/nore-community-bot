@@ -134,10 +134,11 @@ async def send_greeting(bot, chat_id: int, user: dict, day: str) -> None:
     from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 
     from community_bot.ephemeral import keep_in_chat
+    from community_bot.group_message_close import group_message_actors
 
     uid = int(user.get("user_id") or 0)
     recipient = str(uid) if uid else "u" + str(user["username"])
-    with keep_in_chat():
+    with keep_in_chat(), group_message_actors(uid):
         if callable(getattr(bot, "send_rich_message", None)):
             try:
                 await bot.send_rich_message(chat_id, rich_message=rich_greeting(user, day))

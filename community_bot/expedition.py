@@ -160,6 +160,7 @@ async def announce_expedition_result(
     claimed = await db.claim_expedition_notice(user_id)
     if not claimed:
         return False
+    from community_bot.group_message_close import group_message_actors
     from community_bot.helpers import user_link
     from community_bot.pets_talk import pet_pronouns
     from community_bot.shop_text import plain_shop_text
@@ -179,7 +180,8 @@ async def announce_expedition_result(
     dm_text = result_text(pet_name=pet_name, species_words=words, loot=loot)
     if settings.community_chat_id:
         try:
-            await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
+            with group_message_actors(user_id):
+                await bot.send_message(settings.community_chat_id, chat_text, parse_mode="HTML")
         except Exception:
             logger.exception("Не удалось написать в чат о возвращении тамагочи %s", user_id)
     try:

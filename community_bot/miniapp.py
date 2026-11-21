@@ -89,7 +89,10 @@ async def protection(request, handler):
                 ):
                     return web.json_response({'error': 'Заполни профиль на 100%, чтобы открыть этот раздел'},
                                              status=403, headers={'Cache-Control': 'no-store'})
-        response = await handler(request)
+        from community_bot.group_message_close import group_message_actors
+
+        with group_message_actors(request.get('actor', {}).get('id', 0)):
+            response = await handler(request)
         if (request.path in {'/api/sea', '/api/mafia', '/api/community'}
             or request.path.startswith(('/api/sea/', '/api/mafia/'))) and (
             response.content_type == 'application/json' and response.status < 400
