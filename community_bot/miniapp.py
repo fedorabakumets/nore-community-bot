@@ -582,6 +582,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     app['staff_chat_media_gate'] = asyncio.Semaphore(2)
     app.router.add_get('/api/community/chat', staff_chat.feed)
+    app.router.add_post('/api/community/chat/hide', staff_chat.hide)
     app.router.add_get(r'/api/community/chat/media/{message_id:\d+}', staff_chat.media)
     app.router.add_get('/api/community/people', community_api.directory)
     app.router.add_get('/api/community/lobbies', community_api.lobbies)
