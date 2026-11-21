@@ -280,9 +280,39 @@ window.NoraStaffChat = (() => {
       if(video.autoplay) void video.play().catch(()=>{});
     } else if(asset.type.startsWith('audio/') && !thumb) {
       const audio = document.createElement('audio');
-      audio.controls = true; audio.preload = 'metadata'; audio.src = asset.url;
-      stage.replaceChildren(audio);
-      stage.hidden = false; action.hidden = true;
+      audio.preload = 'metadata'; audio.src = asset.url;
+      if(type==='voice'){
+        const wrapper=document.createElement('div');
+        wrapper.className='staff-chat-voice-player';
+        wrapper.innerHTML='<button class="staff-chat-voice-play" type="button" data-chat-voice-play aria-label="Воспроизвести голосовое">▶</button>'+
+          '<div class="staff-chat-voice-body"><div class="staff-chat-voice-wave" aria-hidden="true">'+
+          Array.from({length:24},(_,i)=>'<span style="height:'+
+            (8+Math.abs(Math.sin(i*1.73)*Math.cos(i*.52))*17)+'px"></span>').join('')+
+          '</div><input class="staff-chat-voice-progress" type="range" min="0" max="100" value="0" step=".1" aria-label="Позиция голосового">'+
+          '<time class="staff-chat-voice-time">0:00</time></div>'+
+          '<button type="button" class="staff-chat-voice-speed" data-chat-voice-speed aria-label="Скорость воспроизведения">1×</button>';
+        wrapper.append(audio);
+        const format=seconds=>{
+          if(!Number.isFinite(seconds)||seconds<0)return '0:00';
+          return Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0');
+        };
+        const update=()=>{
+          const progress=wrapper.querySelector('.staff-chat-voice-progress');
+          const label=wrapper.querySelector('.staff-chat-voice-time');
+          const play=wrapper.querySelector('.staff-chat-voice-play');
+          const duration=Number.isFinite(audio.duration)?audio.duration:0;
+          if(progress)progress.value=duration>0?String(audio.currentTime/duration*100):'0';
+          if(label)label.textContent=format(audio.currentTime)+' / '+format(duration);
+          if(play){play.textContent=audio.paused?'▶':'Ⅱ';play.setAttribute('aria-label',audio.paused?'Воспроизвести':'Приостановить');}
+        };
+        for(const event of ['loadedmetadata','durationchange','timeupdate','play','pause','ended'])audio.addEventListener(event,update);
+        stage.replaceChildren(wrapper);
+        update();
+      }else{
+        audio.controls=true;
+        stage.replaceChildren(audio);
+      }
+      stage.hidden=false;action.hidden=true;
     } else return;
     node.dataset.chatRendered = key;
   }
@@ -1097,6 +1127,13 @@ window.NoraStaffChat = (() => {
     }
   });
   document.addEventListener('input',event=>{
+    if(tab==='staffchat' && event.target?.matches?.('.staff-chat-voice-progress')){
+      const audio=event.target.closest('.staff-chat-voice-player')?.querySelector('audio');
+      if(audio && Number.isFinite(audio.duration)){
+        audio.currentTime=audio.duration*Number(event.target.value)/100;
+      }
+      return;
+    }
     if(event.target?.id === 'staff-chat-draft'){
       draft=event.target.value;composeUpdate();postTyping();
     }
@@ -1117,6 +1154,24 @@ window.NoraStaffChat = (() => {
       if(contextId!==null){contextId=null;signature='';void load(true);}
       else if(feed)feed.scrollTo({top:feed.scrollHeight,behavior:'smooth'});
       newCount=0;unreadIds.clear();updateUnread();return;
+    }
+    const voicePlay=event.target.closest('[data-chat-voice-play]');
+    if(voicePlay){
+      const audio=voicePlay.closest('.staff-chat-voice-player')?.querySelector('audio');
+      if(audio){
+        if(audio.paused)void audio.play().catch(()=>toast('Не удалось воспроизвести голосовое'));
+        else audio.pause();
+      }
+      return;
+    }
+    const voiceSpeed=event.target.closest('[data-chat-voice-speed]');
+    if(voiceSpeed){
+      const audio=voiceSpeed.closest('.staff-chat-voice-player')?.querySelector('audio');
+      if(audio){
+        audio.playbackRate=audio.playbackRate===1?1.5:audio.playbackRate===1.5?2:1;
+        voiceSpeed.textContent=audio.playbackRate+'×';
+      }
+      return;
     }
     const reactButton=event.target.closest('[data-chat-react]');
     if(reactButton){void setChatReaction(reactButton);return;}
