@@ -8,7 +8,7 @@ window.NoraHomeScreen = (() => {
     /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const supported = !!(isMobile && app?.isVersionAtLeast?.('8.0') &&
     typeof app?.addToHomeScreen === 'function');
-  const icon = '/intro/nora-logo-ru.jpg';
+  const icon = '/intro/nora-home-icon.svg';
   let dialog, page = 0, status = 'unknown', requested = false, opener;
 
   function ensure() {
@@ -59,7 +59,7 @@ window.NoraHomeScreen = (() => {
     const back = dialog.querySelector('.nora-install-back');
     const title = `<span class="nora-install-kicker">НА ГЛАВНЫЙ ЭКРАН</span>`;
     if (page === 0) {
-      content.innerHTML = `<div class="nora-install-icon"><img src="${icon}" alt="Логотип Норы"></div>
+      content.innerHTML = `<div class="nora-install-icon"><img src="${icon}" alt="Иконка Норы"></div>
         ${title}<h2>Нора всегда<br><em>под рукой.</em></h2>
         <p>Открывай игры, профиль и коммьюнити прямо с экрана телефона. Один значок, один тап.</p>
         <div class="nora-install-footnote">Без App Store и Google Play. Ярлык создаёт сам Telegram.</div>`;
@@ -67,7 +67,7 @@ window.NoraHomeScreen = (() => {
       back.hidden = true;
     } else if (page === 1) {
       const unavailable = !supported || status === 'unsupported';
-      content.innerHTML = `<div class="nora-install-icon nora-install-icon-small"><img src="${icon}" alt="Логотип Норы"></div>
+      content.innerHTML = `<div class="nora-install-icon nora-install-icon-small"><img src="${icon}" alt="Иконка Норы"></div>
         ${title}<h2>Добавь <em>иконку.</em></h2>
         <div class="nora-install-steps">
           <div><b>01</b><span>Открой Нору в Telegram на iPhone или Android.</span></div>
@@ -82,7 +82,7 @@ window.NoraHomeScreen = (() => {
       back.hidden = false;
       action.disabled = status === 'added';
     } else {
-      content.innerHTML = `<div class="nora-install-icon"><img src="${icon}" alt="Логотип Норы"></div>
+      content.innerHTML = `<div class="nora-install-icon"><img src="${icon}" alt="Иконка Норы"></div>
         ${title}<h2>${status === 'added' ? 'Нора теперь <em>рядом.</em>' : 'Проверь <em>свой экран.</em>'}</h2>
         <p>${status === 'added' ? 'Telegram подтвердил добавление ярлыка. Найди значок Норы на главном экране телефона.' :
           'Подтверди запрос Telegram. Некоторые устройства не сообщают приложению, появился ли ярлык. Проверь главный экран вручную.'}</p>
