@@ -667,7 +667,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/events/upload', events_api.upload)
     app.router.add_get('/api/events/{event_id}/cover', events_api.cover)
     app.router.add_get('/api/events/{event_id}/participants', events_api.participants)
-    for name in ('intro.js', 'app.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
+    for name in ('intro.js', 'app.js', 'home-screen.js', 'home.js', 'shop.js', 'cabinet.js', 'pet.js', 'admin.js',
                  'interactive.js', 'nora-voxel.js', 'nora-wings.js', 'nora-scenery.js', 'nora-companion.js',
                  'nora-burrow.js', 'nora-burrow-models.js', 'nora-burrow-items.json',
                  'nora-burrow-trail.js', 'nora-burrow-trail.json',
