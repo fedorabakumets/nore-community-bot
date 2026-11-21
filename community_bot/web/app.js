@@ -366,11 +366,21 @@ function animateRouteChange(app, selected) {
   routeMotion = null;
   if (!oldKey || routeMotionExcluded.has(tab) || navReducedMotion.matches || typeof app.animate !== 'function') return;
   const from = routeMotionOrder.indexOf(oldSection), to = routeMotionOrder.indexOf(selected);
-  const x = from >= 0 && to >= 0 && from !== to ? (to > from ? 8 : -8) : 0;
+  const distance = from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
+  const rise = distance ? 2 : 10;
+  // Six steps create a smooth acceleration/deceleration profile on fast displays.
+  const frame = (offset, remaining, opacity) => ({
+    offset, opacity,
+    transform: `translate3d(${(distance * remaining).toFixed(2)}px,${(rise * remaining).toFixed(2)}px,0) scale(${(1 - .008 * remaining).toFixed(4)})`
+  });
   const animation = app.animate([
-    {opacity: .68, transform: 'translate3d(' + x + 'px,' + (x ? 0 : 6) + 'px,0)'},
-    {opacity: 1, transform: 'translate3d(0,0,0)'}
-  ], {duration: 185, easing: 'cubic-bezier(.2,.7,.3,1)'});
+    frame(0, 1, .72),
+    frame(.16, .86, .81),
+    frame(.36, .52, .91),
+    frame(.58, .23, .975),
+    frame(.82, .045, .998),
+    frame(1, 0, 1)
+  ], {duration: 310, easing: 'linear'});
   routeMotion = animation;
   animation.addEventListener('finish', () => {
     if (routeMotion === animation) routeMotion = null;
@@ -417,7 +427,21 @@ function renderNav(selected,name){
 new ResizeObserver(()=>positionNavDrop()).observe($('#nav'));
 navReducedMotion.addEventListener('change',()=>positionNavDrop());
 
-function sheet(html){$('#sheet-content').innerHTML=html;if(!$('#sheet').open)$('#sheet').showModal()}
+let sheetContentMotion = null;
+function sheet(html) {
+  const dialog = $('#sheet'), content = $('#sheet-content'), wasOpen = dialog.open;
+  sheetContentMotion?.cancel();
+  sheetContentMotion = null;
+  content.innerHTML = html;
+  if (!wasOpen) { dialog.showModal(); return; }
+  // A confirmation inside the same drawer moves only its content.
+  if (navReducedMotion.matches || typeof content.animate !== 'function') return;
+  sheetContentMotion = content.animate([
+    {offset: 0, opacity: .75, transform: 'translate3d(0,8px,0)'},
+    {offset: .5, opacity: .95, transform: 'translate3d(0,2px,0)'},
+    {offset: 1, opacity: 1, transform: 'translate3d(0,0,0)'}
+  ], {duration: 220, easing: 'cubic-bezier(.2,.7,.3,1)'});
+}
 async function product(sku){await window.NoraShop?.product(sku)}
 async function perform(path,payload,b=$('#pay')){
   if(busy)return;
@@ -476,6 +500,8 @@ document.addEventListener('click', e => {
   if (b.id==='change-avatar') $('#avatar-file').click();
 });
 $('#sheet').addEventListener('close',()=>{
+  sheetContentMotion?.cancel();
+  sheetContentMotion = null;
   const dialog=$('#sheet');
   if(dialog.open)return;
   $('#sheet-content').replaceChildren();
