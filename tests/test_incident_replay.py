@@ -33,7 +33,7 @@ async def test_old_group_commands_are_dropped_before_any_handlers():
     observed = []
 
     async def handler(event, _data):
-        observed.append(event.message.message_id)
+        observed.append((event.message or event.edited_message).message_id)
         return "processed"
 
     old = Update(update_id=1, message=msg(age=3600, mid=17))
@@ -120,6 +120,7 @@ async def test_moderation_uses_sent_time_not_replay_arrival(monkeypatch, tmp_pat
     monkeypatch.setattr(group, "Settings", SimpleNamespace)
     monkeypatch.setattr(group, "Bot", SimpleNamespace)
     monkeypatch.setattr(group, "register_telegram_user", AsyncMock(return_value={"user_id": 17}))
+    monkeypatch.setattr(Message, "delete", AsyncMock(return_value=True))
     monkeypatch.setattr(group, "needs_reapplication", AsyncMock(return_value=False))
     monkeypatch.setattr(group, "rank_of_user", AsyncMock(return_value=0))
     monkeypatch.setattr(db, "list_feature_flags", AsyncMock(return_value=[
@@ -130,6 +131,7 @@ async def test_moderation_uses_sent_time_not_replay_arrival(monkeypatch, tmp_pat
     bot = SimpleNamespace(
         get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)),
         restrict_chat_member=AsyncMock(),
+        send_message=AsyncMock(),
     )
     settings = SimpleNamespace(community_chat_id=-100123)
     middleware = group.CommunityModerationMiddleware()

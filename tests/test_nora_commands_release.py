@@ -52,7 +52,12 @@ async def test_command_menu_contains_only_the_guide_in_allowed_chats(chat_id):
         ("all_group_chats", None), ("all_group_chats", "ru")
     }
     for call in calls:
-        assert [(command.command, command.description) for command in call.args[0]] == [("commands", "Нора команды")]
+        expected = (
+            [("start", "Открыть НОРУ")]
+            if call.kwargs["scope"].type == "all_private_chats"
+            else [("commands", "Нора команды")]
+        )
+        assert [(command.command, command.description) for command in call.args[0]] == expected
         if call.kwargs["scope"].type == "chat":
             assert call.kwargs["scope"].chat_id == chat_id
 
