@@ -17,6 +17,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiogram import F, Router
@@ -33,6 +34,14 @@ router = Router(name="song_requests")
 logger = logging.getLogger(__name__)
 
 _REQUEST = re.compile(r"^\s*(?:нора[\s,:\-]+)?песня(?:[\s,:\-]+|$)(.*)$", re.I | re.S)
+# Catch direct Yandex song links before the older pet video downloader.
+_LINK_REQUEST = re.compile(
+    r"^\s*(?:нора[\s,:\-]+)?(?:песня[\s,:\-]+)?"
+    r"(https?://music\.yandex\.(?:ru|by|kz|com)/\S+)\s*$", re.I,
+)
+_TRACK_PATH = re.compile(r"/(?:album/(?P<album>\d{1,16})/)?track/(?P<track>\d{1,16})/?")
+_YANDEX_HOSTS = {"music.yandex.ru", "music.yandex.by", "music.yandex.kz", "music.yandex.com"}
+
 _SEND_LOCK = asyncio.Lock()
 _CHOICES: dict[str, "Choices"] = {}
 MAX_RESULTS = 5
@@ -80,8 +89,32 @@ def song_query(text: str | None) -> str | None:
     return match.group(1).strip().strip('«»"“”').strip()[:120]
 
 
+def song_link_request(text: str | None) -> str | None:
+    """Accept standalone Yandex track links and Nora/song-prefixed links."""
+    match = _LINK_REQUEST.fullmatch(text or "")
+    return match.group(1) if match else None
+
+
+def parse_track_link(url: str) -> tuple[str, str | None]:
+    """Extract a numeric track id, never fetching an untrusted URL."""
+    try:
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.hostname not in _YANDEX_HOSTS
+                or parts.port is not None or parts.username or parts.password):
+            raise SongError("Поддерживается только HTTPS-ссылка на трек Яндекс Музыки.")
+    except ValueError as exc:
+        raise SongError("Некорректная ссылка Яндекс Музыки.") from exc
+    match = _TRACK_PATH.fullmatch(parts.path)
+    if not match:
+        raise SongError(
+            "Пришли ссылку именно на песню, например: "
+            "https://music.yandex.ru/album/123/track/456"
+        )
+    return match.group("track"), match.group("album")
+
+
 def is_song_request(text: str | None) -> bool:
-    return song_query(text) is not None
+    return song_query(text) is not None or song_link_request(text) is not None
 
 
 def _cookie_bytes() -> bytes:
@@ -177,6 +210,42 @@ async def find_songs(query: str) -> list[Song]:
     return parse_search_results(payload)
 
 
+async def find_song_by_link(raw_url: str) -> Song:
+    """Fetch exact track metadata from the Yandex web API."""
+    track_id, album_id = parse_track_link(raw_url)
+    cookies = _cookie_bytes()
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://music.yandex.ru",
+        "Referer": "https://music.yandex.ru/",
+        "x-yandex-music-client": "YandexMusicWebNext/1.0.0",
+        "Cookie": _cookie_header(cookies),
+    }
+    form = aiohttp.FormData()
+    form.add_field("trackIds", f"{track_id}:{album_id}" if album_id else track_id,
+                   content_type="text/plain")
+    timeout = aiohttp.ClientTimeout(total=14)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post("https://api.music.yandex.ru/tracks", data=form,
+                                    headers=headers, allow_redirects=False) as response:
+                if response.status in (401, 403):
+                    raise SongError("Яндекс отклонил сессию. Нужно заново войти в аккаунт.")
+                if response.status != 200:
+                    raise SongError("Не удалось получить информацию о треке. Попробуй позднее.")
+                payload = await response.json(content_type=None)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        raise SongError("Не удалось подключиться к Яндекс Музыке.") from exc
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
+        raise SongError("Яндекс не нашёл трек по ссылке или не предоставил к нему доступ.")
+    songs = parse_search_results({"result": {"tracks": {"results": [payload[0]]}}})
+    if not songs or songs[0].id != track_id:
+        raise SongError("Трек по ссылке недоступен для этого аккаунта.")
+    song = songs[0]
+    return Song(song.id, album_id or song.album_id, song.title, song.artist, song.duration)
+
+
 def is_full_track(actual: float, expected: int) -> bool:
     """Reject 13–30 second preview files masquerading as full tracks."""
     if actual <= 0:
@@ -228,8 +297,7 @@ async def _remaining(db: Database, user_id: int, chat_id: int) -> int:
     return max((max(0, int(float(value) + COOLDOWN_SECONDS - now)) for value in timestamps if value), default=0)
 
 
-async def send_song(callback: CallbackQuery, db: Database, choice: Choices, song: Song) -> None:
-    bot = callback.bot
+async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
     if bot is None:
         return
     async with _SEND_LOCK:
@@ -288,19 +356,31 @@ async def _mark_sent(db: Database, choice: Choices) -> None:
 
 
 @router.message(F.text.func(is_song_request), F.chat.type.in_({"private", "group", "supergroup"}), StateFilter(None))
-async def request_song(message: Message, settings: Settings) -> None:
+async def request_song(message: Message, settings: Settings, db: Database) -> None:
     if (not message.from_user or message.from_user.is_bot or message.sender_chat
             or message.forward_origin or message.via_bot):
         return
     if message.chat.type != "private" and message.chat.id != settings.community_chat_id:
         return
     query = song_query(message.text)
-    if query is None:
+    link = song_link_request(message.text)
+    if query is None and link is None:
         return
     if not enabled():
         await message.answer("Музыкальные запросы пока не подключены. Нужна настройка Яндекса владельцем.")
         return
-    if len(query) < 2:
+    if link is not None:
+        try:
+            song = await find_song_by_link(link)
+        except SongError as exc:
+            await message.answer(str(exc))
+            return
+        choice = Choices(message.from_user.id, message.chat.id, time.monotonic() + CHOICE_TTL, [song])
+        await send_song(message.bot, db, choice, song)
+        if message.chat.type != "private":
+            await delete_user_command(message, message.bot)
+        return
+    if query is None or len(query) < 2:
         await message.answer("Напиши: Нора песня Кино Группа крови")
         return
     try:
@@ -346,4 +426,4 @@ async def song_chosen(callback: CallbackQuery, db: Database) -> None:
         await callback.answer("Неверный запрос.", show_alert=True)
         return
     await callback.answer("Загружаю песню…")
-    await send_song(callback, db, choice, choice.tracks[index])
+    await send_song(callback.bot, db, choice, choice.tracks[index])

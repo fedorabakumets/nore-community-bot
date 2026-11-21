@@ -72,7 +72,7 @@ async def test_disabled_request_does_not_search(monkeypatch):
         chat=SimpleNamespace(id=-100, type="supergroup"),
         text="Нора песня Кино", answer=AsyncMock(),
     )
-    await songs.request_song(message, SimpleNamespace(community_chat_id=-100))
+    await songs.request_song(message, SimpleNamespace(community_chat_id=-100), None)
     message.answer.assert_awaited_once()
     assert "не подключены" in message.answer.await_args.args[0]
 
@@ -113,3 +113,109 @@ async def test_cooldown_is_persistent(monkeypatch):
     monkeypatch.setattr(songs.time, "time", lambda: 150)
     assert await songs._remaining(Db(), 2, -100) == 260
     assert await songs._remaining(Db(), 3, 4) == 0
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("https://music.yandex.ru/track/987?utm_medium=copy_link", "987"),
+    ("Нора https://music.yandex.ru/album/321/track/987?utm_medium=copy_link", "987"),
+    ("Нора песня https://music.yandex.ru/album/321/track/987", "987"),
+    ("песня https://music.yandex.ru/track/987", "987"),
+    ("https://music.yandex.kz/track/987", "987"),
+])
+def test_yandex_link_command_variants(text, expected):
+    assert songs.is_song_request(text)
+    link = songs.song_link_request(text)
+    assert link is not None
+    assert songs.parse_track_link(link)[0] == expected
+
+
+def test_yandex_track_links_ignore_query_and_keep_album():
+    assert songs.parse_track_link("https://music.yandex.ru/album/123/track/456?utm_source=share") == ("456", "123")
+    assert songs.parse_track_link("https://music.yandex.ru/track/456/") == ("456", None)
+
+
+@pytest.mark.parametrize("url", [
+    "https://music.yandex.ru/album/123",
+    "https://music.yandex.ru/artist/123",
+    "https://music.yandex.ru/album/123/track/456/other",
+    "https://music.yandex.ru/album/123/track/../../1",
+    "https://music.yandex.ru.evil.test/track/123",
+    "https://evil.test/track/123",
+    "https://music.yandex.ru:9443/track/123",
+    "http://music.yandex.ru/track/123",
+])
+def test_invalid_yandex_track_links_are_rejected(url):
+    with pytest.raises(songs.SongError):
+        songs.parse_track_link(url)
+
+
+@pytest.mark.asyncio
+async def test_direct_yandex_link_uses_exact_track_without_search(monkeypatch):
+    monkeypatch.setenv("NORA_SONGS_ENABLED", "1")
+    song = songs.Song("987", "321", "Песня", "Исполнитель", 213)
+    find_by_link = AsyncMock(return_value=song)
+    search_by_name = AsyncMock()
+    send = AsyncMock()
+    monkeypatch.setattr(songs, "find_song_by_link", find_by_link)
+    monkeypatch.setattr(songs, "find_songs", search_by_name)
+    monkeypatch.setattr(songs, "send_song", send)
+    bot = SimpleNamespace()
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=10, is_bot=False),
+        sender_chat=None, forward_origin=None, via_bot=None,
+        chat=SimpleNamespace(id=20, type="private"),
+        text="Нора https://music.yandex.ru/album/321/track/987?utm_source=copy_link",
+        answer=AsyncMock(),
+        bot=bot,
+    )
+    db = SimpleNamespace()
+    await songs.request_song(message, SimpleNamespace(community_chat_id=-100), db)
+    find_by_link.assert_awaited_once()
+    search_by_name.assert_not_awaited()
+    send.assert_awaited_once()
+    assert send.await_args.args[0] is bot
+    assert send.await_args.args[1] is db
+    assert send.await_args.args[3] == song
+    message.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_yandex_link_metadata_api_resolves_exact_track(monkeypatch):
+    raw = (b"# Netscape HTTP Cookie File\n"
+           b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
+    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+    requested = []
+
+    class Response:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def json(self, **_):
+            return [{
+                "id": "987", "title": "Песня", "available": True,
+                "artists": [{"name": "Исполнитель"}],
+                "albums": [{"id": "321"}], "durationMs": 200000,
+            }]
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        def post(self, url, **kwargs):
+            requested.append((url, kwargs))
+            return Response()
+
+    monkeypatch.setattr(songs.aiohttp, "ClientSession", lambda **_: Session())
+    result = await songs.find_song_by_link("https://music.yandex.ru/album/321/track/987?utm=1")
+    assert result == songs.Song("987", "321", "Песня", "Исполнитель", 200)
+    assert requested[0][0] == "https://api.music.yandex.ru/tracks"
+    assert requested[0][1]["allow_redirects"] is False
+    assert requested[0][1]["data"]._fields[0][2] == "987:321"
