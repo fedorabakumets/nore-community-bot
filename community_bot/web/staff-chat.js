@@ -450,12 +450,100 @@ window.NoraStaffChat = (() => {
     }
   }
 
+
+  function composeUpdate() {
+    const field = document.getElementById('staff-chat-draft');
+    const form = document.getElementById('staff-chat-compose');
+    if(!field || !form)return;
+    field.maxLength = attachment ? 800 : 3000;
+    const send = document.getElementById('staff-chat-submit');
+    if(send){
+      send.disabled = sending || (!draft.trim() && !attachment) || draft.length > (attachment?800:3000);
+      send.textContent = sending ? '…' : '➤';
+    }
+    const back = document.getElementById('staff-chat-compose-reply');
+    if(back){
+      back.hidden = !replyTarget;
+      back.innerHTML = replyTarget
+        ? `<span><b>↩ ${esc(replyTarget.name)}</b><small>${esc(replyTarget.preview)}</small></span><button type="button" data-chat-cancel-reply aria-label="Отменить ответ">×</button>`
+        : '';
+    }
+    const chosen = document.getElementById('staff-chat-compose-file');
+    if(chosen){
+      chosen.hidden = !attachment;
+      chosen.innerHTML = attachment
+        ? `<span>📎 ${esc(attachment.name)} · ${(attachment.size/1048576).toFixed(1)} МБ</span><button type="button" data-chat-remove-file aria-label="Убрать вложение">×</button>`
+        : '';
+    }
+    const emoji = document.getElementById('staff-chat-emoji-palette');
+    if(emoji)emoji.hidden = !emojiOpen;
+    field.style.height = 'auto';
+    field.style.height = Math.min(field.scrollHeight, 106) + 'px';
+  }
+  function prepareComposer() {
+    const field = document.getElementById('staff-chat-draft');
+    if(!field)return;
+    field.value = draft;
+    composeUpdate();
+  }
+  async function sendCompose() {
+    if(sending || (!draft.trim() && !attachment))return;
+    const text = draft.trim();
+    const reply_to = replyTarget?.id || null;
+    if(text.length > (attachment ? 800 : 3000)){
+      toast('Слишком длинный текст для сообщения с вложением');
+      return;
+    }
+    sending = true;
+    composeUpdate();
+    try {
+      let result;
+      if(attachment){
+        if(attachment.size > maxUpload)throw new Error('Файл должен быть не больше 12 МБ');
+        const form = new FormData();
+        form.append('file',attachment,attachment.name);
+        form.append('text',text);
+        if(reply_to)form.append('reply_to',String(reply_to));
+        const response = await fetch('/api/community/chat/upload',{
+          method:'POST',headers:{Authorization:'tma '+auth},body:form
+        });
+        try {result=await response.json();}catch{throw new Error('Нет ответа от сервера Норы')}
+        if(!response.ok)throw new Error(result.error || 'Не удалось отправить вложение');
+      }else{
+        result=await api('community/chat/send',{text,reply_to});
+      }
+      if(!result?.ok)throw new Error('Telegram не подтвердил отправку');
+      draft='';attachment=null;replyTarget=null;emojiOpen=false;contextId=null;
+      signature='';
+      const file=document.getElementById('staff-chat-file');
+      if(file)file.value='';
+      prepareComposer();
+      void load(true);
+    }catch(error){
+      toast(error.message || 'Не удалось отправить сообщение');
+    }finally{
+      sending=false;composeUpdate();
+    }
+  }
+  function selectReply(button) {
+    const id=Number(button.dataset.chatAnswer);
+    if(!Number.isSafeInteger(id) || id<=0)return;
+    replyTarget={
+      id,
+      name:button.dataset.chatName || 'Сообщение',
+      preview:button.dataset.chatPreview || 'Ответ в Telegram'
+    };
+    composeUpdate();
+    document.getElementById('staff-chat-draft')?.focus();
+  }
+
   function mount() {
     if(timer !== null){clearInterval(timer);timer = null;}
     observer?.disconnect();observer = null;
     visit++;
     loading = false;signature = '';contextId = null;
     if(tab !== 'staffchat'){clearAssets();return;}
+    prepareComposer();
     void load();
     timer = setInterval(()=>{if(contextId === null)void load();},3000);
   }
