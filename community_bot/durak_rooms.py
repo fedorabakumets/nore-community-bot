@@ -16,6 +16,7 @@ from community_bot import durak_items as items
 from community_bot import durak_rules as rules
 from community_bot.database import Database
 from community_bot.friends_api import accepted_in_connection, inbox_in_connection
+from community_bot.game_lobby_posts import record_acceptance
 from community_bot.rocket_api import stake_restriction
 from community_bot.sea_api import _one as one
 from community_bot.sea_api import _rows as rows
@@ -229,6 +230,7 @@ async def _join(conn, r, uid, code, now, *, quick=False):
             items.PARTS["felt"] | items.PARTS["back"])
         r["deadline"] = now + rules.SECONDS[r["config"]["speed"]]
         await conn.execute("DELETE FROM durak_invites WHERE room=?", (r["id"],))
+    await record_acceptance(conn, r["kind"], r["id"], uid, now)
 
 
 async def _finish(conn, r, now, *, cancel=None):

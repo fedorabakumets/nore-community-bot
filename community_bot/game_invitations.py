@@ -95,10 +95,11 @@ async def deliver_game_invitation(bot, db, settings, game, room_id, sender_id, r
     line = f" приглашает сыграть в {_GAME_NAMES[game]}!"
 
     async def deliver(chat_id):
+        sent_since = time.time()
         try:
             with group_message_actors(sender_id, recipient_id):
                 sent = await _send(bot, chat_id, sender, recipient, line, url, dismiss)
-            await remember(db, game, room_id, chat_id, sent)
+            await remember(db, game, room_id, chat_id, sent, recipient=recipient_id, sent_since=sent_since)
         except _DELIVERY_ERRORS as error:
             logger.warning("Game invitation delivery failed: %s", type(error).__name__)
             return
@@ -150,6 +151,7 @@ async def send_lobby_post(bot, db, chat_id, game, rid, uid, stake, players, capa
     stake_text = f"{stake:,}".replace(",", " ") + " 🍪"
     line = " открыл лобби для быстрой игры." if quick else " приглашает сыграть в «Дурака»!"
     seats = f" · {players} из {capacity} игроков"
+    sent_since = time.time()
     try:
         async with asyncio.timeout(6):
             username = (await bot.me()).username
@@ -180,7 +182,7 @@ async def send_lobby_post(bot, db, chat_id, game, rid, uid, stake, players, capa
                             InlineKeyboardButton(text=button.text, style=button.style, url=url),
                         ]]),
                     )
-        await remember(db, game, rid, chat_id, sent, announcement=True)
+        await remember(db, game, rid, chat_id, sent, announcement=True, sent_since=sent_since)
     except _DELIVERY_ERRORS as error:
         logger.warning("Lobby announcement failed: %s", type(error).__name__)
         return False

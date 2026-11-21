@@ -147,7 +147,6 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
             until_date=until,
         )
     await callback.answer("Выстрел.")
-    await callback.message.edit_reply_markup(reply_markup=None)
     winner_name = html.escape(_player_name(winner))
     loser_name = html.escape(_player_name(loser))
     await send_game_finale(
@@ -156,7 +155,6 @@ async def roulette_decision(callback: CallbackQuery, db: Database, bot: Bot) -> 
         f"Уцелел: {user_link(int(winner['user_id']), winner_name)}\n"
         f"Отлетел: {user_link(int(loser['user_id']), loser_name)} — мут {ROULETTE_MUTE_MINUTES} мин.",
     )
-    expire_game_result(callback.message)
 
 
 @router.callback_query(F.data.regexp(r"^game:(join|start|cancel|vote):"))

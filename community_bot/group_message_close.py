@@ -46,7 +46,7 @@ COPIES = {"copyMessage", "copyMessages", "forwardMessage", "forwardMessages"}
 # A separate context is used by Mini App requests and tasks publishing to the chat for a named recipient.
 _ACTORS: ContextVar[tuple[int, ...]] = ContextVar("group_close_actors", default=())
 _SOURCE: ContextVar[Message | None] = ContextVar("group_close_source", default=None)
-_PIN_EDIT: ContextVar[bool] = ContextVar("group_pin_markup_edit", default=False)
+_SKIP_GROUP_CLOSE: ContextVar[bool] = ContextVar("skip_group_close", default=False)
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +58,15 @@ def group_message_actors(*actors: int) -> Iterator[None]:
         yield
     finally:
         _ACTORS.reset(token)
+
+
+@contextmanager
+def without_group_close() -> Iterator[None]:
+    token = _SKIP_GROUP_CLOSE.set(True)
+    try:
+        yield
+    finally:
+        _SKIP_GROUP_CLOSE.reset(token)
 
 
 class GroupMessageActorsMiddleware(BaseMiddleware):
@@ -108,13 +117,10 @@ async def _set_pin_button(make_request, bot, chat_id, message_id, *, pinned):
         async with asyncio.timeout(5):
             username = (await bot.me()).username if pinned else None
             url = f"https://t.me/{username}?startapp" if username else ""
-            token = _PIN_EDIT.set(True)
-            try:
+            with without_group_close():
                 await make_request(bot, EditMessageReplyMarkup(
                     chat_id=chat_id, message_id=message_id, reply_markup=_pin_markup(url),
                 ))
-            finally:
-                _PIN_EDIT.reset(token)
     except TelegramBadRequest as error:
         if "not modified" not in str(error).lower():
             logger.warning("Telegram declined a pin menu change (%s)", type(error).__name__)
@@ -221,18 +227,18 @@ async def _migrate_current_pin(bot, message):
         return  # A native photo or poll can keep its pin, but cannot be edited into Rich text.
     record = await _edit_record(db, chat_id, mid)
     markup = _without_pin_link(message.reply_markup)
-    token = _PIN_EDIT.set(True)
     try:
-        async with asyncio.timeout(5):
-            await bot(EditMessageText(chat_id=chat_id, message_id=mid, rich_message=_rich(blocks, markup, record.data)))
+        with without_group_close():
+            async with asyncio.timeout(5):
+                await bot(EditMessageText(
+                    chat_id=chat_id, message_id=mid, rich_message=_rich(blocks, markup, record.data),
+                ))
         await _remember(db, chat_id, mid, CloseRecord(record.data, rich=True), message.date.timestamp())
     except TelegramBadRequest as error:
         if "not modified" not in str(error).lower():
             logger.warning("Telegram declined Rich migration of the current pin")
     except (TelegramAPIError, TimeoutError, OSError):
         logger.warning("Could not migrate the current pin to Rich")
-    finally:
-        _PIN_EDIT.reset(token)
 
 
 def _without_pin_link(markup):
@@ -261,7 +267,8 @@ class GroupCloseSendMiddleware(BaseRequestMiddleware):
         settings = getattr(bot, "community_settings", None)
         name = method.__api_method__
         chat_id = getattr(method, "chat_id", None)
-        if _PIN_EDIT.get() or not settings or chat_id != getattr(settings, "community_chat_id", 0) or not chat_id:
+        if (_SKIP_GROUP_CLOSE.get() or not chat_id or not settings
+                or chat_id != getattr(settings, "community_chat_id", 0)):
             return await make_request(bot, method)
         db = bot.community_db
         if name in {"pinChatMessage", "unpinChatMessage", "unpinAllChatMessages"}:

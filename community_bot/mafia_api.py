@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
+from community_bot.game_lobby_posts import record_acceptance
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_mafia_rooms (
     id TEXT PRIMARY KEY, host_id INTEGER NOT NULL REFERENCES users(user_id),
@@ -591,6 +593,7 @@ async def _join_lobby(conn, room, uid, now):
         (room["id"], uid),
     )
     _log(room, f"{_players(room)[str(uid)]['name']} присоединился. Подтвердите готовность новым составом.", now)
+    await record_acceptance(conn, "mafia", room["id"], uid, now)
     return "Ты в комнате. Отметь готовность, когда будешь готов начать"
 
 

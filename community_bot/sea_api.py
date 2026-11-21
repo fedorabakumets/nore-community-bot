@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from aiohttp import web
 
+from community_bot.game_lobby_posts import record_acceptance
 from community_bot.profile_fields import profile_age
 
 SCHEMA = """
@@ -686,6 +687,7 @@ async def _join_room(conn, room, uid: int, now: float) -> None:
         (room["id"], uid, now),
     )
     _log(room, f"{_players(room)[str(uid)]['name']} вошёл в комнату.", now)
+    await record_acceptance(conn, "sea", room["id"], uid, now)
 
 
 # Bounded per-process limit supplements the expensive password hash.

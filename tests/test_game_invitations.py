@@ -10,7 +10,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import SendRichMessage
 from aiogram.types import Message, RichMessage
 
-from community_bot import barricade_api, durak_api, durak_rooms, mafia_api, sea_api
+from community_bot import barricade_api, durak_api, durak_rooms, game_lobby_posts, mafia_api, sea_api
 from community_bot.database import Database
 from community_bot.game_invitations import (
     close_game_invitation,
@@ -54,7 +54,9 @@ async def db(tmp_path):
 @pytest.mark.parametrize(("game", "title"), [("durak", "Дурака"), ("mafia", "Мафию"), ("sea", "Морской бой")])
 async def test_rich_invite_delivers_both_copies_and_opens_the_invited_lobby(db, game, title):
     bot = SimpleNamespace(
-        me=AsyncMock(return_value=SimpleNamespace(username="test_nora")), send_rich_message=AsyncMock(),
+        me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
+        send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=31)),
+        edit_message_text=AsyncMock(), delete_message=AsyncMock(),
     )
     request = Request(db, 1, {}, bot)
     if game == "durak":
@@ -104,6 +106,10 @@ async def test_rich_invite_delivers_both_copies_and_opens_the_invited_lobby(db, 
         assert (await protection(Request(db, 2, body), open_invitation)).status == 400
     else:
         assert (await api.read_status(db, 2))["room"]["id"] == rid
+        await game_lobby_posts.cleanup(db, bot)
+        bot.edit_message_text.assert_awaited_once()
+        assert bot.edit_message_text.await_args.kwargs["chat_id"] == -100123
+        bot.delete_message.assert_not_awaited()
 
 
 async def test_durak_host_can_announce_open_lobby_in_community_chat(db):
@@ -113,6 +119,7 @@ async def test_durak_host_can_announce_open_lobby_in_community_chat(db):
     bot = SimpleNamespace(
         me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
         send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=13)),
+        edit_message_text=AsyncMock(), delete_message=AsyncMock(),
     )
 
     async def announce(uid):
@@ -142,6 +149,13 @@ async def test_durak_host_can_announce_open_lobby_in_community_chat(db):
     guest = Request(db, 2, {"code": button.url.split("nora_d_")[1]})
     assert json.loads((await durak_api.preview(guest)).body)["id"] == rid
     assert not (await durak_api.menu(db, 2))["active"]
+    await game_lobby_posts.cleanup(db, bot)
+    bot.edit_message_text.assert_not_awaited()
+    await durak_rooms.command(db, 2, {"action": "join", "room": rid, "nonce": secrets.token_hex(16)})
+    await game_lobby_posts.cleanup(db, bot)
+    bot.edit_message_text.assert_awaited_once()
+    assert bot.edit_message_text.await_args.kwargs["message_id"] == 13
+    assert (await durak_api.snapshot(db, rid, 1))["status"] == "waiting"
 
 
 @pytest.mark.parametrize("chat_id", [2, -100123])
@@ -190,8 +204,11 @@ async def test_group_delivery_survives_closed_dm_and_rich_api_rejection(db):
     ("durak", "🃏 Дурак", durak_api.action), ("barricade", "🪵 Баррикада", barricade_api.action),
 ])
 async def test_quick_lobby_announces_only_new_waiting_rooms_and_opens_specific_room(db, game, title, handler):
-    bot = SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
-                          send_rich_message=AsyncMock())
+    bot = SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
+        send_rich_message=AsyncMock(return_value=SimpleNamespace(message_id=32)),
+        edit_message_text=AsyncMock(), delete_message=AsyncMock(),
+    )
     request = Request(db, 1, {"action": "quick", "config": {"stake": 100}, "nonce": secrets.token_hex(16)}, bot)
     first, retry = await handler(request), await handler(request)
     rid = json.loads(first.body)["id"]
@@ -216,6 +233,9 @@ async def test_quick_lobby_announces_only_new_waiting_rooms_and_opens_specific_r
     assert (await db.get_user(2))["cookies"] == 0
     assert (await protection(click, quick_preview)).status == 400
     assert bot.send_rich_message.await_count == 1
+    await game_lobby_posts.cleanup(db, bot)
+    bot.edit_message_text.assert_awaited_once()
+    bot.delete_message.assert_not_awaited()
 
 
 @pytest.mark.parametrize(("game", "handler"), [("durak", durak_api.action), ("barricade", barricade_api.action)])

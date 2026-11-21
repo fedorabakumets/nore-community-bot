@@ -1,3 +1,4 @@
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -202,19 +203,72 @@ async def test_quick_post_expires_at_two_minutes_without_cancelling_waiting_room
     assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (rid,)))["status"] == "waiting"
 
 
-async def test_mini_app_start_retires_both_copies_of_the_invitation(db):
+async def test_mini_app_start_confirms_group_invitation_before_deleting_it(db):
     rid, _ = await durak_rooms.command(db, 1, command("create", 1, config={"stake": 5, "private": True}))
     _, notice = await durak_rooms.command(db, 1, command("invite", 2, room=rid, friend=2))
     app_bot = fake_bot(db)
     app_bot.me = AsyncMock(return_value=SimpleNamespace(username="test_nora"))
     app_bot.send_rich_message = AsyncMock(side_effect=lambda chat, **_: message(10, chat))
+    app_bot.edit_message_text = AsyncMock()
     await deliver_game_invitation(app_bot, db, app_bot.community_settings, "durak", rid, 1, 2, notice[0])
     await game_lobby_posts.cleanup(db, app_bot)
     app_bot.delete_message.assert_not_called()
     await durak_rooms.command(db, 2, command("join", 3, room=rid))
-    await game_lobby_posts.cleanup(db, app_bot)
-    assert {call.args for call in app_bot.delete_message.await_args_list} == {(GROUP, 10), (2, 10)}
+    now = time.time()
+    await game_lobby_posts.cleanup(db, app_bot, now=now)
+    app_bot.edit_message_text.assert_awaited_once()
+    edit = app_bot.edit_message_text.await_args.kwargs
+    assert (edit["chat_id"], edit["message_id"]) == (GROUP, 10)
+    assert [block.text for block in edit["rich_message"].blocks] == ["Игра принята ✅"]
+    app_bot.delete_message.assert_awaited_once_with(2, 10)
+    await game_lobby_posts.cleanup(db, app_bot, now=now + 1.99)
+    app_bot.delete_message.assert_awaited_once_with(2, 10)
+    await game_lobby_posts.cleanup(db, app_bot, now=now + 2)
+    assert [call.args for call in app_bot.delete_message.await_args_list] == [(2, 10), (GROUP, 10)]
+    app_bot.edit_message_text.assert_awaited_once()
     assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (rid,)))["status"] == "playing"
+
+async def test_roulette_only_confirms_accepted_challenge_without_adding_buttons(db):
+    accepted = await db.create_roulette(GROUP, 1, 2)
+    declined = await db.create_roulette(GROUP, 1, 3)
+    await db.set_bot_state(f"{game_lobby_posts.PREFIX}{GROUP}:10",
+                           f'["roulette",{accepted},{GROUP},10,{time.time() + 120},0]')
+    await game_lobby_posts.remember(db, "roulette", declined, GROUP, message(11))
+    assert (await db.settle_roulette(accepted, 2, 1))[0]
+    assert await db.cancel_roulette(declined, 3)
+    session = RecordingSession()
+    async with Bot("999:TEST", session=session) as bot:
+        bot.community_db = db
+        bot.community_settings = fake_bot(db).community_settings
+        bot.session.middleware.register(GroupCloseSendMiddleware())
+        now = time.time()
+        await game_lobby_posts.cleanup(db, bot, now=now)
+        edit, delete = session.calls
+        assert edit.message_id == 10 and edit.reply_markup is None
+        assert [block.text for block in edit.rich_message.blocks] == ["Игра принята ✅"]
+        assert delete.message_id == 11
+        await game_lobby_posts.cleanup(db, bot, now=now + 1)
+        assert len(session.calls) == 2
+        await game_lobby_posts.cleanup(db, bot, now=now + 2)
+        assert session.calls[-1].__api_method__ == "deleteMessage" and session.calls[-1].message_id == 10
+
+
+async def test_join_during_delivery_confirms_only_matching_and_older_invitations(db):
+    rid, _ = await durak_rooms.command(db, 1, command("create", 1, config={"stake": 5, "players": 3}))
+    sending = time.time()
+    await durak_rooms.command(db, 2, command("join", 2, room=rid), now=sending + 1)
+    await game_lobby_posts.remember(db, "durak", rid, GROUP, message(10),
+                                    now=sending + 2, sent_since=sending, recipient=2)
+    await game_lobby_posts.remember(db, "durak", rid, GROUP, message(11),
+                                    now=sending + 2, sent_since=sending, recipient=3)
+    await game_lobby_posts.remember(db, "durak", rid, GROUP, message(12), now=sending + 2, announcement=True)
+    bot = fake_bot(db)
+    bot.edit_message_text = AsyncMock()
+    await game_lobby_posts.cleanup(db, bot, now=sending + 2)
+    bot.edit_message_text.assert_awaited_once()
+    assert bot.edit_message_text.await_args.kwargs["message_id"] == 10
+    bot.delete_message.assert_not_awaited()
+
 
 async def test_native_sticker_close_removes_companion_and_its_original(db, monkeypatch):
     bot = fake_bot(db)

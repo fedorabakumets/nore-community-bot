@@ -25,7 +25,7 @@ async def settle(db):
 
 async def lifecycle(app):
     """Restore persisted deadlines before HTTP serves; stop gracefully with aiohttp."""
-    from community_bot.game_lobby_posts import cleanup
+    from community_bot.game_lobby_posts import cleanup, purge_acceptances
     from community_bot.group_message_close import purge_ownership
 
     await settle(app['db'])
@@ -51,6 +51,7 @@ async def lifecycle(app):
                 await cleanup(app['db'], app.get('bot'))
                 now = time.time()
                 if now >= next_purge:
+                    await purge_acceptances(app['db'], now)
                     await purge_ownership(app['db'], now)
                     next_purge = now + 3600
             except Exception:
