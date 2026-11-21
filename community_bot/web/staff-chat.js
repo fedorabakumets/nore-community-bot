@@ -7,6 +7,7 @@ window.NoraStaffChat = (() => {
   let retryTimer = null, handshakeTimer = null, heartbeatTimer = null;
   let refreshTimer = null, refreshPending = false, typingTimeout = null;
   let newCount = 0, lastTypingSent = 0;
+  const unreadIds = new Set();
   const cache = new Map();
   let draft = '', replyTarget = null, attachment = null, sending = false, emojiOpen = false;
   const maxUpload = 12 * 1024 * 1024;
@@ -677,9 +678,10 @@ window.NoraStaffChat = (() => {
           const maxShown=feed
             ? Math.max(0,...[...feed.querySelectorAll('[data-message-id]')].map(n=>Number(n.dataset.messageId)||0))
             : 0;
-          const incoming=ids.filter(id=>Number.isSafeInteger(id)&&id>maxShown);
+          const incoming=ids.filter(id=>Number.isSafeInteger(id)&&id>maxShown&&!unreadIds.has(id));
           if(incoming.length && (!isFeedAtBottom()||contextId!==null)){
-            newCount+=incoming.length;
+            for(const id of incoming)unreadIds.add(id);
+            newCount=unreadIds.size;
             updateUnread();
           }
         }
@@ -731,7 +733,7 @@ window.NoraStaffChat = (() => {
     observer?.disconnect();observer = null;
     visit++;
     loading=false;signature='';contextId=null;
-    newCount=0;
+    newCount=0;unreadIds.clear();
     if(tab !== 'staffchat'){clearAssets();clearChatViewport();return;}
     syncChatViewport();
     prepareComposer();
@@ -772,7 +774,7 @@ window.NoraStaffChat = (() => {
       const feed=document.getElementById('staff-chat-feed');
       if(contextId!==null){contextId=null;signature='';void load(true);}
       else if(feed)feed.scrollTo({top:feed.scrollHeight,behavior:'smooth'});
-      newCount=0;updateUnread();return;
+      newCount=0;unreadIds.clear();updateUnread();return;
     }
     const answer = event.target.closest('[data-chat-answer]');
     if(answer){selectReply(answer);return;}
@@ -842,7 +844,7 @@ window.NoraStaffChat = (() => {
   });
   document.addEventListener('scroll',event=>{
     if(event.target?.id === 'staff-chat-feed' && newCount>0 && isFeedAtBottom()){
-      newCount=0;updateUnread();
+      newCount=0;unreadIds.clear();updateUnread();
     }
   },true);
   document.addEventListener('visibilitychange',()=>{
