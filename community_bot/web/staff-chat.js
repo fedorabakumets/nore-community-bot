@@ -8,6 +8,10 @@ window.NoraStaffChat = (() => {
   let refreshTimer = null, refreshPending = false, typingTimeout = null;
   let newCount = 0, lastTypingSent = 0;
   const unreadIds = new Set();
+  const reactionSet = ['❤️','😂','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
+  const reactionBusy = new Set();
+  let gesture = null, gestureTimer = null;
+
   const cache = new Map();
   let draft = '', replyTarget = null, attachment = null, sending = false, emojiOpen = false;
   const maxUpload = 12 * 1024 * 1024;
@@ -83,7 +87,17 @@ window.NoraStaffChat = (() => {
     </section>`;
   };
 
-  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[])].join('|');
+  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[]), JSON.stringify(m.reactions||[])].join('|');
+  const reactionMarkup = (reactions,id) => (Array.isArray(reactions) ? reactions : [])
+    .filter(item=>reactionSet.includes(item.emoji) && Number(item.count)>0)
+    .map(item=>`<button type="button" class="staff-chat-react-chip${item.mine?' is-mine':''}"
+       data-chat-react="${id}" data-chat-emoji-value="${esc(item.emoji)}"
+       aria-pressed="${item.mine?'true':'false'}" aria-label="${esc(item.emoji)}: ${Number(item.count)} реакций">${esc(item.emoji)} <span>${Math.max(0,Number(item.count)||0)}</span></button>`)
+    .join('');
+  const reactionPicker = id => `<div class="staff-chat-reaction-picker" data-chat-picker hidden role="group" aria-label="Реакции Норы">
+    ${reactionSet.map(emoji=>`<button type="button" data-chat-react="${id}" data-chat-emoji-value="${esc(emoji)}" title="Реакция ${esc(emoji)}">${esc(emoji)}</button>`).join('')}
+  </div>`;
+
   const line = m => {
     const id = Number(m.id);
     const sent = new Date(m.sent_at);
@@ -105,12 +119,18 @@ window.NoraStaffChat = (() => {
     const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
     const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
     const more = `<button type="button" class="staff-chat-more" data-chat-more="${id}" aria-label="Действия с сообщением" aria-expanded="false" title="Действия">•••</button>`;
-    const actions = `<div class="staff-chat-actions" data-chat-menu hidden>${replyButton}${link}${hideButton}</div>`;
+    const actions = `<div class="staff-chat-actions" data-chat-menu hidden>
+      <button type="button" class="staff-chat-react-open" data-chat-react-open="${id}" aria-label="Поставить реакцию" title="Реакция">☺</button>
+      ${replyButton}
+      <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="Копировать текст" title="Копировать">⧉</button>
+      ${link}${hideButton}</div>`;
     return `<article class="staff-chat-message" data-message-id="${id}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
          <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${more}</div>
          ${actions}
          ${quote}${mediaTile(m)}${richRow(m)}${body}
+         <div class="staff-chat-reactions" data-chat-reactions="${id}">${reactionMarkup(m.reactions,id)}</div>
+         ${reactionPicker(id)}
        </div>
      </article>`;
   };
