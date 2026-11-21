@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from community_bot.database import Database
 from community_bot import referral_campaign as campaign
+from community_bot.database import Database
 
 
 @pytest.fixture
