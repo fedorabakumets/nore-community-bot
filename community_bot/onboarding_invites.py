@@ -20,8 +20,9 @@ def _telegram_link(url: str) -> bool:
 
 def entry_keyboard(settings, *, bot_username: str = "") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if _telegram_link(settings.community_invite_url):
-        rows.append([InlineKeyboardButton(text="🚪 Войти в чат НОРЫ", url=settings.community_invite_url)])
+    url = getattr(settings, "community_invite_url", "")
+    if _telegram_link(url):
+        rows.append([InlineKeyboardButton(text="🚪 Войти в чат НОРЫ", url=url)])
     if bot_username:
         rows.append([InlineKeyboardButton(
             text="🎮 Открыть приложение NORA",
