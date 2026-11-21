@@ -104,9 +104,12 @@ window.NoraStaffChat = (() => {
     const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
     const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
     const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
+    const more = `<button type="button" class="staff-chat-more" data-chat-more="${id}" aria-label="Действия с сообщением" aria-expanded="false" title="Действия">•••</button>`;
+    const actions = `<div class="staff-chat-actions" data-chat-menu hidden>${replyButton}${link}${hideButton}</div>`;
     return `<article class="staff-chat-message" data-message-id="${id}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
-         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}${replyButton}${hideButton}</div>
+         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${more}</div>
+         ${actions}
          ${quote}${mediaTile(m)}${richRow(m)}${body}
        </div>
      </article>`;
@@ -805,6 +808,19 @@ window.NoraStaffChat = (() => {
       if(contextId!==null){contextId=null;signature='';void load(true);}
       else if(feed)feed.scrollTo({top:feed.scrollHeight,behavior:'smooth'});
       newCount=0;unreadIds.clear();updateUnread();return;
+    }
+    const more = event.target.closest('[data-chat-more]');
+    if(more){
+      const menu=more.closest('.staff-chat-message')?.querySelector('[data-chat-menu]');
+      if(!menu)return;
+      const opened=!menu.hidden;
+      for(const other of document.querySelectorAll('#staff-chat-feed [data-chat-menu]:not([hidden])')){
+        other.hidden=true;
+        other.closest('.staff-chat-message')?.querySelector('[data-chat-more]')?.setAttribute('aria-expanded','false');
+      }
+      menu.hidden=opened;
+      more.setAttribute('aria-expanded',String(!opened));
+      return;
     }
     const answer = event.target.closest('[data-chat-answer]');
     if(answer){selectReply(answer);return;}
