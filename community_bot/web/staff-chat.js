@@ -1,8 +1,12 @@
 'use strict';
-// Experimental read-only Telegram mirror. No fake "send as user" behavior.
+// Staff Telegram community mirror: WebSocket updates and explicitly bot-attributed sends.
 window.NoraStaffChat = (() => {
 
   let timer = null, loading = false, signature = '', contextId = null, visit = 0, observer = null;
+  let liveSocket = null, liveReady = false, liveAttempt = 0, liveFailures = 0;
+  let retryTimer = null, handshakeTimer = null, heartbeatTimer = null;
+  let refreshTimer = null, refreshPending = false, typingTimeout = null;
+  let newCount = 0, lastTypingSent = 0;
   const cache = new Map();
   let draft = '', replyTarget = null, attachment = null, sending = false, emojiOpen = false;
   const maxUpload = 12 * 1024 * 1024;
@@ -105,11 +109,13 @@ window.NoraStaffChat = (() => {
     return `<section class="nora-staff-chat">
       <header class="staff-chat-header">
         <button class="staff-chat-back" type="button" data-tab="community" aria-label="Назад в Коммьюнити">‹</button>
-        <div class="staff-chat-heading"><h1>Чат Норы</h1><span><i aria-hidden="true"></i> Отправка через бота · тест</span></div>
+        <div class="staff-chat-heading"><h1>Чат Норы</h1><span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span></div>
       </header>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
         <p class="staff-chat-empty">Подключаем чат…</p>
       </div>
+      <button type="button" id="staff-chat-new" class="staff-chat-new" data-chat-scroll-new hidden>Новые сообщения ↓</button>
+      <div id="staff-chat-typing" class="staff-chat-typing" hidden></div>
       <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
         <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
