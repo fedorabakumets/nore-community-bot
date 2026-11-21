@@ -74,8 +74,15 @@ async def protection(request, handler):
                     return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
                                              status=403, headers={'Cache-Control': 'no-store'})
                 request['application_ban'] = ban
+            elif path not in {'/api/me', '/api/city'}:
+                registered = await db.get_user(uid)
+                if not registered or not str(registered.get('city') or '').strip():
+                    return web.json_response(
+                        {'error': 'Сначала укажи город в профиле Норы'},
+                        status=403, headers={'Cache-Control': 'no-store'},
+                    )
             profile_optional = path in {
-                '/api/me', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
+                '/api/me', '/api/city', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
             } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
             if not profile_optional:
@@ -220,6 +227,8 @@ async def overview(request):
     from community_bot.shop_api import shop_data
 
     user = await actor(request)
+    if not str(user.get('city') or '').strip():
+        return web.json_response({'city_required': True})
     pet = await pet_data(db, user, development=True)
     user = await db.get_user(user['user_id'])
     shop = await shop_data(db, user, settings)
@@ -277,7 +286,7 @@ async def overview(request):
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
                                         'cookies', 'cookie_debt', 'reputation', 'profile_bio',
-                                        'birth_date', 'hobbies', 'warnings', 'profile_private',
+                                        'birth_date', 'hobbies', 'city', 'warnings', 'profile_private',
                                         'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
         'admin_available': await has_permission(
             db, settings, user['user_id'], 'admin.panel',
@@ -293,6 +302,21 @@ async def overview(request):
         'home': {'community_url': community_url, 'news': news},
         'history': await describe_transactions(db, history),
     })
+
+
+async def set_city(request):
+    from community_bot.application_form import validate_city
+
+    payload = await request.json()
+    if not isinstance(payload, dict) or set(payload) != {'city'}:
+        return web.json_response({'error': 'Укажи город'}, status=400)
+    try:
+        city = validate_city(payload['city'])
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
+    user = await actor(request)
+    await request.app['db'].update_profile(user['user_id'], 'city', city)
+    return web.json_response({'ok': True, 'city': city})
 
 
 async def prepare(request):
@@ -524,6 +548,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/admin/upload', admin_web.upload)
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
+    app.router.add_post('/api/city', set_city)
     app.router.add_post('/api/application', submit_application)
     app.router.add_post('/api/application/photo', upload_application_photo)
     app.router.add_post('/api/profile', save_profile)
