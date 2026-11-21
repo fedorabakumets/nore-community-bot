@@ -9,7 +9,7 @@ import pytest
 from aiogram.types import Chat, Message, PhotoSize, User
 
 from community_bot.database import Database
-from community_bot.staff_chat import StaffChatOutgoingMiddleware, capture, feed, media, staff_allowed
+from community_bot.staff_chat import StaffChatOutgoingMiddleware, capture, feed, hide, media, staff_allowed
 
 GROUP = -100123456789
 
@@ -254,3 +254,75 @@ async def test_forwarded_rich_message_captures_without_text(tmp_path):
         (GROUP, 151),
     )
     assert "Пересланный Rich-плейлист" in row["rich_json"]
+
+
+@pytest.mark.asyncio
+async def test_bot_confirmed_delete_removes_only_community_messages(tmp_path):
+    db = Database(tmp_path / "deleted.db")
+    await db.initialize()
+    settings = SimpleNamespace(community_chat_id=GROUP)
+    bot = SimpleNamespace(community_db=db, community_settings=settings)
+    middleware = StaffChatOutgoingMiddleware()
+
+    for mid in (10, 11, 12, 13):
+        await capture(db, settings, event(mid, f"Сообщение {mid}"))
+
+    async def accepted(_bot, _method):
+        return True
+
+    single = SimpleNamespace(__api_method__="deleteMessage", chat_id=GROUP, message_id=10)
+    assert await middleware(accepted, bot, single) is True
+    assert await db.fetchone(
+        "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 10),
+    ) is None
+
+    async def rejected(_bot, _method):
+        return False
+
+    failed = SimpleNamespace(__api_method__="deleteMessage", chat_id=GROUP, message_id=11)
+    await middleware(rejected, bot, failed)
+    assert await db.fetchone(
+        "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 11),
+    )
+
+    unrelated = SimpleNamespace(__api_method__="deleteMessage", chat_id=-100998877665, message_id=11)
+    await middleware(accepted, bot, unrelated)
+    assert await db.fetchone(
+        "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 11),
+    )
+
+    batch = SimpleNamespace(__api_method__="deleteMessages", chat_id=GROUP, message_ids=[11, 13])
+    await middleware(accepted, bot, batch)
+    remaining = await db.fetchall(
+        "SELECT message_id FROM staff_chat_messages WHERE chat_id=? ORDER BY message_id", (GROUP,),
+    )
+    assert [row["message_id"] for row in remaining] == [12]
+
+
+@pytest.mark.asyncio
+async def test_staff_only_mirror_cleanup_does_not_delete_in_telegram(tmp_path):
+    db = Database(tmp_path / "hide.db")
+    await db.initialize()
+    for uid in (8, 20):
+        await db.ensure_user(uid)
+    await db.set_role(20, "moderator")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+    await capture(db, settings, event(31, "Удалили вручную в Telegram"))
+
+    class Request(dict):
+        app = {"db": db, "settings": settings}
+        async def json(self):
+            return {"message_id": 31}
+
+    assert (await hide(Request(actor={"id": 8}))).status == 403
+    assert await db.fetchone(
+        "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 31),
+    )
+    result = await hide(Request(actor={"id": 20}))
+    assert result.status == 200
+    assert json.loads(result.text)["ok"] is True
+    assert await db.fetchone(
+        "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 31),
+    ) is None
