@@ -85,6 +85,7 @@ async def protection(request, handler):
                 '/api/me', '/api/city', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
+                '/api/community/chat',
             } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
             if not profile_optional:
                 from community_bot.events_api import allowed
@@ -290,6 +291,7 @@ async def overview(request):
                                         'cookies', 'cookie_debt', 'reputation', 'profile_bio',
                                         'birth_date', 'hobbies', 'city', 'warnings', 'profile_private',
                                         'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
+        'staff_chat_available': role in {'owner', 'admin', 'moderator'},
         'admin_available': await has_permission(
             db, settings, user['user_id'], 'admin.panel',
         ),
@@ -576,6 +578,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import community_api, social_profiles
 
     app.router.add_get('/api/community', community_api.status)
+    from community_bot import staff_chat
+
+    app.router.add_get('/api/community/chat', staff_chat.feed)
     app.router.add_get('/api/community/people', community_api.directory)
     app.router.add_get('/api/community/lobbies', community_api.lobbies)
     app.router.add_get('/api/community/presence', community_api.presence)
