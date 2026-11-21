@@ -605,6 +605,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app['staff_chat_voice_gate'] = asyncio.Semaphore(2)
     app.router.add_post('/api/community/chat/send', staff_chat_send.send_text)
     app.router.add_post('/api/community/chat/upload', staff_chat_send.send_attachment)
+    from community_bot import staff_chat_delivery
+    app.router.add_get(r'/api/community/chat/delivery/{operation_id}', staff_chat_delivery.status)
     app.router.add_get(r'/api/community/chat/media/{message_id:\d+}', staff_chat.media)
     app.router.add_get('/api/community/people', community_api.directory)
     app.router.add_get('/api/community/lobbies', community_api.lobbies)

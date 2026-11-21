@@ -15,6 +15,16 @@ window.NoraStaffChat = (() => {
   const cache = new Map();
   let draft = '', replyTarget = null, attachments = [], attachmentKind = 'file';
   let sending = false, emojiOpen = false, uploadProgress = 0, uploadXHR = null;
+  const delivery = window.NoraStaffDelivery.create({
+    getAuth:()=>auth,
+    onConfirmed:(restored)=>{
+      if(!restored){
+        draft='';replyTarget=null;emojiOpen=false;contextId=null;signature='';
+        clearUploads();prepareComposer();void load(true);
+      }
+      composeUpdate();
+    }
+  });
   let recorder = null, microphone = null, recordTimer = null, recordStarted = 0;
   let recording = false;
   const previewUrls = new Map();
@@ -182,6 +192,7 @@ window.NoraStaffChat = (() => {
       <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
         <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
+        <div id="staff-chat-delivery" class="staff-chat-delivery" role="status" hidden></div>
         <div class="staff-chat-record-status" id="staff-chat-record-status" hidden aria-live="polite"></div>
         <div class="staff-chat-compose-row">
           <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="Прикрепить файл" title="Прикрепить файл">＋</button>
@@ -700,17 +711,23 @@ window.NoraStaffChat = (() => {
     field.maxLength=attachments.length?800:3000;
     const send=document.getElementById('staff-chat-submit');
     if(send){
-      send.disabled=sending||recording||(!draft.trim()&&!attachments.length)||
+      send.disabled=sending||recording||delivery.pending||(!draft.trim()&&!attachments.length)||
         draft.length>(attachments.length?800:3000);
       send.textContent=sending?(uploadProgress?uploadProgress+'%':'…'):'➤';
     }
     const microphoneButton=form.querySelector('[data-chat-record]');
     if(microphoneButton){
-      microphoneButton.disabled=sending;
+      microphoneButton.disabled=sending||delivery.pending;
       microphoneButton.classList.toggle('is-recording',recording);
       microphoneButton.textContent=recording?'■':'🎙';
       microphoneButton.setAttribute('aria-label',recording?'Завершить запись':'Записать голосовое');
     }
+    field.disabled=sending||delivery.pending;
+    const attachButton=form.querySelector('[data-chat-attach]');
+    if(attachButton)attachButton.disabled=sending||delivery.pending;
+    const emojiButton=form.querySelector('[data-chat-emoji-toggle]');
+    if(emojiButton)emojiButton.disabled=sending||delivery.pending;
+    delivery.render();
     const back=document.getElementById('staff-chat-compose-reply');
     if(back){
       back.hidden=!replyTarget;
@@ -761,6 +778,7 @@ window.NoraStaffChat = (() => {
       const xhr=new XMLHttpRequest();
       uploadXHR=xhr;
       xhr.open('POST','/api/community/chat/upload',true);
+      xhr.timeout=120000;
       xhr.setRequestHeader('Authorization','tma '+auth);
       xhr.upload.onprogress=event=>{
         if(!event.lengthComputable)return;
@@ -786,15 +804,21 @@ window.NoraStaffChat = (() => {
         if(uploadXHR===xhr)uploadXHR=null;
         reject(new Error('Отправка прервана. Проверь чат перед повтором'));
       };
+      xhr.ontimeout=()=>{
+        if(uploadXHR===xhr)uploadXHR=null;
+        reject(new Error('Превышено время отправки. Проверяем результат.'));
+      };
       xhr.send(form);
     });
   }
   async function sendCompose() {
-    if(sending||recording||(!draft.trim()&&!attachments.length))return;
+    if(sending||delivery.pending||recording||(!draft.trim()&&!attachments.length))return;
     const text=draft.trim(),reply_to=replyTarget?.id||null;
     if(text.length>(attachments.length?800:3000)){
       toast('Слишком длинный текст для сообщения с вложением');return;
     }
+    const operationId=delivery.begin();
+    if(!operationId)return;
     sending=true;uploadProgress=0;composeUpdate();
     try{
       let result;
@@ -807,15 +831,15 @@ window.NoraStaffChat = (() => {
         for(const file of attachments)form.append('file',file,file.name);
         form.append('text',text);
         form.append('kind',attachmentKind);
+        form.append('operation_id',operationId);
         if(reply_to)form.append('reply_to',String(reply_to));
         result=await uploadForm(form);
-      }else result=await api('community/chat/send',{text,reply_to});
-      if(!result?.ok)throw new Error('Telegram не подтвердил отправку');
-      draft='';replyTarget=null;emojiOpen=false;contextId=null;
-      signature='';clearUploads();
-      prepareComposer();void load(true);
+      }else result=await api('community/chat/send',{text,reply_to,operation_id:operationId});
+      if(!delivery.acknowledge(result))await delivery.check();
     }catch(error){
-      toast(error.message||'Не удалось отправить сообщение');
+      await delivery.check();
+      if(delivery.pending)toast('Статус отправки неизвестен. Проверь Telegram.');
+      else if(error?.message)toast(error.message);
     }finally{
       sending=false;uploadProgress=0;composeUpdate();
     }
@@ -1113,9 +1137,11 @@ window.NoraStaffChat = (() => {
     }
     syncChatViewport();
     prepareComposer();
+    delivery.restore();
     updateUnread();
     void load();
     connectLive();
+    if(delivery.pending)void delivery.check();
   }
   window.visualViewport?.addEventListener('resize',syncChatViewport);
   window.visualViewport?.addEventListener('scroll',syncChatViewport);
@@ -1150,6 +1176,13 @@ window.NoraStaffChat = (() => {
   document.addEventListener('click',event=>{
     if(tab !== 'staffchat')return;
 
+    if(event.target.closest('[data-chat-check-delivery]')){
+      void delivery.check();return;
+    }
+    if(event.target.closest('[data-chat-reset-delivery]')){
+      if(delivery.reset())composeUpdate();
+      return;
+    }
     if(event.target.closest('[data-chat-scroll-new]')){
       const feed=document.getElementById('staff-chat-feed');
       if(contextId!==null){contextId=null;signature='';void load(true);}
@@ -1345,13 +1378,14 @@ window.NoraStaffChat = (() => {
   document.addEventListener('visibilitychange',()=>{
     if(tab!=='staffchat')return;
     if(document.hidden){if(recorder)stopRecording(true);stopRealtime();return;}
-    void load();
-    connectLive();
+    void load();connectLive();
+    if(delivery.pending)void delivery.check();
   });
   window.addEventListener('online',()=>{
     if(tab==='staffchat'&&!document.hidden){
       if(retryTimer!==null){clearTimeout(retryTimer);retryTimer=null;}
       connectLive();
+      if(delivery.pending)void delivery.check();
     }
   });
   window.addEventListener('pagehide',()=>{
@@ -1359,7 +1393,11 @@ window.NoraStaffChat = (() => {
     clearUploads();clearAssets();stopRealtime();
   });
   window.addEventListener('pageshow',()=>{
-    if(tab==='staffchat'&&!document.hidden){void load();connectLive();}
+    if(tab==='staffchat'&&!document.hidden){
+      void load();connectLive();
+      delivery.restore();
+      if(delivery.pending)void delivery.check();
+    }
   });
   return {screen,mount};
 })();

@@ -16,6 +16,7 @@ from aiogram.types import BufferedInputFile, InputMediaPhoto, ReplyParameters
 from aiohttp import web
 
 from community_bot.staff_chat import capture, staff_allowed
+from community_bot import staff_chat_delivery as dispatch
 
 logger = logging.getLogger(__name__)
 MAX_TEXT = 3000
@@ -132,7 +133,8 @@ def _author(db_user: dict | None, actor: dict) -> str:
 
 
 async def _publish(request: web.Request, *, text: str, reply: object,
-                   files: list[tuple[str, bytes]] | None, kind: str = "file"):
+                   files: list[tuple[str, bytes]] | None, kind: str = "file",
+                   operation_id: object = None):
     credentials, denied = await _member(request)
     if denied is not None:
         return denied
@@ -150,6 +152,7 @@ async def _publish(request: web.Request, *, text: str, reply: object,
             raise ValueError("Альбом может содержать от 2 до 6 изображений JPG или PNG")
         if sum(len(blob) for _, blob in files) > MAX_BATCH_UPLOAD:
             raise ValueError("Альбом слишком большой")
+        operation_id = dispatch.validate_key(operation_id)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     name = _author(await db.get_user(uid), request["actor"])
@@ -158,11 +161,28 @@ async def _publish(request: web.Request, *, text: str, reply: object,
     locks = request.app["staff_chat_send_locks"]
     lock = locks.setdefault(uid, asyncio.Lock())
     async with lock:
+        if operation_id:
+            digest = dispatch.payload_hash(
+                settings.community_chat_id, content,
+                reply_to.message_id if reply_to else None, kind, files,
+            )
+            outcome, receipt = await dispatch.claim(db, uid, operation_id, digest)
+            if outcome == "conflict":
+                return web.json_response(
+                    {"error": "Идентификатор используется для другого сообщения"},
+                    status=409,
+                )
+            if outcome == "existing":
+                return web.json_response(dispatch.response_data(receipt),
+                                         headers={"Cache-Control": "no-store"})
         now = time.monotonic()
         previous = request.app["staff_chat_last_sent"].get(uid, -100.0)
         if now - previous < SEND_INTERVAL:
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "failed", error="Слишком частая отправка")
             return web.json_response(
-                {"error": "Отправлять сообщения можно не чаще одного раза в 2 секунды"},
+                {"error": "Отправлять сообщения можно не чаще одного раза в 2 секунды",
+                 "state": "failed" if operation_id else None},
                 status=429,
             )
         # Reserve the interval before Telegram: a network timeout can still
@@ -210,25 +230,47 @@ async def _publish(request: web.Request, *, text: str, reply: object,
             else:
                 sent = await bot.send_message(**kwargs, text=body, parse_mode=None)
         except ValueError as exc:
-            return web.json_response({"error": str(exc)}, status=400)
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "failed", error=str(exc))
+            return web.json_response({"error": str(exc), "state": "failed"}, status=400)
         except TelegramRetryAfter as exc:
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "failed",
+                                      error="Telegram ограничил отправку")
             return web.json_response(
                 {"error": f"Telegram просит подождать {min(int(exc.retry_after), 60)} сек."},
                 status=429,
             )
         except TelegramAPIError:
             logger.exception("Staff chat composer Telegram send failed")
-            return web.json_response({"error": _QUIET_ERRORS}, status=502)
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "uncertain",
+                                      error="Неизвестно, принял ли Telegram сообщение")
+            return web.json_response(
+                {"error": _QUIET_ERRORS, "state": "uncertain" if operation_id else None}, status=502,
+            )
         except (OSError, asyncio.TimeoutError):
             logger.exception("Staff chat composer transport failed")
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "uncertain",
+                                      error="Ответ Telegram не получен")
             return web.json_response(
-                {"error": "Ответ Telegram не получен. Проверь чат, прежде чем повторять отправку."},
+                {"error": "Ответ Telegram не получен. Проверь чат, прежде чем повторять отправку.",
+                 "state": "uncertain" if operation_id else None},
                 status=502,
             )
         messages = sent if isinstance(sent, (list, tuple)) else [sent]
         if not messages:
+            if operation_id:
+                await dispatch.finish(db, uid, operation_id, "uncertain",
+                                      error="Telegram не подтвердил отправку альбома")
             return web.json_response(
-                {"error": "Telegram не подтвердил отправку альбома. Проверь чат."}, status=502,
+                {"error": "Telegram не подтвердил отправку альбома. Проверь чат.",
+                 "state": "uncertain" if operation_id else None}, status=502,
+            )
+        if operation_id:
+            await dispatch.finish(
+                db, uid, operation_id, "sent", ids=[m.message_id for m in messages],
             )
         try:
             for message in messages:
@@ -243,7 +285,9 @@ async def _publish(request: web.Request, *, text: str, reply: object,
         except Exception:
             logger.exception("Staff chat composer: message sent but archive failed")
         return web.json_response({
-            "ok": True, "message_id": messages[0].message_id,
+            "ok": True, "state": "sent",
+            "operation_id": operation_id,
+            "message_id": messages[0].message_id,
             "message_ids": [m.message_id for m in messages],
         })
 
@@ -258,11 +302,11 @@ async def send_text(request: web.Request) -> web.Response:
         payload = await request.json()
     except (ValueError, TypeError):
         return web.json_response({"error": "Некорректный запрос"}, status=400)
-    if not isinstance(payload, dict) or set(payload) - {"text", "reply_to"}:
+    if not isinstance(payload, dict) or set(payload) - {"text", "reply_to", "operation_id"}:
         return web.json_response({"error": "Некорректный запрос"}, status=400)
     return await _publish(
         request, text=payload.get("text", ""), reply=payload.get("reply_to"),
-        files=None,
+        files=None, operation_id=payload.get("operation_id"),
     )
 
 
@@ -280,7 +324,7 @@ async def send_attachment(request: web.Request) -> web.Response:
     try:
         reader = await request.multipart()
         while part := await reader.next():
-            if part.name not in {"text", "reply_to", "file", "kind"} or (
+            if part.name not in {"text", "reply_to", "file", "kind", "operation_id"} or (
                 part.name != "file" and part.name in values
             ):
                 raise ValueError("Некорректные поля")
@@ -319,4 +363,7 @@ async def send_attachment(request: web.Request) -> web.Response:
         return web.json_response({"error": str(exc)}, status=400)
     except web.HTTPRequestEntityTooLarge:
         return web.json_response({"error": "Вложения слишком большие"}, status=413)
-    return await _publish(request, text=values.get("text", ""), reply=reply, files=attachments, kind=kind)
+    return await _publish(
+        request, text=values.get("text", ""), reply=reply,
+        files=attachments, kind=kind, operation_id=values.get("operation_id"),
+    )

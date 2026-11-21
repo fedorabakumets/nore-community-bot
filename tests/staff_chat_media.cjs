@@ -12,6 +12,10 @@ const window = {
   addEventListener() {},
 };
 const document = {addEventListener() {}};
+const deliverySource=fs.readFileSync(
+  path.join(__dirname, '..', 'community_bot', 'web', 'staff-chat-delivery.js'), 'utf8',
+);
+vm.runInNewContext(deliverySource, {window,document,console,setTimeout,clearTimeout});
 vm.runInNewContext(source, {
   window, document, esc: value => String(value),
   console, setTimeout, clearTimeout, setInterval, clearInterval,
@@ -30,4 +34,8 @@ assert.match(html, /id="staff-chat-submit"/);
 assert.ok(source.includes('groupAlbums(items)'), 'Album grouping must be wired to feed');
 assert.ok(source.includes('staff-chat-voice-progress'), 'Voice seeking control must exist');
 assert.ok(source.includes('stopRecording(true)'), 'Recordings must be stopped on exit');
+assert.match(html, /id="staff-chat-delivery"/);
+assert.ok(source.includes("form.append('operation_id'"), 'Media operation ID included');
+assert.ok(source.includes('delivery.check()'), 'Status recovery wired');
+
 console.log('NORA stage 7 media UI smoke checks passed');

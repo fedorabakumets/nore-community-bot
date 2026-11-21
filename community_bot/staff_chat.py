@@ -17,6 +17,7 @@ from aiogram.types import Message, TelegramObject, Update
 from aiohttp import web
 
 from community_bot.helpers import effective_role
+from community_bot.staff_chat_delivery import SCHEMA as DELIVERY_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS staff_chat_reactions (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_chat_reactions_message
     ON staff_chat_reactions(chat_id, message_id);
-"""
+""" + DELIVERY_SCHEMA
 
 
 async def staff_allowed(db, settings, uid: int) -> bool:
