@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 COUNT_PREFIX = "likes_received:"
 DAY_PREFIX = "likes_sent_day:"
 RESET_LABEL = "Сброс всех лимитов"
-RESET_DESCRIPTION = "Сбрасывает сегодняшние лимиты лайков и действий с репутацией."
+RESET_DESCRIPTION = "Сбрасывает сегодняшние лимиты лайков, действий с репутацией и скачиваний видео или музыки."
 
 
 async def count(db, user_id: int) -> int:
