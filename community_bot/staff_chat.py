@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS staff_chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_chat_messages_recent
     ON staff_chat_messages(chat_id, message_id DESC);
+CREATE TABLE IF NOT EXISTS staff_chat_reactions (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, message_id, user_id, emoji),
+    FOREIGN KEY (chat_id, message_id)
+        REFERENCES staff_chat_messages(chat_id, message_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_staff_chat_reactions_message
+    ON staff_chat_reactions(chat_id, message_id);
 """
 
 
