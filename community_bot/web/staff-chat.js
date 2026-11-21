@@ -870,6 +870,8 @@ window.NoraStaffChat = (() => {
     app?.style.removeProperty('--staff-chat-viewport-top');
   }
   function mount() {
+    cancelChatGesture();
+    reactionBusy.clear();
     stopRealtime();
     observer?.disconnect();observer = null;
     visit++;
@@ -917,8 +919,22 @@ window.NoraStaffChat = (() => {
       else if(feed)feed.scrollTo({top:feed.scrollHeight,behavior:'smooth'});
       newCount=0;unreadIds.clear();updateUnread();return;
     }
+    const reactButton=event.target.closest('[data-chat-react]');
+    if(reactButton){void setChatReaction(reactButton);return;}
+    const reactionOpen=event.target.closest('[data-chat-react-open]');
+    if(reactionOpen){
+      openReactionPicker(reactionOpen.closest('.staff-chat-message'));
+      return;
+    }
+    const copyButton=event.target.closest('[data-chat-copy]');
+    if(copyButton){
+      void copyChatMessage(copyButton.closest('.staff-chat-message'));
+      copyButton.closest('[data-chat-menu]')?.setAttribute('hidden','');
+      return;
+    }
     const more = event.target.closest('[data-chat-more]');
     if(more){
+      closeChatPickers();
       const menu=more.closest('.staff-chat-message')?.querySelector('[data-chat-menu]');
       if(!menu)return;
       const opened=!menu.hidden;
@@ -996,6 +1012,65 @@ window.NoraStaffChat = (() => {
       event.preventDefault();tg.openTelegramLink(link.href);
     }
   });
+
+  // Touch gestures are scoped to the message content, never to media controls.
+  document.addEventListener('pointerdown',event=>{
+    if(tab!=='staffchat'||event.pointerType==='mouse'||event.button!==0)return;
+    if(event.target.closest('button,a,input,textarea,video,audio,[data-chat-picker]'))return;
+    const bubble=event.target.closest('#staff-chat-feed .staff-chat-bubble');
+    if(!bubble)return;
+    cancelChatGesture();
+    const article=bubble.closest('.staff-chat-message');
+    if(!article)return;
+    gesture={
+      article,bubble,id:event.pointerId,x:event.clientX,y:event.clientY,
+      moved:false,fired:false
+    };
+    gestureTimer=setTimeout(()=>{
+      gestureTimer=null;
+      if(gesture && !gesture.moved && gesture.article.isConnected){
+        gesture.fired=true;
+        openReactionPicker(gesture.article);
+      }
+    },480);
+  },{passive:true});
+  document.addEventListener('pointermove',event=>{
+    if(!gesture||gesture.id!==event.pointerId)return;
+    const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;
+    if(Math.abs(dx)>16||Math.abs(dy)>13){
+      gesture.moved=true;
+      if(gestureTimer!==null){clearTimeout(gestureTimer);gestureTimer=null;}
+    }
+    if(dx>30&&Math.abs(dy)<32&&gesture.bubble.isConnected){
+      gesture.bubble.classList.add('staff-chat-swiping');
+    }else{
+      gesture.bubble.classList.remove('staff-chat-swiping');
+    }
+  },{passive:true});
+  document.addEventListener('pointerup',event=>{
+    if(!gesture||gesture.id!==event.pointerId)return;
+    const current=gesture;
+    const dx=event.clientX-current.x,dy=event.clientY-current.y;
+    current.bubble.classList.remove('staff-chat-swiping');
+    cancelChatGesture();
+    if(!current.fired&&dx>=65&&Math.abs(dy)<42&&current.article.isConnected){
+      const answer=current.article.querySelector('[data-chat-answer]');
+      if(answer){closeChatPickers();selectReply(answer);tg?.HapticFeedback?.impactOccurred?.('light');}
+    }
+  },{passive:true});
+  document.addEventListener('pointercancel',()=>{
+    if(gesture)gesture.bubble.classList.remove('staff-chat-swiping');
+    cancelChatGesture();
+  },{passive:true});
+  document.addEventListener('contextmenu',event=>{
+    if(tab!=='staffchat')return;
+    if(event.target.closest('button,a,input,textarea,video,audio'))return;
+    const article=event.target.closest('#staff-chat-feed .staff-chat-message');
+    if(!article)return;
+    event.preventDefault();
+    openReactionPicker(article);
+  });
+
   document.addEventListener('scroll',event=>{
     if(event.target?.id === 'staff-chat-feed' && newCount>0 && isFeedAtBottom()){
       newCount=0;unreadIds.clear();updateUnread();
