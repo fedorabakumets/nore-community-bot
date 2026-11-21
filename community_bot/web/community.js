@@ -45,7 +45,8 @@ window.NoraCommunity = (() => {
       </button>
     </div>`;
   }
-  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><div class="community-actions">${window.NoraInteractive?.screen('friends')||''}<section id="community-staff">${staff()}</section></div><p class="footer-note" id="community-updated">${updatedLabel()}</p>${musicCard()}`}
+  function staffChatLaunch(){return data?.staff_chat_available?`<button type="button" class="community-chat-launch" data-tab="staffchat"><span class="community-chat-launch-icon" aria-hidden="true">◉</span><span>Чат Норы <small>Тест · для команды</small></span><span aria-hidden="true">›</span></button>`:"";}
+  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}${staffChatLaunch()}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><div class="community-actions">${window.NoraInteractive?.screen('friends')||''}<section id="community-staff">${staff()}</section></div><p class="footer-note" id="community-updated">${updatedLabel()}</p>${musicCard()}`}
   async function load(){
     if(loading)return;
     loading=true;
