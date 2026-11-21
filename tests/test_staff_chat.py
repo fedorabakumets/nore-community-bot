@@ -793,7 +793,7 @@ async def test_stage7_photo_album_upload_and_feed_grouping(tmp_path):
 
     messages = [photo(200, "💬 Тестировщик · через Mini App Норы\n\nЛето"), photo(201, None)]
     bot = SimpleNamespace(send_media_group=AsyncMock(return_value=messages))
-    app = {"db": db, "settings": settings, "bot": bot, "staff_chat_send_locks": {}, "staff_chat_last_sent": {}}
+    app_state = {"db": db, "settings": settings, "bot": bot, "staff_chat_send_locks": {}, "staff_chat_last_sent": {}}
 
     class Field:
         def __init__(self, name, data, filename=None):
@@ -813,7 +813,7 @@ async def test_stage7_photo_album_upload_and_feed_grouping(tmp_path):
     class Request(dict):
         content_type = "multipart/form-data"
         content_length = 300
-        app = app
+        app = app_state
         async def multipart(self):
             return Reader([
                 Field("text", "Лето".encode()),
@@ -836,7 +836,7 @@ async def test_stage7_photo_album_upload_and_feed_grouping(tmp_path):
     )
     assert row["media_group_id"] == "album-stage7-test"
     class FeedRequest(dict):
-        app = app
+        app = app_state
         query = {}
     result = await feed(FeedRequest(actor={"id": 20}))
     feed_items = json.loads(result.text)["items"]
