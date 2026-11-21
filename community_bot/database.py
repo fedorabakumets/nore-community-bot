@@ -617,6 +617,7 @@ class Database:
         from community_bot.pet_progress import SCHEMA as pet_schema
         from community_bot.pet_video import SCHEMA as pet_video_schema
         from community_bot.referral_campaign import SCHEMA as referral_schema
+        from community_bot.staff_chat import SCHEMA as staff_chat_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
@@ -629,7 +630,7 @@ class Database:
             await db.executescript(
                 friends_schema + mafia_schema + rocket_schema + sea_schema + durak_schema
                 + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
-                + referral_schema
+                + referral_schema + staff_chat_schema
             )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
             await db.execute(
