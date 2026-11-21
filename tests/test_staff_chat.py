@@ -165,3 +165,95 @@ async def test_staff_chat_context_loads_older_reply(tmp_path):
     Request.query = {"around": "404"}
     absent = await feed(Request(actor={"id": 20}))
     assert absent.status == 404
+
+
+
+@pytest.mark.asyncio
+async def test_rich_playlist_from_bot_is_archived_and_playable(tmp_path):
+    """Bot API RichMessage has no ordinary text, caption, or single media field."""
+    db = Database(tmp_path / "rich-playlist.db")
+    await db.initialize()
+    await db.ensure_user(20)
+    await db.set_role(20, "moderator")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+    rich = SimpleNamespace(model_dump=lambda **_kwargs: {
+        "blocks": [
+            {"type": "photo", "photo": [
+                {"file_id": "photo-small"}, {"file_id": "photo-large"}]},
+            {"type": "paragraph", "text": "NORA / MUSIC"},
+            {"type": "section_heading", "text": "dedzytwo — музыкальная подборка"},
+            {"type": "details", "summary": "Старое ≠ бесполезное", "blocks": [
+                {"type": "paragraph", "text": "Автор из Санкт-Петербурга"}]},
+            {"type": "audio", "audio": {
+                "file_id": "track-one", "title": "Первый", "performer": "dedzytwo", "duration": 163}},
+            {"type": "audio", "audio": {
+                "file_id": "track-two", "title": "Второй", "performer": "dedzytwo", "duration": 195}},
+            {"type": "buttons", "buttons": [
+                {"text": "НОРА", "url": "https://t.me/nora_community_bot?startapp"},
+                {"text": "Нажми", "callback_data": "secret:callback"}]},
+        ],
+    })
+    msg = event(150, "").model_copy(update={"rich_message": rich, "text": None})
+    await StaffChatOutgoingMiddleware()(
+        lambda _bot, _method: asyncio.sleep(0, result=msg),
+        SimpleNamespace(community_db=db, community_settings=settings), object(),
+    )
+
+    class FeedRequest(dict):
+        app = {"db": db, "settings": settings}
+        query = {}
+
+    response = await feed(FeedRequest(actor={"id": 20}))
+    assert response.status == 200
+    assert "track-one" not in response.text
+    assert "photo-large" not in response.text
+    assert "secret:callback" not in response.text
+    playlist = json.loads(response.text)["items"][0]
+    assert playlist["id"] == 150
+    assert len([b for b in playlist["rich"] if b["type"] == "audio"]) == 2
+    assert next(b for b in playlist["rich"] if b["type"] == "heading")["text"].startswith("dedzytwo")
+    assert next(b for b in playlist["rich"] if b["type"] == "photo")["asset"] == 0
+
+    bot = SimpleNamespace(
+        get_file=AsyncMock(return_value=SimpleNamespace(file_path="music/track.mp3", file_size=4)),
+        download_file=AsyncMock(side_effect=lambda _path, *, destination, timeout: _write_media(destination)),
+    )
+    class MediaRequest(dict):
+        app = {"db": db, "settings": settings, "bot": bot,
+               "staff_chat_media_gate": asyncio.Semaphore(2)}
+        match_info = {"message_id": "150"}
+        query = {"part": "2"}
+
+    allowed = await media(MediaRequest(actor={"id": 20}))
+    assert allowed.status == 200
+    assert allowed.content_type == "audio/mpeg"
+    assert allowed.body == b"song"
+    bot.get_file.assert_awaited_with("track-two")
+
+    denied = await media(MediaRequest(actor={"id": 404}))
+    assert denied.status == 403
+
+
+async def _write_media(destination):
+    destination.write(b"song")
+
+
+@pytest.mark.asyncio
+async def test_forwarded_rich_message_captures_without_text(tmp_path):
+    db = Database(tmp_path / "rich-forward.db")
+    await db.initialize()
+    settings = SimpleNamespace(community_chat_id=GROUP)
+    forwarded = event(151, "").model_copy(update={
+        "text": None,
+        "rich_message": SimpleNamespace(model_dump=lambda **_kwargs: {
+            "blocks": [{"type": "paragraph", "text": "Пересланный Rich-плейлист"}],
+        }),
+    })
+    await capture(db, settings, forwarded)
+    row = await db.fetchone(
+        "SELECT rich_json FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
+        (GROUP, 151),
+    )
+    assert "Пересланный Rich-плейлист" in row["rich_json"]
