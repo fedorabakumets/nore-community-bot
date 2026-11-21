@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS staff_chat_messages (
     media_type TEXT NOT NULL DEFAULT '',
     media_file_id TEXT NOT NULL DEFAULT '',
     media_thumb_file_id TEXT NOT NULL DEFAULT '',
+    media_group_id TEXT NOT NULL DEFAULT '',
     rich_json TEXT NOT NULL DEFAULT '',
     reply_to_id INTEGER,
     sent_at TEXT NOT NULL,
@@ -233,20 +234,22 @@ async def capture(db, settings, message: Message) -> None:
         """
         INSERT INTO staff_chat_messages (
             chat_id, message_id, user_id, author_name, username, text,
-            media_type, media_file_id, media_thumb_file_id, rich_json,
+            media_type, media_file_id, media_thumb_file_id, media_group_id, rich_json,
             reply_to_id, sent_at, edited_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(chat_id, message_id) DO UPDATE SET
             author_name=excluded.author_name, username=excluded.username,
             text=excluded.text, media_type=excluded.media_type,
             media_file_id=excluded.media_file_id,
             media_thumb_file_id=excluded.media_thumb_file_id,
+            media_group_id=excluded.media_group_id,
             rich_json=excluded.rich_json, edited_at=excluded.edited_at
         WHERE excluded.edited_at IS NOT NULL
         """,
         (
             message.chat.id, message.message_id, user_id, author[:120], username[:80],
-            text, media_type, media_id, thumbnail_id, rich_json,
+            text, media_type, media_id, thumbnail_id,
+            str(getattr(message, "media_group_id", "") or "")[:96], rich_json,
             message.reply_to_message.message_id if message.reply_to_message else None,
             _iso_telegram_date(message.date), edited,
         ),
@@ -288,7 +291,7 @@ class StaffChatCaptureMiddleware(BaseMiddleware):
 
 _QUERY = """
     SELECT m.message_id id, m.user_id, m.author_name name, m.username,
-           m.text, m.media_type, m.rich_json, m.reply_to_id, m.sent_at, m.edited_at,
+           m.text, m.media_type, m.media_group_id, m.rich_json, m.reply_to_id, m.sent_at, m.edited_at,
            r.author_name reply_name, r.text reply_text, r.media_type reply_media_type,
            CASE WHEN m.media_file_id != '' THEN 1 ELSE 0 END has_media,
            CASE WHEN m.media_thumb_file_id != '' THEN 1 ELSE 0 END has_thumbnail,
