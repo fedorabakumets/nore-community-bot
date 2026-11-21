@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware
 from aiogram.types import Message, TelegramObject, Update
 from aiohttp import web
 
@@ -161,3 +162,22 @@ async def feed(request: web.Request) -> web.Response:
         )
         messages.append(m)
     return web.json_response({"items": messages, "enabled": True})
+
+
+class StaffChatOutgoingMiddleware(BaseRequestMiddleware):
+    """Mirror messages emitted by the bot too; Bot API does not echo its own sends."""
+
+    async def __call__(self, make_request, bot, method):
+        result = await make_request(bot, method)
+        db = getattr(bot, "community_db", None)
+        settings = getattr(bot, "community_settings", None)
+        if db is None or settings is None:
+            return result
+        messages = result if isinstance(result, list) else [result]
+        for message in messages:
+            if isinstance(message, Message):
+                try:
+                    await capture(db, settings, message)
+                except Exception:
+                    logger.exception("Could not archive outgoing community chat message")
+        return result
