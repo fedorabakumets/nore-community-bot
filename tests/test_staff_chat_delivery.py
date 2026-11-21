@@ -194,3 +194,33 @@ def test_reject_malformed_operation_ids():
             validate_key(value)
     assert validate_key(None) is None
     assert validate_key(OP) == OP
+
+
+
+def test_stage8_delivery_script_is_reachable_from_miniapp():
+    """All scripts needed before NoraStaffChat initializes must have HTTP routes."""
+    from pathlib import Path
+    import re
+
+    from community_bot.miniapp import ROOT
+
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    server = (Path(__file__).resolve().parents[1] / "community_bot" / "miniapp.py").read_text(
+        encoding="utf-8"
+    )
+    required = ("staff-chat-delivery.js", "staff-chat.js")
+    # The exact static endpoint was missed by stage-8 checks, despite the
+    # script passing Node tests locally. Verify both actual registration
+    # and load order.
+    entries = re.search(
+        r"for name in \((.*?)\):\s*\n\s*app\.router\.add_get\('/'\+name,",
+        server,
+        re.DOTALL,
+    )
+    assert entries, "Mini App static route declaration is missing"
+    listed = entries.group(1)
+    positions = [html.index(f'src="/{name}?') for name in required]
+    assert positions == sorted(positions)
+    for name in required:
+        assert f"'{name}'" in listed
+        assert (ROOT / name).is_file()
