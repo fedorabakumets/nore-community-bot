@@ -341,7 +341,11 @@ async def feed(request: web.Request) -> web.Response:
         )
         rows = list(reversed(before)) + after
 
+    from community_bot.staff_chat_reactions import reactions_for
+
+    reaction_map = await reactions_for(db, chat_id, [int(m["id"]) for m in rows], request["actor"]["id"])
     for m in rows:
+        m["reactions"] = reaction_map.get(int(m["id"]), [])
         stored_rich = json.loads(m.pop("rich_json") or "{}")
         m["rich"] = stored_rich.get("blocks", [])
         m["has_avatar"] = bool(m["has_avatar"])
