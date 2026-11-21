@@ -523,7 +523,7 @@ async def index(request):
 
 
 def create_app(db: Database, settings, bot, admin_runtime=None):
-    app = web.Application(middlewares=[protection], client_max_size=20 * 1024 * 1024 + 1024)
+    app = web.Application(middlewares=[protection], client_max_size=31 * 1024 * 1024)
     app.update(db=db, settings=settings, bot=bot, avatar_uploads=asyncio.Semaphore(2))
     from community_bot.media_cache import MediaImages
 
