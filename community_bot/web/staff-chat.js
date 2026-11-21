@@ -16,7 +16,7 @@ window.NoraStaffChat = (() => {
   let draft = '', replyTarget = null, attachments = [], attachmentKind = 'file';
   let sending = false, emojiOpen = false, uploadProgress = 0, uploadXHR = null;
   let recorder = null, microphone = null, recordTimer = null, recordStarted = 0;
-  let recording = false, recordingCancelled = false;
+  let recording = false;
   const previewUrls = new Map();
   const maxUpload = 12 * 1024 * 1024;
   const maxAlbumUpload = 30 * 1024 * 1024;
@@ -639,6 +639,7 @@ window.NoraStaffChat = (() => {
   async function toggleRecording() {
     if(sending)return;
     if(recording){stopRecording();return;}
+    if(recorder)return; // Wait for the previous onstop before starting again.
     if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){
       toast('Запись голоса недоступна в этом Telegram WebView');return;
     }
@@ -653,14 +654,14 @@ window.NoraStaffChat = (() => {
       const options=mime?{mimeType:mime,audioBitsPerSecond:64000}:{audioBitsPerSecond:64000};
       const active=new MediaRecorder(stream,options);
       const chunks=[];
-      microphone=stream;recorder=active;recordingCancelled=false;
+      microphone=stream;recorder=active;
       active.ondataavailable=event=>{if(event.data?.size)chunks.push(event.data);};
       active.onerror=()=>{
         toast('Не удалось записать голосовое');
         stopRecording(true);
       };
       active.onstop=()=>{
-        const discard=recordingCancelled;
+        const discard=!!active._noraDiscard;
         stream.getTracks().forEach(track=>track.stop());
         if(recorder===active)recorder=null;
         if(microphone===stream)microphone=null;
