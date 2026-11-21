@@ -469,6 +469,7 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.game_invitations import router as game_invitations_router
     from community_bot.mafia_notifications import router as mafia_notifications_router
     from community_bot.routers.member_stats import router as member_stats_router
+    from community_bot.routers.song_requests import router as song_requests_router
     from community_bot.sea_notifications import router as sea_notifications_router
 
     dispatcher.include_router(game_invitations_router)
@@ -477,6 +478,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(birthday_router)
     dispatcher.include_router(event_router)
     dispatcher.include_router(moderation_router)
+    dispatcher.include_router(song_requests_router)
     dispatcher.include_router(nora_router)
     dispatcher.include_router(command_admin_router)
     dispatcher.include_router(flows_router)

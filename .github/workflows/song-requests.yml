@@ -1,0 +1,23 @@
+name: Yandex Music song requests
+
+on:
+  pull_request:
+    paths:
+      - "community_bot/routers/song_requests.py"
+      - "community_bot/main.py"
+      - "pyproject.toml"
+      - "tests/test_song_requests.py"
+      - ".github/workflows/song-requests.yml"
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m compileall -q community_bot/routers/song_requests.py tests/test_song_requests.py
+      - run: python -m pytest -q tests/test_song_requests.py
