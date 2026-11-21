@@ -63,34 +63,27 @@ async def accept_waiting_applications(bot, db, settings) -> int:
     from community_bot.routers.private import _notify_application_decision
 
     approved = 0
-    while True:
-        pending = await db.pending_applications(limit=100)
-        eligible = []
-        for row in pending:
-            uid = int(row["user_id"])
-            if not db.ban_is_active(await db.ban_reset_state(uid)):
-                eligible.append(row)
-        if not eligible:
-            break
-        for row in eligible:
-            application_id = int(row["id"])
-            if not await db.decide_application(application_id, settings.owner_id, "approved", None):
-                continue
-            approved += 1
-            try:
-                await _notify_application_decision(
-                    bot, db, settings, application_id, settings.owner_id, "approved", None,
-                    automatic=True,
-                )
-            except TelegramAPIError as error:
-                logger.warning("Auto-approved application %s; DM failed: %s", application_id, type(error).__name__)
-        if len(pending) < 100:
-            break
-        # A page full of actively banned users cannot cause an infinite retry loop.
-        if len(eligible) < len(pending):
-            break
+    pending = await db.fetchall(
+        "SELECT id, user_id FROM applications WHERE status = 'pending' ORDER BY created_at",
+    )
+    for row in pending:
+        uid = int(row["user_id"])
+        if db.ban_is_active(await db.ban_reset_state(uid)):
+            continue
+        application_id = int(row["id"])
+        if not await db.decide_application(application_id, settings.owner_id, "approved", None):
+            continue
+        approved += 1
+        try:
+            await _notify_application_decision(
+                bot, db, settings, application_id, settings.owner_id, "approved", None,
+                automatic=True,
+            )
+            # The same person already got their admission and chat-link card.
+            await db.set_bot_state(f"{BROADCAST_MARKER}{uid}", "sent")
+        except TelegramAPIError as error:
+            logger.warning("Auto-approved application %s; DM failed: %s", application_id, type(error).__name__)
     return approved
-
 
 async def broadcast_entry_once(bot, db, settings) -> tuple[int, int]:
     """Persist per-recipient completion to avoid a repeated blast after a restart."""
