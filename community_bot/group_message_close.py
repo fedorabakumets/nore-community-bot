@@ -122,7 +122,19 @@ def _home_screen_rich(rich: InputRichMessage, pin_url: str) -> InputRichMessage:
     tail = {"type": "buttons", "align": "center", "buttons": [
         {"text": HOME_SCREEN_LABEL, "url": install_url, "style": "primary"},
     ]}
-    if blocks and blocks[-1] == tail:
+    existing = [
+        button
+        for block in blocks if block.get("type") == "buttons"
+        for button in block.get("buttons", [])
+        if button.get("text") == HOME_SCREEN_LABEL
+        or (button.get("url") or "").endswith(f"startapp={HOME_SCREEN_PARAM}")
+    ]
+    if (
+        len(existing) == 1 and blocks and blocks[-1].get("type") == "buttons"
+        and len(blocks[-1].get("buttons", [])) == 1
+        and blocks[-1]["buttons"][0].get("text") == HOME_SCREEN_LABEL
+        and blocks[-1]["buttons"][0].get("url") == install_url
+    ):
         return rich
     cleaned = []
     for block in blocks:
