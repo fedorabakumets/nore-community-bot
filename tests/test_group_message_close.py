@@ -223,7 +223,8 @@ async def test_mini_app_start_confirms_group_invitation_before_deleting_it(db):
     app_bot.delete_message.assert_awaited_once_with(2, 10)
     await game_lobby_posts.cleanup(db, app_bot, now=now + 1.99)
     app_bot.delete_message.assert_awaited_once_with(2, 10)
-    await game_lobby_posts.cleanup(db, app_bot, now=now + 2)
+    # A tiny margin avoids crossing SQLite's floating-point timestamp boundary.
+    await game_lobby_posts.cleanup(db, app_bot, now=now + 2.1)
     assert [call.args for call in app_bot.delete_message.await_args_list] == [(2, 10), (GROUP, 10)]
     app_bot.edit_message_text.assert_awaited_once()
     assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (rid,)))["status"] == "playing"
