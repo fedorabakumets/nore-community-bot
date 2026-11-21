@@ -110,6 +110,7 @@ async def get_or_create_link(bot: Bot, db, settings, user_id: int) -> str:
         name = f"NORA26-{user_id}"[:32]
         invite = await bot.create_chat_invite_link(
             settings.community_chat_id, name=name, creates_join_request=True,
+            expire_date=END,
         )
         url = invite.invite_link
         try:
@@ -255,6 +256,8 @@ async def publish_poster(bot: Bot, db, settings, file_id: str) -> int:
     existing = await db.get_bot_state(POST_KEY)
     if not settings.community_chat_id:
         raise ValueError("Не задан чат сообщества.")
+    if datetime.now(ZONE) >= END and not existing:
+        raise ValueError("Срок конкурса истёк, публиковать его нельзя.")
     if existing:
         await bot.pin_chat_message(settings.community_chat_id, int(existing), disable_notification=True)
         return int(existing)
@@ -300,7 +303,7 @@ async def admin_publish_poster(message: Message, bot: Bot, db, settings) -> None
 
 async def award_finished_contest(bot: Bot, db) -> list[tuple[int, int]]:
     """Atomic, idempotent payout. No reward for a zero-invite participant."""
-    if datetime.now(ZONE) < END:
+    if datetime.now(ZONE) < END or not await db.get_bot_state(POST_KEY):
         return []
     async with db.connect() as connection:
         await connection.execute("BEGIN IMMEDIATE")
@@ -341,7 +344,7 @@ async def award_finished_contest(bot: Bot, db) -> list[tuple[int, int]]:
 
 async def reward_scheduler(bot: Bot, db) -> None:
     while not await db.get_bot_state(AWARD_KEY):
-        if datetime.now(ZONE) >= END:
+        if datetime.now(ZONE) >= END and await db.get_bot_state(POST_KEY):
             await award_finished_contest(bot, db)
             return
         await asyncio.sleep(300)
