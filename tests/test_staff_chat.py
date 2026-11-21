@@ -396,7 +396,7 @@ async def test_staff_chat_composer_rejects_missing_reply_without_sending(tmp_pat
 
     class Request(dict):
         content_length = 95
-        app_state = {
+        app = {
             "db": db, "settings": settings, "bot": bot,
             "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
         }
@@ -468,7 +468,7 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
 
     # Upload inspection denies executable files before Telegram is called.
     class BadRequest(Request):
-        app_state = {**app_state, "staff_chat_last_sent": {}}
+        app = {**app_state, "staff_chat_last_sent": {}}
         async def multipart(self):
             return Reader([Field("file", b"code", filename="nora.exe")])
 
