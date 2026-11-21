@@ -9,7 +9,10 @@ from typing import Any, Iterator
 
 from aiogram import BaseMiddleware, Bot
 from aiogram.client.session.middlewares.base import BaseRequestMiddleware
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import (
+    TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError,
+    TelegramRetryAfter, TelegramServerError,
+)
 from aiogram.methods.base import TelegramMethod, TelegramType
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, TelegramObject
 
@@ -156,6 +159,14 @@ async def delete_user_command(event: Message, bot: Any) -> bool:
             event.message_id,
             event.chat.id,
             error,
+        )
+        return False
+    except (TelegramNetworkError, TelegramRetryAfter, TelegramServerError) as error:
+        # Telegram may temporarily return 502. Deletion is best-effort:
+        # a command must still reach its handler and never be silently lost.
+        logger.warning(
+            "Telegram command cleanup deferred (chat=%s, message=%s, %s)",
+            event.chat.id, event.message_id, type(error).__name__,
         )
         return False
 

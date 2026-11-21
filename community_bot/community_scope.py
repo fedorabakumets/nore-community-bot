@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatMemberStatus, ChatType
@@ -8,6 +9,37 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Update
 
 logger = logging.getLogger(__name__)
+
+
+MAX_MESSAGE_BACKLOG_SECONDS = 120
+
+
+class FreshMessageMiddleware(BaseMiddleware):
+    """Reject stale Telegram messages before moderation, commands and chat capture.
+
+    A backlog delivered after redeploy or API recovery must never trigger
+    old commands, anti-spam mutes, economic operations or notifications.
+    """
+
+    async def __call__(self, handler, event: Update, data):
+        message = event.edited_message or event.message
+        if message is not None:
+            value = message.edit_date if event.edited_message and message.edit_date else message.date
+            if isinstance(value, datetime):
+                sent = value.timestamp()
+            elif type(value) in (int, float):
+                sent = float(value)
+            else:
+                sent = None
+            if sent is not None:
+                age = datetime.now(UTC).timestamp() - sent
+                if age > MAX_MESSAGE_BACKLOG_SECONDS:
+                    logger.warning(
+                        "Skipped stale Telegram message (age=%ds, chat=%s, id=%s)",
+                        int(age), message.chat.id, message.message_id,
+                    )
+                    return None
+        return await handler(event, data)
 
 
 class CommunityScopeMiddleware(BaseMiddleware):

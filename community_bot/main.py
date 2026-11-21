@@ -19,7 +19,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
 )
 
-from community_bot.community_scope import CommunityScopeMiddleware
+from community_bot.community_scope import CommunityScopeMiddleware, FreshMessageMiddleware
 from community_bot.config import Settings, load_settings
 from community_bot.covers import cover_path_for
 from community_bot.database import Database
@@ -435,6 +435,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
     from community_bot.message_widgets import WidgetUpdateMiddleware
 
+    dispatcher.update.outer_middleware(FreshMessageMiddleware())
     dispatcher.update.outer_middleware(CommunityScopeMiddleware())
     dispatcher.update.outer_middleware(GroupMessageActorsMiddleware())
     dispatcher.update.outer_middleware(WidgetUpdateMiddleware())

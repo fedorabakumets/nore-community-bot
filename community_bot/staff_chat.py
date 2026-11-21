@@ -7,6 +7,7 @@ import json
 from io import BytesIO
 from pathlib import PurePosixPath
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from aiogram import BaseMiddleware
@@ -195,6 +196,15 @@ def _rich_projection(message: Message) -> str:
     return json.dumps({"blocks": output, "files": files}, ensure_ascii=False)
 
 
+def _iso_telegram_date(value) -> str | None:
+    """Widget beta responses may provide integer dates instead of datetime."""
+    if value is None:
+        return None
+    if type(value) in (int, float):
+        return datetime.fromtimestamp(value, UTC).isoformat()
+    return value.isoformat()
+
+
 async def capture(db, settings, message: Message) -> None:
     if not settings.community_chat_id or message.chat.id != settings.community_chat_id:
         return
@@ -218,7 +228,7 @@ async def capture(db, settings, message: Message) -> None:
     rich_json = _rich_projection(message)
     if not text and not media_type and not rich_json:
         return
-    edited = message.edit_date.isoformat() if message.edit_date else None
+    edited = _iso_telegram_date(message.edit_date)
     await db.execute(
         """
         INSERT INTO staff_chat_messages (
@@ -238,7 +248,7 @@ async def capture(db, settings, message: Message) -> None:
             message.chat.id, message.message_id, user_id, author[:120], username[:80],
             text, media_type, media_id, thumbnail_id, rich_json,
             message.reply_to_message.message_id if message.reply_to_message else None,
-            message.date.isoformat(), edited,
+            _iso_telegram_date(message.date), edited,
         ),
     )
     from community_bot.staff_chat_live import emit

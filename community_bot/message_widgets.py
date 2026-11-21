@@ -1,7 +1,7 @@
 """Profile-1 Telegram widgets, with ordinary-message fallback on older Bot APIs.
 
 Contract: TelegramMessenger/widget-sandbox docs/tgw-format.md (Bot API 10.4).
-Widget methods and their updates use Telegram beta route for regular chats.
+Only experimental widget methods use Telegram beta. getUpdates always uses stable API.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramNetworkError,
     TelegramNotFound,
+    TelegramRetryAfter,
     TelegramServerError,
     TelegramUnauthorizedError,
 )
@@ -42,7 +43,6 @@ class WidgetSession(AiohttpSession):
     def __init__(self):
         super().__init__()
         self.widget_api = AiohttpSession(api=TelegramAPIServer.from_base("https://api.telegram.org/beta"))
-        self.retry_poll_at = 0.0
 
     async def close(self):
         try:
@@ -55,12 +55,8 @@ class WidgetSession(AiohttpSession):
         if name in {"sendWidget", "sendSharedWidget", "answerWidgetQuery", "editSharedWidgetData",
                     "editMessageWidgetData"}:
             return await self.widget_api.make_request(bot, method, timeout)
-        if name == "getUpdates" and time.monotonic() >= self.retry_poll_at:
-            try:
-                return await self.widget_api.make_request(bot, method, timeout)
-            except (TelegramNotFound, TelegramUnauthorizedError, TelegramForbiddenError,
-                    TelegramServerError, TelegramNetworkError):
-                self.retry_poll_at = time.monotonic() + 60
+        # Never mix beta and stable getUpdates offsets. Independent streams can
+        # replay old group commands or silently miss messages after a 502.
         return await super().make_request(bot, method, timeout)
 
 
@@ -141,6 +137,12 @@ async def try_send(make_request, bot, request: SendWidget) -> Message | None:
     except (TelegramNotFound, TelegramUnauthorizedError) as error:
         logger.warning("Telegram widget API unavailable (%s); using chat controls", type(error).__name__)
         bot._nora_widgets_retry_at = time.monotonic() + 600
+    except (TelegramServerError, TelegramNetworkError, TelegramRetryAfter) as error:
+        logger.warning(
+            "Telegram widget temporarily unavailable (%s); using regular chat buttons",
+            type(error).__name__,
+        )
+        bot._nora_widgets_retry_at = time.monotonic() + 120
     except TelegramForbiddenError:
         logger.info("Telegram denied widget delivery for this request; using chat controls")
     except TelegramBadRequest as error:

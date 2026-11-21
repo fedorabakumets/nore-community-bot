@@ -15,7 +15,10 @@ from zoneinfo import ZoneInfo
 from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramAPIError, TelegramBadRequest, TelegramForbiddenError,
+    TelegramNetworkError, TelegramRetryAfter, TelegramServerError,
+)
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
@@ -227,6 +230,14 @@ class CommunityModerationMiddleware(BaseMiddleware):
             is_admin = member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
         except (TelegramBadRequest, TelegramForbiddenError):
             is_admin = False
+        except (TelegramServerError, TelegramNetworkError, TelegramRetryAfter) as error:
+            # Fail open on temporary Bot API outages: never mute a Telegram
+            # administrator just because getChatMember returned 502.
+            logging.getLogger(__name__).warning(
+                "Telegram admin role unknown, skipping punitive moderation (%s)",
+                type(error).__name__,
+            )
+            return cached[1] if cached else True
         self._admin_cache[key] = (now_monotonic, is_admin)
         return is_admin
 
@@ -245,7 +256,7 @@ class CommunityModerationMiddleware(BaseMiddleware):
                 and event.chat.id == settings.community_chat_id
                 and await needs_reapplication(db, event.from_user.id)
             ):
-                with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
+                with contextlib.suppress(TelegramAPIError):
                     await event.delete()
                 return None
             await register_telegram_user(db, event.from_user)
@@ -289,25 +300,35 @@ class CommunityModerationMiddleware(BaseMiddleware):
                 if member and sticker_filter_on and event.sticker:
                     blocked_reason = "Стикеры сейчас запрещены настройками чата."
                 if member and flags.get("anti_flood"):
-                    key = (event.chat.id, event.from_user.id)
-                    now_monotonic = time.monotonic()
-                    bucket = self._messages[key]
-                    bucket.append(now_monotonic)
-                    while bucket and now_monotonic - bucket[0] > 10:
-                        bucket.popleft()
-                    if len(bucket) > 6:
-                        blocked_reason = "Антифлуд: не больше 6 сообщений за 10 секунд."
-                        with contextlib.suppress(TelegramBadRequest):
-                            await bot.restrict_chat_member(
-                                event.chat.id,
-                                event.from_user.id,
-                                permissions=ChatPermissions(can_send_messages=False),
-                                until_date=datetime.now(UTC) + timedelta(minutes=5),
-                            )
+                    # Telegram batches updates after deploys and API outages.
+                    # Only recent author timestamps count; never count how
+                    # rapidly the backlog was delivered to the bot.
+                    sent_at = (
+                        event.date.timestamp() if isinstance(event.date, datetime)
+                        else float(event.date)
+                    )
+                    arrival_age = datetime.now(UTC).timestamp() - sent_at
+                    if 0 <= arrival_age <= 30:
+                        key = (event.chat.id, event.from_user.id)
+                        bucket = self._messages[key]
+                        if bucket and sent_at < bucket[-1]:
+                            bucket.clear()
+                        bucket.append(sent_at)
+                        while bucket and sent_at - bucket[0] > 10:
+                            bucket.popleft()
+                        if len(bucket) > 6:
+                            blocked_reason = "Антифлуд: не больше 6 сообщений за 10 секунд."
+                            with contextlib.suppress(TelegramAPIError):
+                                await bot.restrict_chat_member(
+                                    event.chat.id,
+                                    event.from_user.id,
+                                    permissions=ChatPermissions(can_send_messages=False),
+                                    until_date=datetime.now(UTC) + timedelta(minutes=5),
+                                )
                 if blocked_reason:
-                    with contextlib.suppress(TelegramBadRequest):
+                    with contextlib.suppress(TelegramAPIError):
                         await event.delete()
-                    with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
+                    with contextlib.suppress(TelegramAPIError):
                         await bot.send_message(event.from_user.id, f"🛡 {blocked_reason}")
                     await db.log_admin_action(
                         SYSTEM_ACTOR_ID,
