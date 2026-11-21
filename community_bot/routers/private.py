@@ -29,7 +29,7 @@ from aiogram.types import (
 )
 
 from community_bot.aliases import command_or_alias
-from community_bot.application_form import validate_application_age
+from community_bot.application_form import validate_application_age, validate_city
 from community_bot.audit import format_audit_log, person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
@@ -1277,9 +1277,12 @@ async def application_age(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplicationForm.city)
 async def application_city(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message, maximum=100)) is None:
+    try:
+        city = validate_city(message.text)
+    except ValueError as error:
+        await message.answer(str(error))
         return
-    await state.update_data(city=text)
+    await state.update_data(city=city)
     await state.set_state(ApplicationForm.bio)
     await message.answer("Расскажи немного о себе.", reply_markup=flow_reply_keyboard())
 

@@ -158,7 +158,7 @@ async def application_onboarding(db, uid, ban):
 
 
 async def submit_application(request):
-    from community_bot.application_form import validate_application_age
+    from community_bot.application_form import validate_application_age, validate_city
     from community_bot.routers.private import _notify_application_decision
 
     if 'application_ban' not in request:
@@ -186,6 +186,7 @@ async def submit_application(request):
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
                 raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
             answers[field] = value.strip()
+        answers['city'] = validate_city(answers['city'])
         answers['age'] = validate_application_age(body.get('age'))
     except (ValueError, TypeError) as error:
         message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'

@@ -427,6 +427,7 @@ async def memory_cleanup_job(db: Database) -> None:
 
 def create_dispatcher() -> Dispatcher:
     from community_bot.access import PrivateAccessMiddleware, ProfileAccessMiddleware
+    from community_bot.city_gate import CityGateMiddleware
     from community_bot.group_message_close import GroupCloseCallbackMiddleware, GroupMessageActorsMiddleware
     from community_bot.private_rich import PrivateRichContextMiddleware
     from community_bot.reply_rich import ReplyRichContextMiddleware
@@ -452,6 +453,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(PrivateRichContextMiddleware())
     dispatcher.message.outer_middleware(PrivateAccessMiddleware())
     dispatcher.callback_query.outer_middleware(PrivateAccessMiddleware())
+    dispatcher.message.outer_middleware(CityGateMiddleware())
+    dispatcher.callback_query.outer_middleware(CityGateMiddleware())
     from community_bot.nora_game_chat import GameChatMiddleware
     from community_bot.routers.group import CommunityModerationMiddleware, moderation_router
 
