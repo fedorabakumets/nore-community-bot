@@ -326,7 +326,7 @@ if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
 if(tab==='lk')content=profileScreen(u);
 if(tab==='community')content=window.NoraCommunity?.screen()||'';
-if(tab==='staffchat')content=window.NoraStaffChat?.screen()||'';
+if(tab==='staffchat')content=window.NoraStaffChat?.screen()||'<section class="nora-staff-chat"><h1>Чат Норы</h1><p class="sub">Экран чата не загрузился. Закрой и заново открой Нору.</p><button type="button" data-tab="community" class="secondary">Назад</button></section>';
 if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
