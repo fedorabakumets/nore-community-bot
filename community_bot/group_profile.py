@@ -160,6 +160,22 @@ async def group_profile_body(
     return body, avatar, track, name, subtitle, details, like, votes, commands
 
 
+def _fallback_limits_body(body):
+    """Fallback for Telegram clients that reject interactive blocks inside Details."""
+    result = []
+    for block in body:
+        if isinstance(block, InputRichBlockDetails) and block.summary == "Лимиты":
+            table, action = block.blocks
+            text = "\n".join(f"{row[0].text} │ {row[1].text}" for row in table.cells)
+            result.extend([
+                InputRichBlockDetails(summary="Лимиты", blocks=[InputRichBlockParagraph(text=text)]),
+                action,
+            ])
+        else:
+            result.append(block)
+    return result
+
+
 async def send_group_profile(
     message: Message,
     db: Database,
@@ -175,10 +191,12 @@ async def send_group_profile(
     )
     thread = message.message_thread_id if message.is_topic_message else None
     sent = None
-    profile_blocks = [*body[:3], audio_block(track), *body[3:]] if track else body
-    attempts = [[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks]
-    if track:
-        attempts.extend([[avatar, *body], body] if avatar else [body])
+    attempts = []
+    for variant in (body, _fallback_limits_body(body)):
+        profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+        attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
+        if track:
+            attempts.extend([[avatar, *variant], variant] if avatar else [variant])
     audio_inline = bool(track)
     for blocks in attempts:
         audio_inline = bool(track and any(block.type == "audio" for block in blocks))
@@ -228,11 +246,11 @@ async def restore_group_profile_card(
     )
     with keep_in_chat(), bot_publication():
         attempts = []
-        if avatar:
-            attempts.append([avatar, *body[:3], audio_block(track), *body[3:]] if track else [avatar, *body])
-        attempts.append([*body[:3], audio_block(track), *body[3:]] if track else body)
-        if track:
-            attempts.extend([[avatar, *body], body] if avatar else [body])
+        for variant in (body, _fallback_limits_body(body)):
+            profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+            attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
+            if track:
+                attempts.extend([[avatar, *variant], variant] if avatar else [variant])
         for blocks in attempts:
             try:
                 await message.edit_text(
