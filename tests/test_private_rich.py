@@ -572,16 +572,12 @@ async def test_background_game_updates_respect_the_current_screen(setup, navigat
     assert len(session.calls) == before + (0 if navigate_away else 1)
 
 
-@pytest.mark.parametrize("attach_photo", [False, True])
-async def test_application_replaces_final_question_and_approval_opens_a_new_interactive_menu(
-    setup, monkeypatch, attach_photo,
-):
-    from aiogram.filters import MagicData
-
+async def test_application_auto_approves_and_shows_join_button_and_interactive_menu(setup, monkeypatch):
     from community_bot.routers import private
     from community_bot.states import ApplicationForm
 
     db, bot, session, _ = setup
+    bot.community_settings.owner_id = 99
     bot.community_settings.reviewers = frozenset()
     bot.community_settings.community_invite_url = "https://t.me/+community"
     monkeypatch.delenv("MINIAPP_URL", raising=False)
@@ -596,9 +592,6 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
     router.message.register(private.application_age, ApplicationForm.age)
     router.message.register(private.application_city, ApplicationForm.city)
     router.message.register(private.application_bio, ApplicationForm.bio)
-    router.message.register(private.attach_application_photo, F.photo, MagicData(F.application_photo_target))
-    router.callback_query.register(private.skip_application_photo, F.data == "application:skip-photo")
-    router.callback_query.register(private.approve_application, F.data.startswith("application:approve:"))
     profile_click = AsyncMock()
 
     @router.callback_query(F.data == "menu:profile")
@@ -609,8 +602,8 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
     first = await show_panel(setup, bot.send_message, 8, "Добро пожаловать")
     actor = incoming(uid=8).from_user
 
-    async def callback(action, update_id, message, user=actor):
-        event = CallbackQuery(id=str(update_id), from_user=user, chat_instance="x", message=message, data=action)
+    async def callback(action, update_id, message):
+        event = CallbackQuery(id=str(update_id), from_user=actor, chat_instance="x", message=message, data=action)
         await dispatcher.feed_update(bot, Update(update_id=update_id, callback_query=event),
                                      db=db, settings=bot.community_settings)
 
@@ -618,54 +611,27 @@ async def test_application_replaces_final_question_and_approval_opens_a_new_inte
     for idx, text in enumerate(["Рома", "13", "24", "Москва", "Люблю музыку"], 2):
         await dispatcher.feed_update(bot, Update(update_id=idx, message=incoming(uid=8, text=text)),
                                      db=db, settings=bot.community_settings)
-    panels = [call for call in session.calls if isinstance(call, (SendRichMessage, EditMessageText))]
-    assert sum(isinstance(call, SendRichMessage) for call in panels) == 2
-    assert all(getattr(call, "message_id", first.message_id) == first.message_id for call in panels)
-    assert await db.has_pending_application(8)
-    profile = await db.get_user(8)
-    assert (profile["profile_name"], profile["birth_date"]) == ("Рома", None)
-    assert profile["profile_bio"] == ""
-    assert "отправлена на проверку" in panels[-1].rich_message.model_dump_json()
-    assert "онлайн-интервью" not in panels[-1].rich_message.model_dump_json()
-    assert set(actions(panels[-1])) == {"menu:question", "application:skip-photo"}
-    pending_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
-    assert pending_id != first.message_id
-    assert session.calls[-1].__api_method__ == "deleteMessage"
-    assert session.calls[-1].message_id == first.message_id
-    application = (await db.pending_applications())[0]
-    saved = await db.get_application(application["id"])
-    assert saved["answers"] == {"name": "Рома", "age": 24, "city": "Москва", "bio": "Люблю музыку"}
-    if attach_photo:
-        photo = incoming(uid=8, text=None, photo=[
-            PhotoSize(file_id="applicant-photo", file_unique_id="photo", width=320, height=200),
-        ])
-        await dispatcher.feed_update(bot, Update(update_id=7, message=photo),
-                                     db=db, settings=bot.community_settings)
-        assert await db.application_photo(application["id"]) == "applicant-photo"
-    else:
-        waiting = Message(message_id=pending_id, date=datetime.now(UTC), chat=first.chat,
-                          rich_message={"blocks": content(panels[-1])})
-        await callback("application:skip-photo", 7, waiting)
-        assert await db.application_photo(application["id"]) is None
-    assert await db.has_pending_application(8)
 
-    review = await show_panel(setup, bot.send_message, 99, "Анкета на проверку")
-    await callback(f"application:approve:{application['id']}", 9, review, incoming(uid=99).from_user)
-    (notice,) = [call for call in session.calls if call.__api_method__ == "sendMessage" and call.chat_id == 8]
-    assert "Заявка одобрена" in notice.text and "https://t.me/+community" in notice.text
-    approved = [call for call in session.calls if isinstance(call, SendRichMessage) and call.chat_id == 8][-1]
-    assert "Выбери раздел" in approved.rich_message.model_dump_json()
-    assert "отправлена на проверку" not in approved.rich_message.model_dump_json()
+    assert await db.has_approved_application(8)
+    assert not await db.has_pending_application(8)
+    record = await db.fetchone("SELECT id FROM applications WHERE user_id = 8")
+    saved = await db.get_application(record["id"])
+    assert saved["answers"] == {"name": "Рома", "age": 24, "city": "Москва", "bio": "Люблю музыку"}
+    assert not any("application:approve:" in str(call) for call in session.calls)
+    invites = [call for call in session.calls if isinstance(call, SendMessage) and call.chat_id == 8
+               and "Добро пожаловать в НОРУ" in call.text]
+    assert len(invites) == 1
+    assert invites[0].reply_markup.inline_keyboard[0][0].url == "https://t.me/+community"
+
+    menu = [call for call in session.calls if isinstance(call, SendRichMessage) and call.chat_id == 8][-1]
+    assert "Выбери раздел" in menu.rich_message.model_dump_json()
     assert {"menu:profile", "menu:wallet", "menu:shop", "menu:pet", "menu:notices", "menu:question"} == set(
-        actions(approved)
+        actions(menu)
     )
     menu_id = json.loads(await db.get_bot_state("private_rich_panel:8"))["message_id"]
-    assert menu_id != pending_id
-    deleted = [call for call in session.calls if call.__api_method__ == "deleteMessage" and call.chat_id == 8]
-    assert deleted[-1].message_id == pending_id
-    menu = Message(message_id=menu_id, date=datetime.now(UTC), chat=first.chat,
-                   rich_message={"blocks": content(approved)})
-    await callback("menu:profile", 10, menu)
+    panel = Message(message_id=menu_id, date=datetime.now(UTC), chat=first.chat,
+                    rich_message={"blocks": content(menu)})
+    await callback("menu:profile", 10, panel)
     profile_click.assert_awaited_once_with(menu_id)
     await dispatcher.storage.close()
 
