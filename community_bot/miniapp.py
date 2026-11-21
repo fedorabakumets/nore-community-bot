@@ -86,7 +86,7 @@ async def protection(request, handler):
                 '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
                 '/api/community/chat',
-            } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
+            } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
             if not profile_optional:
                 from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
@@ -580,7 +580,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/community', community_api.status)
     from community_bot import staff_chat
 
+    app['staff_chat_media_gate'] = asyncio.Semaphore(2)
     app.router.add_get('/api/community/chat', staff_chat.feed)
+    app.router.add_get(r'/api/community/chat/media/{message_id:\d+}', staff_chat.media)
     app.router.add_get('/api/community/people', community_api.directory)
     app.router.add_get('/api/community/lobbies', community_api.lobbies)
     app.router.add_get('/api/community/presence', community_api.presence)
