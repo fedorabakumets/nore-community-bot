@@ -86,6 +86,11 @@ window.NoraStaffChat = (() => {
   const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[])].join('|');
   const line = m => {
     const id = Number(m.id);
+    const sent = new Date(m.sent_at);
+    const day = Number.isNaN(sent.getTime()) ? '' :
+      [sent.getFullYear(),String(sent.getMonth()+1).padStart(2,'0'),String(sent.getDate()).padStart(2,'0')].join('-');
+    const dayLabel = Number.isNaN(sent.getTime()) ? '' :
+      sent.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
     const name = esc(m.name || 'Участник');
     const initial = esc((m.name || '?').match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || '?');
     const who = Number(m.user_id) > 0
@@ -99,7 +104,7 @@ window.NoraStaffChat = (() => {
     const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
     const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
     const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
-    return `<article class="staff-chat-message" data-message-id="${id}">
+    return `<article class="staff-chat-message" data-message-id="${id}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
          <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}${replyButton}${hideButton}</div>
          ${quote}${mediaTile(m)}${richRow(m)}${body}
@@ -109,14 +114,24 @@ window.NoraStaffChat = (() => {
   function screen() {
     return `<section class="nora-staff-chat">
       <header class="staff-chat-header">
-        <button class="staff-chat-back" type="button" data-tab="community" aria-label="Назад в Коммьюнити">‹</button>
-        <div class="staff-chat-heading"><h1>Чат Норы</h1><span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span></div>
+        <button class="staff-chat-back" type="button" data-tab="community" aria-label="Назад в Коммьюнити">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg>
+        </button>
+        <span class="staff-chat-mark" aria-hidden="true"><span></span></span>
+        <div class="staff-chat-heading">
+          <h1>Чат Норы</h1>
+          <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span>
+        </div>
+        <span class="staff-chat-team-label">КОМАНДА</span>
       </header>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
         <p class="staff-chat-empty">Подключаем чат…</p>
       </div>
-      <button type="button" id="staff-chat-new" class="staff-chat-new" data-chat-scroll-new hidden>Новые сообщения ↓</button>
-      <div id="staff-chat-typing" class="staff-chat-typing" hidden></div>
+      <div class="staff-chat-activity" aria-live="polite">
+        <button type="button" id="staff-chat-new" class="staff-chat-new" data-chat-scroll-new hidden>Новые сообщения ↓</button>
+        <div id="staff-chat-typing" class="staff-chat-typing" hidden></div>
+        <button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним ↓</button>
+      </div>
       <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
         <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
@@ -130,9 +145,8 @@ window.NoraStaffChat = (() => {
         <div class="staff-chat-emoji-palette" id="staff-chat-emoji-palette" hidden>
           ${quickEmoji.map(emoji=>`<button type="button" data-chat-emoji="${esc(emoji)}" aria-label="Добавить ${esc(emoji)}">${emoji}</button>`).join('')}
         </div>
-        <p class="staff-chat-compose-hint">Отправит бот Нора с подписью твоего имени · 1 файл до 12 МБ</p>
+        <p class="staff-chat-compose-hint"><span aria-hidden="true">●</span> Отправка от бота Норы с подписью автора · до 12 МБ</p>
       </form>
-      <footer class="staff-chat-footer"><span>Чат Telegram · тестовый режим команды</span><button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним сообщениям ↑</button></footer>
     </section>`;
   }
 
@@ -346,6 +360,22 @@ window.NoraStaffChat = (() => {
       if(msg)node.dataset.chatSig = msgSignature(msg);
     }
     hydrateMedia();
+    decorateDates(feed);
+  }
+  function decorateDates(feed) {
+    // Date headers belong to the scrollable history, not the fixed screen chrome.
+    for(const date of feed.querySelectorAll('.staff-chat-day'))date.remove();
+    let previous = '';
+    for(const message of feed.querySelectorAll('.staff-chat-message')){
+      const day=message.dataset.chatDay || '';
+      if(day && day!==previous){
+        const divider=document.createElement('div');
+        divider.className='staff-chat-day';
+        divider.textContent=message.dataset.chatDate || '';
+        message.before(divider);
+      }
+      previous=day;
+    }
   }
   function focusMessage(id) {
     const feed = document.getElementById('staff-chat-feed');
