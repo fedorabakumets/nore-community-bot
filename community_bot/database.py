@@ -632,6 +632,15 @@ class Database:
                 + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
                 + referral_schema + staff_chat_schema
             )
+            staff_chat_columns = {
+                str(row[1]) for row in await (await db.execute(
+                    "PRAGMA table_info(staff_chat_messages)"
+                )).fetchall()
+            }
+            if 'media_thumb_file_id' not in staff_chat_columns:
+                await db.execute(
+                    "ALTER TABLE staff_chat_messages ADD COLUMN media_thumb_file_id TEXT NOT NULL DEFAULT ''"
+                )
             await db.execute("INSERT OR IGNORE INTO pet_development(user_id) SELECT user_id FROM pets")
             await db.execute(
                 "INSERT OR IGNORE INTO pet_stage_rewards "
