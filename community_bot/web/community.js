@@ -14,7 +14,7 @@ window.NoraCommunity = (() => {
   function updateClock(){const el=document.getElementById('community-updated');if(el)el.textContent=updatedLabel()}
   function leaders(){
     const buttons=Object.entries(metrics).map(([id,item])=>`<button type="button" data-community-metric="${id}" aria-label="${item.label}" aria-pressed="${metric===id}" title="${item.label}">${item.icon}</button>`).join('');
-    return `<div class="community-table community-leaders"><h2 id="community-top-title">ТОП</h2><div class="community-table-body"><div class="community-top-filters" role="group" aria-label="Фильтр рейтинга">${buttons}</div><div id="community-top-results">${leaderResults()}</div></div></div>${board?`<p class="footer-note" id="community-updated">${updatedLabel()}</p>`:''}`;
+    return `<div class="community-table community-leaders"><h2 id="community-top-title">ТОП</h2><div class="community-table-body"><div class="community-top-filters" role="group" aria-label="Фильтр рейтинга">${buttons}</div><div id="community-top-results">${leaderResults()}</div></div></div>`;
   }
   function leaderResults(){
     if(!board)return boardFailed?'<p class="sub">Таблица не загрузилась.</p><button type="button" class="text-btn" data-community-retry>Повторить</button>':'<p class="sub" role="status">Загружаем рейтинг…</p>';
@@ -23,8 +23,7 @@ window.NoraCommunity = (() => {
     return `<h3 class="community-top-heading">${metrics[metric].title}</h3>${rows.length?rows.map((p,i)=>row(p,'leader',i)).join(''):`<p class="sub">${metrics[metric].empty}</p>`}${metric==='messages'?`<p class="community-winner">${winner}</p>`:''}`;
   }
   function staff(){
-    if(!board)return '';
-    return `<details class="community-table community-staff" data-board="staff" data-retain-open="staff"><summary>Команда Норы <span class="community-chevron">⌄</span></summary><div class="community-table-body">${board.staff.length?board.staff.map(p=>row(p,'staff')).join(''):'<p class="sub">Список команды пока пуст.</p>'}<p class="footer-note">Зелёный — сейчас в Норе. Для остальных показаны время выхода или последней активности, если она открыта.</p></div></details>`;
+    return `<details class="community-table community-staff" data-board="staff" data-retain-open="staff"><summary>Команда Норы <span class="community-chevron" aria-hidden="true">⌄</span></summary><div class="community-table-body">${!board?'<p class="sub">Загружаем команду…</p>':board.staff.length?board.staff.map(p=>row(p,'staff')).join(''):'<p class="sub">Список команды пока пуст.</p>'}<p class="footer-note">Зелёный — сейчас в Норе. Для остальных показаны время выхода или последней активности, если она открыта.</p></div></details>`;
   }
   let musicUntil=0, musicSending=false;
   const socialIcon=kind=>kind==='telegram'?'<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m21 3-4 18-6-5-3 3 1-6 9-7-11 6-5-2z"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>';
@@ -45,7 +44,7 @@ window.NoraCommunity = (() => {
       </button>
     </div>`;
   }
-  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}${window.NoraInteractive?.screen('friends')||''}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><section id="community-staff">${staff()}</section>${musicCard()}`}
+  function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><div class="community-actions">${window.NoraInteractive?.screen('friends')||''}<section id="community-staff">${staff()}</section></div><p class="footer-note" id="community-updated">${updatedLabel()}</p>${musicCard()}`}
   async function load(){
     if(loading)return;
     loading=true;
@@ -59,6 +58,7 @@ window.NoraCommunity = (() => {
         open.forEach(k=>{const d=el.querySelector(`[data-board="${k}"]`);if(d)d.open=true});
         if(focused)el.querySelector(`[data-community-metric="${focused}"]`)?.focus({preventScroll:true});
       }
+      updateClock();
       await online();
     }catch{boardFailed=true;const results=$('#community-top-results');if(!board&&results)results.innerHTML=leaderResults()}
     finally{loading=false}
