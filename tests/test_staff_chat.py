@@ -528,7 +528,9 @@ async def test_staff_live_websocket_auth_events_and_typing(tmp_path):
     )
     hub = StaffChatHub()
     db._staff_chat_hub = hub
-    app = web.Application()
+    from community_bot.miniapp import protection
+
+    app = web.Application(middlewares=[protection])
     app["db"], app["settings"], app["staff_chat_hub"] = db, settings, hub
     app.router.add_get("/ws/community/chat", connect)
 
