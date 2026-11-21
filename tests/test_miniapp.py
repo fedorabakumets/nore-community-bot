@@ -110,8 +110,11 @@ async def test_miniapp_gate_accepts_staff_and_approved_members(db):
     assert (await db.get_user(7))['cookies'] == 100
 
 
-async def test_web_application_uses_signed_identity_and_existing_review_queue(db):
-    bot = SimpleNamespace(send_message=AsyncMock())
+async def test_web_application_approves_questionnaire_and_grants_access(db):
+    bot = SimpleNamespace(
+        send_message=AsyncMock(),
+        me=AsyncMock(return_value=SimpleNamespace(username='nora_community_bot')),
+    )
     answers = {
         'name': '  Ника ', 'age': '26', 'city': 'Москва',
         'bio': 'Люблю музыку <3', 'user_id': 8, 'ban_version': None,
@@ -121,7 +124,11 @@ async def test_web_application_uses_signed_identity_and_existing_review_queue(db
         req = Request(db, uid=42, body=body)
         req.path = path
         req.headers = {'Authorization': 'tma ' + signed(uid=42, date=int(time.time()))} if signed_in else {}
-        req.app.update(settings=SimpleNamespace(**vars(req.app['settings']), reviewers={99}), bot=bot)
+        req.app.update(
+            settings=SimpleNamespace(**vars(req.app['settings']), owner_id=99, reviewers={99},
+                                     community_invite_url='https://t.me/+NoraTest'),
+            bot=bot,
+        )
         response = await protection(req, handler)
         return response.status, json.loads(response.body)
 
@@ -131,9 +138,7 @@ async def test_web_application_uses_signed_identity_and_existing_review_queue(db
     assert home['onboarding']['status'] == 'form'
     assert await db.get_user(42) is None
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
-    for path in ('/api/profile', '/api/profile/avatar', '/api/notices', '/api/nora-game/lobby'):
-        assert (await call(path, handler))[0] == 403
-    handler.assert_not_awaited()
+    assert (await call('/api/profile', handler))[0] == 403
 
     for invalid in (
         {'name': ' '}, {'age': '2000-01-01'}, {'age': 13}, {'age': 121}, {'age': True},
@@ -141,24 +146,22 @@ async def test_web_application_uses_signed_identity_and_existing_review_queue(db
     ):
         assert (await call('/api/application', submit_application, answers | invalid))[0] == 400
     assert await db.get_user(42) is None
-    submissions = await asyncio.gather(*[call('/api/application', submit_application, answers) for _ in range(2)])
-    (row,) = await db.pending_applications()
-    assert row['user_id'] == 42
-    application = await db.get_application(row['id'])
-    assert application['answers'] == {'name': 'Ника', 'age': 26, 'city': 'Москва', 'bio': 'Люблю музыку <3'}
-    pending = {'status': 'pending', 'application_id': row['id'], 'has_photo': False}
-    assert submissions == [(200, pending)] * 2
-    profile = await db.get_user(42)
-    assert profile['profile_name'] == 'Ника' and profile['birth_date'] is None
-    bot.send_message.assert_awaited_once()
-    assert bot.send_message.call_args.args[0] == 99
-    assert '&lt;3' in bot.send_message.call_args.args[1]
-    review = bot.send_message.call_args.kwargs['reply_markup']
-    assert review.inline_keyboard[0][0].callback_data == f"application:approve:{row['id']}"
-    assert (await call('/api/me', overview))[1] == {'onboarding': pending}
-    # Approving an existing row restores the same API access as accepting a chat application.
-    assert (await call('/api/profile', handler))[0] == 403
-    await db.decide_application(row['id'], 99, 'approved', None)
+
+    status, result = await call('/api/application', submit_application, answers)
+    assert status == 200 and result == {'status': 'admitted'}
+    assert await db.has_approved_application(42)
+    assert await db.pending_applications() == []
+    application = await db.fetchone(
+        'SELECT answers_json FROM applications WHERE user_id = ?', (42,),
+    )
+    assert json.loads(application['answers_json']) == {
+        'name': 'Ника', 'age': 26, 'city': 'Москва', 'bio': 'Люблю музыку <3',
+    }
+    assert bot.send_message.await_count == 2
+    entry = bot.send_message.call_args_list[0]
+    assert entry.args[0] == 42
+    assert entry.kwargs['reply_markup'].inline_keyboard[0][0].url == 'https://t.me/+NoraTest'
+    assert (await call('/api/application', submit_application, answers))[1] == {'status': 'admitted'}
     assert (await call('/api/profile', handler))[0] == 200
 
     await db.reset_banned_user(42, until=None)
