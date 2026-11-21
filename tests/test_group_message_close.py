@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram import Bot, Dispatcher
 from aiogram.enums import ChatMemberStatus
 from aiogram.methods import (
     EditMessageReplyMarkup,
@@ -25,18 +26,23 @@ from aiogram.types import (
     InputRichMessage,
     Message,
     RichMessageButton,
+    Update,
     User,
 )
 
 from community_bot import durak_rooms, game_lobby_posts
+from community_bot.community_scope import CommunityScopeMiddleware
 from community_bot.game_invitations import announce_quick_lobby, deliver_game_invitation
 from community_bot.group_message_close import (
     GroupCloseCallbackMiddleware,
     GroupCloseSendMiddleware,
+    GroupMessageActorsMiddleware,
     group_message_actors,
     normalize_current_pin,
 )
+from community_bot.message_widgets import WidgetUpdateMiddleware
 from tests.test_game_invitations import db as room_db
+from tests.test_private_rich import RecordingSession
 
 db = room_db
 GROUP = -100123
@@ -265,3 +271,33 @@ async def test_restore_only_own_current_pin(db):
     await normalize_current_pin(Client(), bot.community_settings)
     method = called.await_args.args[0]
     assert method.message_id == 10 and method.reply_markup.inline_keyboard[0][0].text == "НОРА"
+
+
+async def test_rich_close_reaches_callback_handler_with_widget_middleware_enabled(db):
+    session = RecordingSession()
+    async with Bot("999:OFFLINE_RICH_CLOSE_TEST", session=session) as bot:
+        settings = fake_bot(db).community_settings
+        bot.community_db, bot.community_settings = db, settings
+        bot.session.middleware.register(GroupCloseSendMiddleware())
+        dispatcher = Dispatcher()
+        dispatcher.update.outer_middleware(CommunityScopeMiddleware())
+        dispatcher.update.outer_middleware(GroupMessageActorsMiddleware())
+        dispatcher.update.outer_middleware(WidgetUpdateMiddleware())
+        dispatcher.callback_query.outer_middleware(GroupCloseCallbackMiddleware())
+
+        with group_message_actors(1):
+            sent = await bot.send_rich_message(GROUP, rich_message=InputRichMessage(blocks=[
+                InputRichBlockParagraph(text="Гайд по командам"),
+            ]))
+        close = sent.rich_message.blocks[-1].buttons[0]
+        assert close.text == "❌" and sent.reply_markup is None
+        card = message(sent.message_id, rich=sent.rich_message)
+        callback = CallbackQuery(id="click-close", from_user=user(1), chat_instance="community", message=card,
+                                 data=close.callback_data)
+        await dispatcher.feed_update(bot, Update(update_id=1, callback_query=callback), db=db, settings=settings)
+
+    assert [method.__api_method__ for method in session.calls] == [
+        "sendRichMessage", "deleteMessage", "answerCallbackQuery",
+    ]
+    assert session.calls[-2].message_id == sent.message_id
+    assert session.calls[-1].text is None

@@ -1064,13 +1064,14 @@ async def test_profile_birth_date_accepts_calendar_date_and_rejects_numeric_age(
     await dispatcher.storage.close()
 
 
-async def test_amount_widget_prepares_discounted_intent_without_spending(setup, monkeypatch):
+@pytest.mark.parametrize("via_button", [False, True], ids=["widget", "rich-button"])
+async def test_amount_widget_prepares_discounted_intent_without_spending(setup, monkeypatch, via_button):
     from community_bot.message_widgets import WidgetUpdateMiddleware
     from community_bot.routers.group import finish_flexible_purchase
     from community_bot.states import FlexiblePurchase
 
     db, bot, session, _ = setup
-    session.widgets = True
+    session.widgets = not via_button
     prepare = AsyncMock(return_value='test-intent')
     monkeypatch.setattr(db, 'create_wallet_intent', prepare)
     before = (await db.get_user(7))['cookies']
@@ -1090,17 +1091,24 @@ async def test_amount_widget_prepares_discounted_intent_without_spending(setup, 
     await dispatcher.feed_update(bot, Update(update_id=1, message=incoming(text='/amount')),
                                  db=db, settings=bot.community_settings)
     page = json.loads(await db.get_bot_state('private_rich_panel:7'))
-    query = {'id': 'query-amount', 'from': incoming().from_user.model_dump(),
-             'chat': incoming().chat.model_dump(), 'message_id': page['message_id'],
-             'data': f"nora:{page['widget']['token']}:500"}
+    token = page['number_choice' if via_button else 'widget']['token']
+    payload = f"nora:{token}:500"
     for idx in (2, 3):
-        await dispatcher.feed_update(bot, Update(update_id=idx, widget_query=query),
-                                     db=db, settings=bot.community_settings)
+        source = incoming().model_copy(update={'message_id': page['message_id']})
+        if via_button:
+            callback = CallbackQuery(id=str(idx), from_user=source.from_user, chat_instance='private',
+                                     message=source, data=payload)
+            update = Update(update_id=idx, callback_query=callback)
+        else:
+            query = {'id': str(idx), 'from': source.from_user.model_dump(), 'chat': source.chat.model_dump(),
+                     'message_id': source.message_id, 'data': payload}
+            update = Update(update_id=idx, widget_query=query)
+        await dispatcher.feed_update(bot, update, db=db, settings=bot.community_settings)
     prepare.assert_awaited_once_with(7, 'support', 450, payload={'base_amount': 500, 'discount': 10})
     assert (await db.get_user(7))['cookies'] == before
-    rich = next(c for c in reversed(session.calls) if isinstance(c, SendRichMessage))
-    assert 'test-intent' in rich.rich_message.model_dump_json()
-    assert '450' in rich.rich_message.model_dump_json()
+    rich = next(c.rich_message for c in reversed(session.calls) if getattr(c, 'rich_message', None))
+    assert 'test-intent' in rich.model_dump_json()
+    assert '450' in rich.model_dump_json()
     await dispatcher.storage.close()
 
 

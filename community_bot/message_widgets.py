@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE = Path(__file__).with_name("widgets") / "number.html"
 PICKERS = {"FlexiblePurchase:amount": (1, 1_000_000)}
+PICKER_PAYLOAD = re.compile(r"nora:([a-f0-9]{16}):([0-9]{1,7})")
 
 
 class WidgetSession(AiohttpSession):
@@ -223,7 +224,7 @@ class WidgetUpdateMiddleware(BaseMiddleware):
 
             await handle_fallback_read(data["bot"], data["db"], callback)
             return
-        button = callback and (callback.data or "").startswith("nora:")
+        button = callback and PICKER_PAYLOAD.fullmatch(callback.data or "")
         if button and isinstance(callback.message, Message):
             query = {"id": callback.id, "from": callback.from_user.model_dump(by_alias=True),
                      "chat": callback.message.chat.model_dump(), "message_id": callback.message.message_id,
@@ -231,7 +232,7 @@ class WidgetUpdateMiddleware(BaseMiddleware):
         if not isinstance(query, dict):
             return await handler(event, data)
         bot = data["bot"]
-        match = re.fullmatch(r"nora:([a-f0-9]{16}):([0-9]{1,7})", str(query.get("data", "")))
+        match = PICKER_PAYLOAD.fullmatch(str(query.get("data", "")))
         chat, sender = query.get("chat") or {}, query.get("from") or {}
         valid = (match and chat.get("type") == "private" and chat.get("id") == sender.get("id")
                  and isinstance(query.get("message_id"), int) and not query.get("inline_message_id"))
