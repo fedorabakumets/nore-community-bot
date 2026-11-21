@@ -75,9 +75,9 @@ async def _limits_detail(db, settings, user):
     values = await profile_limits(db, settings, user)
     table = InputRichBlockTable(
         cells=[
-            [RichBlockTableCell(text=icon, align="center", valign="middle"),
-             RichBlockTableCell(text=value, align="center", valign="middle")]
-            for icon, value in values
+            [RichBlockTableCell(text=f"{icon} {value}", align="center", valign="middle")
+             for icon, value in values[index:index + 2]]
+            for index in range(0, len(values), 2)
         ],
         is_compact=True,
         is_bordered=False,
@@ -87,8 +87,10 @@ async def _limits_detail(db, settings, user):
         blocks=[
             table,
             InputRichBlockButtons(align="center", buttons=[
-                RichMessageButton(text="♻️ Восстановить лимиты", style="link",
+                RichMessageButton(text="♻️ Восстановить", style="link",
                                   callback_data=f"gprofile:limits:restore:{uid}"),
+                RichMessageButton(text="🎁 Подарить", style="link",
+                                  callback_data=f"gprofile:limits:gift:{uid}"),
             ]),
         ],
     )
@@ -166,7 +168,7 @@ def _fallback_limits_body(body):
     for block in body:
         if isinstance(block, InputRichBlockDetails) and block.summary == "Лимиты":
             table, action = block.blocks
-            text = "\n".join(f"{row[0].text} │ {row[1].text}" for row in table.cells)
+            text = "\n".join("  │  ".join(cell.text for cell in row) for row in table.cells)
             result.extend([
                 InputRichBlockDetails(summary="Лимиты", blocks=[InputRichBlockParagraph(text=text)]),
                 action,
@@ -218,14 +220,16 @@ async def send_group_profile(
         text += f"\n🍪 {balance} · Репутация {escape(score)}"
         limits = await profile_limits(db, settings, user)
         text += "\n<blockquote expandable>Лимиты\n" + "\n".join(
-            f"{icon} │ {value}" for icon, value in limits
+            "  │  ".join(f"{icon} {value}" for icon, value in limits[index:index + 2])
+            for index in range(0, len(limits), 2)
         ) + "</blockquote>"
         with bot_publication():
             sent = await bot.send_message(
                 message.chat.id, text, message_thread_id=thread, parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [ibtn(like, f"{LIKE_PREFIX}{int(user['user_id'])}")], votes,
-                    [ibtn("♻️ Восстановить лимиты", f"gprofile:limits:restore:{int(user['user_id'])}")], commands,
+                    [ibtn("♻️ Восстановить", f"gprofile:limits:restore:{int(user['user_id'])}"),
+                     ibtn("🎁 Подарить", f"gprofile:limits:gift:{int(user['user_id'])}")], commands,
                 ]),
             )
     if track and not audio_inline:

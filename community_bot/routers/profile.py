@@ -24,7 +24,7 @@ from community_bot.helpers import (
 from community_bot.domain import reputation_tier
 from community_bot.ephemeral import keep_in_chat
 from community_bot.reply_rich import bot_publication
-from community_bot.shop_catalog import shop_prices_for
+from community_bot.shop_catalog import gift_price, shop_prices_for
 from community_bot.keyboards import (
     close_btn,
     compact_profile_keyboard,
@@ -161,23 +161,36 @@ router.callback_query.register(
 LIMITS_CALLBACK = "gprofile:limits:"
 
 
-async def _limits_price(db: Database, settings: Settings, user: dict) -> int | None:
+async def _limits_price(db: Database, settings: Settings, payer: dict, *, gift: bool = False) -> int | None:
     item = await db.get_shop_item("reset_limits")
-    if not item or not int(item.get("enabled") or 0):
+    category = await db.get_shop_category(item["category_slug"]) if item else None
+    if (not item or not item.get("enabled") or not item.get("price")
+            or not category or not category.get("enabled")):
         return None
+    if gift:
+        return gift_price(item["price"])
     prices = shop_prices_for(
-        user, settings.restricted_reputation_threshold, await db.priced_shop_map(),
+        payer, settings.restricted_reputation_threshold, await db.priced_shop_map(),
     )
     return prices.get("reset_limits")
 
 
-def _limits_confirmation(user: dict, price: int, uid: int, token: str) -> InputRichMessage:
-    balance = int(user["cookies"])
+def _limits_confirmation(
+    payer: dict, recipient: dict, price: int, token: str, *, gift: bool,
+) -> InputRichMessage:
+    uid = int(recipient["user_id"])
+    balance = int(payer["cookies"])
+    title = "🎁 Подарить восстановление лимитов" if gift else "♻️ Восстановление лимитов"
+    if gift:
+        name = str(recipient.get("profile_name") or recipient.get("telegram_name")
+                   or recipient.get("username") or f"Участник {uid}")
+        description = f"Восстановить дневные лимиты пользователю {name[:80]}?\n"
+    else:
+        description = "Все твои дневные лимиты будут сброшены.\n"
     return InputRichMessage(blocks=[
-        InputRichBlockParagraph(text=[RichTextBold(text="♻️ Восстановление лимитов")]),
+        InputRichBlockParagraph(text=[RichTextBold(text=title)]),
         InputRichBlockParagraph(
-            text=f"Все дневные лимиты будут сброшены.\n"
-                 f"Цена: {price} 🍪 · Баланс: {balance} 🍪\n"
+            text=f"{description}Цена: {price} 🍪 · Твой баланс: {balance} 🍪\n"
                  "Таймер 60 секунд между треками останется."
         ),
         InputRichBlockButtons(align="center", buttons=[
@@ -195,7 +208,7 @@ def _limits_confirmation(user: dict, price: int, uid: int, token: str) -> InputR
     F.data.startswith(LIMITS_CALLBACK), F.message.chat.type.in_({"group", "supergroup"}),
 )
 async def group_profile_limits(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    """Use the existing shop intent/payment path, editing the same group card."""
+    """Edit the shared card in place; only the clicking buyer owns the payment intent."""
     message = callback.message
     if not isinstance(message, Message) or not callback.data:
         await callback.answer("Карточка профиля больше недоступна.", show_alert=True)
@@ -206,59 +219,77 @@ async def group_profile_limits(callback: CallbackQuery, db: Database, settings: 
         await callback.answer("Неверная кнопка.", show_alert=True)
         return
     _, _, action, raw_uid, *rest = parts
-    if not raw_uid.isdecimal() or action not in {"restore", "back", "pay"}:
+    if (not raw_uid.isdecimal() or action not in {"restore", "gift", "back", "pay"}
+            or (action in {"restore", "gift"} and rest)
+            or (action in {"back", "pay"} and len(rest) != 1)):
         await callback.answer("Некорректная операция.", show_alert=True)
         return
+
     uid = int(raw_uid)
-    if uid != callback.from_user.id:
-        await callback.answer("Восстановить лимиты может только владелец профиля.", show_alert=True)
+    payer_id = callback.from_user.id
+    if action == "restore" and payer_id != uid:
+        await callback.answer("Восстановить свои лимиты можно только в своём профиле.", show_alert=True)
+        return
+    if action == "gift" and payer_id == uid:
+        await callback.answer("Себе подарок отправить нельзя. Используй ♻️.", show_alert=True)
         return
 
-    user = await db.get_user(uid)
-    if user is None:
-        await callback.answer("Профиль недоступен.", show_alert=True)
+    recipient = await db.get_user(uid)
+    if not recipient or recipient.get("profile_private"):
+        await callback.answer("Этот профиль недоступен.", show_alert=True)
         return
+    payer = await db.get_user(payer_id)
+    if not payer:
+        payer = await register_telegram_user(db, callback.from_user)
 
-    if action == "back":
-        if rest:
-            await db.cancel_wallet_intent(uid, rest[0])
-        ok = await restore_group_profile_card(message, db, settings, user, uid)
-        await callback.answer("" if ok else "Не удалось вернуть карточку.", show_alert=not ok)
-        return
-
-    price = await _limits_price(db, settings, user)
-    if price is None:
-        await callback.answer("Сброс лимитов сейчас не продаётся в магазине.", show_alert=True)
-        return
-
-    if action == "restore" and not rest:
-        token = await db.create_wallet_intent(uid, "reset_limits", price)
+    if action in {"restore", "gift"}:
+        gift = action == "gift"
+        price = await _limits_price(db, settings, payer, gift=gift)
+        if price is None:
+            await callback.answer("Сброс лимитов сейчас не продаётся в магазине.", show_alert=True)
+            return
+        token = await db.create_wallet_intent(
+            payer_id, "reset_limits", price, target_id=uid,
+            payload={"shop_quote": True, "gift": gift,
+                     "restricted_threshold": settings.restricted_reputation_threshold},
+        )
         try:
             with keep_in_chat(), bot_publication():
                 await message.edit_text(
-                    parse_mode=None, rich_message=_limits_confirmation(user, price, uid, token),
+                    parse_mode=None,
+                    rich_message=_limits_confirmation(payer, recipient, price, token, gift=gift),
                 )
         except (TelegramBadRequest, TelegramNotFound):
-            await db.cancel_wallet_intent(uid, token)
+            await db.cancel_wallet_intent(payer_id, token)
             await callback.answer("Не удалось открыть подтверждение покупки.", show_alert=True)
             return
         await callback.answer()
         return
 
-    if action != "pay" or len(rest) != 1:
-        await callback.answer("Подтверждение недоступно.", show_alert=True)
+    token = rest[0]
+    intent = await db.get_wallet_intent(payer_id, token)
+    gift = payer_id != uid
+    if (not intent or intent["item"] != "reset_limits"
+            or int(intent["target_id"]) != uid
+            or bool(intent["payload"].get("gift")) != gift):
+        await callback.answer("Подтверждение устарело или принадлежит другому участнику.", show_alert=True)
         return
 
-    token = rest[0]
-    intent = await db.get_wallet_intent(uid, token)
-    if not intent or intent["item"] != "reset_limits" or int(intent["target_id"]) != uid:
-        await callback.answer("Подтверждение устарело. Открой покупку заново.", show_alert=True)
+    requester = await db.get_ui_owner(message.chat.id, message.message_id) or uid
+    if action == "back":
+        await db.cancel_wallet_intent(payer_id, token)
+        restored = await restore_group_profile_card(message, db, settings, recipient, requester)
+        await callback.answer("" if restored else "Не удалось вернуть карточку.", show_alert=not restored)
         return
-    if int(intent["price"]) != price:
+
+    price = await _limits_price(db, settings, payer, gift=gift)
+    if price is None or int(intent["price"]) != price:
         await callback.answer("Цена изменилась. Открой покупку заново.", show_alert=True)
         return
 
-    ok, error = await db.buy_item(uid, "reset_limits", price, intent_id=token)
+    ok, error = await db.buy_item(
+        payer_id, "reset_limits", price, target_id=uid, intent_id=token,
+    )
     if not ok:
         await callback.answer(error, show_alert=True)
         return
@@ -266,12 +297,12 @@ async def group_profile_limits(callback: CallbackQuery, db: Database, settings: 
     from community_bot.life import unlock
     from community_bot.notify import vitrine_consumed
 
-    await unlock(db, uid, "shop_first")
+    await unlock(db, payer_id, "shop_first")
     await vitrine_consumed(message.bot, db, "reset_limits")
-    fresh = await db.get_user(uid) or user
-    edited = await restore_group_profile_card(message, db, settings, fresh, uid)
-    await callback.answer("Лимиты восстановлены ✓" if edited else "Лимиты восстановлены. Открой профиль заново.")
-
+    fresh = await db.get_user(uid) or recipient
+    edited = await restore_group_profile_card(message, db, settings, fresh, requester)
+    result = "Подарок отправлен ✓" if gift else "Лимиты восстановлены ✓"
+    await callback.answer(result if edited else f"{result} Открой профиль заново.")
 
 
 
