@@ -16,6 +16,8 @@ dependencies = [
   "pillow-heif>=1.8.1,<1.9",
   "boto3>=1.40,<2",
   "yt-dlp[default]==2026.10.26",
+  "yt-dlp-yandex-music==2026.9.24",
+  "mutagen>=1.47,<2",
 ]
 
 [project.optional-dependencies]
