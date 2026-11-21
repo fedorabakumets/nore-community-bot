@@ -213,41 +213,72 @@ async def find_songs(query: str) -> list[Song]:
     return parse_search_results(payload)
 
 
+def _song_metadata_sync(track_id: str, album_id: str | None, cookies: bytes) -> Song:
+    """Reuse the same modern Yandex extractor as actual audio downloads.
+
+    The standalone /tracks request previously lacked web-client headers and
+    could return an empty result even when the track was playable.
+    """
+    import yt_dlp
+
+    canonical_url = (
+        f"https://music.yandex.ru/album/{album_id}/track/{track_id}"
+        if album_id else f"https://music.yandex.ru/track/{track_id}"
+    )
+    with tempfile.TemporaryDirectory(prefix="nora-song-meta-") as directory:
+        cookie_file = Path(directory) / "cookies.txt"
+        cookie_file.write_bytes(cookies)
+        cookie_file.chmod(0o600)
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "ignoreerrors": False,
+            "noplaylist": True,
+            "skip_download": True,
+            "cookiefile": str(cookie_file),
+            "socket_timeout": 20,
+            "retries": 1,
+            "extractor_retries": 1,
+            "cachedir": False,
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(canonical_url, download=False)
+        except Exception as exc:
+            # Never include Yandex cookies, extracted stream URLs or raw
+            # provider error messages in application logs.
+            logger.warning("Yandex track metadata failed: track=%s, error=%s",
+                           track_id, type(exc).__name__)
+            raise SongError("Не удалось получить песню по ссылке. Проверь доступ к треку в Яндексе.") from exc
+
+    if not isinstance(info, dict) or str(info.get("id") or "") != track_id:
+        raise SongError("Яндекс не вернул данные нужной песни по этой ссылке.")
+    title = info.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise SongError("Яндекс не вернул название песни по ссылке.")
+
+    artist = info.get("artist") or info.get("performer") or "Неизвестный исполнитель"
+    album_from_info = str(info.get("album_id") or "")
+    if not album_from_info.isdecimal():
+        album_from_info = ""
+    try:
+        duration = max(0, int(float(info.get("duration") or 0)))
+    except (ValueError, TypeError):
+        duration = 0
+    return Song(track_id, album_id or album_from_info or None,
+                title.strip()[:180], str(artist)[:180], duration)
+
+
 async def find_song_by_link(raw_url: str) -> Song:
-    """Fetch exact track metadata from the Yandex web API."""
+    """Resolve a pasted song link with the extractor already used to download."""
     track_id, album_id = parse_track_link(raw_url)
     cookies = _cookie_bytes()
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Origin": "https://music.yandex.ru",
-        "Referer": "https://music.yandex.ru/",
-        "x-yandex-music-client": "YandexMusicWebNext/1.0.0",
-        "Cookie": _cookie_header(cookies),
-    }
-    form = aiohttp.FormData()
-    form.add_field("trackIds", f"{track_id}:{album_id}" if album_id else track_id,
-                   content_type="text/plain")
-    timeout = aiohttp.ClientTimeout(total=14)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post("https://api.music.yandex.ru/tracks", data=form,
-                                    headers=headers, allow_redirects=False) as response:
-                if response.status in (401, 403):
-                    raise SongError("Яндекс отклонил сессию. Нужно заново войти в аккаунт.")
-                if response.status != 200:
-                    raise SongError("Не удалось получить информацию о треке. Попробуй позднее.")
-                payload = await response.json(content_type=None)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        raise SongError("Не удалось подключиться к Яндекс Музыке.") from exc
-    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
-        raise SongError("Яндекс не нашёл трек по ссылке или не предоставил к нему доступ.")
-    songs = parse_search_results({"result": {"tracks": {"results": [payload[0]]}}})
-    if not songs or songs[0].id != track_id:
-        raise SongError("Трек по ссылке недоступен для этого аккаунта.")
-    song = songs[0]
-    return Song(song.id, album_id or song.album_id, song.title, song.artist, song.duration)
-
+        return await asyncio.wait_for(
+            asyncio.to_thread(_song_metadata_sync, track_id, album_id, cookies), timeout=50,
+        )
+    except asyncio.TimeoutError as exc:
+        raise SongError("Яндекс слишком долго отвечает на ссылку. Попробуй позже.") from exc
 
 def is_full_track(actual: float, expected: int) -> bool:
     """Reject 13–30 second preview files masquerading as full tracks."""

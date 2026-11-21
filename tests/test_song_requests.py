@@ -180,46 +180,98 @@ async def test_direct_yandex_link_uses_exact_track_without_search(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_yandex_link_metadata_api_resolves_exact_track(monkeypatch):
+async def test_yandex_link_uses_same_extractor_as_song_download(monkeypatch):
+    from pathlib import Path
+
+    import yt_dlp
+
     raw = (b"# Netscape HTTP Cookie File\n"
            b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
     monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
-    requested = []
+    seen = []
 
-    class Response:
-        status = 200
+    class FakeYDL:
+        def __init__(self, options):
+            self.options = options
+            seen.append(self)
 
-        async def __aenter__(self):
+        def __enter__(self):
             return self
 
-        async def __aexit__(self, *_):
+        def __exit__(self, *_):
             return None
 
-        async def json(self, **_):
-            return [{
-                "id": "987", "title": "Песня", "available": True,
-                "artists": [{"name": "Исполнитель"}],
-                "albums": [{"id": "321"}], "durationMs": 200000,
-            }]
+        def extract_info(self, url, download):
+            assert self.options["skip_download"] is True
+            assert self.options["cookiefile"]
+            assert Path(self.options["cookiefile"]).read_bytes() == raw
+            assert download is False
+            assert url == "https://music.yandex.ru/album/321/track/987"
+            return {
+                "id": "987", "title": "Песня", "artist": "Исполнитель",
+                "album_id": "321", "duration": 200.5,
+            }
 
-    class Session:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            return None
-
-        def post(self, url, **kwargs):
-            requested.append((url, kwargs))
-            return Response()
-
-    monkeypatch.setattr(songs.aiohttp, "ClientSession", lambda **_: Session())
-    result = await songs.find_song_by_link("https://music.yandex.ru/album/321/track/987?utm=1")
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    result = await songs.find_song_by_link(
+        "https://music.yandex.ru/album/321/track/987?utm_source=share"
+    )
     assert result == songs.Song("987", "321", "Песня", "Исполнитель", 200)
-    assert requested[0][0] == "https://api.music.yandex.ru/tracks"
-    assert requested[0][1]["allow_redirects"] is False
-    assert requested[0][1]["data"]._fields[0][2] == "987:321"
+    assert len(seen) == 1
+    assert not Path(seen[0].options["cookiefile"]).exists()
 
+
+@pytest.mark.asyncio
+async def test_yandex_link_extractor_rejects_missing_or_wrong_track(monkeypatch):
+    import yt_dlp
+
+    raw = (b"# Netscape HTTP Cookie File\n"
+           b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
+    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+
+    class FakeYDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def extract_info(self, _url, download):
+            return {"id": "999", "title": "Не тот трек"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    with pytest.raises(songs.SongError, match="нужной песни"):
+        await songs.find_song_by_link("https://music.yandex.ru/track/987")
+
+
+@pytest.mark.asyncio
+async def test_yandex_link_extractor_returns_helpful_error_not_secrets(monkeypatch):
+    import yt_dlp
+
+    raw = (b"# Netscape HTTP Cookie File\n"
+           b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
+    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+
+    class FakeYDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def extract_info(self, _url, download):
+            raise RuntimeError("fake-secret")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    with pytest.raises(songs.SongError) as error:
+        await songs.find_song_by_link("https://music.yandex.ru/track/987")
+    assert "fake-secret" not in str(error.value)
 
 
 @pytest.mark.asyncio
