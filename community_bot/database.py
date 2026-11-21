@@ -2519,6 +2519,7 @@ class Database:
                 (user_id, today),
             )
             await db.execute("DELETE FROM bot_state WHERE key=?", (f"{DAY_PREFIX}{user_id}",))
+            await db.execute("DELETE FROM bot_state WHERE key=?", (f"nora_ai_daily:{user_id}",))
             await db.execute(
                 "DELETE FROM pet_video_deliveries WHERE user_id = ? AND day = ?",
                 (user_id, today),

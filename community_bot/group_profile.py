@@ -37,6 +37,7 @@ from community_bot.keyboards import ibtn
 from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import _reusable
 from community_bot.profile_fields import profile_age
+from community_bot.profile_limits import profile_limits
 from community_bot.profile_track import audio_block, get_track
 from community_bot.reply_rich import bot_publication
 from community_bot.ui_owner import bind_ui_owner
@@ -66,6 +67,33 @@ def _table(user, settings):
     )
 
 
+
+
+async def _limits_detail(db, settings, user):
+    """Collapsed, two-column live counters with a compact shop action."""
+    uid = int(user["user_id"])
+    values = await profile_limits(db, settings, user)
+    table = InputRichBlockTable(
+        cells=[
+            [RichBlockTableCell(text=icon, align="center", valign="middle"),
+             RichBlockTableCell(text=value, align="center", valign="middle")]
+            for icon, value in values
+        ],
+        is_compact=True,
+        is_bordered=False,
+    )
+    return InputRichBlockDetails(
+        summary="Лимиты",
+        blocks=[
+            table,
+            InputRichBlockButtons(align="center", buttons=[
+                RichMessageButton(text="♻️ Восстановить лимиты", style="link",
+                                  callback_data=f"gprofile:limits:restore:{uid}"),
+            ]),
+        ],
+    )
+
+
 async def _friend_icon(db, requester_id, target_id):
     return "🫂" if await friends_api.accepted(db, requester_id, target_id) else "👤"
 
@@ -80,15 +108,10 @@ async def _avatar(db, user):
     return None
 
 
-async def send_group_profile(
-    message: Message,
-    db: Database,
-    settings: Settings,
-    user: dict[str, Any],
-    requester_id: int,
-    *,
-    show_username: bool = True,
-) -> Message:
+async def group_profile_body(
+    db: Database, settings: Settings, user: dict[str, Any], requester_id: int,
+    bot, *, show_username: bool = True,
+):
     uid = int(user["user_id"])
     name = str(user.get("profile_name") or user.get("telegram_name") or "")
     name = (" ".join(name.split()) or f"Участник {uid}")[:100]
@@ -98,7 +121,6 @@ async def send_group_profile(
     subtitle = " · ".join(filter(None, (role, handle, f"Возраст: {age}" if age else "")))
 
     commands = [ibtn("❌", "ui:close", "danger")]
-    bot = message.bot
     try:
         username = (await bot.me()).username
     except TelegramAPIError:
@@ -131,15 +153,50 @@ async def send_group_profile(
         InputRichBlockParagraph(text=subtitle),
         *details,
         _table(user, settings),
+        await _limits_detail(db, settings, user),
         actions,
     ]
     avatar = await _avatar(db, user)
+    return body, avatar, track, name, subtitle, details, like, votes, commands
+
+
+def _fallback_limits_body(body):
+    """Fallback for Telegram clients that reject interactive blocks inside Details."""
+    result = []
+    for block in body:
+        if isinstance(block, InputRichBlockDetails) and block.summary == "Лимиты":
+            table, action = block.blocks
+            text = "\n".join(f"{row[0].text} │ {row[1].text}" for row in table.cells)
+            result.extend([
+                InputRichBlockDetails(summary="Лимиты", blocks=[InputRichBlockParagraph(text=text)]),
+                action,
+            ])
+        else:
+            result.append(block)
+    return result
+
+
+async def send_group_profile(
+    message: Message,
+    db: Database,
+    settings: Settings,
+    user: dict[str, Any],
+    requester_id: int,
+    *,
+    show_username: bool = True,
+) -> Message:
+    bot = message.bot
+    body, avatar, track, name, subtitle, details, like, votes, commands = await group_profile_body(
+        db, settings, user, requester_id, bot, show_username=show_username,
+    )
     thread = message.message_thread_id if message.is_topic_message else None
     sent = None
-    profile_blocks = [*body[:3], audio_block(track), *body[3:]] if track else body
-    attempts = [[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks]
-    if track:
-        attempts.extend([[avatar, *body], body] if avatar else [body])
+    attempts = []
+    for variant in (body, _fallback_limits_body(body)):
+        profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+        attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
+        if track:
+            attempts.extend([[avatar, *variant], variant] if avatar else [variant])
     audio_inline = bool(track)
     for blocks in attempts:
         audio_inline = bool(track and any(block.type == "audio" for block in blocks))
@@ -159,11 +216,16 @@ async def send_group_profile(
             content = escape(detail.blocks[0].text)
             text += f"\n<blockquote expandable>{detail.summary}\n{content}</blockquote>"
         text += f"\n🍪 {balance} · Репутация {escape(score)}"
+        limits = await profile_limits(db, settings, user)
+        text += "\n<blockquote expandable>Лимиты\n" + "\n".join(
+            f"{icon} │ {value}" for icon, value in limits
+        ) + "</blockquote>"
         with bot_publication():
             sent = await bot.send_message(
                 message.chat.id, text, message_thread_id=thread, parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [ibtn(like, f"{LIKE_PREFIX}{uid}")], votes, commands,
+                    [ibtn(like, f"{LIKE_PREFIX}{int(user['user_id'])}")], votes,
+                    [ibtn("♻️ Восстановить лимиты", f"gprofile:limits:restore:{int(user['user_id'])}")], commands,
                 ]),
             )
     if track and not audio_inline:
@@ -173,6 +235,33 @@ async def send_group_profile(
             pass
     await bind_ui_owner(db, sent, requester_id, "profile")
     return sent
+
+
+async def restore_group_profile_card(
+    message: Message, db: Database, settings: Settings, user: dict[str, Any], requester_id: int,
+) -> bool:
+    """Return an edited purchase confirmation to the original profile in place."""
+    body, avatar, track, *_ = await group_profile_body(
+        db, settings, user, requester_id, message.bot,
+    )
+    with keep_in_chat(), bot_publication():
+        attempts = []
+        for variant in (body, _fallback_limits_body(body)):
+            profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+            attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
+            if track:
+                attempts.extend([[avatar, *variant], variant] if avatar else [variant])
+        for blocks in attempts:
+            try:
+                await message.edit_text(
+                    parse_mode=None,
+                    rich_message=InputRichMessage(blocks=blocks, skip_entity_detection=True),
+                )
+                return True
+            except (TelegramBadRequest, TelegramNotFound):
+                continue
+    return False
+
 
 
 async def refresh_group_profile(message: Message, db: Database, settings: Settings, target_id: int) -> None:
