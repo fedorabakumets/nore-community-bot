@@ -497,6 +497,9 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(games_router)
     dispatcher.include_router(pets_router)
     dispatcher.include_router(life_router)
+    from community_bot.referral_campaign import router as referral_campaign_router
+
+    dispatcher.include_router(referral_campaign_router)
     dispatcher.include_router(contest_router)
     dispatcher.include_router(shop_admin_router)
     dispatcher.include_router(commands_router)
@@ -638,6 +641,9 @@ async def main() -> None:
     from community_bot.onboarding_invites import run_entry_release
 
     entry_release_task = asyncio.create_task(run_entry_release(bot, db, settings))
+    from community_bot.referral_campaign import reward_scheduler
+
+    referral_reward_task = asyncio.create_task(reward_scheduler(bot, db))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     pet_video_queue = PetVideoQueue(db)
