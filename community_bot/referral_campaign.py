@@ -11,8 +11,13 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.types import (
-    CallbackQuery, ChatJoinRequest, ChatMemberUpdated, InlineKeyboardButton,
-    InlineKeyboardMarkup, InputRichMessage, Message,
+    CallbackQuery,
+    ChatJoinRequest,
+    ChatMemberUpdated,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+    Message,
 )
 
 from community_bot.group_message_close import without_group_close
