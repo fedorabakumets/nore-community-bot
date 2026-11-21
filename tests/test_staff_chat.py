@@ -350,14 +350,14 @@ async def test_staff_chat_composer_role_identity_reply_and_rate_limit(tmp_path):
         text="💬 Модератор Марина · через Mini App Норы\n\nТест",
     )
     bot = SimpleNamespace(send_message=AsyncMock(return_value=message))
-    app = {
+    app_state = {
         "db": db, "settings": settings, "bot": bot,
         "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
     }
 
     class Request(dict):
         content_length = 68
-        app = app
+        app = app_state
         async def json(self):
             return {"text": "Тест", "reply_to": 71}
 
@@ -396,7 +396,7 @@ async def test_staff_chat_composer_rejects_missing_reply_without_sending(tmp_pat
 
     class Request(dict):
         content_length = 95
-        app = {
+        app_state = {
             "db": db, "settings": settings, "bot": bot,
             "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
         }
@@ -426,7 +426,7 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
         photo=[PhotoSize(file_id="upload-photo", file_unique_id="u", width=12, height=12)],
     )
     bot = SimpleNamespace(send_photo=AsyncMock(return_value=message))
-    app = {
+    app_state = {
         "db": db, "settings": settings, "bot": bot,
         "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
     }
@@ -449,7 +449,7 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
     class Request(dict):
         content_type = "multipart/form-data"
         content_length = 140
-        app = app
+        app = app_state
         async def multipart(self):
             return Reader([
                 Field("text", b"\xd0\x9e\xd0\xb1\xd0\xbb\xd0\xbe\xd0\xb6\xd0\xba\xd0\xb0"),
@@ -468,7 +468,7 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
 
     # Upload inspection denies executable files before Telegram is called.
     class BadRequest(Request):
-        app = {**app, "staff_chat_last_sent": {}}
+        app_state = {**app_state, "staff_chat_last_sent": {}}
         async def multipart(self):
             return Reader([Field("file", b"code", filename="nora.exe")])
 
