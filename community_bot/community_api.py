@@ -102,6 +102,14 @@ async def status(request):
              'likes': by_id[row['user_id']]['likes'], metric: row[metric]}
             for row in visible
         ]
+    from community_bot.referral_campaign import END as referral_end, START as referral_start, leaderboard
+
+    invited = await leaderboard(db, limit=10)
+    boards['invites'] = [
+        {**await card(db, settings, viewer, by_id[row['user_id']]),
+         'likes': by_id[row['user_id']]['likes'], 'invites': int(row['invites'])}
+        for row in invited if row['user_id'] in by_id
+    ][:3]
     # Show the recipient actually credited by the existing midnight job, never guess or issue another reward.
     winner = await db.fetchone(
         "SELECT user_id FROM transactions WHERE kind='daily_chat' AND details=? AND amount>0 ORDER BY id LIMIT 1",
@@ -129,6 +137,8 @@ async def status(request):
                               'revision_day': today.isoformat(),
                               'timezone': 'Europe/Moscow', 'leaders': boards['messages'],
                               'boards': boards, 'staff': staff,
+                               'referral_contest': {'starts_at': referral_start.isoformat(),
+                                                    'ends_at': referral_end.isoformat()},
                               'winner': winner_card, 'awarded': bool(winner), 'sea_invites': sea_invites,
                               'sea_lobbies': sea_lobbies, 'sea_admin': sea_admin,
                               'updated_at': now.isoformat(timespec='seconds')})
