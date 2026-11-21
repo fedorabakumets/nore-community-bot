@@ -604,6 +604,94 @@ window.NoraStaffChat = (() => {
   }
 
 
+
+  function closeChatPickers(except=null) {
+    for(const node of document.querySelectorAll('#staff-chat-feed [data-chat-picker]:not([hidden])')){
+      if(node!==except)node.hidden=true;
+    }
+  }
+  function openReactionPicker(article) {
+    if(!article || tab!=='staffchat')return;
+    const picker=article.querySelector('[data-chat-picker]');
+    if(!picker)return;
+    const opened=!picker.hidden;
+    closeChatPickers();
+    for(const menu of document.querySelectorAll('#staff-chat-feed [data-chat-menu]:not([hidden])')){
+      menu.hidden=true;
+      menu.closest('.staff-chat-message')?.querySelector('[data-chat-more]')?.setAttribute('aria-expanded','false');
+    }
+    picker.hidden=opened;
+    if(!opened){
+      const reacted=[...article.querySelectorAll('.staff-chat-react-chip[aria-pressed="true"]')]
+        .map(x=>x.dataset.chatEmojiValue);
+      for(const button of picker.querySelectorAll('[data-chat-react]')){
+        button.setAttribute('aria-pressed',String(reacted.includes(button.dataset.chatEmojiValue)));
+      }
+      if(typeof tg!=='undefined')tg?.HapticFeedback?.selectionChanged?.();
+    }
+  }
+  function updateReactionChips(id,reactions) {
+    const article=[...document.querySelectorAll('#staff-chat-feed .staff-chat-message')]
+      .find(node=>Number(node.dataset.messageId)===id);
+    if(!article)return;
+    const container=article.querySelector('[data-chat-reactions]');
+    if(container)container.innerHTML=reactionMarkup(reactions,id);
+    for(const btn of article.querySelectorAll('[data-chat-picker] [data-chat-react]')){
+      const selected=(reactions||[]).some(item=>item.emoji===btn.dataset.chatEmojiValue&&item.mine);
+      btn.setAttribute('aria-pressed',String(selected));
+    }
+  }
+  async function setChatReaction(button) {
+    const id=Number(button.dataset.chatReact);
+    const emoji=button.dataset.chatEmojiValue;
+    if(!Number.isSafeInteger(id)||id<=0||!reactionSet.includes(emoji)||reactionBusy.has(id))return;
+    const article=button.closest('.staff-chat-message');
+    const own=article&&[...article.querySelectorAll('.staff-chat-react-chip[aria-pressed="true"]')]
+      .some(x=>x.dataset.chatEmojiValue===emoji);
+    reactionBusy.add(id);
+    try{
+      const result=await api('community/chat/reaction',{message_id:id,emoji,active:!own});
+      if(!result?.ok)throw new Error('Реакция не сохранилась');
+      updateReactionChips(id,result.reactions);
+      const picker=article?.querySelector('[data-chat-picker]');
+      if(picker)picker.hidden=true;
+      tg?.HapticFeedback?.impactOccurred?.('light');
+      queueRefresh();
+    }catch(error){
+      toast(error.message||'Не удалось изменить реакцию');
+    }finally{
+      reactionBusy.delete(id);
+    }
+  }
+  async function copyChatMessage(article) {
+    if(!article)return;
+    const text=article.querySelector('.staff-chat-text')?.textContent?.trim() ||
+      [...article.querySelectorAll('.staff-rich-text,.staff-rich-heading')]
+        .map(node=>node.textContent).join('\n').trim();
+    if(!text){toast('В сообщении нет текста для копирования');return;}
+    let copied=false;
+    try{
+      if(navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(text);
+        copied=true;
+      }
+    }catch{}
+    if(!copied){
+      const field=document.createElement('textarea');
+      field.value=text;
+      field.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.append(field);field.select();
+      try{copied=document.execCommand('copy')}catch{}
+      field.remove();
+    }
+    toast(copied?'Текст скопирован':'Не удалось скопировать текст');
+    if(copied)tg?.HapticFeedback?.notificationOccurred?.('success');
+  }
+  function cancelChatGesture() {
+    if(gestureTimer!==null){clearTimeout(gestureTimer);gestureTimer=null;}
+    gesture=null;
+  }
+
   function connectionStatus(label,state='connecting',online=null) {
     const node=document.getElementById('staff-chat-live-status');
     if(!node)return;
