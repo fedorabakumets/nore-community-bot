@@ -183,11 +183,11 @@ async def record_join(db, event: ChatMemberUpdated) -> bool:
         return False
     async with db.connect() as connection:
         await connection.execute("BEGIN IMMEDIATE")
-        current = await (await connection.execute(
+        current = await connection.execute(
             "INSERT OR IGNORE INTO referral_campaign_joins "
             "(campaign,user_id,inviter_id,joined_at) VALUES(?,?,?,?)",
             (CAMPAIGN, user.id, inviter, event.date.isoformat()),
-        ))
+        )
         await connection.execute(
             "DELETE FROM referral_campaign_pending WHERE campaign=? AND user_id=?",
             (CAMPAIGN, user.id),
