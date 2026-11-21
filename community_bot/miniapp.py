@@ -138,7 +138,7 @@ async def protection(request, handler):
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self' https://telegram.org https://www.youtube.com https://s.ytimg.com; "
         "style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; "
-        "media-src 'self' blob: https:; connect-src 'self'; "
+        "media-src 'self' blob: https:; connect-src 'self' wss: ws:; "
         "frame-src https://www.youtube.com; font-src 'self'; base-uri 'none'; "
         "frame-ancestors https://web.telegram.org https://*.telegram.org"
     )
@@ -580,6 +580,19 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/community', community_api.status)
     from community_bot import staff_chat
 
+    from community_bot import staff_chat_live
+
+    chat_hub = staff_chat_live.StaffChatHub()
+    app['staff_chat_hub'] = chat_hub
+    db._staff_chat_hub = chat_hub
+
+    async def close_staff_chat(_):
+        await chat_hub.shutdown()
+        if getattr(db, '_staff_chat_hub', None) is chat_hub:
+            delattr(db, '_staff_chat_hub')
+
+    app.on_cleanup.append(close_staff_chat)
+    app.router.add_get('/ws/community/chat', staff_chat_live.connect)
     app['staff_chat_media_gate'] = asyncio.Semaphore(2)
     app.router.add_get('/api/community/chat', staff_chat.feed)
     app.router.add_post('/api/community/chat/hide', staff_chat.hide)
