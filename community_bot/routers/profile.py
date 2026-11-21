@@ -235,13 +235,12 @@ async def group_profile_limits(callback: CallbackQuery, db: Database, settings: 
         return
 
     recipient = await db.get_user(uid)
-    payer = await db.get_user(payer_id)
     if not recipient or recipient.get("profile_private"):
         await callback.answer("Этот профиль недоступен.", show_alert=True)
         return
+    payer = await db.get_user(payer_id)
     if not payer:
-        await callback.answer("Сначала зарегистрируйся в Норе.", show_alert=True)
-        return
+        payer = await register_telegram_user(db, callback.from_user)
 
     if action in {"restore", "gift"}:
         gift = action == "gift"
