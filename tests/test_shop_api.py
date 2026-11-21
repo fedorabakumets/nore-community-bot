@@ -232,6 +232,8 @@ def test_shop_text_repairs_only_encoding_and_preserves_healthy_russian_and_html(
 async def test_reset_limits_uses_moscow_day_in_both_clients_after_utc_midnight_boundary(env, monkeypatch):
     from datetime import UTC, datetime
 
+    from community_bot.pet_video import PetVideoQueue
+
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -242,10 +244,53 @@ async def test_reset_limits_uses_moscow_day_in_both_clients_after_utc_midnight_b
     for day in ('2026-10-26', '2026-10-27'):
         await env.db.execute('INSERT INTO reputation_actions(actor_id,target_id,delta,action_date,created_at) '
                              'VALUES(7,8,5,?,?)', (day, day+'T12:00:00+00:00'))
+    for i in range(5):
+        await env.db.execute(
+            'INSERT INTO pet_video_deliveries(chat_id,message_id,user_id,day) VALUES (?,?,?,?)',
+            (7, 100 + i, 7, '2026-10-27'),
+        )
+    await env.db.execute(
+        'INSERT INTO pet_video_deliveries(chat_id,message_id,user_id,day) VALUES (?,?,?,?)',
+        (7, 200, 7, '2026-10-26'),
+    )
+    await env.db.execute(
+        'INSERT INTO pet_video_deliveries(chat_id,message_id,user_id,day) VALUES (?,?,?,?)',
+        (8, 300, 8, '2026-10-27'),
+    )
+    queue = PetVideoQueue(env.db)
+    assert not await queue._quota(7, '2026-10-27')
     q = await prepared(env, 'reset_limits')
     assert (await paid(env, q['token'])).status == 200
     rows = await env.db.fetchall('SELECT action_date FROM reputation_actions WHERE actor_id=7')
     assert rows == [{'action_date': '2026-10-26'}]
+    assert await queue._quota(7, '2026-10-27')
+    remaining = await env.db.fetchall(
+        'SELECT user_id,day FROM pet_video_deliveries ORDER BY user_id,day',
+    )
+    assert remaining == [
+        {'user_id': 7, 'day': '2026-10-26'},
+        {'user_id': 8, 'day': '2026-10-27'},
+    ]
+
+
+async def test_reset_limits_gift_resets_video_quota_only_for_recipient(env):
+    from community_bot.pet_progress import moscow_now
+    from community_bot.pet_video import PetVideoQueue
+
+    day = moscow_now().date().isoformat()
+    for user_id in (7, 8):
+        for i in range(5):
+            await env.db.execute(
+                'INSERT INTO pet_video_deliveries(chat_id,message_id,user_id,day) VALUES (?,?,?,?)',
+                (user_id, 400 + i, user_id, day),
+            )
+    queue = PetVideoQueue(env.db)
+    assert not await queue._quota(7, day)
+    assert not await queue._quota(8, day)
+    q = await prepared(env, 'reset_limits', recipient='@boris_nora')
+    assert (await paid(env, q['token'], recipient='@boris_nora')).status == 200
+    assert not await queue._quota(7, day)
+    assert await queue._quota(8, day)
 
 
 async def test_changed_topup_rate_and_foreign_receipt_do_not_create_orders(env):
