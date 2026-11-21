@@ -232,7 +232,14 @@ async def _publish(request: web.Request, *, text: str, reply: object,
             )
         try:
             for message in messages:
-                await capture(db, settings, message)
+                # The Bot session middleware already archives successful sends.
+                # Only perform the fallback capture if that middleware did not.
+                existing = await db.fetchone(
+                    "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
+                    (settings.community_chat_id, message.message_id),
+                )
+                if not existing:
+                    await capture(db, settings, message)
         except Exception:
             logger.exception("Staff chat composer: message sent but archive failed")
         return web.json_response({
