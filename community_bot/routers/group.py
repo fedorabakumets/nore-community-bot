@@ -138,6 +138,9 @@ async def auto_approve_join_request(
     """Join-request links no longer require a second manual review after the questionnaire."""
     if request.chat.id != settings.community_chat_id:
         return
+    from community_bot.referral_campaign import remember_request
+
+    await remember_request(db, request)
     if not await private_allowed(db, settings, request.from_user.id):
         return
     try:
@@ -178,6 +181,12 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
     if joined and (was_outside or isinstance(member, ChatMemberRestricted) and not member.can_send_messages):
         await register_telegram_user(db, member.user)
     if joined and was_outside:
+        from community_bot.referral_campaign import record_join
+
+        try:
+            await record_join(db, event)
+        except Exception:
+            logging.getLogger(__name__).exception("Could not attribute a competition invite")
         moscow_day = event.date.astimezone(ZoneInfo("Europe/Moscow")).date()
         await db.remember_community_join(event.chat.id, uid, moscow_day.isoformat())
         from community_bot.welcome import send_member_welcome
