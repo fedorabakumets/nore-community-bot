@@ -284,12 +284,13 @@ async def _publish(request: web.Request, *, text: str, reply: object,
                     await capture(db, settings, message)
         except Exception:
             logger.exception("Staff chat composer: message sent but archive failed")
-        return web.json_response({
-            "ok": True, "state": "sent",
-            "operation_id": operation_id,
-            "message_id": messages[0].message_id,
+        receipt = {
+            "ok": True, "message_id": messages[0].message_id,
             "message_ids": [m.message_id for m in messages],
-        })
+        }
+        if operation_id:
+            receipt.update(state="sent", operation_id=operation_id)
+        return web.json_response(receipt)
 
 
 async def send_text(request: web.Request) -> web.Response:

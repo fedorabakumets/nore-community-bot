@@ -184,7 +184,7 @@ async def test_legacy_client_without_operation_id_still_sends(tmp_path):
     db, _, bot, app = await setup(tmp_path)
     sent = await send_text(request(app, operation_id=None))
     assert sent.status == 200
-    assert json.loads(sent.text)["state"] == "sent"
+    assert json.loads(sent.text) == {"ok": True, "message_id": 940, "message_ids": [940]}
     bot.send_message.assert_awaited_once()
 
 
