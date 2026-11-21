@@ -584,6 +584,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     chat_hub = staff_chat_live.StaffChatHub()
     app['staff_chat_hub'] = chat_hub
+    app['staff_chat_handshake_gate'] = asyncio.Semaphore(24)
     db._staff_chat_hub = chat_hub
 
     async def close_staff_chat(_):
