@@ -169,6 +169,7 @@ async def profile(request):
         hidden=False,
         private=bool(target["profile_private"]),
         age=profile_age(target),
+        city=target.get('city'),
         role=await role_title(db, await effective_role(db, settings, target["user_id"])),
         has_avatar=bool(target["avatar_file_id"] and target["avatar_media_type"] == "photo"),
         presence=presence,

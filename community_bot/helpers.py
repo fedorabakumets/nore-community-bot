@@ -299,6 +299,7 @@ def profile_text(user: dict[str, Any], settings: Settings, role_name: str | None
             f"🔗 {html.escape(username)}",
             "",
             f"🎂 <b>Возраст:</b> {age}",
+            f"📍 <b>Город:</b> {html.escape(str(user.get('city') or 'не указан'))}",
             f"🎯 <b>Увлечения:</b> {html.escape(str(hobbies))}",
             "",
             "━━━━━━━━━━━━━━",
@@ -341,6 +342,7 @@ def ornate_profile_text(user: dict[str, Any], settings: Settings, role_name: str
         f"  𓆩 {html.escape(username)} 𓆪\n"
         "\n"
         f"  🎂  {age}     🍪  {user['cookies']}\n"
+        f"  📍  {html.escape(str(user.get('city') or 'не указан'))}\n"
         f"  🎯  {hobbies}\n"
         "\n"
         f"  {tier.emoji}  репутация  <b>{reputation}</b>/100\n"
@@ -361,6 +363,7 @@ def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: st
         f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
         f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {profile_age(user) or '—'}",
     ]
+    lines.append(f"📍 Город: {html.escape(str(user.get('city') or 'не указан'))}")
     if user.get("profile_private"):
         lines.append("🔒 Закрытый профиль")
     if user.get("profile_bio"):

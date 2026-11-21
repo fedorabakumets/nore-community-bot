@@ -11,7 +11,15 @@ import pytest
 from aiohttp import web
 
 from community_bot.database import Database
-from community_bot.miniapp import confirm, overview, prepare, protection, submit_application, validate_init_data
+from community_bot.miniapp import (
+    confirm,
+    overview,
+    prepare,
+    protection,
+    set_city,
+    submit_application,
+    validate_init_data,
+)
 
 
 def signed(uid=7, date=1000, token='test-only'):
@@ -36,7 +44,7 @@ class Request(dict):
         super().__init__(actor={'id': uid, 'first_name': 'Анна'})
         self.app = {'db': db, 'settings': SimpleNamespace(restricted_reputation_threshold=0, timezone='Europe/Moscow',
                                                      is_owner=lambda uid: uid == 99, moderator_ids=frozenset(),
-                                                     bot_token='test-only'), 'bot': None}
+                                                     bot_token='test-only', community_chat_id=0), 'bot': None}
         self.body = body or {}
 
     async def json(self):
@@ -50,6 +58,7 @@ async def db(tmp_path):
     await db.upsert_shop_item('rep_shield', price=12, enabled=1)
     for uid in (7, 8):
         await db.ensure_user(uid, telegram_name='Тест')
+        await db.update_profile(uid, 'city', 'Тестоград')
         await db.add_cookies(uid, 100, 'test')
     return db
 
@@ -150,6 +159,7 @@ async def test_web_application_approves_questionnaire_and_grants_access(db):
     status, result = await call('/api/application', submit_application, answers)
     assert status == 200 and result == {'status': 'admitted'}
     assert await db.has_approved_application(42)
+    assert (await db.get_user(42))['city'] == 'Москва'
     assert await db.pending_applications() == []
     application = await db.fetchone(
         'SELECT answers_json FROM applications WHERE user_id = ?', (42,),
@@ -378,3 +388,33 @@ async def test_profile_stats_use_the_bot_reputation_rules(db):
     response = json.loads((await overview(req)).body)
     assert response['profile']['actions_used'] == 1
     assert response['profile']['actions_left'] == 0
+
+
+async def test_miniapp_city_screen_and_api_gate(db):
+    app_id = await db.create_application(7, {})
+    await db.decide_application(app_id, 99, 'approved', None)
+    await db.execute("UPDATE users SET city=NULL WHERE user_id=7")
+    req = Request(db)
+    req.headers = {'Authorization': 'tma ' + signed(date=int(time.time()))}
+
+    req.path = '/api/me'
+    initial = await protection(req, overview)
+    assert initial.status == 200
+    assert json.loads(initial.body) == {'city_required': True}
+
+    locked = AsyncMock(return_value=web.json_response({'ok': True}))
+    req.path = '/api/profile'
+    assert (await protection(req, locked)).status == 403
+    locked.assert_not_awaited()
+
+    req.path = '/api/city'
+    req.body = {'city': '  Новосибирск  '}
+    saved = await protection(req, set_city)
+    assert saved.status == 200
+    assert json.loads(saved.body) == {'ok': True, 'city': 'Новосибирск'}
+    assert (await db.get_user(7))['city'] == 'Новосибирск'
+
+    req.path = '/api/me'
+    unlocked = await protection(req, overview)
+    assert unlocked.status == 200
+    assert json.loads(unlocked.body)['user']['city'] == 'Новосибирск'

@@ -120,7 +120,10 @@ async def group_profile_body(
     role = await role_title(db, user["role"])
     age = profile_age(user)
     handle = f"@{user['username']}" if show_username and user.get("username") else ""
-    subtitle = " · ".join(filter(None, (role, handle, f"Возраст: {age}" if age else "")))
+    subtitle = " · ".join(filter(None, (
+        role, handle, f"Возраст: {age}" if age else "",
+        f"📍 {user['city']}" if user.get("city") else "",
+    )))
 
     commands = [ibtn("❌", "ui:close", "danger")]
     try:

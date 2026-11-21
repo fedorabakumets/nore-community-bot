@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
     age INTEGER,
     birth_date TEXT,
     hobbies TEXT,
+    city TEXT,
     avatar_file_id TEXT,
     avatar_media_type TEXT NOT NULL DEFAULT 'photo',
     role TEXT NOT NULL DEFAULT 'member',
@@ -646,6 +647,27 @@ class Database:
             columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
             if "birth_date" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN birth_date TEXT")
+            if "city" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN city TEXT")
+                # Recover cities from approved applications, without overwriting a profile city.
+                from community_bot.application_form import validate_city
+
+                approved = await (await db.execute(
+                    "SELECT user_id, answers_json FROM applications WHERE status='approved' ORDER BY id DESC"
+                )).fetchall()
+                recovered = set()
+                for row in approved:
+                    if row["user_id"] in recovered:
+                        continue
+                    try:
+                        city = validate_city(json.loads(row["answers_json"]).get("city"))
+                    except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+                        continue
+                    recovered.add(row["user_id"])
+                    await db.execute(
+                        "UPDATE users SET city=? WHERE user_id=? AND TRIM(COALESCE(city,''))=''",
+                        (city, row["user_id"]),
+                    )
             if "avatar_media_type" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN avatar_media_type TEXT NOT NULL DEFAULT 'photo'")
             pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
@@ -1530,6 +1552,7 @@ class Database:
             "profile_name",
             "birth_date",
             "hobbies",
+            "city",
             "avatar_file_id",
             "avatar_media_type",
             "profile_private",
@@ -1543,6 +1566,10 @@ class Database:
             from community_bot.profile_fields import validate_birth_date
 
             value = validate_birth_date(value)
+        elif field == "city":
+            from community_bot.application_form import validate_city
+
+            value = validate_city(value)
         sql = f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?"
         params = (value, utcnow(), user_id)
         if field == "avatar_file_id":
@@ -1782,6 +1809,13 @@ class Database:
                 await db.execute(
                     "UPDATE users SET profile_name=?, updated_at=? WHERE user_id=?",
                     (answers["name"], now, user_id),
+                )
+            if "city" in answers:
+                from community_bot.application_form import validate_city
+
+                await db.execute(
+                    "UPDATE users SET city=?, updated_at=? WHERE user_id=?",
+                    (validate_city(answers["city"]), now, user_id),
                 )
             await db.commit()
             return int(cursor.lastrowid)

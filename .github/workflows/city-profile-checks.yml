@@ -1,0 +1,28 @@
+name: City profile checks
+
+on:
+  pull_request:
+    branches: ["cursor/nora-2-update-d133"]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - name: Python lint
+        run: python -m ruff check community_bot/application_form.py community_bot/city_gate.py community_bot/database.py community_bot/profile_fields.py community_bot/miniapp.py community_bot/main.py community_bot/group_profile.py community_bot/helpers.py community_bot/social_profiles.py community_bot/routers/private.py community_bot/release_backup.py tests/test_city_gate.py tests/test_miniapp.py tests/test_release_backup.py
+      - name: Regression tests
+        run: python -m pytest -q tests/test_city_gate.py tests/test_miniapp.py tests/test_private_access.py tests/test_release_backup.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JavaScript syntax
+        run: |
+          node --check community_bot/web/app.js
+          node --check community_bot/web/people.js
+          node --check community_bot/web/cabinet.js

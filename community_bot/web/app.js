@@ -89,6 +89,50 @@ window.addEventListener('pagehide', () => {
 });
 let applicationScreen = null;
 
+function showCitySetup() {
+  applicationScreen = null;
+  barricadeView?.unmount();
+  data = null;
+  $('#nav').replaceChildren();
+  if ($('#sheet').open) $('#sheet').close();
+  tg?.BackButton?.hide?.();
+  const app = $('#app');
+  app.dataset.screen = 'city';
+  window.scrollTo(0, 0);
+  app.innerHTML = `<section class="application-panel card">
+    <span class="eyebrow">Нора · твой профиль</span>
+    <h1>Из какого ты города?</h1>
+    <p class="sub">Укажи город, чтобы открыть Нору и пользоваться командами в чате.</p>
+    <form id="city-setup-form">
+      <label>Город
+        <input name="city" autocomplete="address-level2" minlength="2" maxlength="100"
+          placeholder="Например, Санкт-Петербург" required autofocus>
+      </label>
+      <p class="application-error" id="city-setup-error" role="alert"></p>
+      <button type="submit" class="primary">Продолжить</button>
+    </form>
+  </section>`;
+  const form = $('#city-setup-form');
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (busy) return;
+    const button = form.querySelector('[type="submit"]');
+    const error = $('#city-setup-error');
+    busy = button.disabled = true;
+    button.textContent = 'Сохраняем…';
+    error.textContent = '';
+    try {
+      await api('city', {city: form.elements.city.value});
+      await openApp(await api('me'));
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      busy = button.disabled = false;
+      button.textContent = 'Продолжить';
+    }
+  };
+}
+
 function showApplication(application) {
   applicationScreen = application;
   barricadeView?.unmount();
@@ -509,6 +553,11 @@ async function openApp(result) {
     window.NoraIntro?.finish(true);
     return;
   }
+  if (result.city_required) {
+    showCitySetup();
+    window.NoraIntro?.finish(true);
+    return;
+  }
   await memberScreensReady;
   applicationScreen = null;
   data = result;
@@ -586,7 +635,7 @@ async function startApp() {
 void startApp();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
-function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
+function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Город<input name="city" minlength="2" maxlength="100" required value="${esc(u.city||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, город — от 2 до 100, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
 const AVATAR_MAX_MB = 64;
 const AVATAR_ACCEPT = 'image/*,.heic,.heif';
 async function uploadPhoto(file, endpoint, headers) {

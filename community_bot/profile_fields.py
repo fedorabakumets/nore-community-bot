@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-EDITABLE = {'profile_name': (1, 50), 'hobbies': (1, 500), 'profile_bio': (1, 280)}
+EDITABLE = {'profile_name': (1, 50), 'hobbies': (1, 500), 'profile_bio': (1, 280), 'city': (2, 100)}
 REVISION_FIELDS = (*EDITABLE, 'birth_date', 'avatar_file_id', 'avatar_media_type', 'profile_private')
 
 
@@ -52,11 +52,15 @@ def profile_revision(user):
 
 def validate_profile_fields(values):
     if not isinstance(values, dict) or not values or set(values) - {*EDITABLE, 'birth_date'}:
-        raise ValueError('Можно изменить только имя, дату рождения, увлечения и описание')
+        raise ValueError('Можно изменить только имя, дату рождения, город, увлечения и описание')
     clean = {}
     for key, value in values.items():
         if key == 'birth_date':
             value = validate_birth_date(value)
+        elif key == 'city':
+            from community_bot.application_form import validate_city
+
+            value = validate_city(value)
         else:
             minimum, maximum = EDITABLE[key]
             if not isinstance(value, str) or not minimum <= len(value.strip()) <= maximum:
