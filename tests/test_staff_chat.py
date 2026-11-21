@@ -370,7 +370,7 @@ async def test_staff_chat_composer_role_identity_reply_and_rate_limit(tmp_path):
 
     success = await send_text(Request(actor={"id": 20}))
     assert success.status == 200
-    assert json.loads(success.text) == {"ok": True, "message_id": 72}
+    assert json.loads(success.text) == {"ok": True, "message_id": 72, "message_ids": [72]}
     kwargs = bot.send_message.await_args.kwargs
     assert kwargs["chat_id"] == GROUP
     assert kwargs["reply_parameters"].message_id == 71
@@ -766,3 +766,181 @@ async def test_staff_chat_reaction_changes_reach_live_clients(tmp_path):
         assert response.status == 200
         assert (await _ws_until(ws, "change"))["operation"] == "reaction"
         await ws.close()
+
+
+
+@pytest.mark.asyncio
+async def test_stage7_photo_album_upload_and_feed_grouping(tmp_path):
+    from community_bot.staff_chat_send import MAX_BATCH_UPLOAD, MAX_ALBUM_ITEMS
+
+    db = Database(tmp_path / "media-album.db")
+    await db.initialize()
+    await db.ensure_user(20, telegram_name="Тестировщик")
+    await db.set_role(20, "admin")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+
+    def photo(mid, caption):
+        return Message(
+            message_id=mid, date=datetime.now(UTC),
+            chat=Chat(id=GROUP, type="supergroup"),
+            media_group_id="album-stage7-test",
+            from_user=User(id=900, is_bot=True, first_name="НОРА"),
+            caption=caption,
+            photo=[PhotoSize(file_id="photo-"+str(mid), file_unique_id="u"+str(mid), width=100, height=100)],
+        )
+
+    messages = [photo(200, "💬 Тестировщик · через Mini App Норы\n\nЛето"), photo(201, None)]
+    bot = SimpleNamespace(send_media_group=AsyncMock(return_value=messages))
+    app = {"db": db, "settings": settings, "bot": bot, "staff_chat_send_locks": {}, "staff_chat_last_sent": {}}
+
+    class Field:
+        def __init__(self, name, data, filename=None):
+            self.name, self.data, self.filename = name, data, filename
+            self.position = 0
+        async def read_chunk(self, amount):
+            chunk = self.data[self.position:self.position+amount]
+            self.position += len(chunk)
+            return chunk
+        async def read(self, decode=False):
+            return self.data
+
+    class Reader:
+        def __init__(self, values): self.values=iter(values)
+        async def next(self): return next(self.values, None)
+
+    class Request(dict):
+        content_type = "multipart/form-data"
+        content_length = 300
+        app = app
+        async def multipart(self):
+            return Reader([
+                Field("text", "Лето".encode()),
+                Field("file", b"\xff\xd8\xff" + b"A"*16, "one.jpg"),
+                Field("file", b"\x89PNG\r\n\x1a\n" + b"B"*16, "two.png"),
+            ])
+
+    result = await send_attachment(Request(actor={"id": 20}))
+    assert result.status == 200
+    assert json.loads(result.text)["message_ids"] == [200, 201]
+    send = bot.send_media_group.await_args.kwargs
+    assert len(send["media"]) == 2
+    assert send["media"][0].caption.endswith("Лето")
+    assert send["media"][1].caption is None
+    assert send["media"][0].media.data.startswith(b"\xff\xd8\xff")
+    assert send["media"][1].media.data.startswith(b"\x89PNG")
+    row = await db.fetchone(
+        "SELECT media_group_id FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
+        (GROUP, 201),
+    )
+    assert row["media_group_id"] == "album-stage7-test"
+    class FeedRequest(dict):
+        app = app
+        query = {}
+    result = await feed(FeedRequest(actor={"id": 20}))
+    feed_items = json.loads(result.text)["items"]
+    assert [item["id"] for item in feed_items] == [200, 201]
+    assert all(item["media_group_id"] == "album-stage7-test" for item in feed_items)
+    assert MAX_ALBUM_ITEMS == 6 and MAX_BATCH_UPLOAD == 30*1024*1024
+
+    class InvalidRequest(Request):
+        async def multipart(self):
+            return Reader([
+                Field("file", b"\xff\xd8\xffSTUFF", "one.jpg"),
+                Field("file", b"not an image", "dangerous.pdf"),
+            ])
+    invalid = await send_attachment(InvalidRequest(actor={"id": 20}))
+    assert invalid.status == 400
+    assert bot.send_media_group.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stage7_browser_voice_sent_as_real_telegram_voice(monkeypatch, tmp_path):
+    from community_bot import staff_chat_send
+
+    db = Database(tmp_path / "voice-stage7.db")
+    await db.initialize()
+    await db.ensure_user(20, telegram_name="Модератор")
+    await db.set_role(20, "moderator")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+    sent = Message(
+        message_id=501, date=datetime.now(UTC),
+        chat=Chat(id=GROUP, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="НОРА"),
+        caption="💬 Модератор · через Mini App Норы",
+        voice={"file_id":"voice-501","file_unique_id":"unique-501","duration":3},
+    )
+    bot = SimpleNamespace(send_voice=AsyncMock(return_value=sent))
+    state = {"db": db, "settings": settings, "bot": bot, "staff_chat_send_locks": {}, "staff_chat_last_sent": {}}
+    converted = AsyncMock(return_value=b"OggS-verified-transcode")
+    monkeypatch.setattr(staff_chat_send, "_voice_ogg", converted)
+
+    class Field:
+        def __init__(self, name, data, filename=None):
+            self.name, self.data, self.filename = name, data, filename
+            self.position=0
+        async def read_chunk(self, size):
+            chunk=self.data[self.position:self.position+size]
+            self.position+=len(chunk)
+            return chunk
+        async def read(self, decode=False): return self.data
+    class Reader:
+        def __init__(self, fields): self.fields=iter(fields)
+        async def next(self): return next(self.fields, None)
+    class Request(dict):
+        content_type="multipart/form-data"
+        content_length=200
+        app=state
+        async def multipart(self):
+            return Reader([Field("kind", b"voice"), Field("file", b"\x1aE\xdf\xa3abc", "nora-voice.webm")])
+
+    result=await send_attachment(Request(actor={"id": 20}))
+    assert result.status == 200
+    converted.assert_awaited_once()
+    call=bot.send_voice.await_args.kwargs
+    assert call["voice"].filename == "nora-voice.ogg"
+    assert call["voice"].data == b"OggS-verified-transcode"
+    assert call["caption"].startswith("💬 Модератор · через Mini App Норы")
+    stored=await db.fetchone(
+        "SELECT media_type,media_file_id FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
+        (GROUP, 501),
+    )
+    assert stored["media_type"] == "voice"
+    assert stored["media_file_id"] == "voice-501"
+    assert json.loads(result.text)["message_ids"] == [501]
+
+    class Bad(Request):
+        app={**state,"staff_chat_last_sent": {}}
+        async def multipart(self):
+            return Reader([Field("kind", b"voice"), Field("file", b"bad", "script.js")])
+    bad=await send_attachment(Bad(actor={"id":20}))
+    assert bad.status == 400
+    assert bot.send_voice.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stage7_existing_chat_schema_migrates_to_album_column(tmp_path):
+    import sqlite3
+
+    database_file=tmp_path/"legacy-staff-chat.db"
+    with sqlite3.connect(database_file) as conn:
+        conn.execute("""
+            CREATE TABLE staff_chat_messages (
+                chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 0, author_name TEXT NOT NULL,
+                username TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '',
+                media_type TEXT NOT NULL DEFAULT '', media_file_id TEXT NOT NULL DEFAULT '',
+                media_thumb_file_id TEXT NOT NULL DEFAULT '', rich_json TEXT NOT NULL DEFAULT '',
+                reply_to_id INTEGER, sent_at TEXT NOT NULL, edited_at TEXT,
+                PRIMARY KEY (chat_id, message_id)
+            )
+        """)
+    db=Database(database_file)
+    await db.initialize()
+    columns=await db.fetchall("PRAGMA table_info(staff_chat_messages)")
+    assert "media_group_id" in {row["name"] for row in columns}
+    await db.initialize()
+    assert "media_group_id" in {row["name"] for row in await db.fetchall("PRAGMA table_info(staff_chat_messages)")}
