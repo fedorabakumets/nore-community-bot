@@ -627,9 +627,9 @@ window.NoraStaffChat = (() => {
   }
   function stopRecording(discard=false) {
     if(!recorder)return;
-    if(discard)recordingCancelled=true;
     if(recordTimer!==null){clearInterval(recordTimer);recordTimer=null;}
     const active=recorder;
+    if(discard)active._noraDiscard=true;
     recording=false;
     recordStatus();
     composeUpdate();
