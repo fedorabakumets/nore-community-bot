@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 from io import BytesIO
 from pathlib import PurePosixPath
 from collections.abc import Awaitable, Callable
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS staff_chat_messages (
     media_type TEXT NOT NULL DEFAULT '',
     media_file_id TEXT NOT NULL DEFAULT '',
     media_thumb_file_id TEXT NOT NULL DEFAULT '',
+    rich_json TEXT NOT NULL DEFAULT '',
     reply_to_id INTEGER,
     sent_at TEXT NOT NULL,
     edited_at TEXT,
@@ -69,6 +71,118 @@ def message_thumbnail(message: Message) -> str:
     return ''
 
 
+def _as_dict(value: Any) -> dict:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_none=True, warnings=False)
+    return {}
+
+
+def _rich_text(value: Any) -> str:
+    """Plain-text projection of Telegram RichText without injecting client-side HTML."""
+    if isinstance(value, str):
+        return value[:4000]
+    if isinstance(value, list):
+        return "".join(_rich_text(item) for item in value)[:4000]
+    node = _as_dict(value)
+    if not node:
+        return ""
+    parts = []
+    for key in ("text", "children"):
+        if key in node:
+            parts.append(_rich_text(node[key]))
+    return "".join(parts)[:4000]
+
+
+def _file_id_from_photo(photo: Any) -> str:
+    photos = photo if isinstance(photo, list) else [photo]
+    for item in reversed(photos):
+        fid = _as_dict(item).get("file_id", "")
+        if isinstance(fid, str) and fid:
+            return fid
+    return ""
+
+
+def _rich_projection(message: Message) -> str:
+    """Persist a bounded Rich Message projection. File IDs stay server-side."""
+    rich = getattr(message, "rich_message", None)
+    if not rich:
+        return ""
+    source = _as_dict(rich)
+    blocks = source.get("blocks") or []
+    if not isinstance(blocks, list):
+        return ""
+    output: list[dict] = []
+    files: list[dict] = []
+
+    def asset(kind: str, fid: Any) -> int | None:
+        if not isinstance(fid, str) or not fid or len(fid) > 512 or len(files) >= 50:
+            return None
+        index = len(files)
+        files.append({"type": kind, "file_id": fid})
+        return index
+
+    def visit(nodes: list, depth: int = 0) -> None:
+        if depth > 3 or len(output) >= 80:
+            return
+        for raw in nodes:
+            if len(output) >= 80:
+                break
+            block = _as_dict(raw)
+            kind = block.get("type")
+            if kind in ("section_heading", "paragraph", "heading", "subheading"):
+                value = _rich_text(block.get("text"))
+                if value:
+                    output.append({"type": "heading" if kind != "paragraph" else "text", "text": value})
+            elif kind == "details":
+                summary = _rich_text(block.get("summary"))
+                if summary:
+                    output.append({"type": "details", "text": summary})
+                nested = block.get("blocks") or []
+                if isinstance(nested, list):
+                    visit(nested, depth+1)
+            elif kind == "photo":
+                fid = _file_id_from_photo(block.get("photo"))
+                idx = asset("photo", fid)
+                output.append({"type": "photo", "asset": idx})
+            elif kind == "audio":
+                audio = _as_dict(block.get("audio"))
+                idx = asset("audio", audio.get("file_id"))
+                output.append({
+                    "type": "audio", "asset": idx,
+                    "title": _rich_text(audio.get("title"))[:160] or "Аудиотрек",
+                    "performer": _rich_text(audio.get("performer"))[:160],
+                    "duration": audio.get("duration") if isinstance(audio.get("duration"), int) else None,
+                })
+            elif kind == "buttons":
+                buttons = []
+                for raw_button in (block.get("buttons") or [])[:12]:
+                    button = _as_dict(raw_button)
+                    url = button.get("url")
+                    if not isinstance(url, str) or not url.startswith(("https://", "http://")) or len(url) > 1000:
+                        url = ""
+                    title = _rich_text(button.get("text"))[:64]
+                    if title:
+                        buttons.append({"text": title, "url": url})
+                if buttons:
+                    output.append({"type": "buttons", "buttons": buttons})
+            elif kind in ("video", "animation", "voice_note", "document"):
+                data = _as_dict(block.get(kind))
+                idx = asset("voice" if kind == "voice_note" else kind, data.get("file_id"))
+                output.append({"type": kind, "asset": idx})
+            elif kind in ("list", "blockquote", "quote", "table"):
+                nested = block.get("blocks") or block.get("items") or []
+                if isinstance(nested, list):
+                    visit(nested, depth+1)
+                elif block.get("text"):
+                    output.append({"type": "text", "text": _rich_text(block.get("text"))})
+    visit(blocks)
+    if not output:
+        output.append({"type": "text", "text": "Rich-сообщение из Telegram"})
+    return json.dumps({"blocks": output, "files": files}, ensure_ascii=False)
+
+
 async def capture(db, settings, message: Message) -> None:
     if not settings.community_chat_id or message.chat.id != settings.community_chat_id:
         return
@@ -89,27 +203,28 @@ async def capture(db, settings, message: Message) -> None:
     media_type, media_id = message_media(message)
     thumbnail_id = message_thumbnail(message)
     text = str(message.text or message.caption or "")[:4000]
-    if not text and not media_type:
+    rich_json = _rich_projection(message)
+    if not text and not media_type and not rich_json:
         return
     edited = message.edit_date.isoformat() if message.edit_date else None
     await db.execute(
         """
         INSERT INTO staff_chat_messages (
             chat_id, message_id, user_id, author_name, username, text,
-            media_type, media_file_id, media_thumb_file_id,
+            media_type, media_file_id, media_thumb_file_id, rich_json,
             reply_to_id, sent_at, edited_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(chat_id, message_id) DO UPDATE SET
             author_name=excluded.author_name, username=excluded.username,
             text=excluded.text, media_type=excluded.media_type,
             media_file_id=excluded.media_file_id,
             media_thumb_file_id=excluded.media_thumb_file_id,
-            edited_at=excluded.edited_at
+            rich_json=excluded.rich_json, edited_at=excluded.edited_at
         WHERE excluded.edited_at IS NOT NULL
         """,
         (
             message.chat.id, message.message_id, user_id, author[:120], username[:80],
-            text, media_type, media_id, thumbnail_id,
+            text, media_type, media_id, thumbnail_id, rich_json,
             message.reply_to_message.message_id if message.reply_to_message else None,
             message.date.isoformat(), edited,
         ),
@@ -148,7 +263,7 @@ class StaffChatCaptureMiddleware(BaseMiddleware):
 
 _QUERY = """
     SELECT m.message_id id, m.user_id, m.author_name name, m.username,
-           m.text, m.media_type, m.reply_to_id, m.sent_at, m.edited_at,
+           m.text, m.media_type, m.rich_json, m.reply_to_id, m.sent_at, m.edited_at,
            r.author_name reply_name, r.text reply_text, r.media_type reply_media_type,
            CASE WHEN m.media_file_id != '' THEN 1 ELSE 0 END has_media,
            CASE WHEN m.media_thumb_file_id != '' THEN 1 ELSE 0 END has_thumbnail,
@@ -212,6 +327,8 @@ async def feed(request: web.Request) -> web.Response:
         rows = list(reversed(before)) + after
 
     for m in rows:
+        stored_rich = json.loads(m.pop("rich_json") or "{}")
+        m["rich"] = stored_rich.get("blocks", [])
         m["has_avatar"] = bool(m["has_avatar"])
         m["has_media"] = bool(m["has_media"])
         m["has_thumbnail"] = bool(m["has_thumbnail"])
@@ -255,14 +372,29 @@ async def media(request: web.Request) -> web.Response:
     message_id = int(request.match_info["message_id"])
     chat_id = int(settings.community_chat_id or 0)
     row = await db.fetchone(
-        "SELECT media_type, media_file_id, media_thumb_file_id "
+        "SELECT media_type, media_file_id, media_thumb_file_id, rich_json "
         "FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
         (chat_id, message_id),
     )
-    if not row or row["media_type"] not in MEDIA_TYPES:
+    if not row:
         return web.json_response({"error": "Вложение не найдено"}, status=404)
+    part = request.query.get("part")
     thumb = request.query.get("thumb") == "1"
-    file_id = row["media_thumb_file_id"] if thumb else row["media_file_id"]
+    if part is not None:
+        if not part.isdecimal() or len(part) > 3 or int(part) >= 50 or thumb:
+            return web.json_response({"error": "Некорректное вложение"}, status=400)
+        content = json.loads(row["rich_json"] or "{}")
+        files = content.get("files") or []
+        if int(part) >= len(files):
+            return web.json_response({"error": "Вложение не найдено"}, status=404)
+        chosen = files[int(part)]
+        if chosen.get("type") not in MEDIA_TYPES:
+            return web.json_response({"error": "Формат не поддерживается"}, status=415)
+        file_id = chosen.get("file_id", "")
+    else:
+        if row["media_type"] not in MEDIA_TYPES:
+            return web.json_response({"error": "Вложение не найдено"}, status=404)
+        file_id = row["media_thumb_file_id"] if thumb else row["media_file_id"]
     if not file_id:
         return web.json_response({"error": "Превью недоступно"}, status=404)
     bot = request.app.get("bot")
