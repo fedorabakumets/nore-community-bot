@@ -537,16 +537,35 @@ window.NoraStaffChat = (() => {
     document.getElementById('staff-chat-draft')?.focus();
   }
 
+  function syncChatViewport() {
+    const app = document.getElementById('app');
+    if(!app || tab !== 'staffchat' || app.dataset.screen !== 'staffchat')return;
+    const viewport = window.visualViewport;
+    // iOS keyboard shrinks the visual viewport without reliably resizing 100dvh.
+    const height = Math.max(1,Math.round(viewport?.height || window.innerHeight));
+    const top = Math.max(0,Math.round(viewport?.offsetTop || 0));
+    app.style.setProperty('--staff-chat-viewport-height',height+'px');
+    app.style.setProperty('--staff-chat-viewport-top',top+'px');
+  }
+  function clearChatViewport() {
+    const app = document.getElementById('app');
+    app?.style.removeProperty('--staff-chat-viewport-height');
+    app?.style.removeProperty('--staff-chat-viewport-top');
+  }
   function mount() {
     if(timer !== null){clearInterval(timer);timer = null;}
     observer?.disconnect();observer = null;
     visit++;
     loading = false;signature = '';contextId = null;
-    if(tab !== 'staffchat'){clearAssets();return;}
+    if(tab !== 'staffchat'){clearAssets();clearChatViewport();return;}
+    syncChatViewport();
     prepareComposer();
     void load();
     timer = setInterval(()=>{if(contextId === null)void load();},3000);
   }
+  window.visualViewport?.addEventListener('resize',syncChatViewport);
+  window.visualViewport?.addEventListener('scroll',syncChatViewport);
+  window.addEventListener('resize',syncChatViewport);
 
   document.addEventListener('submit',event=>{
     if(event.target?.id === 'staff-chat-compose'){
