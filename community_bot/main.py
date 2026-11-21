@@ -58,13 +58,17 @@ logger = logging.getLogger(__name__)
 
 
 async def configure_commands(bot: Bot, community_chat_id: int) -> None:
-    commands = [BotCommand(command="commands", description="Нора команды")]
+    private_commands = [BotCommand(command="start", description="Открыть НОРУ")]
+    group_commands = [BotCommand(command="commands", description="Нора команды")]
     for language_code in (None, "ru"):
         await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats(), language_code=language_code)
-        await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats(), language_code=language_code)
+        await bot.set_my_commands(
+            private_commands, scope=BotCommandScopeAllPrivateChats(), language_code=language_code,
+        )
         if community_chat_id:
             await bot.set_my_commands(
-                commands, scope=BotCommandScopeChat(chat_id=community_chat_id), language_code=language_code,
+                group_commands, scope=BotCommandScopeChat(chat_id=community_chat_id),
+                language_code=language_code,
             )
 
 
@@ -625,6 +629,9 @@ async def main() -> None:
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
     december_meetup_task = asyncio.create_task(publish_december_meetup(db, settings, bot))
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
+    from community_bot.onboarding_invites import run_entry_release
+
+    entry_release_task = asyncio.create_task(run_entry_release(bot, db, settings))
     emergency_task = asyncio.create_task(emergency_stop_job(dispatcher, emergency_stop))
     restart_task = asyncio.create_task(restart_stop_job(dispatcher, restart_stop))
     pet_video_queue = PetVideoQueue(db)
@@ -664,6 +671,7 @@ async def main() -> None:
             event_counters_task,
             december_meetup_task,
             sticker_delivery_task,
+            entry_release_task,
             emergency_task,
             restart_task,
         ):
@@ -688,6 +696,7 @@ async def main() -> None:
                 event_counters_task,
                 december_meetup_task,
                 sticker_delivery_task,
+                entry_release_task,
                 emergency_task,
                 restart_task,
             )

@@ -152,7 +152,7 @@ async def application_onboarding(db, uid, ban):
 
 async def submit_application(request):
     from community_bot.application_form import validate_application_age
-    from community_bot.routers.private import notify_application_reviewers
+    from community_bot.routers.private import _notify_application_decision
 
     if 'application_ban' not in request:
         return web.json_response({'status': 'admitted'})
@@ -187,15 +187,24 @@ async def submit_application(request):
     await actor(request)
     application_id = await db.create_application(uid, answers, ban_version=ban.get('version'))
     if not application_id:
-        # Another tab may already have submitted or a moderator may have changed access.
+        # A second browser tab may have completed the same application first.
+        if await db.has_approved_application(uid):
+            return web.json_response({'status': 'admitted'})
         onboarding = await application_onboarding(db, uid, await db.ban_reset_state(uid))
         if onboarding['status'] != 'form':
             return web.json_response(onboarding)
         return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
-    await notify_application_reviewers(
-        request.app['bot'], settings, application_id, uid, request['actor'].get('username'), answers,
-    )
-    return web.json_response({'status': 'pending', 'application_id': application_id, 'has_photo': False})
+    if not await db.decide_application(application_id, settings.owner_id, 'approved', None):
+        return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
+    try:
+        await _notify_application_decision(
+            request.app['bot'], db, settings, application_id, settings.owner_id,
+            'approved', None, automatic=True,
+        )
+    except TelegramAPIError:
+        # Approval must not roll back because Telegram could not deliver the private invitation.
+        pass
+    return web.json_response({'status': 'admitted'})
 
 
 async def overview(request):

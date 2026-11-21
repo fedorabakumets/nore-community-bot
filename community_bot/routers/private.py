@@ -1300,15 +1300,17 @@ async def application_bio(
         await message.answer(reason)
         await restore_private_menu(message, db, settings)
         return
-    markup = start_apply_keyboard(pending=True)
-    markup.inline_keyboard.insert(0, [ibtn("Пропустить фото", "application:skip-photo")])
-    with fresh_private_panel(user.id):
-        await safe_send(
-            bot, user.id,
-            f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт сюда.\n\n{APPLICATION_PHOTO_PROMPT}",
-            reply_markup=markup,
+    if not await db.decide_application(application_id, settings.owner_id, "approved", None):
+        await message.answer("Анкета уже рассмотрена. Открой /start, чтобы проверить доступ.")
+        return
+    try:
+        await _notify_application_decision(
+            bot, db, settings, application_id, settings.owner_id, "approved", None,
+            automatic=True,
         )
-    await notify_application_reviewers(bot, settings, application_id, user.id, user.username, answers)
+    except TelegramAPIError as error:
+        logger.warning("Automatic application %s approved; invite delivery failed (%s)",
+                       application_id, type(error).__name__)
 
 
 @router.message(F.photo, MagicData(F.application_photo_target))
@@ -1400,6 +1402,8 @@ async def _notify_application_decision(
     moderator_id: int,
     status: str,
     reason: str | None,
+    *,
+    automatic: bool = False,
 ) -> None:
     application = await db.get_application(application_id)
     if not application or application["status"] != status:
@@ -1408,13 +1412,7 @@ async def _notify_application_decision(
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
-    invite = ""
-    if approved and settings.community_invite_url:
-        invite = (
-            "\n\nДобро пожаловать в НОРУ:\n"
-            f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
-            f"{html.escape(settings.community_invite_url)}</a>"
-        )
+    # The invitation is sent as a dedicated card with an actual join button.
     if approved:
         markup = private_menu_keyboard(
             await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
@@ -1424,12 +1422,18 @@ async def _notify_application_decision(
     else:
         menu_text, markup = await private_menu_content(db, settings, user_id)
     with standalone_rich_message():
-        await safe_send(bot, user_id, f"{result}.{reason_text}{invite}", parse_mode="HTML")
+        if approved:
+            from community_bot.onboarding_invites import send_entry
+
+            await send_entry(bot, settings, user_id, new_member=True)
+        else:
+            await safe_send(bot, user_id, f"{result}.{reason_text}", parse_mode="HTML")
     with fresh_private_panel(user_id):
         await safe_send(bot, user_id, menu_text, parse_mode="HTML", reply_markup=markup)
-    report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
-    for reviewer_id in settings.reviewers - {moderator_id, user_id}:
-        await safe_send(bot, reviewer_id, report, parse_mode="HTML")
+    if not automatic:
+        report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
+        for reviewer_id in settings.reviewers - {moderator_id, user_id}:
+            await safe_send(bot, reviewer_id, report, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("application:approve:"))
