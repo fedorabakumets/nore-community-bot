@@ -388,7 +388,13 @@ window.NoraStaffChat = (() => {
       if(tab === 'staffchat' && target && !target.querySelector('.staff-chat-message'))
         target.innerHTML = `<p class="staff-chat-empty">${esc(error.message || 'Чат недоступен')}</p><button type="button" class="staff-chat-retry" data-staff-chat-retry>Повторить</button>`;
       else if(contextId !== null)toast(error.message || 'Сообщение недоступно');
-    } finally { loading = false; }
+    } finally {
+      loading=false;
+      if(refreshPending && tab==='staffchat' && !document.hidden) {
+        refreshPending=false;
+        void load();
+      }
+    }
   }
   async function navigateReply(button) {
     const id = Number(button.dataset.chatReply);
@@ -721,15 +727,17 @@ window.NoraStaffChat = (() => {
     app?.style.removeProperty('--staff-chat-viewport-top');
   }
   function mount() {
-    if(timer !== null){clearInterval(timer);timer = null;}
+    stopRealtime();
     observer?.disconnect();observer = null;
     visit++;
-    loading = false;signature = '';contextId = null;
+    loading=false;signature='';contextId=null;
+    newCount=0;
     if(tab !== 'staffchat'){clearAssets();clearChatViewport();return;}
     syncChatViewport();
     prepareComposer();
+    updateUnread();
     void load();
-    timer = setInterval(()=>{if(contextId === null)void load();},3000);
+    connectLive();
   }
   window.visualViewport?.addEventListener('resize',syncChatViewport);
   window.visualViewport?.addEventListener('scroll',syncChatViewport);
@@ -743,7 +751,7 @@ window.NoraStaffChat = (() => {
   });
   document.addEventListener('input',event=>{
     if(event.target?.id === 'staff-chat-draft'){
-      draft=event.target.value;composeUpdate();
+      draft=event.target.value;composeUpdate();postTyping();
     }
   });
   document.addEventListener('change',event=>{
@@ -760,6 +768,12 @@ window.NoraStaffChat = (() => {
   document.addEventListener('click',event=>{
     if(tab !== 'staffchat')return;
 
+    if(event.target.closest('[data-chat-scroll-new]')){
+      const feed=document.getElementById('staff-chat-feed');
+      if(contextId!==null){contextId=null;signature='';void load(true);}
+      else if(feed)feed.scrollTo({top:feed.scrollHeight,behavior:'smooth'});
+      newCount=0;updateUnread();return;
+    }
     const answer = event.target.closest('[data-chat-answer]');
     if(answer){selectReply(answer);return;}
     if(event.target.closest('[data-chat-cancel-reply]')){
@@ -787,7 +801,7 @@ window.NoraStaffChat = (() => {
           field.value=draft;
           field.focus();
           field.setSelectionRange(start+symbol.length,start+symbol.length);
-          composeUpdate();
+          composeUpdate();postTyping();
         }
       }
       return;
@@ -826,9 +840,28 @@ window.NoraStaffChat = (() => {
       event.preventDefault();tg.openTelegramLink(link.href);
     }
   });
+  document.addEventListener('scroll',event=>{
+    if(event.target?.id === 'staff-chat-feed' && newCount>0 && isFeedAtBottom()){
+      newCount=0;updateUnread();
+    }
+  },true);
   document.addEventListener('visibilitychange',()=>{
-    if(!document.hidden && tab === 'staffchat' && contextId === null)void load();
+    if(tab!=='staffchat')return;
+    if(document.hidden){stopRealtime();return;}
+    void load();
+    connectLive();
   });
-  window.addEventListener('pagehide',clearAssets);
+  window.addEventListener('online',()=>{
+    if(tab==='staffchat'&&!document.hidden){
+      if(retryTimer!==null){clearTimeout(retryTimer);retryTimer=null;}
+      connectLive();
+    }
+  });
+  window.addEventListener('pagehide',()=>{
+    clearAssets();stopRealtime();
+  });
+  window.addEventListener('pageshow',()=>{
+    if(tab==='staffchat'&&!document.hidden){void load();connectLive();}
+  });
   return {screen,mount};
 })();
