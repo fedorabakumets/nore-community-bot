@@ -38,6 +38,8 @@ from community_bot.reply_rich import _SEND, _method_fields, _reply_parameters, s
 PREFIX = "nora:close:"
 RECORD = "group-close:"
 PIN = "group-pin-button:"
+HOME_SCREEN_LABEL = "📲 Добавить Нору на экран"
+HOME_SCREEN_PARAM = "nora_home_screen"
 LEGACY = {"ui:close", "g:hide", "shop:close", "commands:close", "nora_speech:close"}
 LEGACY_INVITE = "game-invite:close:"
 EDITS = {"editMessageText", "editMessageCaption", "editMessageMedia", "editMessageReplyMarkup",
@@ -108,6 +110,71 @@ def _pin_markup(url):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url)]]) if url else None
 
 
+def _home_screen_url(pin_url: str) -> str:
+    """Open the Main Mini App on the installation story using Telegram's startapp."""
+    return pin_url.partition("?startapp")[0] + f"?startapp={HOME_SCREEN_PARAM}"
+
+
+def _home_screen_rich(rich: InputRichMessage, pin_url: str) -> InputRichMessage:
+    """Always keep one home-screen button in the last Rich row of pinned posts."""
+    install_url = _home_screen_url(pin_url)
+    blocks = _reusable(rich.model_dump(exclude_none=True)["blocks"])
+    tail = {"type": "buttons", "align": "center", "buttons": [
+        {"text": HOME_SCREEN_LABEL, "url": install_url, "style": "primary"},
+    ]}
+    existing = [
+        button
+        for block in blocks if block.get("type") == "buttons"
+        for button in block.get("buttons", [])
+        if button.get("text") == HOME_SCREEN_LABEL
+        or (button.get("url") or "").endswith(f"startapp={HOME_SCREEN_PARAM}")
+    ]
+    if (
+        len(existing) == 1 and blocks and blocks[-1].get("type") == "buttons"
+        and len(blocks[-1].get("buttons", [])) == 1
+        and blocks[-1]["buttons"][0].get("text") == HOME_SCREEN_LABEL
+        and blocks[-1]["buttons"][0].get("url") == install_url
+    ):
+        return rich
+    cleaned = []
+    for block in blocks:
+        if block.get("type") != "buttons":
+            cleaned.append(block)
+            continue
+        buttons = [
+            button for button in block.get("buttons", [])
+            if not (
+                button.get("text") == HOME_SCREEN_LABEL
+                or (button.get("url") or "").endswith(f"startapp={HOME_SCREEN_PARAM}")
+            )
+        ]
+        if buttons:
+            cleaned.append({**block, "buttons": buttons})
+    extra = rich.model_dump(exclude={"html", "markdown", "blocks"}, exclude_none=True)
+    return InputRichMessage(blocks=[*cleaned, tail], **extra)
+
+
+async def _update_pin_rich(bot, chat_id: int, message_id: int, pin_url: str) -> None:
+    """Patch the existing pinned Rich post in place, without reposting the contest."""
+    chat = await bot.get_chat(chat_id)
+    post = getattr(chat, "pinned_message", None)
+    if (not isinstance(post, Message) or post.message_id != message_id
+            or not post.from_user or post.from_user.id != bot.id):
+        return
+    blocks = _body(post)
+    if not blocks:
+        return  # Non-Rich media cannot be transformed without changing its format.
+    original = InputRichMessage(blocks=blocks)
+    updated = _home_screen_rich(original, pin_url)
+    if updated is original:
+        return
+    with without_group_close():
+        await bot(EditMessageText(
+            chat_id=chat_id, message_id=message_id, rich_message=updated,
+            reply_markup=_pin_markup(pin_url),
+        ))
+
+
 async def _set_pin_button(make_request, bot, chat_id, message_id, *, pinned):
     db = bot.community_db
     key = _pin_key(chat_id, message_id)
@@ -130,6 +197,11 @@ async def _set_pin_button(make_request, bot, chat_id, message_id, *, pinned):
         return
     if url:
         await db.set_bot_state(key, url)
+        try:
+            async with asyncio.timeout(7):
+                await _update_pin_rich(bot, chat_id, message_id, url)
+        except (TelegramAPIError, TimeoutError, OSError, AttributeError) as error:
+            logger.warning("Could not add NORA install story to the Rich pin (%s)", type(error).__name__)
     else:
         await db.execute("DELETE FROM bot_state WHERE key=?", (key,))
 
@@ -340,7 +412,9 @@ class GroupCloseSendMiddleware(BaseRequestMiddleware):
             fields = _method_fields(method, EditMessageText)
             fields.update(text=None, parse_mode=None, entities=None, link_preview_options=None,
                           disable_web_page_preview=None, reply_markup=_pin_markup(url),
-                          rich_message=_rich(blocks, markup, record.data, original))
+                          rich_message=_home_screen_rich(
+                              _rich(blocks, markup, record.data, original), url
+                          ) if url else _rich(blocks, markup, record.data, original))
             try:
                 result = await make_request(bot, EditMessageText(**fields))
             except (TelegramBadRequest, TelegramNotFound):

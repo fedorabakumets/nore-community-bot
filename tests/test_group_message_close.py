@@ -223,7 +223,8 @@ async def test_mini_app_start_confirms_group_invitation_before_deleting_it(db):
     app_bot.delete_message.assert_awaited_once_with(2, 10)
     await game_lobby_posts.cleanup(db, app_bot, now=now + 1.99)
     app_bot.delete_message.assert_awaited_once_with(2, 10)
-    await game_lobby_posts.cleanup(db, app_bot, now=now + 2)
+    # A tiny margin avoids crossing SQLite's floating-point timestamp boundary.
+    await game_lobby_posts.cleanup(db, app_bot, now=now + 2.1)
     assert [call.args for call in app_bot.delete_message.await_args_list] == [(2, 10), (GROUP, 10)]
     app_bot.edit_message_text.assert_awaited_once()
     assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (rid,)))["status"] == "playing"
@@ -249,7 +250,8 @@ async def test_roulette_only_confirms_accepted_challenge_without_adding_buttons(
         assert delete.message_id == 11
         await game_lobby_posts.cleanup(db, bot, now=now + 1)
         assert len(session.calls) == 2
-        await game_lobby_posts.cleanup(db, bot, now=now + 2)
+        # SQLite JSON float precision can put the 2s deadline just after now + 2.
+        await game_lobby_posts.cleanup(db, bot, now=now + 2.1)
         assert session.calls[-1].__api_method__ == "deleteMessage" and session.calls[-1].message_id == 10
 
 
@@ -309,8 +311,11 @@ async def test_only_pinned_posts_get_one_nora_inline_link(db):
     await middleware(telegram, bot, EditMessageReplyMarkup(chat_id=GROUP, message_id=10,
                                                          reply_markup=keyboard("new")))
     assert calls[-1].reply_markup.inline_keyboard[0][0].text == "НОРА"
-    assert [[b.callback_data for b in block.buttons] for block in calls[-1].rich_message.blocks
-            if isinstance(block, InputRichBlockButtons)] == [["new", "nora:close:0"]]
+    rows = [block.buttons for block in calls[-1].rich_message.blocks
+            if isinstance(block, InputRichBlockButtons)]
+    assert [[b.callback_data for b in row] for row in rows] == [["new", "nora:close:0"], [None]]
+    assert rows[-1][0].text == "📲 Добавить Нору на экран"
+    assert rows[-1][0].url == "https://t.me/test_nora?startapp=nora_home_screen"
     await middleware(telegram, bot, UnpinChatMessage(chat_id=GROUP, message_id=10))
     assert calls[-1].reply_markup is None
 

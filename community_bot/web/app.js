@@ -601,6 +601,10 @@ async function openApp(result) {
   }
   render();
   loadAvatar();
+  if (telegramStartParam() === 'nora_home_screen') {
+    window.NoraIntro?.finish(true);
+    window.NoraHomeScreen?.open();
+  }
   if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
   else if (inviteError) toast(inviteError);
   else if (topupClosed) toast('Пополнение временно недоступно');
