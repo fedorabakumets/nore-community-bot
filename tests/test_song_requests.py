@@ -111,7 +111,7 @@ async def test_cooldown_is_persistent(monkeypatch):
             return {"song:last_user:2": "100", "song:last_chat:-100": "110"}.get(key)
 
     monkeypatch.setattr(songs.time, "time", lambda: 150)
-    assert await songs._remaining(Db(), 2, -100) == 260
+    assert await songs._remaining(Db(), 2, -100) == 20
     assert await songs._remaining(Db(), 3, 4) == 0
 
 
@@ -219,3 +219,84 @@ async def test_yandex_link_metadata_api_resolves_exact_track(monkeypatch):
     assert requested[0][0] == "https://api.music.yandex.ru/tracks"
     assert requested[0][1]["allow_redirects"] is False
     assert requested[0][1]["data"]._fields[0][2] == "987:321"
+
+
+
+@pytest.mark.asyncio
+async def test_successful_cached_songs_have_60_second_cooldown_and_five_daily_deliveries(tmp_path, monkeypatch):
+    from community_bot.database import Database
+
+    db = Database(tmp_path / "songs.db")
+    await db.initialize()
+    song = songs.Song("987", "321", "Песня", "Исполнитель", 200)
+    choice = songs.Choices(user_id=17, chat_id=-100, expires=999999, tracks=[song])
+    await db.set_bot_state("song:file_id:987", "already_uploaded_audio")
+    bot = SimpleNamespace(
+        send_audio=AsyncMock(return_value=SimpleNamespace(audio=SimpleNamespace(file_id="cached"))),
+        send_message=AsyncMock(),
+    )
+
+    monkeypatch.setattr(songs.time, "time", lambda: 1000.0)
+    await songs.send_song(bot, db, choice, song)
+    assert await songs._daily_used(db, 17) == 1
+
+    monkeypatch.setattr(songs.time, "time", lambda: 1000.1)
+    assert await songs._remaining(db, 17, -100) == 60
+    await songs.send_song(bot, db, choice, song)
+    assert bot.send_audio.await_count == 1
+    assert await songs._daily_used(db, 17) == 1
+    assert "через 60 сек" in bot.send_message.await_args.args[1]
+
+    for index in range(1, 5):
+        monkeypatch.setattr(songs.time, "time", lambda index=index: 1000 + index * 61)
+        await songs.send_song(bot, db, choice, song)
+        assert await songs._daily_used(db, 17) == index + 1
+
+    assert bot.send_audio.await_count == 5
+    monkeypatch.setattr(songs.time, "time", lambda: 2000)
+    await songs.send_song(bot, db, choice, song)
+    assert bot.send_audio.await_count == 5
+    assert await songs._daily_used(db, 17) == 5
+    assert "00:00 МСК" in bot.send_message.await_args.args[1]
+    assert await songs._daily_used(db, 18) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_song_does_not_use_daily_quota_or_cooldown(tmp_path, monkeypatch):
+    from community_bot.database import Database
+
+    db = Database(tmp_path / "failed_songs.db")
+    await db.initialize()
+    monkeypatch.delenv("YANDEX_MUSIC_COOKIES_B64", raising=False)
+    song = songs.Song("123", None, "Не загружается", "Artist", 180)
+    choice = songs.Choices(user_id=42, chat_id=100, expires=99999, tracks=[song])
+    status = SimpleNamespace(delete=AsyncMock())
+    bot = SimpleNamespace(send_audio=AsyncMock(), send_message=AsyncMock(return_value=status))
+    await songs.send_song(bot, db, choice, song)
+    assert bot.send_audio.await_count == 0
+    assert await songs._daily_used(db, 42) == 0
+    assert await db.get_bot_state("song:last_user:42") is None
+    assert await db.get_bot_state("song:last_chat:100") is None
+    status.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_daily_song_counter_uses_moscow_calendar_day(tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from community_bot.database import Database
+
+    db = Database(tmp_path / "midnight_songs.db")
+    await db.initialize()
+    msk = ZoneInfo("Europe/Moscow")
+    choice = songs.Choices(user_id=42, chat_id=100, expires=123, tracks=[])
+    monkeypatch.setattr(songs, "moscow_now", lambda: datetime(2026, 11, 21, 23, 59, tzinfo=msk))
+    await songs._mark_sent(db, choice)
+    assert await songs._daily_used(db, 42) == 1
+    monkeypatch.setattr(songs, "moscow_now", lambda: datetime(2026, 11, 22, 0, 1, tzinfo=msk))
+    assert await songs._daily_used(db, 42) == 0
+    await songs._mark_sent(db, choice)
+    assert await songs._daily_used(db, 42) == 1
+    assert await db.get_bot_state("song:daily:42:2026-11-21") == "1"
+    assert await db.get_bot_state("song:daily:42:2026-11-22") == "1"

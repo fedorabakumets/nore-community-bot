@@ -303,3 +303,37 @@ async def test_changed_topup_rate_and_foreign_receipt_do_not_create_orders(env):
     assert (await topup_receipt(request)).status == 409
     assert await env.db.pending_cookie_orders() == []
     assert (await env.db.get_user(7))['cookies'] == 1000
+
+
+
+async def test_reset_limits_restores_song_daily_count_but_never_60s_cooldown(env):
+    from community_bot.routers import song_requests as songs
+
+    day = songs.moscow_now().date().isoformat()
+    await env.db.set_bot_state(songs._daily_key(7, day), "5")
+    await env.db.set_bot_state(f"song:last_user:7", "1000")
+    await env.db.set_bot_state(f"song:last_chat:-100123", "1000")
+    assert await songs._daily_used(env.db, 7) == 5
+    assert await songs._quota_error(env.db, 7)
+
+    quote = await prepared(env, "reset_limits")
+    assert (await paid(env, quote["token"])).status == 200
+    assert await songs._daily_used(env.db, 7) == 0
+    assert await songs._quota_error(env.db, 7) is None
+    assert await env.db.get_bot_state("song:last_user:7") == "1000"
+    assert await env.db.get_bot_state("song:last_chat:-100123") == "1000"
+
+
+async def test_gift_reset_limits_only_resets_recipient_song_quota(env):
+    from community_bot.routers import song_requests as songs
+
+    day = songs.moscow_now().date().isoformat()
+    for uid in (7, 8):
+        await env.db.set_bot_state(songs._daily_key(uid, day), "5")
+        await env.db.set_bot_state(f"song:last_user:{uid}", "1000")
+    quote = await prepared(env, "reset_limits", recipient="@boris_nora")
+    assert (await paid(env, quote["token"], recipient="@boris_nora")).status == 200
+    assert await songs._daily_used(env.db, 7) == 5
+    assert await songs._daily_used(env.db, 8) == 0
+    assert await env.db.get_bot_state("song:last_user:7") == "1000"
+    assert await env.db.get_bot_state("song:last_user:8") == "1000"
