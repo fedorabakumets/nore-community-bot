@@ -2513,11 +2513,16 @@ class Database:
         elif item == "reset_limits":
             from community_bot.social_likes import DAY_PREFIX
 
+            today = datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()
             await db.execute(
                 "DELETE FROM reputation_actions WHERE actor_id = ? AND action_date = ?",
-                (user_id, datetime.now(ZoneInfo("Europe/Moscow")).date().isoformat()),
+                (user_id, today),
             )
             await db.execute("DELETE FROM bot_state WHERE key=?", (f"{DAY_PREFIX}{user_id}",))
+            await db.execute(
+                "DELETE FROM pet_video_deliveries WHERE user_id = ? AND day = ?",
+                (user_id, today),
+            )
         elif item == "forgive":
             await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
         elif item == "rep_shield":
