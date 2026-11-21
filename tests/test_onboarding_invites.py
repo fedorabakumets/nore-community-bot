@@ -2,16 +2,21 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import SendMessage
+
 from community_bot.database import Database
 from community_bot.main import configure_commands
 from community_bot.onboarding_invites import (
     BROADCAST_MARKER,
+    BROADCAST_DONE,
     accept_waiting_applications,
     broadcast_entry_once,
     entry_keyboard,
     entry_text,
 )
 from community_bot.routers.group import auto_approve_join_request
+from community_bot.routers.private import _notify_application_decision
 
 
 def settings():
@@ -68,6 +73,10 @@ async def test_one_time_broadcast_is_per_recipient_and_has_entry_button(tmp_path
     assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "sent"
     assert await broadcast_entry_once(client, db, settings()) == (0, 0)
     assert client.send_message.await_count == 2
+    assert await db.get_bot_state(BROADCAST_DONE) == "1"
+    await db.ensure_user(9)
+    assert await broadcast_entry_once(client, db, settings()) == (0, 0)
+    assert client.send_message.await_count == 2
 
 
 async def test_existing_pending_applications_are_approved_and_not_broadcast_twice(tmp_path):
@@ -100,3 +109,31 @@ async def test_chat_join_requests_accepted_only_after_questionnaire(tmp_path):
     await db.decide_application(application_id, 99, "approved", None)
     await auto_approve_join_request(req, db, settings(), client)
     client.approve_chat_join_request.assert_awaited_once_with(-100123456, 7)
+
+
+async def test_non_messageable_users_are_marked_processed_in_one_time_broadcast(tmp_path):
+    db = Database(tmp_path / "unreachable.db")
+    await db.initialize()
+    await db.ensure_user(7)
+    client = bot()
+    client.send_message.side_effect = TelegramBadRequest(
+        method=SendMessage(chat_id=7, text="test"), message="chat not found",
+    )
+    assert await broadcast_entry_once(client, db, settings()) == (0, 1)
+    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "blocked"
+    assert await db.get_bot_state(BROADCAST_DONE) == "1"
+    assert await broadcast_entry_once(client, db, settings()) == (0, 0)
+    assert client.send_message.await_count == 1
+
+
+async def test_automatic_admission_marks_invite_and_accepts_pending_telegram_join(tmp_path):
+    db = Database(tmp_path / "pending_join.db")
+    await db.initialize()
+    await db.ensure_user(7)
+    application_id = await db.create_application(7, {"name": "Анна"})
+    await db.decide_application(application_id, 99, "approved", None)
+    client = bot()
+    await _notify_application_decision(client, db, settings(), application_id, 99, "approved", None, automatic=True)
+    client.approve_chat_join_request.assert_awaited_once_with(-100123456, 7)
+    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "sent"
+    assert client.send_message.await_count >= 2
