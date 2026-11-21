@@ -543,6 +543,168 @@ window.NoraStaffChat = (() => {
     document.getElementById('staff-chat-draft')?.focus();
   }
 
+
+  function connectionStatus(label,state='connecting',online=null) {
+    const node=document.getElementById('staff-chat-live-status');
+    if(!node)return;
+    node.dataset.liveState=state;
+    const title=node.querySelector('b'),count=node.querySelector('small');
+    if(title)title.textContent=label;
+    if(count && online!==null)count.textContent=online>0?` · ${online} в Mini App`:'';
+    if(count && state!=='live')count.textContent='';
+  }
+  function isFeedAtBottom() {
+    const node=document.getElementById('staff-chat-feed');
+    return !node || node.scrollHeight-node.scrollTop-node.clientHeight<105;
+  }
+  function updateUnread() {
+    const button=document.getElementById('staff-chat-new');
+    if(!button)return;
+    button.hidden=newCount<1;
+    if(newCount>0)button.textContent=`${newCount} новых сообщений ↓`;
+  }
+  function queueRefresh() {
+    if(tab!=='staffchat'||document.hidden)return;
+    if(refreshTimer!==null)clearTimeout(refreshTimer);
+    refreshTimer=setTimeout(()=>{
+      refreshTimer=null;
+      if(loading)refreshPending=true;
+      else void load();
+    },75);
+  }
+  function startFallback() {
+    if(timer!==null||tab!=='staffchat'||document.hidden)return;
+    timer=setInterval(()=>{if(tab==='staffchat')void load()},6000);
+    void load();
+  }
+  function stopFallback() {
+    if(timer!==null){clearInterval(timer);timer=null;}
+  }
+  function stopRealtime() {
+    liveAttempt++;
+    liveReady=false;
+    stopFallback();
+    for(const id of [retryTimer,handshakeTimer,heartbeatTimer,refreshTimer,typingTimeout]){
+      if(id!==null)clearTimeout(id);
+    }
+    retryTimer=null;handshakeTimer=null;heartbeatTimer=null;
+    refreshTimer=null;typingTimeout=null;refreshPending=false;
+    if(liveSocket){
+      const old=liveSocket;
+      liveSocket=null;
+      old.onopen=old.onmessage=old.onclose=old.onerror=null;
+      try{old.close(1000,'Leaving NORA chat');}catch{}
+    }
+  }
+  function showTyping(name) {
+    const node=document.getElementById('staff-chat-typing');
+    if(!node||tab!=='staffchat')return;
+    node.textContent=name+' печатает из Mini App…';
+    node.hidden=false;
+    if(typingTimeout!==null)clearTimeout(typingTimeout);
+    typingTimeout=setTimeout(()=>{
+      typingTimeout=null;
+      if(node.isConnected)node.hidden=true;
+    },3300);
+  }
+  function postTyping() {
+    if(!draft.trim()||!liveReady||!liveSocket||liveSocket.readyState!==WebSocket.OPEN)return;
+    const now=Date.now();
+    if(now-lastTypingSent<2500)return;
+    lastTypingSent=now;
+    try{liveSocket.send(JSON.stringify({type:'typing'}));}catch{}
+  }
+  function connectLive() {
+    if(tab!=='staffchat'||document.hidden)return;
+    if(liveSocket && (liveSocket.readyState===WebSocket.CONNECTING || liveSocket.readyState===WebSocket.OPEN))return;
+    if(typeof WebSocket==='undefined'||!auth){
+      connectionStatus('Режим обновления','fallback');
+      startFallback();return;
+    }
+    const generation=++liveAttempt;
+    let socket;
+    try{
+      const protocol=location.protocol==='https:'?'wss:':'ws:';
+      socket=new WebSocket(protocol+'//'+location.host+'/ws/community/chat');
+    }catch{
+      connectionStatus('Режим обновления','fallback');
+      startFallback();return;
+    }
+    liveSocket=socket;
+    liveReady=false;
+    connectionStatus(liveFailures?'Переподключаем…':'Подключаем…');
+    const valid=()=>generation===liveAttempt && liveSocket===socket && tab==='staffchat';
+    const cleanup=()=>{
+      if(handshakeTimer!==null){clearTimeout(handshakeTimer);handshakeTimer=null;}
+      if(heartbeatTimer!==null){clearInterval(heartbeatTimer);heartbeatTimer=null;}
+    };
+    handshakeTimer=setTimeout(()=>{
+      if(valid()&&!liveReady)socket.close();
+    },9000);
+    socket.onopen=()=>{
+      if(!valid())return;
+      try{socket.send(JSON.stringify({type:'auth',init_data:auth}));}catch{socket.close();}
+    };
+    socket.onmessage=event=>{
+      if(!valid())return;
+      let payload;
+      try{payload=JSON.parse(event.data);}catch{return;}
+      if(!payload||typeof payload!=='object')return;
+      if(payload.type==='ready'){
+        liveReady=true;liveFailures=0;
+        cleanup();
+        stopFallback();
+        connectionStatus('В реальном времени','live',Number(payload.online)||0);
+        heartbeatTimer=setInterval(()=>{
+          if(valid()&&liveReady&&socket.readyState===WebSocket.OPEN){
+            try{socket.send(JSON.stringify({type:'ping'}));}catch{}
+          }
+        },20000);
+        queueRefresh();
+      }else if(payload.type==='change'){
+        const ids=Array.isArray(payload.ids)?payload.ids.map(Number):[];
+        if(payload.operation==='delete'&&contextId!==null&&ids.includes(contextId)){
+          contextId=null;signature='';
+        }
+        if(payload.operation==='message'){
+          const feed=document.getElementById('staff-chat-feed');
+          const maxShown=feed
+            ? Math.max(0,...[...feed.querySelectorAll('[data-message-id]')].map(n=>Number(n.dataset.messageId)||0))
+            : 0;
+          const incoming=ids.filter(id=>Number.isSafeInteger(id)&&id>maxShown);
+          if(incoming.length && (!isFeedAtBottom()||contextId!==null)){
+            newCount+=incoming.length;
+            updateUnread();
+          }
+        }
+        queueRefresh();
+      }else if(payload.type==='presence'){
+        connectionStatus('В реальном времени','live',Number(payload.online)||0);
+      }else if(payload.type==='typing'&&typeof payload.name==='string'){
+        showTyping(payload.name.slice(0,48));
+      }else if(payload.type==='error'&&payload.reason==='access'){
+        connectionStatus('Нет доступа','offline');
+        socket._noraDenied=true;
+      }
+    };
+    socket.onerror=()=>{if(valid()&&socket.readyState!==WebSocket.CLOSED)socket.close();};
+    socket.onclose=()=>{
+      if(!valid())return;
+      cleanup();
+      liveSocket=null;
+      liveReady=false;
+      if(socket._noraDenied){
+        connectionStatus('Нет доступа','offline');return;
+      }
+      if(document.hidden)return;
+      liveFailures=Math.min(liveFailures+1,5);
+      connectionStatus('Переподключаем…','fallback');
+      startFallback();
+      const delay=Math.min(16000,800*2**Math.min(liveFailures,4));
+      retryTimer=setTimeout(()=>{retryTimer=null;connectLive()},delay);
+    };
+  }
+
   function syncChatViewport() {
     const app = document.getElementById('app');
     if(!app || tab !== 'staffchat' || app.dataset.screen !== 'staffchat')return;
