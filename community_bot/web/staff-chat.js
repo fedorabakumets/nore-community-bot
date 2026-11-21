@@ -30,7 +30,52 @@ window.NoraStaffChat = (() => {
         <div class="staff-chat-media-player" hidden></div>
       </div>`;
   };
-  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0'].join('|');
+
+  const richRow = m => {
+    const blocks = Array.isArray(m.rich) ? m.rich : [];
+    if(!blocks.length)return '';
+    const id = Number(m.id);
+    const nAudio = blocks.filter(block=>block.type==='audio').length;
+    const parts = blocks.slice(0,80).map((block,i)=>{
+      const type = block.type;
+      const text = esc(block.text || '');
+      if(type==='heading')return `<h3 class="staff-rich-heading">${text}</h3>`;
+      if(type==='text')return `<p class="staff-rich-text">${text}</p>`;
+      if(type==='details')return `<p class="staff-rich-detail">${text}</p>`;
+      if(type==='photo'){
+        if(!Number.isInteger(block.asset))return '<div class="staff-rich-placeholder">Обложка в Telegram</div>';
+        return `<div class="staff-rich-cover" data-rich-cover="${id}" data-rich-part="${block.asset}">
+          <span>Загружаем обложку…</span></div>`;
+      }
+      if(type==='audio'){
+        const title=esc(block.title||'Аудиотрек');
+        const performer=esc(block.performer||'');
+        const duration=Number(block.duration)>0?`${Math.floor(Number(block.duration)/60)}:${String(Number(block.duration)%60).padStart(2,'0')}`:'';
+        const playable=Number.isInteger(block.asset);
+        return `<div class="staff-rich-track">
+          <button type="button" class="staff-rich-track-start" data-rich-play="${id}" data-rich-part="${playable?block.asset:'-1'}" ${playable?'':'disabled'} aria-label="Воспроизвести ${title}">▶</button>
+          <div class="staff-rich-track-copy"><strong>${title}</strong>${performer?`<span>${performer}</span>`:''}</div>
+          ${duration?`<time>${duration}</time>`:''}
+          <div class="staff-rich-track-player" hidden></div>
+        </div>`;
+      }
+      if(type==='buttons'){
+        return `<div class="staff-rich-buttons">${(block.buttons||[]).slice(0,12).map(btn=>{
+          const label=esc(btn.text||'Открыть');
+          const url=typeof btn.url==='string' && /^https?:\/\//i.test(btn.url)?esc(btn.url):'';
+          return url?`<a href="${url}" data-chat-telegram target="_blank" rel="noopener noreferrer">${label}</a>`:`<span>${label} · в Telegram</span>`;
+        }).join('')}</div>`;
+      }
+      if(['video','animation','voice_note','document'].includes(type))
+        return `<div class="staff-rich-placeholder">📎 ${esc(mediaLabels[type]||'Медиа')} · ${m.link?'<span>Открыть в Telegram ↗</span>':''}</div>`;
+      return '';
+    }).join('');
+    return `<section class="staff-rich-card" aria-label="${nAudio?'Музыкальная подборка':'Rich-сообщение'}">
+      ${parts}
+    </section>`;
+  };
+
+  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[])].join('|');
   const line = m => {
     const id = Number(m.id);
     const name = esc(m.name || 'Участник');
@@ -47,7 +92,7 @@ window.NoraStaffChat = (() => {
     return `<article class="staff-chat-message" data-message-id="${id}">
        ${avatar}<div class="staff-chat-bubble">
          <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}</div>
-         ${quote}${mediaTile(m)}${body}
+         ${quote}${mediaTile(m)}${richRow(m)}${body}
        </div>
      </article>`;
   };
@@ -72,8 +117,8 @@ window.NoraStaffChat = (() => {
     cache.clear();
     pendingAssets.clear();
   }
-  async function getAsset(messageId, thumb = false) {
-    const key = messageId + ':' + (thumb ? 'thumb' : 'full');
+  async function getAsset(messageId, thumb = false, part = null) {
+    const key = messageId + ':' + (part === null ? (thumb ? 'thumb' : 'full') : 'part:'+part);
     if(cache.has(key)) {
       const hit = cache.get(key);
       cache.delete(key); cache.set(key, hit);
@@ -83,7 +128,8 @@ window.NoraStaffChat = (() => {
     const currentVisit = visit;
     const request = (async() => {
       try {
-        const url = '/api/community/chat/media/' + messageId + (thumb ? '?thumb=1' : '');
+        const url = '/api/community/chat/media/' + messageId +
+          (part !== null ? '?part='+part : (thumb ? '?thumb=1' : ''));
         const response = await fetch(url, {headers:{Authorization:'tma '+auth}});
         if(!response.ok) {
           let payload = {};
@@ -183,6 +229,49 @@ window.NoraStaffChat = (() => {
       node.dataset.chatLoading = '0';
     }
   }
+
+  async function richCover(node) {
+    if(!node?.isConnected || node.dataset.richLoaded)return;
+    node.dataset.richLoaded='1';
+    const id = Number(node.dataset.richCover), part=Number(node.dataset.richPart);
+    try {
+      const result=await getAsset(id,false,part);
+      if(!node.isConnected)return;
+      if(!result?.type.startsWith('image/'))throw Error('Обложка недоступна');
+      const image=new Image();
+      image.src=result.url;image.alt='Обложка подборки';image.decoding='async';
+      node.replaceChildren(image);
+    }catch {
+      if(node.isConnected)node.textContent='Обложка доступна в Telegram';
+    }
+  }
+  async function richPlay(button) {
+    if(!button?.isConnected || button.disabled)return;
+    const id=Number(button.dataset.richPlay),part=Number(button.dataset.richPart);
+    if(!Number.isInteger(part)||part<0)return;
+    const track=button.closest('.staff-rich-track');
+    const holder=track?.querySelector('.staff-rich-track-player');
+    if(!holder)return;
+    button.disabled=true;button.textContent='…';
+    try {
+      const result=await getAsset(id,false,part);
+      if(!button.isConnected || !result)return;
+      if(!result.type.startsWith('audio/'))throw Error('Аудио недоступно');
+      const player=document.createElement('audio');
+      player.controls=true;player.preload='metadata';player.src=result.url;
+      player.setAttribute('aria-label','Аудиотрек Норы');
+      holder.replaceChildren(player);holder.hidden=false;
+      button.textContent='♫';
+      void player.play().catch(()=>{});
+    }catch(error){
+      button.textContent='▶';
+      const link=button.closest('.staff-chat-message')?.querySelector('.staff-chat-original');
+      holder.innerHTML=`<p class="staff-rich-error">${esc(error.message||'Не удалось открыть аудио')}</p>`+
+        (link ? `<a data-chat-telegram href="${esc(link.href)}" target="_blank" rel="noopener noreferrer">Открыть в Telegram ↗</a>`:'');
+      holder.hidden=false;
+    }finally{if(button.isConnected)button.disabled=false;}
+  }
+
   function hydrateMedia() {
     observer?.disconnect();observer = null;
     const feed = document.getElementById('staff-chat-feed');
@@ -192,6 +281,8 @@ window.NoraStaffChat = (() => {
       node.dataset.chatThumb === '1' && ['video','animation','video_note'].includes(node.dataset.chatType));
     if(typeof IntersectionObserver === 'undefined') {
       assets.slice(-12).forEach(loadVisible);
+      for(const node of feed.querySelectorAll('[data-rich-cover]:not([data-rich-loaded])'))
+        void richCover(node);
       return;
     }
     observer = new IntersectionObserver(entries => {
@@ -203,6 +294,8 @@ window.NoraStaffChat = (() => {
       }
     }, {root:feed,rootMargin:'90px'});
     assets.forEach(node=>observer.observe(node));
+    for(const node of feed.querySelectorAll('[data-rich-cover]:not([data-rich-loaded])'))
+      void richCover(node);
   }
   function applyMessages(feed, items, force=false) {
     const existing = new Map([...feed.querySelectorAll('.staff-chat-message')]
@@ -313,6 +406,8 @@ window.NoraStaffChat = (() => {
       contextId = null;signature = '';
       void load(true);
     }
+    const richPlayButton=event.target.closest('[data-rich-play]');
+    if(richPlayButton){void richPlay(richPlayButton);return;}
     const reply = event.target.closest('[data-chat-reply]');
     if(reply){void navigateReply(reply);return;}
     const action = event.target.closest('[data-chat-activate]');
