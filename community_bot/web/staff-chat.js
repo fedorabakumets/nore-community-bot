@@ -63,48 +63,283 @@ window.NoraStaffChat = (() => {
       <footer class="staff-chat-footer"><span>Сообщения из Telegram · режим просмотра</span><button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним сообщениям ↑</button></footer>
     </section>`;
   }
-  async function load() {
-    if (tab !== 'staffchat' || document.hidden || loading) return;
+
+  const pendingAssets = new Map();
+  const mediaCacheBytes = () => [...cache.values()].reduce((sum, value) => sum + value.size, 0);
+  function clearAssets() {
+    observer?.disconnect(); observer = null;
+    for(const asset of cache.values()) URL.revokeObjectURL(asset.url);
+    cache.clear();
+    pendingAssets.clear();
+  }
+  async function getAsset(messageId, thumb = false) {
+    const key = messageId + ':' + (thumb ? 'thumb' : 'full');
+    if(cache.has(key)) {
+      const hit = cache.get(key);
+      cache.delete(key); cache.set(key, hit);
+      return hit;
+    }
+    if(pendingAssets.has(key))return pendingAssets.get(key);
+    const currentVisit = visit;
+    const request = (async() => {
+      try {
+        const url = '/api/community/chat/media/' + messageId + (thumb ? '?thumb=1' : '');
+        const response = await fetch(url, {headers:{Authorization:'tma '+auth}});
+        if(!response.ok) {
+          let payload = {};
+          try { payload = await response.json(); } catch {}
+          throw new Error(payload.error || 'Файл недоступен');
+        }
+        const blob = await response.blob();
+        if(currentVisit !== visit || tab !== 'staffchat')return null;
+        const result = {url:URL.createObjectURL(blob),type:blob.type,size:blob.size};
+        cache.set(key, result);
+        while(cache.size > 30 || mediaCacheBytes() > 96*1024*1024) {
+          const oldest = cache.keys().next().value;
+          if(oldest === key || !oldest)break;
+          URL.revokeObjectURL(cache.get(oldest).url);
+          cache.delete(oldest);
+        }
+        return result;
+      } finally {
+        pendingAssets.delete(key);
+      }
+    })();
+    pendingAssets.set(key, request);
+    return request;
+  }
+  function embedMedia(node, asset, thumb) {
+    if(!node.isConnected || !asset)return;
+    const id = node.dataset.chatAsset;
+    const type = node.dataset.chatType;
+    const key = id + ':' + (thumb ? 'thumb' : 'full');
+    if(node.dataset.chatRendered === key)return;
+    const action = node.querySelector('[data-chat-activate]');
+    const stage = node.querySelector('.staff-chat-media-player');
+    if(!action || !stage)return;
+    if(asset.type.startsWith('image/')) {
+      const img = new Image();
+      img.alt = mediaLabels[type] || 'Вложение';
+      img.src = asset.url;
+      img.decoding = 'async';
+      action.replaceChildren(img);
+      action.classList.add('has-preview');
+      action.hidden = false; stage.hidden = true; stage.replaceChildren();
+      if(thumb && ['video','animation','video_note'].includes(type)) {
+        const icon = document.createElement('span');
+        icon.className = 'staff-chat-video-play';
+        icon.textContent = '▶';
+        action.append(icon);
+      }
+    } else if(asset.type.startsWith('video/') && !thumb) {
+      const video = document.createElement('video');
+      video.src = asset.url;
+      video.playsInline = true; video.preload = 'metadata';
+      if(['sticker','animation'].includes(type)) {
+        video.muted = true; video.loop = true; video.autoplay = true;
+      } else video.controls = true;
+      video.className = type === 'video_note' ? 'staff-chat-round-video' : '';
+      stage.replaceChildren(video);
+      stage.hidden = false; action.hidden = true;
+      if(video.autoplay) void video.play().catch(()=>{});
+    } else if(asset.type.startsWith('audio/') && !thumb) {
+      const audio = document.createElement('audio');
+      audio.controls = true; audio.preload = 'metadata'; audio.src = asset.url;
+      stage.replaceChildren(audio);
+      stage.hidden = false; action.hidden = true;
+    } else return;
+    node.dataset.chatRendered = key;
+  }
+  function assetError(node, message) {
+    if(!node.isConnected)return;
+    const action = node.querySelector('[data-chat-activate]');
+    const stage = node.querySelector('.staff-chat-media-player');
+    if(!stage || !action)return;
+    const url = node.dataset.chatLink;
+    stage.innerHTML = `<div class="staff-chat-media-fallback">${esc(message)}</div>`+
+      (url ? `<a class="staff-chat-telegram-link" href="${esc(url)}" data-chat-telegram target="_blank" rel="noopener noreferrer">Открыть в Telegram</a>` : '');
+    action.hidden = true;stage.hidden = false;
+  }
+  async function displayAsset(node, thumb=false) {
+    if(!node?.isConnected || node.dataset.chatLoading === '1')return;
+    const key = node.dataset.chatAsset + ':' + (thumb ? 'thumb':'full');
+    if(node.dataset.chatRendered === key)return;
+    node.dataset.chatLoading = '1';
+    try {
+      const asset = await getAsset(node.dataset.chatAsset, thumb);
+      if(node.isConnected)embedMedia(node, asset, thumb);
+    } catch(error) {
+      if(!node.isConnected)return;
+      if(thumb)return; // A missing video preview must not block playback.
+      if(node.dataset.chatType === 'sticker' && node.dataset.chatThumb === '1') {
+        try {
+          const preview = await getAsset(node.dataset.chatAsset, true);
+          embedMedia(node, preview, true);
+          return;
+        }catch {}
+      }
+      assetError(node, error.message || 'Файл недоступен');
+    } finally {
+      node.dataset.chatLoading = '0';
+    }
+  }
+  function hydrateMedia() {
+    observer?.disconnect();observer = null;
     const feed = document.getElementById('staff-chat-feed');
-    if (!feed) return;
+    if(!feed)return;
+    const assets = [...feed.querySelectorAll('[data-chat-asset][data-chat-auto="1"]')];
+    const loadVisible = node => displayAsset(node,
+      node.dataset.chatThumb === '1' && ['video','animation','video_note'].includes(node.dataset.chatType));
+    if(typeof IntersectionObserver === 'undefined') {
+      assets.slice(-12).forEach(loadVisible);
+      return;
+    }
+    observer = new IntersectionObserver(entries => {
+      for(const entry of entries) {
+        if(entry.isIntersecting) {
+          observer?.unobserve(entry.target);
+          void loadVisible(entry.target);
+        }
+      }
+    }, {root:feed,rootMargin:'90px'});
+    assets.forEach(node=>observer.observe(node));
+  }
+  function applyMessages(feed, items, force=false) {
+    const existing = new Map([...feed.querySelectorAll('.staff-chat-message')]
+      .map(el => [Number(el.dataset.messageId),el]));
+    const firstExisting = existing.keys().next().value;
+    if(force || !existing.size || (items.length && items[0].id < firstExisting)) {
+      feed.innerHTML = items.length ? items.map(line).join('') :
+        '<p class="staff-chat-empty">Новых сообщений пока нет. Всё появится автоматически.</p>';
+    } else {
+      const ids = new Set(items.map(m=>Number(m.id)));
+      for(const [id,node] of existing)if(!ids.has(id))node.remove();
+      for(const m of items) {
+        const old = existing.get(Number(m.id));
+        if(!old || !old.isConnected)feed.insertAdjacentHTML('beforeend',line(m));
+        else if(old.dataset.chatSig !== msgSignature(m))old.outerHTML = line(m);
+      }
+    }
+    const info = new Map(items.map(m=>[Number(m.id),m]));
+    for(const node of feed.querySelectorAll('.staff-chat-message')) {
+      const msg = info.get(Number(node.dataset.messageId));
+      if(msg)node.dataset.chatSig = msgSignature(msg);
+    }
+    hydrateMedia();
+  }
+  function focusMessage(id) {
+    const feed = document.getElementById('staff-chat-feed');
+    if(!feed)return false;
+    const item = [...feed.querySelectorAll('.staff-chat-message')]
+      .find(el=>Number(el.dataset.messageId)===id);
+    if(!item)return false;
+    const top = feed.scrollTop + item.getBoundingClientRect().top -
+      feed.getBoundingClientRect().top - 26;
+    feed.scrollTo({top:Math.max(0,top),behavior:'smooth'});
+    item.classList.remove('staff-chat-focus');
+    void item.offsetWidth;
+    item.classList.add('staff-chat-focus');
+    setTimeout(()=>item.classList.remove('staff-chat-focus'),1700);
+    return true;
+  }
+  async function load(force=false) {
+    if(tab !== 'staffchat' || document.hidden || loading)return;
+    const feed = document.getElementById('staff-chat-feed');
+    if(!feed)return;
+    const version = visit;
     loading = true;
     try {
-      const result = await api('community/chat');
+      const result = await api('community/chat' +
+        (contextId === null ? '' : '?around='+contextId));
       const target = document.getElementById('staff-chat-feed');
-      if (tab !== 'staffchat' || !target) return;
+      if(tab !== 'staffchat' || version !== visit || !target)return;
       const items = Array.isArray(result.items) ? result.items : [];
-      const current = items.map(m=>`${m.id}:${m.edited_at||''}`).join('|');
-      if (current === signature && target.querySelector('.staff-chat-message')) return;
-      const wasAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 90;
-      const first = !signature;
-      signature = current;
-      target.innerHTML = items.length
-        ? items.map(line).join('')
-        : '<p class="staff-chat-empty">Пока здесь нет записанных сообщений. Новые сообщения появятся автоматически.</p>';
-      if (first || wasAtBottom) target.scrollTop = target.scrollHeight;
-    } catch (error) {
+      const next = items.map(m=>m.id+':'+msgSignature(m)).join('~');
+      if(next === signature && target.querySelector('.staff-chat-message'))return;
+      const wasAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 95;
+      const fresh = !signature || force;
+      signature = next;
+      applyMessages(target, items, fresh);
+      if(contextId !== null)focusMessage(contextId);
+      else if(fresh || wasAtBottom)target.scrollTop = target.scrollHeight;
+      const latest = document.querySelector('[data-chat-latest]');
+      if(latest) latest.hidden = contextId === null;
+    } catch(error) {
       const target = document.getElementById('staff-chat-feed');
-      if (tab === 'staffchat' && target && !target.querySelector('.staff-chat-message'))
+      if(tab === 'staffchat' && target && !target.querySelector('.staff-chat-message'))
         target.innerHTML = `<p class="staff-chat-empty">${esc(error.message || 'Чат недоступен')}</p><button type="button" class="staff-chat-retry" data-staff-chat-retry>Повторить</button>`;
+      else if(contextId !== null)toast(error.message || 'Сообщение недоступно');
     } finally { loading = false; }
   }
-  function mount() {
-    if (timer !== null) {clearInterval(timer);timer = null;}
-    if (tab !== 'staffchat') return;
+  async function navigateReply(button) {
+    const id = Number(button.dataset.chatReply);
+    if(!Number.isSafeInteger(id) || id <= 0)return;
+    if(focusMessage(id))return;
+    const oldContext = contextId;
+    contextId = id;
     signature = '';
-    void load();
-    timer = setInterval(load, 3000);
+    try {
+      const result = await api('community/chat?around='+id);
+      if(tab !== 'staffchat')return;
+      const feed = document.getElementById('staff-chat-feed');
+      if(!feed)return;
+      applyMessages(feed,result.items || [],true);
+      signature = (result.items || []).map(m=>m.id+':'+msgSignature(m)).join('~');
+      document.querySelector('[data-chat-latest]').hidden = false;
+      focusMessage(id);
+    }catch(error) {
+      contextId = oldContext;
+      const link = button.dataset.chatLink;
+      if(link && tg?.openTelegramLink)tg.openTelegramLink(link);
+      else toast(error.message || 'Сообщение не найдено');
+    }
   }
-  document.addEventListener('click', event => {
-    if (event.target.closest('[data-staff-chat-retry]')) void load();
-    const link = event.target.closest('.staff-chat-original');
-    if (link && tg?.openTelegramLink) {
-      event.preventDefault();
-      tg.openTelegramLink(link.href);
+  function showPhoto(asset) {
+    if(!asset || !asset.type.startsWith('image/'))return;
+    sheet(`<div class="staff-chat-image-view"><img src="${esc(asset.url)}" alt="Фото из чата Норы"></div>`);
+  }
+  function mount() {
+    if(timer !== null){clearInterval(timer);timer = null;}
+    observer?.disconnect();observer = null;
+    visit++;
+    loading = false;signature = '';contextId = null;
+    if(tab !== 'staffchat'){clearAssets();return;}
+    void load();
+    timer = setInterval(()=>{if(contextId === null)void load();},3000);
+  }
+  document.addEventListener('click',event=>{
+    if(event.target.closest('[data-staff-chat-retry]')){signature='';void load(true);}
+    if(event.target.closest('[data-chat-latest]')){
+      contextId = null;signature = '';
+      void load(true);
+    }
+    const reply = event.target.closest('[data-chat-reply]');
+    if(reply){void navigateReply(reply);return;}
+    const action = event.target.closest('[data-chat-activate]');
+    if(action){
+      const node = action.closest('[data-chat-asset]');
+      if(!node)return;
+      const type = node.dataset.chatType;
+      const key = node.dataset.chatAsset + ':full';
+      const ready = cache.get(key);
+      if(ready?.type.startsWith('image/') && node.dataset.chatRendered === key){
+        showPhoto(ready);
+        return;
+      }
+      void displayAsset(node,false).then(()=>{
+        const loaded = cache.get(key);
+        if(type === 'photo' && loaded?.type.startsWith('image/'))showPhoto(loaded);
+      });
+      return;
+    }
+    const link = event.target.closest('a.staff-chat-original, a[data-chat-telegram]');
+    if(link && tg?.openTelegramLink){
+      event.preventDefault();tg.openTelegramLink(link.href);
     }
   });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && tab === 'staffchat') void load();
+  document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden && tab === 'staffchat' && contextId === null)void load();
   });
+  window.addEventListener('pagehide',clearAssets);
   return {screen,mount};
 })();
