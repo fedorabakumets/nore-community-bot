@@ -249,7 +249,8 @@ async def test_roulette_only_confirms_accepted_challenge_without_adding_buttons(
         assert delete.message_id == 11
         await game_lobby_posts.cleanup(db, bot, now=now + 1)
         assert len(session.calls) == 2
-        await game_lobby_posts.cleanup(db, bot, now=now + 2)
+        # SQLite JSON float precision can put the 2s deadline just after now + 2.
+        await game_lobby_posts.cleanup(db, bot, now=now + 2.1)
         assert session.calls[-1].__api_method__ == "deleteMessage" and session.calls[-1].message_id == 10
 
 
