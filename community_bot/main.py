@@ -573,6 +573,8 @@ async def main() -> None:
     patch_bot_ephemeral(bot)
     bot.session.middleware.register(ReplyRichMiddleware())
     bot.session.middleware.register(GroupCloseSendMiddleware())
+    from community_bot.staff_chat import StaffChatOutgoingMiddleware
+    bot.session.middleware.register(StaffChatOutgoingMiddleware())
     dispatcher = create_dispatcher()
     if settings.openrouter_api_key or settings.deepseek_api_key:
         dispatcher["openrouter_chat"] = OpenRouterChat(db, settings)
