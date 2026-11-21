@@ -755,8 +755,8 @@ async def test_staff_chat_reaction_changes_reach_live_clients(tmp_path):
             json={"message_id": 777, "emoji": "🍪", "active": True},
         )
         assert response.status == 200
-        await asyncio.sleep(0.04)
-        assert ws._reader._buffer == __import__("collections").deque() or not ws._reader._buffer
+        totals = await reactions_for(db, GROUP, [777], 21)
+        assert totals[777] == [{"emoji": "🍪", "count": 1, "mine": True}]
 
         response = await client.post(
             "/api/community/chat/reaction",
