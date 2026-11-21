@@ -110,3 +110,84 @@ async def test_city_backfilled_from_approved_legacy_application(tmp_path):
     await db.execute("ALTER TABLE users DROP COLUMN city")
     await db.initialize()
     assert (await db.get_user(12))['city'] == 'Казань'
+
+
+
+async def test_legacy_member_without_approved_application_can_set_city_in_group(city_setup, monkeypatch):
+    db, data = city_setup
+    await db.execute("DELETE FROM applications WHERE user_id=7")
+    sent = AsyncMock()
+    monkeypatch.setattr(Message, "reply", sent)
+    handler = AsyncMock()
+    gate = CityGateMiddleware()
+
+    await gate(handler, make_message("Нора профиль", group=True), data)
+    handler.assert_not_awaited()
+    sent.assert_awaited_once_with(CITY_PROMPT)
+
+    prompt = Message(
+        message_id=17, date=datetime.now(UTC), chat=Chat(id=-100123, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="Нора"), text=CITY_PROMPT,
+    )
+    await gate(handler, make_message("Тюмень", group=True, reply=prompt), data)
+    assert (await db.get_user(7))["city"] == "Тюмень"
+    assert "Команды Норы" in sent.await_args.args[0]
+
+
+async def test_reply_to_rich_city_prompt_is_recognized(city_setup, monkeypatch):
+    db, data = city_setup
+    reply = AsyncMock()
+    monkeypatch.setattr(Message, "reply", reply)
+    handler = AsyncMock()
+
+    # Telegram Rich replies have rich_message blocks but no Message.text.
+    prompt = Message(
+        message_id=19, date=datetime.now(UTC), chat=Chat(id=-100123, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="Нора"),
+    ).model_copy(update={
+        "rich_message": SimpleNamespace(
+            model_dump=lambda **kwargs: {"blocks": [{"type": "paragraph", "text": CITY_PROMPT}]}
+        ),
+    })
+    message = make_message("Казань", group=True).model_copy(update={"reply_to_message": prompt})
+    await CityGateMiddleware()(handler, message, data)
+
+    assert (await db.get_user(7))["city"] == "Казань"
+    handler.assert_not_awaited()
+    assert "✅ Город сохранён" in reply.await_args.args[0]
+
+
+async def test_city_response_uses_tracked_prompt_when_telegram_omits_original_content(city_setup, monkeypatch):
+    db, data = city_setup
+    sent = Message(
+        message_id=22, date=datetime.now(UTC), chat=Chat(id=-100123, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="Нора"),
+    )
+    reply = AsyncMock(side_effect=[sent, None])
+    monkeypatch.setattr(Message, "reply", reply)
+    handler = AsyncMock()
+
+    await CityGateMiddleware()(handler, make_message("/profile", group=True), data)
+    assert await db.get_bot_state("city_prompt:-100123:7") == "22"
+
+    response = make_message("Екатеринбург", group=True, reply=sent)
+    await CityGateMiddleware()(handler, response, data)
+    assert (await db.get_user(7))["city"] == "Екатеринбург"
+    assert await db.get_bot_state("city_prompt:-100123:7") == ""
+    handler.assert_not_awaited()
+
+
+async def test_unrelated_bot_reply_is_not_accepted_as_city(city_setup, monkeypatch):
+    db, data = city_setup
+    reply = AsyncMock()
+    monkeypatch.setattr(Message, "reply", reply)
+    handler = AsyncMock()
+
+    unrelated = Message(
+        message_id=91, date=datetime.now(UTC), chat=Chat(id=-100123, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="Нора"), text="Баланс печенек",
+    )
+    await CityGateMiddleware()(handler, make_message("Краснодар", group=True, reply=unrelated), data)
+    assert (await db.get_user(7))["city"] is None
+    handler.assert_awaited_once()
+    reply.assert_not_awaited()
