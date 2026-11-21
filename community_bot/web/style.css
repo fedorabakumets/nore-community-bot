@@ -2951,3 +2951,64 @@ button.staff-chat-author{text-align:left;background:none;padding:0;border:0}
 
 /* The page scroll shortcut must never cover the chat send button. */
 #app[data-screen="staffchat"] ~ #scroll-jump { display: none !important; }
+
+
+/* Staff chat: keep the whole page fixed, scroll only the message history.
+   16px textarea font prevents iOS WebKit focus auto-zoom. */
+body:has(#app[data-screen="staffchat"]){
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+#app[data-screen="staffchat"]{
+  position:fixed;
+  top:var(--staff-chat-viewport-top,0px);
+  left:0;right:0;
+  width:100%;
+  max-width:720px;
+  height:var(--staff-chat-viewport-height,100dvh);
+  max-height:none;
+  margin:0 auto;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  overscroll-behavior:none;
+  padding-bottom:calc(102px + var(--safe-bottom));
+}
+#app[data-screen="staffchat"] .nora-staff-chat{
+  flex:1 1 auto;
+  height:100%;
+  max-height:100%;
+  min-height:0;
+  overflow:hidden;
+}
+#app[data-screen="staffchat"] .staff-chat-header{
+  flex:none;
+}
+#app[data-screen="staffchat"] .staff-chat-feed{
+  flex:1 1 auto;
+  height:auto;
+  min-height:0;
+  max-height:none;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+#app[data-screen="staffchat"] #staff-chat-compose{
+  flex:none;
+  max-height:50%;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+#app[data-screen="staffchat"] .staff-chat-footer{
+  flex:none;
+}
+#app[data-screen="staffchat"] #staff-chat-draft{
+  font-size:16px!important;
+  line-height:1.35;
+  touch-action:auto;
+}
+body:has(#staff-chat-draft:focus) #nav{
+  display:none!important;
+}
+body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"]{
+  padding-bottom:max(10px,var(--tg-content-safe-area-inset-bottom,0px));
+}
