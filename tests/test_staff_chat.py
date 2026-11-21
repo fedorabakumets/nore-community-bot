@@ -10,6 +10,7 @@ from aiogram.types import Chat, Message, PhotoSize, User
 
 from community_bot.database import Database
 from community_bot.staff_chat import StaffChatOutgoingMiddleware, capture, feed, hide, media, staff_allowed
+from community_bot.staff_chat_send import MAX_UPLOAD, send_attachment, send_text
 
 GROUP = -100123456789
 
@@ -326,3 +327,151 @@ async def test_staff_only_mirror_cleanup_does_not_delete_in_telegram(tmp_path):
     assert await db.fetchone(
         "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 31),
     ) is None
+
+
+
+@pytest.mark.asyncio
+async def test_staff_chat_composer_role_identity_reply_and_rate_limit(tmp_path):
+    db = Database(tmp_path / "compose.db")
+    await db.initialize()
+    await db.ensure_user(20, telegram_name="Модератор Марина")
+    await db.set_role(20, "moderator")
+    await db.ensure_user(8, telegram_name="Обычный участник")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(),
+        is_owner=lambda uid: False,
+    )
+    await capture(db, settings, event(71, "Исходное сообщение"))
+
+    message = Message(
+        message_id=72, date=datetime.now(UTC),
+        chat=Chat(id=GROUP, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="НОРА"),
+        text="💬 Модератор Марина · через Mini App Норы\n\nТест",
+    )
+    bot = SimpleNamespace(send_message=AsyncMock(return_value=message))
+    app = {
+        "db": db, "settings": settings, "bot": bot,
+        "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
+    }
+
+    class Request(dict):
+        content_length = 68
+        app = app
+        async def json(self):
+            return {"text": "Тест", "reply_to": 71}
+
+    denied = await send_text(Request(actor={"id": 8}))
+    assert denied.status == 403
+    assert not bot.send_message.await_count
+
+    success = await send_text(Request(actor={"id": 20}))
+    assert success.status == 200
+    assert json.loads(success.text) == {"ok": True, "message_id": 72}
+    kwargs = bot.send_message.await_args.kwargs
+    assert kwargs["chat_id"] == GROUP
+    assert kwargs["reply_parameters"].message_id == 71
+    assert kwargs["parse_mode"] is None
+    assert kwargs["text"].startswith("💬 Модератор Марина · через Mini App Норы\n\nТест")
+    saved = await db.fetchone(
+        "SELECT text FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 72),
+    )
+    assert saved and saved["text"].endswith("Тест")
+    blocked = await send_text(Request(actor={"id": 20}))
+    assert blocked.status == 429
+    assert bot.send_message.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_staff_chat_composer_rejects_missing_reply_without_sending(tmp_path):
+    db = Database(tmp_path / "invalid-reply.db")
+    await db.initialize()
+    await db.ensure_user(20)
+    await db.set_role(20, "admin")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(),
+        is_owner=lambda uid: False,
+    )
+    bot = SimpleNamespace(send_message=AsyncMock())
+
+    class Request(dict):
+        content_length = 95
+        app = {
+            "db": db, "settings": settings, "bot": bot,
+            "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
+        }
+        async def json(self):
+            return {"text": "Ответ", "reply_to": 123456}
+
+    response = await send_text(Request(actor={"id": 20}))
+    assert response.status == 400
+    bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
+    db = Database(tmp_path / "upload.db")
+    await db.initialize()
+    await db.ensure_user(20, telegram_name="Тест")
+    await db.set_role(20, "admin")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(),
+        is_owner=lambda uid: False,
+    )
+    message = Message(
+        message_id=140, date=datetime.now(UTC),
+        chat=Chat(id=GROUP, type="supergroup"),
+        from_user=User(id=900, is_bot=True, first_name="НОРА"),
+        caption="💬 Тест · через Mini App Норы\n\nОбложка",
+        photo=[PhotoSize(file_id="upload-photo", file_unique_id="u", width=12, height=12)],
+    )
+    bot = SimpleNamespace(send_photo=AsyncMock(return_value=message))
+    app = {
+        "db": db, "settings": settings, "bot": bot,
+        "staff_chat_send_locks": {}, "staff_chat_last_sent": {},
+    }
+
+    class Field:
+        def __init__(self, name, data: bytes, filename=None):
+            self.name, self.data, self.filename = name, data, filename
+            self.read_at = 0
+        async def read_chunk(self, size):
+            chunk=self.data[self.read_at:self.read_at+size]
+            self.read_at+=len(chunk)
+            return chunk
+        async def read(self, decode=False):
+            return self.data
+
+    class Reader:
+        def __init__(self, fields): self.fields=iter(fields)
+        async def next(self): return next(self.fields, None)
+
+    class Request(dict):
+        content_type = "multipart/form-data"
+        content_length = 140
+        app = app
+        async def multipart(self):
+            return Reader([
+                Field("text", b"\xd0\x9e\xd0\xb1\xd0\xbb\xd0\xbe\xd0\xb6\xd0\xba\xd0\xb0"),
+                Field("file", b"\xff\xd8\xffTEST", filename="nora.jpg"),
+            ])
+
+    result = await send_attachment(Request(actor={"id": 20}))
+    assert result.status == 200
+    assert json.loads(result.text)["message_id"] == 140
+    called = bot.send_photo.await_args.kwargs
+    assert called["chat_id"] == GROUP
+    assert called["photo"].filename == "nora.jpg"
+    assert called["photo"].data == b"\xff\xd8\xffTEST"
+    assert "Обложка" in called["caption"]
+    assert called["parse_mode"] is None
+
+    # Upload inspection denies executable files before Telegram is called.
+    class BadRequest(Request):
+        app = {**app, "staff_chat_last_sent": {}}
+        async def multipart(self):
+            return Reader([Field("file", b"code", filename="nora.exe")])
+
+    rejected = await send_attachment(BadRequest(actor={"id": 20}))
+    assert rejected.status == 400
+    assert bot.send_photo.await_count == 1
