@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -7,6 +8,7 @@ import pytest
 
 from community_bot import social_likes
 from community_bot.database import Database
+from community_bot.social_profiles import heartbeat
 from community_bot.friends_api import (
     SCHEMA,
     accepted,
@@ -49,6 +51,35 @@ async def befriend(env, a=1, b=2):
     token = (await relation(env, b, "incoming"))["token"]
     await do(env, b, "accept", a, token=token)
     return token
+
+
+async def test_friends_sorted_online_first_then_by_last_activity_with_privacy(env):
+    for uid in range(2, 8):
+        await befriend(env, 1, uid)
+
+    now = time.time()
+    # Both are online; the most recently active should appear first.
+    await heartbeat(env.db, 2, "a" * 20, 1, True, now=now - 25)
+    await heartbeat(env.db, 3, "b" * 20, 1, True, now=now - 5)
+    # These friends have left the app; the more recent exit goes first.
+    await heartbeat(env.db, 4, "c" * 20, 1, True, now=now - 120)
+    await heartbeat(env.db, 4, "c" * 20, 2, False, now=now - 90)
+    await heartbeat(env.db, 5, "d" * 20, 1, True, now=now - 40)
+    await heartbeat(env.db, 5, "d" * 20, 2, False, now=now - 35)
+    # Hidden activity must not affect sorting or leak the timestamp.
+    await heartbeat(env.db, 6, "e" * 20, 1, True, now=now - 1)
+    await env.db.execute(
+        "INSERT INTO mini_presence_settings(user_id,hidden) VALUES (?,1)", (6,)
+    )
+
+    friends = (await snapshot(env.db, env.settings, 1))["friends"]
+    assert [p["id"] for p in friends[:4]] == [3, 2, 5, 4]
+    assert {p["id"] for p in friends[4:]} == {6, 7}
+    assert friends[-1]["presence"]["last_seen"] is None
+    hidden = next(p for p in friends if p["id"] == 6)["presence"]
+    assert hidden["visible"] is False
+    assert hidden["online"] is False
+    assert hidden["last_seen"] is None
 
 
 async def test_mutual_consent_owns_actions_and_private_snapshot(env):

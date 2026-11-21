@@ -216,7 +216,11 @@ async def snapshot(db, settings, uid: int) -> dict:
     statuses = await presence_map(db, [p['id'] for p in result['friends']])
     for person in result['friends']:
         person['presence'] = statuses.get(person['id'], {'visible': False, 'online': False, 'last_seen': None})
-    result['friends'].sort(key=lambda p: not p['presence']['online'])
+    # Online first; within each group, put the most recently active first.
+    # presence_map masks hidden/private timestamps, so they remain at the bottom.
+    result['friends'].sort(
+        key=lambda p: (not p['presence']['online'], -(p['presence']['last_seen'] or 0))
+    )
     result["counts"] = {key: len(value) for key, value in result.items()}
     result["limits"] = {
         "max_friends": MAX_FRIENDS, "max_pending": MAX_PENDING,
