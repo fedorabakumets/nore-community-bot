@@ -12,7 +12,7 @@ if (tg) {
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function profileTabLocked(target) {
-  return data.profile.fill_percent < 100 && !['home','commands','lk','notices','admin','reputation'].includes(target)
+  return data.profile.fill_percent < 100 && !['home','commands','lk','notices','admin','reputation','staffchat'].includes(target)
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
@@ -326,6 +326,7 @@ if(tab==='shop')content=window.NoraShop?.screen()||'';
 if(tab==='events')content=window.NoraEvents?.screen()||'';
 if(tab==='lk')content=profileScreen(u);
 if(tab==='community')content=window.NoraCommunity?.screen()||'';
+if(tab==='staffchat')content=window.NoraStaffChat?.screen()||'';
 if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
@@ -348,7 +349,7 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
 
 
 // Animate route changes only. Refreshes and game-internal renders should remain still.
@@ -466,6 +467,7 @@ function bookEvent(button) {
   $('#pay').onclick = () => perform('events/join', payload);
 }
 function goToTab(next, prepare, refreshAfter = false) {
+  if(next==='staffchat'&&!data?.staff_chat_available){toast('Чат пока доступен только команде Норы');return;}
   if (profileTabLocked(next)) {
     toast('Заполни профиль на 100%, чтобы открыть этот раздел');
     return;
@@ -746,7 +748,7 @@ document.addEventListener('change', async e => {
     busy = false;
   }
 });
-async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
+async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||tab==='staffchat'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.
