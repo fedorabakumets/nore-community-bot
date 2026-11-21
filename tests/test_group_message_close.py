@@ -4,10 +4,19 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.enums import ChatMemberStatus
-from aiogram.methods import EditMessageReplyMarkup, SendMediaGroup, SendMessage, SendRichMessage, SendSticker
+from aiogram.methods import (
+    EditMessageReplyMarkup,
+    PinChatMessage,
+    SendMediaGroup,
+    SendMessage,
+    SendRichMessage,
+    SendSticker,
+    UnpinChatMessage,
+)
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    InaccessibleMessage,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -25,6 +34,7 @@ from community_bot.group_message_close import (
     GroupCloseCallbackMiddleware,
     GroupCloseSendMiddleware,
     group_message_actors,
+    normalize_current_pin,
 )
 from tests.test_game_invitations import db as room_db
 
@@ -37,14 +47,16 @@ def user(uid):
     return User(id=uid, is_bot=False, first_name=f"User {uid}")
 
 
-def message(mid=10, chat=GROUP, markup=None, actor=NORA):
+def message(mid=10, chat=GROUP, markup=None, actor=NORA, rich=None):
     return Message(message_id=mid, chat=Chat(id=chat, type="supergroup" if chat < 0 else "private"),
-                   date=datetime.now(UTC), from_user=actor, reply_markup=markup)
+                   date=datetime.now(UTC), from_user=actor, reply_markup=markup, rich_message=rich)
 
 
 def fake_bot(db, *, is_admin=False):
     settings = SimpleNamespace(community_chat_id=GROUP, moderator_ids=set(), is_owner=lambda uid: uid == 8)
-    return SimpleNamespace(id=NORA.id, community_db=db, community_settings=settings, delete_message=AsyncMock(),
+    return SimpleNamespace(id=NORA.id, community_db=db, community_settings=settings,
+                           default=SimpleNamespace(parse_mode=None), delete_message=AsyncMock(),
+                           me=AsyncMock(return_value=SimpleNamespace(username="test_nora")),
                            get_chat_member=AsyncMock(return_value=SimpleNamespace(
                                status=ChatMemberStatus.ADMINISTRATOR if is_admin else ChatMemberStatus.MEMBER)))
 
@@ -55,7 +67,6 @@ def keyboard(action):
 
 @pytest.mark.parametrize("method", [
     SendMessage(chat_id=GROUP, text="Text", reply_markup=keyboard("ui:close")),
-    SendSticker(chat_id=GROUP, sticker="file_id"),
     SendRichMessage(chat_id=GROUP, rich_message=InputRichMessage(blocks=[
         InputRichBlockParagraph(text="Play"),
         InputRichBlockButtons(buttons=[
@@ -66,23 +77,28 @@ def keyboard(action):
 ])
 async def test_group_close_button_and_owner_survive_edits(db, method):
     bot = fake_bot(db)
-    sent = AsyncMock(return_value=message())
+    async def telegram(bot, method):
+        rich = getattr(method, "rich_message", None)
+        return message(rich=rich.model_dump(exclude_none=True) if rich else None)
+
+    sent = AsyncMock(side_effect=telegram)
     middleware = GroupCloseSendMiddleware()
     with group_message_actors(1, 2):
         await middleware(sent, bot, method)
     outgoing = sent.await_args.args[1]
-    assert outgoing.reply_markup.inline_keyboard[-1][0].callback_data == "nora:close:1:2"
-    assert outgoing.reply_markup.inline_keyboard[-1][0].text == "✕ Закрыть"
-    if isinstance(outgoing, SendRichMessage):
-        assert [button.text for button in outgoing.rich_message.blocks[-1].buttons] == ["Join"]
+    assert isinstance(outgoing, SendRichMessage) and outgoing.reply_markup is None
+    assert outgoing.rich_message.blocks[-1].buttons[0].callback_data == "nora:close:1:2"
+    assert outgoing.rich_message.blocks[-1].buttons[0].text == "❌"
+    if isinstance(method, SendRichMessage):
+        assert [button.text for button in outgoing.rich_message.blocks[-2].buttons] == ["Join"]
     with group_message_actors(3):
-        await GroupCloseSendMiddleware()(sent, bot, EditMessageReplyMarkup(
+        await middleware(sent, bot, EditMessageReplyMarkup(
             chat_id=GROUP, message_id=10, reply_markup=keyboard("play:accept"),
         ))
     edited = sent.await_args.args[1]
-    assert [button.callback_data for row in edited.reply_markup.inline_keyboard for button in row] == [
-        "play:accept", "nora:close:1:2",
-    ]
+    assert edited.reply_markup is None
+    assert [b.callback_data for block in edited.rich_message.blocks if isinstance(block, InputRichBlockButtons)
+            for b in block.buttons] == ["play:accept", "nora:close:1:2"]
     private = SendMessage(chat_id=1, text="Hello", reply_markup=keyboard("ui:close"))
     await middleware(sent, bot, private)
     assert sent.await_args.args[1] is private
@@ -90,14 +106,15 @@ async def test_group_close_button_and_owner_survive_edits(db, method):
 
 async def test_batch_media_gets_buttons_of_its_own(db):
     bot = fake_bot(db)
-    sent = AsyncMock(side_effect=[[message(10), message(11)], message(10), message(11)])
+    sent = AsyncMock(side_effect=[[message(10), message(11)], message(12), message(13)])
     method = SendMediaGroup(chat_id=GROUP, media=[InputMediaPhoto(media="one"), InputMediaPhoto(media="two")])
     with group_message_actors(1):
         await GroupCloseSendMiddleware()(sent, bot, method)
     calls = [call.args[1] for call in sent.await_args_list]
     assert calls[0] == method
-    assert [call.message_id for call in calls[1:]] == [10, 11]
-    assert all(call.reply_markup.inline_keyboard[-1][0].callback_data == "nora:close:1" for call in calls[1:])
+    assert [call.reply_parameters.message_id for call in calls[1:]] == [10, 11]
+    assert all(call.reply_markup is None for call in calls[1:])
+    assert all(call.rich_message.blocks[-1].buttons[0].callback_data == "nora:close:1" for call in calls[1:])
 
 
 @pytest.mark.parametrize(("uid", "admin", "callback", "author", "allowed"), [
@@ -136,7 +153,12 @@ async def test_global_announcement_only_admin_and_legacy_staff_override(db, monk
                               message=message(markup=keyboard(data)))
         await GroupCloseCallbackMiddleware()(AsyncMock(), event, {"db": db, "bot": bot,
                                                                   "settings": bot.community_settings})
-    assert bot.delete_message.await_count == 3
+    await db.remember_bot_message(GROUP, 19)
+    source = InaccessibleMessage(chat=Chat(id=GROUP, type="supergroup"), message_id=19)
+    legacy = CallbackQuery(id="event", from_user=user(3), chat_instance="test", data="nora:close:0", message=source)
+    await GroupCloseCallbackMiddleware()(AsyncMock(), legacy, {"db": db, "bot": bot,
+                                                               "settings": bot.community_settings})
+    assert bot.delete_message.await_count == 4
     bot.get_chat_member.assert_not_awaited()
 
 
@@ -157,7 +179,8 @@ async def test_quick_post_expires_at_two_minutes_without_cancelling_waiting_room
     bot.send_rich_message = send
     await announce_quick_lobby(bot, db, bot.community_settings, "barricade", rid, 1, 5)
     method = outgoing.await_args.args[1]
-    assert method.reply_markup.inline_keyboard[0][0].callback_data == "nora:close:1"
+    assert method.reply_markup is None
+    assert method.rich_message.blocks[-1].buttons[0].callback_data == "nora:close:1"
     row = await db.fetchone("SELECT json_extract(value,'$[4]') AS until FROM bot_state WHERE key=?",
                             (f"game-lobby-post:{GROUP}:10",))
     await game_lobby_posts.cleanup(db, bot, now=row["until"] - 0.001)
@@ -181,3 +204,64 @@ async def test_mini_app_start_retires_both_copies_of_the_invitation(db):
     await game_lobby_posts.cleanup(db, app_bot)
     assert {call.args for call in app_bot.delete_message.await_args_list} == {(GROUP, 10), (2, 10)}
     assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (rid,)))["status"] == "playing"
+
+async def test_native_sticker_close_removes_companion_and_its_original(db, monkeypatch):
+    bot = fake_bot(db)
+    answer = AsyncMock()
+    monkeypatch.setattr(CallbackQuery, "answer", answer)
+    sent = AsyncMock(side_effect=[message(10), message(11)])
+    with group_message_actors(1):
+        await GroupCloseSendMiddleware()(sent, bot, SendSticker(chat_id=GROUP, sticker="sticker"))
+    outgoing = sent.await_args.args[1]
+    assert outgoing.reply_markup is None
+    assert outgoing.rich_message.blocks[-1].buttons[0].text == "❌"
+    # Some Telegram callback updates contain no usable author or Rich markup.
+    source = InaccessibleMessage(chat=Chat(id=GROUP, type="supergroup"), message_id=11)
+    event = CallbackQuery(id="event", from_user=user(1), chat_instance="test", data="nora:close:1", message=source)
+    await GroupCloseCallbackMiddleware()(AsyncMock(), event, {"settings": bot.community_settings, "bot": bot, "db": db})
+    assert [call.args for call in bot.delete_message.await_args_list] == [(GROUP, 10), (GROUP, 11)]
+
+
+async def test_only_pinned_posts_get_one_nora_inline_link(db):
+    bot = fake_bot(db)
+    calls = []
+    middleware = GroupCloseSendMiddleware()
+
+    async def telegram(bot, method):
+        calls.append(method)
+        if isinstance(method, (PinChatMessage, UnpinChatMessage)):
+            return True
+        if rich := getattr(method, "rich_message", None):
+            return message(rich=rich.model_dump(exclude_none=True))
+        return message()
+
+    await middleware(telegram, bot, SendMessage(chat_id=GROUP, text="Post", reply_markup=keyboard("open")))
+    assert calls[-1].reply_markup is None
+    await middleware(telegram, bot, PinChatMessage(chat_id=GROUP, message_id=10))
+    inline = calls[-1].reply_markup.inline_keyboard
+    assert len(inline) == len(inline[0]) == 1
+    assert (inline[0][0].text, inline[0][0].url) == ("НОРА", "https://t.me/test_nora?startapp")
+    await middleware(telegram, bot, EditMessageReplyMarkup(chat_id=GROUP, message_id=10,
+                                                         reply_markup=keyboard("new")))
+    assert calls[-1].reply_markup.inline_keyboard[0][0].text == "НОРА"
+    assert [block.buttons[0].callback_data for block in calls[-1].rich_message.blocks
+            if isinstance(block, InputRichBlockButtons)] == ["new", "nora:close:0"]
+    await middleware(telegram, bot, UnpinChatMessage(chat_id=GROUP, message_id=10))
+    assert calls[-1].reply_markup is None
+
+
+async def test_restore_only_own_current_pin(db):
+    bot = fake_bot(db)
+    bot.get_chat = AsyncMock(return_value=SimpleNamespace(id=GROUP, pinned_message=message()))
+    called = AsyncMock(return_value=message())
+
+    class Client:
+        def __getattr__(self, name):
+            return getattr(bot, name)
+
+        async def __call__(self, method):
+            return await called(method)
+
+    await normalize_current_pin(Client(), bot.community_settings)
+    method = called.await_args.args[0]
+    assert method.message_id == 10 and method.reply_markup.inline_keyboard[0][0].text == "НОРА"

@@ -547,7 +547,7 @@ async def main() -> None:
 
     await run_requested_reset(db, settings, bot)
     from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
-    from community_bot.group_message_close import GroupCloseSendMiddleware
+    from community_bot.group_message_close import GroupCloseSendMiddleware, normalize_current_pin
     from community_bot.private_rich import PrivateRichMiddleware
     from community_bot.reply_rich import ReplyRichMiddleware
 
@@ -571,6 +571,7 @@ async def main() -> None:
         name="nora-telegram-command-registration",
     )
     await log_community_permissions(bot, settings)
+    await normalize_current_pin(bot, settings)
     await send_memory_notice_once(bot, db, settings)
     from community_bot.stickers import sticker_delivery_job, verify_sticker_pack
 
