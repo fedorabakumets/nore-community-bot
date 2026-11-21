@@ -187,7 +187,9 @@ async def submit_application(request):
     await actor(request)
     application_id = await db.create_application(uid, answers, ban_version=ban.get('version'))
     if not application_id:
-        # Another tab may already have submitted or a moderator may have changed access.
+        # A second browser tab may have completed the same application first.
+        if await db.has_approved_application(uid):
+            return web.json_response({'status': 'admitted'})
         onboarding = await application_onboarding(db, uid, await db.ban_reset_state(uid))
         if onboarding['status'] != 'form':
             return web.json_response(onboarding)
