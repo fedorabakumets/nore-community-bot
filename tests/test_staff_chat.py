@@ -13,6 +13,7 @@ from community_bot.staff_chat import StaffChatOutgoingMiddleware, capture, feed,
 from community_bot.staff_chat_send import MAX_UPLOAD, send_attachment, send_text
 from community_bot.staff_chat import discard
 from community_bot.staff_chat_live import StaffChatHub, connect
+from community_bot.staff_chat_reactions import ALLOWED_EMOJIS, reactions_for, set_reaction
 
 GROUP = -100123456789
 
@@ -621,3 +622,147 @@ async def test_staff_live_queue_backpressure_keeps_refresh_signal():
     assert await client.queue.get() == {
         "type": "change", "operation": "sync", "ids": [],
     }
+
+
+
+@pytest.mark.asyncio
+async def test_staff_chat_reactions_storage_limit_authorization_and_cascade(tmp_path):
+    db = Database(tmp_path / "reactions.db")
+    await db.initialize()
+    for uid in (8, 20, 21):
+        await db.ensure_user(uid, telegram_name=f"Команда {uid}")
+    await db.set_role(20, "moderator")
+    await db.set_role(21, "admin")
+    settings = SimpleNamespace(
+        community_chat_id=GROUP, moderator_ids=frozenset(),
+        is_owner=lambda uid: False,
+    )
+    await capture(db, settings, event(610, "Ставим реакции"))
+    await capture(db, settings, event(611, "Второе сообщение"))
+
+    class Request(dict):
+        content_length = 75
+        app = {"db": db, "settings": settings}
+        payload = None
+
+        async def json(self):
+            return self.payload
+
+    def request(uid, mid=610, emoji="❤️", active=True):
+        item = Request(actor={"id": uid})
+        item.payload = {"message_id": mid, "emoji": emoji, "active": active}
+        return item
+
+    assert (await set_reaction(request(8))).status == 403
+    assert (await set_reaction(request(20, mid=999))).status == 404
+    assert (await set_reaction(request(20, emoji="🔫"))).status == 400
+    invalid = request(20)
+    invalid.payload["active"] = 1
+    assert (await set_reaction(invalid)).status == 400
+
+    first = await set_reaction(request(20))
+    assert first.status == 200
+    assert json.loads(first.text)["reactions"] == [
+        {"emoji": "❤️", "count": 1, "mine": True},
+    ]
+    # Setting the desired state again is idempotent and does not double-count.
+    assert (await set_reaction(request(20))).status == 200
+    added = await set_reaction(request(21))
+    assert json.loads(added.text)["reactions"] == [
+        {"emoji": "❤️", "count": 2, "mine": True},
+    ]
+    assert json.loads((await set_reaction(request(20, emoji="😂"))).text)["ok"]
+    assert json.loads((await set_reaction(request(20, emoji="🔥"))).text)["ok"]
+    assert (await set_reaction(request(20, emoji="👍"))).status == 409
+
+    as_viewer = await reactions_for(db, GROUP, [610, 611], 21)
+    assert [item["count"] for item in as_viewer[610] if item["emoji"] == "❤️"] == [2]
+    assert any(item["mine"] for item in as_viewer[610])
+    feed_request = Request(actor={"id": 21})
+    feed_request.query = {}
+    items = json.loads((await feed(feed_request)).text)["items"]
+    assert len(items) == 2
+    assert next(m for m in items if m["id"] == 610)["reactions"] == as_viewer[610]
+    assert next(m for m in items if m["id"] == 611)["reactions"] == []
+
+    removed = await set_reaction(request(20, active=False))
+    assert removed.status == 200
+    assert json.loads(removed.text)["reactions"][0]["count"] == 1
+    assert (await set_reaction(request(20, active=False))).status == 200
+    assert (await set_reaction(request(20, emoji="👍"))).status == 200
+
+    await discard(db, settings, GROUP, [610])
+    assert await db.fetchall(
+        "SELECT * FROM staff_chat_reactions WHERE chat_id=? AND message_id=?", (GROUP, 610),
+    ) == []
+    assert (await set_reaction(request(20))).status == 404
+    assert ALLOWED_EMOJIS == ("❤️", "😂", "🔥", "👍", "🥲", "👀", "🍪", "🎧", "🤝", "💀")
+
+
+@pytest.mark.asyncio
+async def test_staff_chat_reaction_changes_reach_live_clients(tmp_path):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from community_bot.miniapp import protection
+
+    db = Database(tmp_path / "reaction-live.db")
+    await db.initialize()
+    for uid in (20, 21):
+        await db.ensure_user(uid, telegram_name=f"Сотрудник {uid}")
+        await db.execute(
+            "UPDATE users SET city=? WHERE user_id=?", ("Санкт-Петербург", uid),
+        )
+    await db.set_role(20, "moderator")
+    await db.set_role(21, "admin")
+    settings = SimpleNamespace(
+        bot_token="test-telegram-token", community_chat_id=GROUP,
+        moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+    hub = StaffChatHub()
+    db._staff_chat_hub = hub
+    app = web.Application(middlewares=[protection])
+    app["db"], app["settings"], app["staff_chat_hub"] = db, settings, hub
+    app["staff_chat_handshake_gate"] = asyncio.Semaphore(4)
+    app.router.add_get("/ws/community/chat", connect)
+    app.router.add_post("/api/community/chat/reaction", set_reaction)
+
+    async def cleanup(_app):
+        await hub.shutdown()
+
+    app.on_cleanup.append(cleanup)
+    await capture(db, settings, event(777, "Поставь лайк"))
+    async with TestClient(TestServer(app)) as client:
+        ws = await client.ws_connect("/ws/community/chat")
+        await ws.send_json({"type": "auth", "init_data": _signed_chat_auth(20)})
+        assert (await _ws_until(ws, "ready"))["type"] == "ready"
+
+        response = await client.post(
+            "/api/community/chat/reaction",
+            headers={"Authorization": "tma " + _signed_chat_auth(21)},
+            json={"message_id": 777, "emoji": "🍪", "active": True},
+        )
+        assert response.status == 200
+        assert (await response.json())["reactions"] == [
+            {"emoji": "🍪", "count": 1, "mine": True},
+        ]
+        event_data = await _ws_until(ws, "change")
+        assert event_data == {"type": "change", "operation": "reaction", "ids": [777]}
+
+        # Repeating a desired-state operation emits no duplicate event.
+        response = await client.post(
+            "/api/community/chat/reaction",
+            headers={"Authorization": "tma " + _signed_chat_auth(21)},
+            json={"message_id": 777, "emoji": "🍪", "active": True},
+        )
+        assert response.status == 200
+        await asyncio.sleep(0.04)
+        assert ws._reader._buffer == __import__("collections").deque() or not ws._reader._buffer
+
+        response = await client.post(
+            "/api/community/chat/reaction",
+            headers={"Authorization": "tma " + _signed_chat_auth(21)},
+            json={"message_id": 777, "emoji": "🍪", "active": False},
+        )
+        assert response.status == 200
+        assert (await _ws_until(ws, "change"))["operation"] == "reaction"
+        await ws.close()
