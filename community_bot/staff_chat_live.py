@@ -16,7 +16,6 @@ from typing import Any
 from aiohttp import WSMsgType, web
 
 from community_bot.access import private_allowed
-from community_bot.helpers import effective_role
 from community_bot.miniapp import validate_init_data
 from community_bot.staff_chat import staff_allowed
 
@@ -158,13 +157,18 @@ async def _authorized(request: web.Request, raw: Any) -> dict | None:
 async def connect(request: web.Request) -> web.StreamResponse:
     """Never publish chat data before validating the first signed frame."""
     hub: StaffChatHub = request.app["staff_chat_hub"]
-    if hub.closed or len(hub.clients) >= MAX_CLIENTS:
+    gate = request.app.get("staff_chat_handshake_gate")
+    if hub.closed or len(hub.clients) >= MAX_CLIENTS or (gate and gate.locked()):
         return web.json_response({"error": "Чат перегружен"}, status=503)
+    # Bound outstanding unauthenticated handshakes before accepting connections.
+    if gate is not None:
+        await gate.acquire()
+    gate_held = gate is not None
     # WebSocket auth is *not* put in the URL: it would leak into access logs.
     socket = web.WebSocketResponse(heartbeat=25, max_msg_size=12288)
-    await socket.prepare(request)
     client = None
     try:
+        await socket.prepare(request)
         try:
             initial = await asyncio.wait_for(socket.receive(), timeout=AUTH_TIMEOUT)
             if initial.type != WSMsgType.TEXT:
@@ -188,21 +192,29 @@ async def connect(request: web.Request) -> web.StreamResponse:
                 await socket.send_json({"type": "error", "reason": "limit"})
                 return socket
             await socket.send_json({"type": "ready", "online": hub.online})
+            if gate_held:
+                gate.release()
+                gate_held = False
         except (asyncio.TimeoutError, ValueError, TypeError, json.JSONDecodeError):
             await socket.send_json({"type": "error", "reason": "auth"})
             return socket
 
         last_check = time.monotonic()
-        async for msg in socket:
+        last_ping = 0.0
+        while not socket.closed:
+            try:
+                msg = await socket.receive(timeout=ROLE_CHECK_INTERVAL)
+            except asyncio.TimeoutError:
+                # Even idle clients lose access after role/ban changes.
+                actor = await _authorized(request, login["init_data"])
+                if actor is None:
+                    await socket.send_json({"type": "error", "reason": "access"})
+                    break
+                last_check = time.monotonic()
+                continue
             if msg.type != WSMsgType.TEXT:
                 if msg.type in (WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSED):
                     break
-                continue
-            try:
-                payload = json.loads(msg.data)
-            except (ValueError, TypeError):
-                continue
-            if not isinstance(payload, dict):
                 continue
             if time.monotonic() - last_check >= ROLE_CHECK_INTERVAL:
                 actor = await _authorized(request, login["init_data"])
@@ -210,11 +222,22 @@ async def connect(request: web.Request) -> web.StreamResponse:
                     await socket.send_json({"type": "error", "reason": "access"})
                     break
                 last_check = time.monotonic()
+            try:
+                payload = json.loads(msg.data)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
             if payload.get("type") == "ping":
-                hub._queue(client, {"type": "pong"})
+                now = time.monotonic()
+                if now-last_ping >= 5:
+                    last_ping=now
+                    hub._queue(client, {"type": "pong"})
             elif payload.get("type") == "typing":
                 hub.typing(client)
     finally:
+        if gate_held:
+            gate.release()
         if client:
             await hub.leave(socket)
         if not socket.closed:
