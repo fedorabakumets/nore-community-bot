@@ -186,7 +186,7 @@ window.NoraWorld = (() => {
       if(socket){const ws=socket;socket=null;ws.close();}
       retrySocket=0;
       clearPeers();
-      const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000)).catch(()=>{});
+      const send=()=>api('nora-game/lobby',{leave:true,session:departed},AbortSignal.timeout(3000),true).catch(()=>{});
       pending=Promise.resolve(pending).then(send).finally(()=>{pending=null;});
       return pending;
     }

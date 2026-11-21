@@ -327,6 +327,25 @@ async def _leave(conn, r, uid, m, now, *, cancel=False):
         raise ValueError("Партия уже началась или завершена")
 
 
+async def leave_current(conn, uid, game, now):
+    member = await one(conn, f"""
+        SELECT m.* FROM durak_members m JOIN durak_rooms r ON r.id=m.room
+        WHERE m.uid=? AND m.active=1 AND {GAME_KIND}=?
+    """, (uid, game))
+    if not member:
+        return None
+    room = await _room(conn, member["room"], game)
+    await _expire(conn, room, now)
+    if room["status"] not in LIVE:
+        return room["id"]
+    if game == "durak" and room["status"] == "playing":
+        if member["seat"] in (*room["game"]["out"], *room["game"]["forfeit"]):
+            return room["id"]
+    await _leave(conn, room, uid, member, now)
+    await _save(conn, room, now)
+    return room["id"]
+
+
 async def _invite(conn, r, uid, target):
     if r["status"] != "waiting" or r["config"].get("quick") or type(target) is not int or target <= 0:
         raise ValueError("Выбери друга для приглашения в лобби")

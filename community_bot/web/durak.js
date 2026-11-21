@@ -764,17 +764,14 @@ async function inviteLink(share){
     }else await copyText(url);
   }catch(err){errorText(err)}
 }
+function returnToTables(){
+  room=null;
+  change('open');
+  readMenu();
+}
 function confirmLeave(){
-  const waiting=room.status==='waiting',owner=room.host===room.members[room.own]?.id;
-  const title=waiting?(owner?'Отменить стол?':'Выйти из комнаты?'):'Сдаться в партии?';
-  sheet(`<h2>${title}</h2><p class="sub">${waiting?'Зарезервированные ставки вышедших игроков вернутся в кошельки.':'Тебе будет засчитано поражение. Ставка останется в банке.'}</p>
-    <button class="primary" id="dk-confirm-leave">${waiting?(owner?'Отменить стол':'Выйти и вернуть ставку'):'Сдаться'}</button>`);
-  document.getElementById('dk-confirm-leave').onclick=()=>{
-    document.getElementById('sheet').close();
-    send(waiting&&owner?'cancel':'leave',{room:room.id,rev:room.rev},async id=>{
-      if(waiting&&!owner){room=null;change('mine');await readMenu()}else await freshRoom(id);
-    });
-  };
+  if(lobbyEntry)goToTab('games');
+  else requestGameExit(returnToTables);
 }
 function back(){
   if(!host)return false;
@@ -782,7 +779,11 @@ function back(){
   if(mode==='friends'&&room){openRoom(room.id);return true}
   if(mode==='gift'){change('items');readMenu();return true}
   if(mode==='items'){change('open');readMenu();return true}
-  if(!lobbyEntry&&mode!=='open'){change('open');readMenu();return true}
+  if(!lobbyEntry&&mode!=='open'){
+    if((mode==='room'&&(!room||['waiting','playing'].includes(room.status)))||pending)confirmLeave();
+    else returnToTables();
+    return true;
+  }
   return false;
 }
 function pick(card,quick=false){
@@ -1123,5 +1124,5 @@ function unmount(){
   document.removeEventListener('visibilitychange',visibility);
   document.body.classList.remove('dk-playing');host=null;
 }
-window.NoraDurak={mount,unmount,back};
+window.NoraDurak={mount,unmount,back,clearRoom:()=>store('room',null)};
 export {mount};

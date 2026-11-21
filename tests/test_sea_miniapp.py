@@ -330,6 +330,24 @@ async def test_leaving_active_game_forfeits_to_opponent_and_releases_member(env)
     assert await env.db.fetchall("SELECT user_id FROM mini_sea_members WHERE active=1") == []
 
 
+async def test_confirmed_exit_closes_lobby_and_forfeits_a_started_match(env):
+    from community_bot.game_exit import exit_game
+
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=5)
+    await exit_game(env.db, 7, "sea", now=env.now)
+    assert (await view(env, 7, room))["room"]["status"] == "cancelled"
+    assert (await env.db.get_user(7))["cookies"] == 100
+
+    room, _, _ = await send(env, 7, "create", vs_bot=False, stake=5)
+    await send(env, 7, "invite", room, user_id=8)
+    await send(env, 8, "respond", room, accept=True)
+    for uid in (7, 8):
+        await send(env, uid, "ready", room, ready=True)
+    await send(env, 7, "start", room)
+    await exit_game(env.db, 7, "sea", now=env.now)
+    assert (await view(env, 8, room))["room"]["winner"] == 8
+
+
 async def test_lobby_leave_releases_member_for_rejoin(env):
     room, _, _ = await send(env, 7, "create", vs_bot=False, stake=0)
     await send(env, 7, "invite", room, user_id=8)

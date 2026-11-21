@@ -14,6 +14,7 @@ from community_bot import durak_items as items
 from community_bot import durak_rooms as rooms
 from community_bot import durak_rules as rules
 from community_bot.database import Database
+from community_bot.game_exit import exit_game, leave
 from community_bot.miniapp import protection
 from community_bot.release_backup import verify_durak_backup
 from tests.test_miniapp import signed
@@ -343,6 +344,35 @@ async def test_signed_http_uses_only_actor_and_rejects_unsigned(db):
     assert (await protection(Request(signed(1, int(time.time())), payload | {"uid": 2}), api.action)).status == 400
     assert (await protection(Request(signed(1, int(time.time())), payload), api.action)).status == 200
     assert await balance(db, 1) == 900 and await balance(db, 2) == 1000
+
+    class ExitRequest(Request):
+        path = "/api/games/exit/durak"
+        match_info = {"game": "durak"}
+
+    assert (await protection(ExitRequest("", {}), leave)).status == 401
+    assert (await protection(ExitRequest(signed(2, int(time.time())), {"uid": 1}), leave)).status == 200
+    assert await balance(db, 1) == 900
+    assert (await protection(ExitRequest(signed(1, int(time.time())), {}), leave)).status == 200
+    assert await balance(db, 1) == 1000
+
+
+@pytest.mark.parametrize("game", ["durak", "barricade"])
+async def test_confirmed_exit_resolves_waiting_or_matched_quick_game(db, game):
+    async def queue(uid):
+        rid, _ = await rooms.command(db, uid, command("quick", config={"stake": 5}), game=game)
+        return rid
+
+    waiting = await queue(1)
+    assert await exit_game(db, 1, game) == waiting
+    assert await exit_game(db, 1, game) is None
+    assert await amounts_as_list(db, waiting) == ([] if game == "barricade" else [-5, 5])
+
+    playing = await queue(1)
+    assert await queue(2) == playing
+    assert await exit_game(db, 1, game) == playing
+    assert (await db.fetchone("SELECT status FROM durak_rooms WHERE id=?", (playing,)))["status"] == "finished"
+    assert await balance(db, 1) == 995
+    assert await balance(db, 2) == 1005
 
 
 @pytest.mark.parametrize("n", [2, 3, 6])

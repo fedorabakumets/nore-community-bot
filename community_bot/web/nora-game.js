@@ -8,7 +8,7 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"aim-actions", "nora-world":"burrow-trail", "nora-chat":"burrow-trail", "nora-cinema":"burrow-trail", "nora-scenery":"burrow-trail", "nora-burrow":"burrow-trail", "nora-burrow-models":"burrow-trail",
+      const version = {"nora-companion":"aim-actions", "nora-world":"game-exit", "nora-chat":"burrow-trail", "nora-cinema":"burrow-trail", "nora-scenery":"burrow-trail", "nora-burrow":"burrow-trail", "nora-burrow-models":"burrow-trail",
         "nora-voxel":"burrows", "nora-observatory":"reticle-hud"}[name];
       const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
       script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
@@ -268,6 +268,7 @@
     music?.close(); music = null;
     sceneStop?.(); sceneStop = null;
     overlay?.remove(); overlay = null;
+    window.NoraShop?.syncBack();
     if (requestedFullscreen) { try { tg?.exitFullscreen?.(); } catch (_) {} }
     requestedFullscreen = false;
     (trigger || document.getElementById('nora-game-open'))?.focus();
@@ -278,7 +279,7 @@
     sceneStop?.(); sceneStop = null;
     overlay.classList.toggle('nora-world-active', content.includes('class="nora-world"'));
     overlay.innerHTML = `<div class="nora-game-inner"><button type="button" class="nora-game-back" aria-label="Вернуться к играм">← Игры</button><div class="nora-game-body">${content}</div><div class="nora-game-foot">NORA / НОВЫЙ МИР</div></div>`;
-    overlay.querySelector('.nora-game-back').onclick = close;
+    overlay.querySelector('.nora-game-back').onclick = confirmExit;
     music?.attach(overlay);
   }
   async function world(nickname) {
@@ -356,7 +357,7 @@
     });
     dialog.querySelectorAll('[data-section]').forEach(button=>button.onclick=()=>showSection(button.dataset.section));
     dialog.querySelectorAll('[data-settings-back]').forEach(button=>button.onclick=()=>showSection(null));
-    dialog.querySelector('.nora-settings-continue').onclick=()=>dialog.close(); dialog.querySelector('.nora-settings-exit').onclick=close;
+    dialog.querySelector('.nora-settings-continue').onclick=()=>dialog.close(); dialog.querySelector('.nora-settings-exit').onclick=confirmExit;
     back.onclick=()=>{showSection(null);root.dispatchEvent(new Event('nora-settings-open'));dialog.showModal();};
     root.dataset.recordGift = entry === 'record' ? '1' : '';
     root.dataset.playWithPet = entry === 'pet' ? '1' : '';
@@ -527,13 +528,15 @@
     overlay = document.createElement('section'); overlay.className = 'nora-game-screen';
     overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Игра НОРА');
     document.body.appendChild(overlay);
+    window.NoraShop?.syncBack();
     music = createMusic(); music.start();
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
     frame(`${logo}<p>Открываем новый мир…</p>`);
     try { await loadGame(); if (version !== active) return; const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
     catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const destination=entry, trigger=petTrigger;close();open(destination,trigger); }; } }
   }
-  window.NoraGame = {open};
+  function confirmExit() { NoraShop.exitGameView(close); }
+  window.NoraGame = {open, close, isOpen: () => Boolean(overlay)};
   document.addEventListener('click', event => {
     if (event.target.closest('#nora-game-open')) open();
     if (event.target.closest('button[data-record-gift]')) open('record');
@@ -542,6 +545,6 @@
   });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.defaultPrevented && !event.repeat && overlay &&
-        ![...overlay.querySelectorAll('dialog')].some(dialog=>dialog.open)) close();
+        !$('#game-exit').open && ![...overlay.querySelectorAll('dialog')].some(dialog=>dialog.open)) confirmExit();
   });
 })();

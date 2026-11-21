@@ -83,6 +83,32 @@ async def test_prepare_is_free_secret_commitment_and_actor_bound_launch_is_exact
     assert not (await rocket.get_status(db, 8, now=NOW + 3.1))['history']
 
 
+async def test_confirmed_exit_expires_quote_and_surrenders_without_payout(db, monkeypatch):
+    from community_bot.game_exit import exit_game
+
+    quote = await prepare_with_point(db, monkeypatch)
+    await exit_game(db, 7, "rocket", now=NOW)
+    with pytest.raises(ValueError, match="устарело"):
+        await rocket.launch_round(db, 7, quote["token"], now=NOW)
+
+    _, flight = await start(db, monkeypatch, point=250, bet=30, auto=1.5)
+    when = at(flight, 125)
+    await exit_game(db, 7, "rocket", now=when)
+    await exit_game(db, 7, "rocket", now=when)
+    status = await rocket.get_status(db, 7, now=when)
+    assert status["round"] is None
+    assert status["history"][0]["status"] == "surrendered"
+    assert status["balance"] == 970
+    assert await rocket.tick(db, now=when + 60) == 0
+
+    _, flight = await start(db, monkeypatch, point=500, auto=1.5, now=when + 60)
+    when = at(flight, 151)
+    await exit_game(db, 7, "rocket", now=when)
+    status = await rocket.get_status(db, 7, now=when)
+    assert status["history"][0]["status"] == "cashed_out"
+    assert status["balance"] == 975
+
+
 async def test_manual_cashout_is_atomic_concurrent_and_round_owned(db, monkeypatch):
     _, flight = await start(db, monkeypatch, bet=7)
     when = at(flight, 137) + .001

@@ -182,14 +182,59 @@ window.NoraShop=(()=>{
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-seasonal-new'))seasonalEdit(null);if(b.hasAttribute('data-seasonal-edit'))seasonalEdit(b.dataset.seasonalEdit);if(b.hasAttribute('data-seasonal-action'))seasonalAction(b.dataset.seasonalAction);if(b.hasAttribute('data-seasonal-manage'))seasonalManage(b.dataset.seasonalManage,Number(b.dataset.offset||0))});
 
   function route(){const u=new URL(location.href),view=u.searchParams.get('view');if(view)return {view,category:u.searchParams.get('category')};try{if(location.hash.startsWith('#shop/'))return {view:'shop',category:decodeURIComponent(location.hash.slice(6))};const legacy=location.hash.match(/^#(home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea|durak|barricade)(?:[&?]|$)/);return {view:legacy?.[1]||'home',category:null}}catch{return {view:'home',category:null}}}
-  let backPending=false;
+  let backPending=false, afterGameBack, closingGuard=false;
   function writeRoute(next,push=false,petFrom=null){const u=new URL(location.href);u.searchParams.set('view',next);if(next==='shop'&&category)u.searchParams.set('category',category);else u.searchParams.delete('category');if(/^#(?:home|shop|pet|lk|wallet|history|notices|admin|interactive|games|friends|community|events|mafia|rocket|sea|durak|barricade)(?:\/[^&?]*)?$/.test(u.hash))u.hash='';history[push?'pushState':'replaceState']({noraView:next,petFrom},'',u)}
-  function navigate(next,push=true){category=next;tab='shop';writeRoute(tab,push);render();window.scrollTo(0,0);syncBack()}
+  function navigate(next,push=true){
+    leaveGameTo('shop',()=>{
+      category=next;tab='shop';writeRoute(tab,push);render();window.scrollTo(0,0);syncBack();
+    });
+  }
   function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
     (['durak','barricade'].includes(tab)&&'games')||(tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
-  function syncBack(){if(category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide()}
+  function confirmUnload(event){event.preventDefault();event.returnValue=true}
+  function pushGameGuard(game){
+    if(game==='world')history.pushState(history.state,'',location.href);
+    else writeRoute(tab,true);
+    history.replaceState({...history.state,noraGameExit:true},'',location.href);
+  }
+  function syncBack(){
+    const game=currentGame();
+    if(game&&!history.state?.noraGameExit&&!afterGameBack){
+      // Preserve a same-document Back destination, including for direct game links.
+      if(game!=='world'&&route().view===tab)writeRoute('games');
+      pushGameGuard(game);
+    }
+    if(Boolean(game)!==closingGuard){
+      closingGuard=Boolean(game);
+      if(closingGuard){
+        tg?.enableClosingConfirmation?.();
+        window.addEventListener('beforeunload',confirmUnload);
+      }else{
+        tg?.disableClosingConfirmation?.();
+        window.removeEventListener('beforeunload',confirmUnload);
+      }
+    }
+    if(game||category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide();
+  }
+  function exitGameView(onExit){
+    requestGameExit(()=>{
+      if(!history.state?.noraGameExit){onExit();return}
+      afterGameBack=onExit;
+      history.back();
+    });
+  }
+  function leaveGameTo(next,onExit){
+    const game=currentGame();
+    if(game==='world')exitGameView(()=>{
+      window.NoraGame.close();
+      onExit();
+    });
+    else if(game&&next!==tab)exitGameView(onExit);
+    else onExit();
+  }
   function resume(initialCategory=route().category){category=initialCategory;syncBack()}
   function tabChanged(next,previous){
+    if(gameViews.has(next)){syncBack();return}
     if(next==='pet'){
       if(previous&&previous!=='pet'){
         // Keep the actual parent in browser history for the WebView edge gesture.
@@ -249,7 +294,7 @@ window.NoraShop=(()=>{
     }catch(err){toast(err.message)}finally{busy=false}
   }
   document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.shopCategory!==undefined)navigate(b.dataset.shopCategory);if(b.hasAttribute('data-shop-root'))navigate(null);if(b.dataset.topup)topup(Number(b.dataset.topup));if(b.dataset.tab)queueMicrotask(syncBack)});
-  window.addEventListener('popstate',()=>{
+  function applyHistoryRoute(){
     backPending=false;
     if(!data)return;
     const next=route();
@@ -257,10 +302,27 @@ window.NoraShop=(()=>{
     category=tab==='shop'?next.category:null;
     if($('#sheet').open)$('#sheet').close();
     render();
+  }
+  window.addEventListener('popstate',()=>{
+    if(afterGameBack){
+      const onExit=afterGameBack;
+      afterGameBack=null;
+      onExit();
+      return;
+    }
+    const game=currentGame();
+    if(game){
+      // Restore the guard entry immediately so cancelling Back keeps the game and URL.
+      if(!history.state?.noraGameExit)pushGameGuard(game);
+      exitGameView(game==='world'?window.NoraGame.close:applyHistoryRoute);
+      return;
+    }
+    applyHistoryRoute();
   });
-  tg?.BackButton?.onClick?.(()=>{
-    if(!data||backPending)return;
+  function goBack(){
+    if(!data||backPending||afterGameBack||$('#game-exit').open)return;
     if($('#sheet').open){$('#sheet').close();return}
+    if(window.NoraGame?.isOpen?.()){exitGameView(window.NoraGame.close);return}
     if(tab==='durak'&&window.NoraDurak?.back())return;
     if(tab==='barricade'&&barricadeView?.back())return;
     if(tab==='pet'&&history.state?.petFrom){
@@ -269,8 +331,16 @@ window.NoraShop=(()=>{
       return;
     }
     const next=parent();
-    if(next){tab=next;tabChanged(tab);render();window.scrollTo(0,0)}
+    if(next)goToTab(next);
     else if(tab==='shop')navigate(null);
+  }
+  tg?.BackButton?.onClick?.(goBack);
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'&&!event.defaultPrevented&&!event.repeat&&gameViews.has(tab)&&
+        !window.NoraGame?.isOpen?.()&&!document.querySelector('dialog[open]')){
+      event.preventDefault();
+      goBack();
+    }
   });
-  return {screen,cards,product,resume,syncBack,svg,route,tabChanged,preloadSeasonal,openCategory:navigate};
+  return {screen,cards,product,resume,syncBack,svg,route,tabChanged,preloadSeasonal,openCategory:navigate,leaveGameTo,exitGameView};
 })();

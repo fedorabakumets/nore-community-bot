@@ -77,7 +77,7 @@ async def protection(request, handler):
             profile_optional = path in {
                 '/api/me', '/api/application', '/api/application/photo', '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
-            } or path.startswith(('/api/notices/', '/api/admin/'))
+            } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/'))
             if not profile_optional:
                 from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
@@ -596,9 +596,11 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/sea', sea_api.status)
     app.router.add_post('/api/sea/action', sea_api.action)
 
+    from community_bot.game_exit import leave as leave_game
     from community_bot.game_invitations import open_invitation, quick_preview
 
     app.router.add_post('/api/games/invite', open_invitation)
+    app.router.add_post(r'/api/games/exit/{game:durak|barricade|sea|mafia|rocket}', leave_game)
     app.router.add_get(r'/api/games/quick/{game:durak|barricade}/{rid:[a-f0-9]{16}}', quick_preview)
 
     from community_bot.interactive_runtime import lifecycle

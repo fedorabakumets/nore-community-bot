@@ -164,8 +164,9 @@ window.NoraSea = (() => {
     if (["finished", "cancelled"].includes(r.status)) {
       return `<div class="pet-action-row"><button class="primary" id="sea-again">Новая партия</button><button class="secondary" id="sea-home">К списку</button></div>`;
     }
-    const cancel = r.host_id === data.user.user_id && r.status === "lobby" ? '<button class="secondary danger-action" data-sea-action="cancel">Закрыть комнату</button>' : "";
-    return `<section class="card mafia-room-controls"><button class="secondary" data-sea-action="leave">${r.status === "lobby" ? "Выйти" : "Сдаться и выйти"}</button>${cancel}</section>`;
+    const label = r.status !== "lobby" ? "Сдаться и выйти"
+      : r.host_id === data.user.user_id ? "Закрыть комнату" : "Выйти";
+    return `<section class="card mafia-room-controls"><button class="secondary" data-sea-action="leave">${label}</button></section>`;
   }
 
   function logView(r) {
@@ -301,31 +302,22 @@ window.NoraSea = (() => {
     sheet(`<span class="eyebrow">Собираем флот</span><h2>Позвать в Морской бой</h2>${rows}<button class="secondary" id="sea-to-friends">Добавить друзей</button>`);
     $("#sea-to-friends").onclick = () => {
       $("#sheet").close();
-      tab = "friends";
-      render();
-      window.scrollTo(0, 0);
+      goToTab("friends");
     };
   }
 
   async function joinLobby(roomId, password) {
     const result = await perform({action: "join", room_id: roomId, password}, {close: true});
     if (result) {
-      const previous = tab;
-      tab = "sea";
-      NoraShop.tabChanged(tab, previous);
-      render();
-      window.scrollTo(0, 0);
+      goToTab("sea");
     } else window.NoraInteractive?.reloadLobbies();
   }
 
   function openSetup() {
-    creating = true;
-    lastRoomId = "";
-    const previous = tab;
-    tab = "sea";
-    NoraShop.tabChanged(tab, previous);
-    render();
-    window.scrollTo(0, 0);
+    goToTab("sea", () => {
+      creating = true;
+      lastRoomId = "";
+    });
   }
 
   function mount() {
@@ -408,11 +400,7 @@ window.NoraSea = (() => {
       perform({ action: "respond", room_id: b.dataset.roomId, accept }).then((result) => {
         if (tab === "notices") window.NoraCabinet?.reloadNotices();
         if (result && accept) {
-          const previous = tab;
-          tab = "sea";
-          NoraShop.tabChanged(tab, previous);
-          render();
-          window.scrollTo(0, 0);
+          goToTab("sea");
         } else window.NoraInteractive?.reloadLobbies();
       });
       return;
@@ -432,14 +420,7 @@ window.NoraSea = (() => {
       perform({ action: "shoot", room_id: state.sea?.room?.id, cell }, { quiet: true });
       return;
     }
-    if (b.dataset.seaAction) {
-      const action = b.dataset.seaAction;
-      const cancelText = "Комната закроется" + (state.sea?.room?.stake ? ", ставка вернётся" : "") + ".";
-      const lobby = state.sea?.room?.status === "lobby";
-      sheet(`<h2>${action === "cancel" ? "Закрыть комнату?" : lobby ? "Выйти из комнаты?" : "Сдаться и выйти?"}</h2><p class="sub">${action === "cancel" ? cancelText : lobby ? "Ты покинешь лобби." : "Партия завершится, победа засчитается сопернику."}</p><button class="primary" id="sea-leave-confirm">${action === "cancel" ? "Закрыть" : lobby ? "Выйти" : "Сдаться"}</button>`);
-      $("#sea-leave-confirm").onclick = () => perform({ action, room_id: state.sea?.room?.id }, { close: true });
-      return;
-    }
+    if (b.dataset.seaAction) goToTab("games");
   });
 
   document.addEventListener("visibilitychange", () => {

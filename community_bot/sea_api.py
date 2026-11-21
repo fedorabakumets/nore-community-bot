@@ -401,12 +401,19 @@ async def _leave(conn, room, own, now):
         await _finish(conn, room, _opponent_id(room, uid), now)
 
 
-async def leave_on_account_reset(conn, uid, now):
+async def leave_current(conn, uid, now, *, advance=True):
     member = await _one(conn, "SELECT room_id FROM mini_sea_members WHERE user_id=? AND active=1", (uid,))
     if member:
         room = await _load(conn, member["room_id"])
-        await _leave(conn, room, _player(room, uid), now)
+        if advance:
+            await _advance(conn, room, now)
+        if room["status"] in {"lobby", "active"}:
+            await _leave(conn, room, _player(room, uid), now)
         await _save(conn, room, now)
+
+
+async def leave_on_account_reset(conn, uid, now):
+    await leave_current(conn, uid, now, advance=False)
     await conn.execute(
         "UPDATE mini_sea_invites SET status='revoked' WHERE ? IN (user_id, sender_id) AND status='pending'", (uid,),
     )

@@ -19,7 +19,74 @@ const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const hasProfileFire=likes=>likes>=50;
 const profileLikeText=likes=>`${hasProfileFire(likes)?'💜':'❤️'} ${number(likes)}`;
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
-async function api(path,body,signal){const r=await fetch('/api/'+path,{signal,method:body?'POST':'GET',headers:{Authorization:'tma '+auth,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});let j;try{j=await r.json()}catch{throw Error('Сервис пока недоступен. Попробуй ещё раз')}if(!r.ok)throw Object.assign(Error(j.error||j.message||'Не удалось выполнить действие'),{status:r.status});return j}
+const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket']);
+const gameWrites = new Map();
+function api(path, body, signal, keepalive = false) {
+  const request = (async () => {
+    const r = await fetch('/api/'+path, {signal, keepalive, method:body?'POST':'GET', headers:{
+      Authorization:'tma '+auth, ...(body?{'Content-Type':'application/json'}:{})
+    }, body:body?JSON.stringify(body):undefined});
+    let j;
+    try {j=await r.json()} catch {throw Error('Сервис пока недоступен. Попробуй ещё раз')}
+    if(!r.ok)throw Object.assign(Error(j.error||j.message||'Не удалось выполнить действие'),{status:r.status});
+    return j;
+  })();
+  const game = path.split('/')[0];
+  if (body && gameViews.has(game)) {
+    if (!gameWrites.has(game)) gameWrites.set(game, new Set());
+    const writes = gameWrites.get(game);
+    writes.add(request);
+    const remove = () => writes.delete(request);
+    request.then(remove, remove);
+  }
+  return request;
+}
+
+function currentGame() {
+  return window.NoraGame?.isOpen?.() ? 'world' : gameViews.has(tab) ? tab : null;
+}
+
+function requestGameExit(onExit) {
+  const game = currentGame(), dialog = $('#game-exit');
+  if (!game) { onExit(); return; }
+  if (dialog.open) return;
+  const exit = $('#game-exit-confirm'), stay = $('#game-exit-stay'), error = $('#game-exit-error');
+  error.textContent = '';
+  $('#game-exit-details').textContent = {
+    world: 'Ты покинешь мир Норы.',
+    rocket: 'Текущий полёт завершится. Ставка будет проиграна.',
+    mafia: 'Ты выйдешь из лобби или сдашься в начавшейся партии.',
+  }[game] || 'Поиск отменится. Если партия уже началась, тебе засчитается поражение.';
+  stay.onclick = () => dialog.close();
+  dialog.oncancel = event => { if (exit.disabled) event.preventDefault(); };
+  exit.onclick = async () => {
+    exit.disabled = stay.disabled = true;
+    exit.textContent = 'Выходим…';
+    error.textContent = '';
+    try {
+      if (game !== 'world') {
+        await Promise.allSettled(gameWrites.get(game) || []);
+        await api('games/exit/' + game, {});
+        if (game === 'durak') window.NoraDurak?.clearRoom?.();
+      }
+      dialog.close();
+      if ($('#sheet').open) $('#sheet').close();
+      onExit();
+    } catch (e) {
+      error.textContent = e.message;
+    } finally {
+      exit.disabled = stay.disabled = false;
+      exit.textContent = 'Выйти';
+    }
+  };
+  dialog.showModal();
+}
+
+window.addEventListener('pagehide', () => {
+  const game = currentGame();
+  if (game === 'world') window.NoraGame.close();
+  else if (game && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
+});
 let applicationScreen = null;
 
 function showApplication(application) {
@@ -158,12 +225,7 @@ const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
 let durakModule, durakInboxRoom, durakEntry;
 function openDurak(entry) {
-  durakEntry = entry;
-  const from = tab;
-  tab = 'durak';
-  NoraShop.tabChanged(tab, from);
-  render();
-  window.scrollTo(0, 0);
+  goToTab('durak', () => { durakEntry = entry; });
 }
 function mountDurak() {
   if (tab !== 'durak') { durakEntry = null; window.NoraDurak?.unmount(); return; }
@@ -174,7 +236,7 @@ function mountDurak() {
     css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=quick-game';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=quick-game').catch(() => {
+  durakModule ??= import('/durak.js?v=game-exit').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');
@@ -187,14 +249,8 @@ function mountDurak() {
 let barricadeModule, barricadeView, barricadeEntry;
 
 function openBarricade(entry) {
-  barricadeEntry = entry;
-  const from = tab;
-  tab = 'barricade';
-  window.NoraShop?.tabChanged(tab, from);
-  render();
-  window.scrollTo(0, 0);
+  goToTab('barricade', () => { barricadeEntry = entry; });
 }
-
 function mountBarricade() {
   if (tab !== 'barricade') { barricadeEntry = null; barricadeView?.unmount(); return; }
   const root = document.getElementById('barricade-root');
@@ -204,7 +260,7 @@ function mountBarricade() {
     css.id = id; css.rel = 'stylesheet'; css.href = href;
     document.head.append(css);
   }
-  barricadeModule ??= import('/barricade.js?v=quick-game').catch(() => {
+  barricadeModule ??= import('/barricade.js?v=game-exit').catch(() => {
     barricadeModule = null;
     if (!root.isConnected || tab !== 'barricade') return;
     const retry = document.createElement('button');
@@ -314,7 +370,40 @@ function bookEvent(button) {
   sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);
   $('#pay').onclick = () => perform('events/join', payload);
 }
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.tab&&profileTabLocked(b.dataset.tab)){toast('Заполни профиль на 100%, чтобы открыть этот раздел');return}if(b.dataset.barricadeInvite)barricadeEntry={id:b.dataset.barricadeInvite};if(b.dataset.durakInvite)durakInboxRoom=b.dataset.durakInvite;if(b.dataset.tab){const from=tab;tab=b.dataset.tab;window.NoraShop?.tabChanged(tab,from);render();window.scrollTo(0,0);if(tab!=='admin')refresh()}if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.product)product(b.dataset.product);if(b.dataset.event&&data.profile.fill_percent<100){toast('Заполни профиль на 100% в ЛК');return}if(b.hasAttribute('data-reputation'))showReputation();if(b.dataset.event)bookEvent(b);if(b.hasAttribute('data-profile')){tab='lk';window.NoraShop?.tabChanged(tab);render();window.scrollTo(0,0)}if(b.id==='edit-profile')editProfile();if(b.id==='change-avatar')$('#avatar-file').click()});
+function goToTab(next, prepare, refreshAfter = false) {
+  if (profileTabLocked(next)) {
+    toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+    return;
+  }
+  NoraShop.leaveGameTo(next, () => {
+    prepare?.();
+    const from = tab;
+    tab = next;
+    NoraShop.tabChanged(tab, from);
+    render();
+    window.scrollTo(0, 0);
+    if (refreshAfter && tab !== 'admin') refresh();
+  });
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.tab) goToTab(b.dataset.tab, () => {
+    if (b.dataset.barricadeInvite) barricadeEntry = {id:b.dataset.barricadeInvite};
+    if (b.dataset.durakInvite) durakInboxRoom = b.dataset.durakInvite;
+  }, true);
+  if (b.dataset.filter) {filter=b.dataset.filter;render()}
+  if (b.dataset.product) product(b.dataset.product);
+  if (b.dataset.event && data.profile.fill_percent<100) {
+    toast('Заполни профиль на 100% в ЛК');return;
+  }
+  if (b.hasAttribute('data-reputation')) showReputation();
+  if (b.dataset.event) bookEvent(b);
+  if (b.hasAttribute('data-profile')) goToTab('lk');
+  if (b.id==='edit-profile') editProfile();
+  if (b.id==='change-avatar') $('#avatar-file').click();
+});
 $('#sheet').addEventListener('close',()=>{
   const dialog=$('#sheet');
   if(dialog.open)return;

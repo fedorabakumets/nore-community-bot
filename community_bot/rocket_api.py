@@ -214,6 +214,20 @@ async def _settle_user(connection, uid: int, now: float) -> dict | None:
     return await _settle(connection, row, now) if row else None
 
 
+async def leave_current(connection, uid: int, now: float) -> None:
+    await connection.execute(
+        "UPDATE mini_rocket_quotes SET status='superseded' WHERE user_id=? AND status='pending'", (uid,),
+    )
+    row = await _settle_user(connection, uid, now)
+    if row and row["status"] == "active":
+        await _finish(connection, row, None, now)
+
+
+def _surrendered(row: dict) -> bool:
+    # A loss recorded before the committed crash time was ended by the player.
+    return row["status"] == "crashed" and row["finished_at"] < _at_multiplier(row["starts_at"], row["crash_cents"])
+
+
 def _public(row: dict, now: float) -> dict:
     state = row["status"]
     if state == "active":
@@ -221,6 +235,9 @@ def _public(row: dict, now: float) -> dict:
     cents = multiplier_cents(row["starts_at"], now)
     if state == "cashed_out":
         cents = row["cashout_cents"]
+    elif _surrendered(row):
+        state = "surrendered"
+        cents = multiplier_cents(row["starts_at"], row["finished_at"])
     elif state == "crashed":
         cents = row["crash_cents"]
     return {
@@ -237,6 +254,8 @@ def _public(row: dict, now: float) -> dict:
 
 
 def _message(row: dict, now: float) -> str:
+    if _surrendered(row):
+        return f"Полёт завершён досрочно. Ставка {row['bet']} 🍪 проиграна"
     if row["status"] == "crashed":
         return f"Срыв на ×{row['crash_cents'] / 100:.2f}. Ставка {row['bet']} 🍪 проиграна"
     if row["status"] == "cashed_out":

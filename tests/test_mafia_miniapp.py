@@ -79,6 +79,20 @@ async def advance(env, seconds):
     await mafia.tick(env.db, env.now)
 
 
+async def test_confirmed_exit_closes_owned_lobby_or_eliminates_player(env):
+    from community_bot.game_exit import exit_game
+
+    room = await lobby(env)
+    await exit_game(env.db, 7, "mafia", now=env.now)
+    assert (await view(env, 8, room))["room"]["status"] == "cancelled"
+
+    room = await started(env)
+    await rig_roles(env, room, {7: "civilian", 8: "mafia", 9: "detective", 10: "civilian", 11: "civilian"})
+    await exit_game(env.db, 7, "mafia", now=env.now)
+    assert (await state(env, room))["players"]["7"]["left"]
+    assert (await view(env, 8, room))["room"]["status"] == "active"
+
+
 async def test_lobby_requires_invite_consent_ready_and_host_start_and_no_money(env):
     ledger = await env.db.fetchall("SELECT * FROM transactions ORDER BY id")
     room = await lobby(env)

@@ -488,18 +488,10 @@ async function share() {
 
 function back() {
   if (!root || screen === 'menu' || screen === 'match') return false;
-  if (screen === 'friends' && room?.status === 'waiting') change('waiting');
+  if (screen === 'friends' && room) change(room.status === 'waiting' ? 'waiting' : 'match');
+  else if (screen === 'waiting' || screen === 'loading' || busy) requestGameExit(returnToMenu);
   else returnToMenu();
   return true;
-}
-
-function confirmSurrender() {
-  sheet('<h2>Сдаться?</h2><p class="sub">Соперник получит весь банк.</p>' +
-    '<button type="button" class="primary" id="bc-surrender">Сдаться</button>');
-  document.getElementById('bc-surrender').onclick = () => {
-    document.getElementById('sheet').close();
-    submitAction('leave', {room: room.id, rev: room.rev}, id => openRoom(id, true));
-  };
 }
 
 function click(event) {
@@ -548,8 +540,8 @@ function click(event) {
       if (!model) loadMenu();
     }
   }
-  if (bc === 'cancel') submitAction('cancel', {room: room.id, rev: room.rev}, id => openRoom(id, true));
-  if (bc === 'surrender') confirmSurrender();
+  if (bc === 'cancel') requestGameExit(returnToMenu);
+  if (bc === 'surrender') goToTab('games');
   if (bc === 'pawn' || bc === 'wall' || bc === 'horizontal' || bc === 'vertical' || bc === 'target') {
     if (bc === 'pawn' || bc === 'wall') {
       placing = bc === 'wall';
