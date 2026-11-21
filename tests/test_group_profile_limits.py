@@ -251,3 +251,21 @@ async def test_gift_price_change_rejects_stale_confirmation(env, monkeypatch):
     await profile.group_profile_limits(stale, env.db, env.settings)
     assert stale.answer.await_args.kwargs["show_alert"] is True
     assert (await env.db.get_user(3))["cookies"] == 100
+
+
+@pytest.mark.asyncio
+async def test_non_owner_and_new_member_can_open_gift_from_shared_card(env, monkeypatch):
+    from community_bot.ui_owner import is_owned_callback
+
+    assert not is_owned_callback("gprofile:limits:gift:2")
+    message = _message()
+    edit = AsyncMock()
+    monkeypatch.setattr(Message, "edit_text", edit)
+    assert await env.db.get_user(4) is None
+    await profile.group_profile_limits(
+        _callback(message, "gprofile:limits:gift:2", uid=4), env.db, env.settings,
+    )
+    assert await env.db.get_user(4) is not None
+    assert edit.await_count == 1
+    rich = edit.await_args.kwargs["rich_message"]
+    assert "Твой баланс: 0 🍪" in rich.blocks[1].text
