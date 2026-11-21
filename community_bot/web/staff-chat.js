@@ -89,9 +89,10 @@ window.NoraStaffChat = (() => {
       </button>` : '';
     const body = m.text ? `<div class="staff-chat-text">${esc(m.text)}</div>` : '';
     const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
+    const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
     return `<article class="staff-chat-message" data-message-id="${id}">
        ${avatar}<div class="staff-chat-bubble">
-         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}</div>
+         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${link}${hideButton}</div>
          ${quote}${mediaTile(m)}${richRow(m)}${body}
        </div>
      </article>`;
@@ -391,6 +392,45 @@ window.NoraStaffChat = (() => {
     if(!asset || !asset.type.startsWith('image/'))return;
     sheet(`<div class="staff-chat-image-view"><img src="${esc(asset.url)}" alt="Фото из чата Норы"></div>`);
   }
+
+  async function hideEntry(button) {
+    if(!button || !button.isConnected)return;
+    if(button.dataset.confirm !== '1') {
+      button.dataset.confirm='1';
+      button.textContent='Скрыть?';
+      button.classList.add('confirm');
+      button.setAttribute('aria-label','Подтвердить скрытие только из зеркала');
+      setTimeout(()=>{
+        if(button.isConnected && button.dataset.confirm==='1') {
+          button.dataset.confirm='';
+          button.textContent='×';
+          button.classList.remove('confirm');
+          button.setAttribute('aria-label','Скрыть сообщение из зеркала');
+        }
+      },5000);
+      return;
+    }
+    const messageId=Number(button.dataset.chatHide);
+    if(!Number.isSafeInteger(messageId) || messageId <= 0)return;
+    button.disabled=true;
+    try {
+      await api('community/chat/hide',{message_id:messageId});
+      const feed=document.getElementById('staff-chat-feed');
+      button.closest('.staff-chat-message')?.remove();
+      signature='outdated after hide';
+      if(feed && !feed.querySelector('.staff-chat-message')) {
+        feed.innerHTML='<p class="staff-chat-empty">В сохранённой истории больше нет сообщений.</p>';
+      }
+      void load();
+    } catch(error) {
+      button.disabled=false;
+      button.dataset.confirm='';
+      button.textContent='×';
+      button.classList.remove('confirm');
+      toast(error.message||'Не удалось скрыть сообщение');
+    }
+  }
+
   function mount() {
     if(timer !== null){clearInterval(timer);timer = null;}
     observer?.disconnect();observer = null;
@@ -401,6 +441,8 @@ window.NoraStaffChat = (() => {
     timer = setInterval(()=>{if(contextId === null)void load();},3000);
   }
   document.addEventListener('click',event=>{
+    const hide=event.target.closest('[data-chat-hide]');
+    if(hide){void hideEntry(hide);return;}
     if(event.target.closest('[data-staff-chat-retry]')){signature='';void load(true);}
     if(event.target.closest('[data-chat-latest]')){
       contextId = null;signature = '';
