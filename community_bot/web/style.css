@@ -3554,3 +3554,128 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
   width:auto;
   min-width:65px;
 }
+
+
+/* NORA Chat 2.1: private reactions and gesture affordances.
+   The touch area stays scrollable vertically, never locks the whole chat. */
+#app[data-screen="staffchat"] .staff-chat-bubble{
+  touch-action:pan-y;
+  -webkit-touch-callout:none;
+}
+#app[data-screen="staffchat"] .staff-chat-reactions{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:5px;
+  margin-top:8px;
+}
+#app[data-screen="staffchat"] .staff-chat-reactions:empty{
+  display:none;
+}
+#app[data-screen="staffchat"] .staff-chat-react-chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  min-width:43px;
+  min-height:29px;
+  padding:4px 9px;
+  margin:0;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:10px;
+  background:rgba(255,255,255,.065);
+  color:#e7dfe7;
+  font:550 13px/1.15 Rubik,Arial,sans-serif;
+  transition:background .15s ease,border-color .15s ease,transform .15s ease;
+}
+#app[data-screen="staffchat"] .staff-chat-react-chip span{
+  font:550 11px/1 Rubik,Arial,sans-serif;
+  color:#bcb3c1;
+  font-variant-numeric:tabular-nums;
+}
+#app[data-screen="staffchat"] .staff-chat-react-chip.is-mine{
+  color:#ffe3e9;
+  background:rgba(178,55,85,.22);
+  border-color:rgba(231,112,139,.38);
+}
+#app[data-screen="staffchat"] .staff-chat-react-chip.is-mine span{
+  color:#f1b6c4;
+}
+#app[data-screen="staffchat"] .staff-chat-react-chip:active{
+  transform:scale(.95);
+}
+#app[data-screen="staffchat"] .staff-chat-reaction-picker{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  align-items:center;
+  gap:6px;
+  width:min(280px,calc(100vw - 90px));
+  max-width:calc(100vw - 80px);
+  margin:9px 0 2px;
+  padding:8px;
+  border:1px solid rgba(245,153,175,.16);
+  border-radius:15px;
+  background:rgba(28,24,34,.98);
+  box-shadow:0 12px 30px rgba(0,0,0,.23);
+  animation:staff-chat-react-show .16s ease-out both;
+}
+#app[data-screen="staffchat"] .staff-chat-reaction-picker[hidden]{
+  display:none!important;
+}
+#app[data-screen="staffchat"] .staff-chat-reaction-picker button{
+  display:grid;
+  place-items:center;
+  width:100%;
+  min-width:0;
+  min-height:37px;
+  padding:4px 0;
+  border:1px solid transparent;
+  border-radius:10px;
+  background:rgba(255,255,255,.045);
+  color:#fff;
+  font:500 23px/1.2 Rubik,Arial,sans-serif;
+}
+#app[data-screen="staffchat"] .staff-chat-reaction-picker button[aria-pressed="true"]{
+  border-color:rgba(235,114,147,.34);
+  background:rgba(185,61,93,.24);
+}
+#app[data-screen="staffchat"] .staff-chat-reaction-picker button:active{
+  transform:scale(.9);
+}
+#app[data-screen="staffchat"] .staff-chat-actions .staff-chat-react-open,
+#app[data-screen="staffchat"] .staff-chat-actions .staff-chat-copy{
+  display:grid;
+  place-items:center;
+  flex:none;
+  width:27px;
+  min-width:27px;
+  height:27px;
+  min-height:27px;
+  padding:0;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:#c7b2bd;
+  font:500 20px/1 Rubik,Arial,sans-serif;
+}
+#app[data-screen="staffchat"] .staff-chat-actions .staff-chat-copy{
+  font-size:19px;
+}
+#app[data-screen="staffchat"] .staff-chat-bubble.staff-chat-swiping{
+  transform:translateX(6px);
+  border-color:rgba(238,137,160,.27);
+  background:rgba(55,36,50,.9);
+}
+@keyframes staff-chat-react-show{
+  from{opacity:.65;transform:translateY(-4px) scale(.98)}
+  to{opacity:1;transform:none}
+}
+@media(prefers-reduced-motion:reduce){
+  #app[data-screen="staffchat"] .staff-chat-react-chip,
+  #app[data-screen="staffchat"] .staff-chat-bubble{
+    transition:none;
+  }
+  #app[data-screen="staffchat"] .staff-chat-reaction-picker{
+    animation:none;
+  }
+}
