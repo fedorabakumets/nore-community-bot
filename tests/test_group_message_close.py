@@ -309,8 +309,11 @@ async def test_only_pinned_posts_get_one_nora_inline_link(db):
     await middleware(telegram, bot, EditMessageReplyMarkup(chat_id=GROUP, message_id=10,
                                                          reply_markup=keyboard("new")))
     assert calls[-1].reply_markup.inline_keyboard[0][0].text == "НОРА"
-    assert [[b.callback_data for b in block.buttons] for block in calls[-1].rich_message.blocks
-            if isinstance(block, InputRichBlockButtons)] == [["new", "nora:close:0"]]
+    rows = [block.buttons for block in calls[-1].rich_message.blocks
+            if isinstance(block, InputRichBlockButtons)]
+    assert [[b.callback_data for b in row] for row in rows] == [["new", "nora:close:0"], [None]]
+    assert rows[-1][0].text == "📲 Добавить Нору на экран"
+    assert rows[-1][0].url == "https://t.me/test_nora?startapp=nora_home_screen"
     await middleware(telegram, bot, UnpinChatMessage(chat_id=GROUP, message_id=10))
     assert calls[-1].reply_markup is None
 
