@@ -547,7 +547,65 @@ window.NoraStaffChat = (() => {
     void load();
     timer = setInterval(()=>{if(contextId === null)void load();},3000);
   }
+
+  document.addEventListener('submit',event=>{
+    if(event.target?.id === 'staff-chat-compose'){
+      event.preventDefault();
+      void sendCompose();
+    }
+  });
+  document.addEventListener('input',event=>{
+    if(event.target?.id === 'staff-chat-draft'){
+      draft=event.target.value;composeUpdate();
+    }
+  });
+  document.addEventListener('change',event=>{
+    if(event.target?.id !== 'staff-chat-file')return;
+    const selected=event.target.files?.[0];
+    if(!selected)return;
+    if(selected.size > maxUpload){
+      toast('Файл должен быть не больше 12 МБ');
+      event.target.value='';return;
+    }
+    attachment=selected;emojiOpen=false;composeUpdate();
+  });
+
   document.addEventListener('click',event=>{
+    if(tab !== 'staffchat')return;
+
+    const answer = event.target.closest('[data-chat-answer]');
+    if(answer){selectReply(answer);return;}
+    if(event.target.closest('[data-chat-cancel-reply]')){
+      replyTarget=null;composeUpdate();return;
+    }
+    if(event.target.closest('[data-chat-remove-file]')){
+      attachment=null;const file=document.getElementById('staff-chat-file');
+      if(file)file.value='';composeUpdate();return;
+    }
+    if(event.target.closest('[data-chat-attach]')){
+      document.getElementById('staff-chat-file')?.click();return;
+    }
+    if(event.target.closest('[data-chat-emoji-toggle]')){
+      emojiOpen=!emojiOpen;composeUpdate();return;
+    }
+    const emojiButton=event.target.closest('[data-chat-emoji]');
+    if(emojiButton){
+      const symbol=emojiButton.dataset.chatEmoji || '';
+      const field=document.getElementById('staff-chat-draft');
+      if(field && symbol){
+        const start=field.selectionStart,end=field.selectionEnd;
+        const allowed=attachment ? 800 : 3000;
+        if(draft.length - (end-start) + symbol.length <= allowed){
+          draft=draft.slice(0,start)+symbol+draft.slice(end);
+          field.value=draft;
+          field.focus();
+          field.setSelectionRange(start+symbol.length,start+symbol.length);
+          composeUpdate();
+        }
+      }
+      return;
+    }
+
     const hide=event.target.closest('[data-chat-hide]');
     if(hide){void hideEntry(hide);return;}
     if(event.target.closest('[data-staff-chat-retry]')){signature='';void load(true);}
