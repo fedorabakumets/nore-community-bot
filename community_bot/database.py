@@ -611,12 +611,12 @@ class Database:
 
     async def initialize(self) -> None:
         from community_bot.durak_rooms import SCHEMA as durak_schema
-        from community_bot.referral_campaign import SCHEMA as referral_schema
         from community_bot.friends_api import SCHEMA as friends_schema
         from community_bot.mafia_api import SCHEMA as mafia_schema
         from community_bot.nora_game_api import SCHEMA as nora_game_schema
         from community_bot.pet_progress import SCHEMA as pet_schema
         from community_bot.pet_video import SCHEMA as pet_video_schema
+        from community_bot.referral_campaign import SCHEMA as referral_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
