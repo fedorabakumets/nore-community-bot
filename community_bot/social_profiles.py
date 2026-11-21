@@ -76,6 +76,7 @@ async def presence_map(db, ids, now=None):
     marks = ",".join("?" for _ in ids)
     rows = await db.fetchall(
         "SELECT u.user_id,u.profile_private,COALESCE(s.hidden,0) hidden,MAX(p.seen_at) last_seen,"
+        "MAX(CASE WHEN p.active=0 THEN p.seen_at END) last_exit,"
         "MAX(CASE WHEN p.active=1 AND p.seen_at>? THEN 1 ELSE 0 END) online "
         "FROM users u LEFT JOIN mini_presence p ON p.user_id=u.user_id "
         "LEFT JOIN mini_presence_settings s ON s.user_id=u.user_id "
@@ -87,6 +88,7 @@ async def presence_map(db, ids, now=None):
             "visible": not bool(row["hidden"] or row["profile_private"]),
             "online": bool(row["online"]) if not row["hidden"] and not row["profile_private"] else False,
             "last_seen": row["last_seen"] if not row["hidden"] and not row["profile_private"] else None,
+            "last_exit": row["last_exit"] if not row["hidden"] and not row["profile_private"] else None,
         }
         for row in rows
     }
@@ -160,11 +162,9 @@ async def profile(request):
     }
     if not await can_view_profile(db, settings, uid, target):
         return web.json_response(result)
-    presence = (
-        (await presence_map(db, [target["user_id"]]))[target["user_id"]]
-        if friend or uid == target["user_id"]
-        else {"visible": False, "online": False, "last_seen": None}
-    )
+    # Public presence is visible to every viewer, but per-user settings and
+    # profile_private are enforced by presence_map before any timestamps leave the server.
+    presence = (await presence_map(db, [target["user_id"]]))[target["user_id"]]
     result.update(
         hidden=False,
         private=bool(target["profile_private"]),

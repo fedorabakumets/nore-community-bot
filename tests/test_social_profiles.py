@@ -83,9 +83,15 @@ async def test_presence_tracks_foreground_sessions_stale_sequences_and_expiry(en
     await heartbeat(env.db, 8, "a" * 20, 2, True, now=120)  # reordered old active request
     assert (await presence_map(env.db, [8], now=130))[8]["online"]  # second window stays open
     await heartbeat(env.db, 8, "b" * 20, 2, False, now=140)
-    assert not (await presence_map(env.db, [8], now=141))[8]["online"]
+    after_exit = (await presence_map(env.db, [8], now=141))[8]
+    assert not after_exit["online"]
+    assert after_exit["last_exit"] == 140
+    assert after_exit["last_seen"] == 140
     await heartbeat(env.db, 8, "b" * 20, 3, True, now=150)
-    assert not (await presence_map(env.db, [8], now=211))[8]["online"]  # missed offline falls back to TTL
+    expired = (await presence_map(env.db, [8], now=211))[8]
+    assert not expired["online"]  # missed offline falls back to TTL
+    assert expired["last_seen"] == 150 and expired["last_exit"] == 140
+    # Only the earlier off packet is authoritative; 150 was just an active ping.
     for n in range(10):
         await heartbeat(env.db, 8, str(n) * 20, 1, True, now=250 + n)
     assert (await env.db.fetchone("SELECT COUNT(*) n FROM mini_presence WHERE user_id=8"))["n"] <= 5
@@ -99,26 +105,36 @@ async def test_presence_privacy_and_private_profile_hide_all_activity(env):
     assert (await snapshot(env.db, env.settings, 7))["friends"][0]["presence"]["online"]
     await update(Request(env, body={"hidden": True}))
     p = (await snapshot(env.db, env.settings, 7))["friends"][0]["presence"]
-    assert not p["visible"] and p["last_seen"] is None and not p["online"]
+    assert not p["visible"] and p["last_seen"] is None and p["last_exit"] is None and not p["online"]
     await update(Request(env, body={"hidden": False}))
     await env.db.update_profile(8, "profile_private", 1)
-    assert not (await presence_map(env.db, [8]))[8]["visible"]
+    private = (await presence_map(env.db, [8]))[8]
+    assert not private["visible"] and private["last_seen"] is None and private["last_exit"] is None
     with pytest.raises(ValueError):
         await update(Request(env, body={"hidden": True, "user_id": 9}))
 
 
-async def test_public_profile_shows_balance_omits_secrets_and_nonfriend_online(env):
+async def test_public_profile_shows_balance_and_presence_to_nonfriends(env):
     await heartbeat(env.db, 9, "b" * 20, 1, True)
     assert await social_likes.give(env.db, 8, 9) is None
     result = json.loads((await profile(Request(env))).body)
     assert result["id"] == 9 and result["bio"] == "Био участника" and not result["hidden"]
-    assert not result["presence"]["visible"]
+    assert result["presence"]["visible"] and result["presence"]["online"]
+    assert result["presence"]["last_exit"] is None
     assert result["cookies"] == 100
     assert result["likes"] == 1
     assert not {"cookie_debt", "moderator_note", "avatar_file_id", "warnings", "fill_percent"} & result.keys()
     assert "secret note" not in json.dumps(result)
+    await heartbeat(env.db, 9, "b" * 20, 2, False)
+    exit_status = json.loads((await profile(Request(env))).body)["presence"]
+    assert not exit_status["online"] and exit_status["last_exit"] == exit_status["last_seen"]
+    assert exit_status["last_exit"] is not None
+    await update(Request(env, uid=9, body={"hidden": True}))
+    hidden = json.loads((await profile(Request(env))).body)["presence"]
+    assert not hidden["visible"] and hidden["last_seen"] is None and hidden["last_exit"] is None
+    await update(Request(env, uid=9, body={"hidden": False}))
     await befriend(env, 8, 9)
-    assert json.loads((await profile(Request(env))).body)["presence"]["online"]
+    assert json.loads((await profile(Request(env))).body)["presence"]["visible"]
     lookup = Request(env, target=None)
     lookup.query = {"recipient": "@person9"}
     assert json.loads((await profile(lookup)).body)["id"] == 9
