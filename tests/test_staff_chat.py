@@ -11,6 +11,8 @@ from aiogram.types import Chat, Message, PhotoSize, User
 from community_bot.database import Database
 from community_bot.staff_chat import StaffChatOutgoingMiddleware, capture, feed, hide, media, staff_allowed
 from community_bot.staff_chat_send import MAX_UPLOAD, send_attachment, send_text
+from community_bot.staff_chat import discard
+from community_bot.staff_chat_live import StaffChatHub, connect
 
 GROUP = -100123456789
 
@@ -475,3 +477,139 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
     rejected = await send_attachment(BadRequest(actor={"id": 20}))
     assert rejected.status == 400
     assert bot.send_photo.await_count == 1
+
+
+
+def _signed_chat_auth(uid, token="test-telegram-token"):
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+
+    values = {
+        "user": json.dumps(
+            {"id": uid, "first_name": "Сотрудник", "is_bot": False},
+            ensure_ascii=False, separators=(",", ":"),
+        ),
+        "auth_date": str(int(time.time())),
+    }
+    check = "\n".join(f"{key}={val}" for key, val in sorted(values.items()))
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    values["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+    return urlencode(values)
+
+
+async def _ws_until(socket, kind, *, matching=None):
+    for _ in range(10):
+        item = await asyncio.wait_for(socket.receive_json(), timeout=3)
+        if item.get("type") == kind and (matching is None or matching(item)):
+            return item
+    raise AssertionError(f"WebSocket did not deliver {kind}")
+
+
+@pytest.mark.asyncio
+async def test_staff_live_websocket_auth_events_and_typing(tmp_path):
+    """Real aiohttp WebSockets, signed Telegram auth, SQLite events and fanout."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    db = Database(tmp_path / "live.db")
+    await db.initialize()
+    for uid in (8, 20, 21):
+        await db.ensure_user(uid, telegram_name=f"Сотрудник {uid}")
+        await db.execute(
+            "UPDATE users SET city=? WHERE user_id=?", ("Санкт-Петербург", uid),
+        )
+    await db.set_role(20, "moderator")
+    await db.set_role(21, "admin")
+    settings = SimpleNamespace(
+        bot_token="test-telegram-token", community_chat_id=GROUP,
+        moderator_ids=frozenset(), is_owner=lambda uid: False,
+    )
+    hub = StaffChatHub()
+    db._staff_chat_hub = hub
+    app = web.Application()
+    app["db"], app["settings"], app["staff_chat_hub"] = db, settings, hub
+    app.router.add_get("/ws/community/chat", connect)
+
+    async def cleanup(_app):
+        await hub.shutdown()
+
+    app.on_cleanup.append(cleanup)
+
+    async with TestClient(TestServer(app)) as client:
+        unauthorized = await client.ws_connect("/ws/community/chat")
+        await unauthorized.send_json({"type": "auth", "init_data": _signed_chat_auth(8)})
+        rejected = await _ws_until(unauthorized, "error")
+        assert rejected["reason"] == "access"
+        assert hub.online == 0
+        await unauthorized.close()
+
+        forged = await client.ws_connect("/ws/community/chat")
+        await forged.send_json({"type": "auth", "init_data": "fake-signature"})
+        denied = await _ws_until(forged, "error")
+        assert denied["reason"] == "access"
+        await forged.close()
+
+        first = await client.ws_connect("/ws/community/chat")
+        await first.send_json({"type": "auth", "init_data": _signed_chat_auth(20)})
+        ready1 = await _ws_until(first, "ready")
+        assert ready1["online"] == 1
+
+        second = await client.ws_connect("/ws/community/chat")
+        await second.send_json({"type": "auth", "init_data": _signed_chat_auth(21)})
+        ready2 = await _ws_until(second, "ready")
+        assert ready2["online"] == 2
+        joined = await _ws_until(first, "presence", matching=lambda e: e["online"] == 2)
+        assert joined["online"] == 2
+
+        await capture(db, settings, event(220, "Новое из Telegram"))
+        for socket in (first, second):
+            update = await _ws_until(socket, "change")
+            assert update == {"type": "change", "operation": "message", "ids": [220]}
+
+        await capture(db, settings, event(220, "Исправлено").model_copy(
+            update={"edit_date": datetime.now(UTC)},
+        ))
+        for socket in (first, second):
+            update = await _ws_until(socket, "change")
+            assert update["operation"] == "edit" and update["ids"] == [220]
+
+        await first.send_json({"type": "typing"})
+        typing = await _ws_until(second, "typing")
+        assert typing["user_id"] == 20
+        assert typing["name"] == "Сотрудник 20"
+
+        await discard(db, settings, GROUP, [220])
+        for socket in (first, second):
+            update = await _ws_until(socket, "change")
+            assert update["operation"] == "delete" and update["ids"] == [220]
+        assert await db.fetchone(
+            "SELECT 1 FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
+            (GROUP, 220),
+        ) is None
+
+        await first.close()
+        await second.close()
+    assert hub.closed
+
+
+@pytest.mark.asyncio
+async def test_staff_live_queue_backpressure_keeps_refresh_signal():
+    from community_bot.staff_chat_live import Client
+
+    hub = StaffChatHub()
+
+    class StubSocket:
+        closed = False
+
+    stub = StubSocket()
+    client = Client(stub, 20, "Модератор", asyncio.Queue(maxsize=2))
+    hub.clients[stub] = client
+    hub.publish("message", [101])
+    hub.publish("edit", [101])
+    hub.publish("delete", [101])
+    assert client.queue.qsize() == 1
+    assert await client.queue.get() == {
+        "type": "change", "operation": "sync", "ids": [],
+    }
