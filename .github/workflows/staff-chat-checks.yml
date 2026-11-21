@@ -6,6 +6,8 @@ on:
       - "community_bot/staff_chat.py"
       - "community_bot/staff_chat_send.py"
       - "community_bot/staff_chat_live.py"
+      - "community_bot/staff_chat_reactions.py"
+      - "community_bot/web/style.css"
       - "community_bot/miniapp.py"
       - "community_bot/database.py"
       - "community_bot/web/staff-chat.js"
