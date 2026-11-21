@@ -2846,3 +2846,105 @@ button.staff-chat-author{text-align:left;background:none;padding:0;border:0}
 }
 .staff-chat-hide:focus-visible{outline:2px solid #e0a0b0;outline-offset:2px}
 .staff-chat-hide:disabled{opacity:.45}
+
+
+/* Staff chat composer: reserved to moderators/admins, compact Liquid Glass. */
+#app[data-screen="staffchat"] .staff-chat-feed{
+  height:clamp(185px, calc(100dvh - 390px), 620px);
+  min-height:185px;
+}
+#app[data-screen="staffchat"] .nora-staff-chat{
+  gap:8px;
+}
+.staff-chat-answer{
+  color:rgba(205,193,205,.77);
+  background:transparent;border:0;border-radius:6px;
+  min-height:23px;min-width:24px;padding:0 4px;
+  font-size:17px;cursor:pointer;
+}
+.staff-chat-answer:focus-visible{outline:2px solid #d691a0;outline-offset:2px}
+#staff-chat-compose{
+  display:grid;gap:7px;padding:10px 10px 9px;
+  border:1px solid rgba(255,255,255,.11);border-radius:18px;
+  background:rgba(192,186,199,.065);
+  -webkit-backdrop-filter:blur(23px) saturate(120%);
+  backdrop-filter:blur(23px) saturate(120%);
+  min-width:0;
+}
+#staff-chat-compose .staff-chat-compose-row{
+  display:flex;align-items:flex-end;gap:7px;min-width:0;
+}
+#staff-chat-compose :is(.staff-chat-add-file,.staff-chat-emoji-toggle,.staff-chat-submit){
+  display:grid;place-items:center;flex:none;
+  height:36px;width:36px;padding:0;margin:0;
+  border:1px solid rgba(255,255,255,.10);border-radius:12px;
+  background:rgba(255,255,255,.055);color:#e8dde5;
+  font:500 21px/1 Rubik,Arial,sans-serif;
+  cursor:pointer;
+}
+#staff-chat-compose .staff-chat-add-file{font-size:26px;font-weight:300}
+#staff-chat-compose .staff-chat-submit{
+  background:rgba(172,52,76,.8);color:#fff;border-color:rgba(221,107,129,.24);
+  font-size:18px;
+}
+#staff-chat-compose .staff-chat-submit:disabled{
+  background:rgba(255,255,255,.065);color:#8f8994;border-color:rgba(255,255,255,.05);
+  opacity:.78;cursor:not-allowed;
+}
+#staff-chat-compose #staff-chat-draft{
+  display:block;flex:1;min-width:0;min-height:37px;max-height:106px;
+  padding:10px 5px;margin:0;resize:none;overflow-y:auto;
+  border:0!important;outline:0!important;box-shadow:none!important;
+  background:transparent!important;color:#f4edf3!important;
+  font:400 13px/1.42 Rubik,Arial,sans-serif;
+  border-radius:0;
+}
+#staff-chat-compose #staff-chat-draft::placeholder{color:#a6a0aa;opacity:1}
+#staff-chat-compose .staff-chat-compose-hint{
+  margin:0 2px;color:#948e9a;font-size:10px;line-height:1.35;
+  overflow-wrap:anywhere;
+}
+#staff-chat-compose :is(.staff-chat-compose-reply,.staff-chat-compose-file){
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-width:0;max-width:100%;
+  padding:7px 9px;border-radius:10px;
+  background:rgba(255,255,255,.055);
+  border-left:2px solid rgba(231,132,149,.68);
+}
+#staff-chat-compose :is(.staff-chat-compose-reply,.staff-chat-compose-file)[hidden],
+#staff-chat-compose .staff-chat-emoji-palette[hidden],
+#staff-chat-compose #staff-chat-file[hidden]{display:none!important}
+#staff-chat-compose .staff-chat-compose-reply>span,
+#staff-chat-compose .staff-chat-compose-file>span{
+  display:grid;gap:2px;flex:1;min-width:0;font-size:11px;
+  color:#d8d2dd;overflow:hidden;text-overflow:ellipsis;
+}
+#staff-chat-compose .staff-chat-compose-reply b{
+  color:#edb2bf;font-size:11px;font-weight:600;
+}
+#staff-chat-compose .staff-chat-compose-reply small{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#aca5b1;font-size:10px;
+}
+#staff-chat-compose :is(.staff-chat-compose-reply,.staff-chat-compose-file)>button{
+  display:grid;place-items:center;flex:none;width:26px;height:26px;
+  background:transparent;border:0;color:#bdb5c3;font-size:18px;cursor:pointer;
+}
+#staff-chat-compose .staff-chat-emoji-palette{
+  display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:4px;
+}
+#staff-chat-compose .staff-chat-emoji-palette button{
+  min-width:31px;min-height:31px;border-radius:10px;border:0;
+  background:rgba(255,255,255,.055);
+  padding:3px;color:#fff;font-size:18px;cursor:pointer;
+}
+#staff-chat-compose :is(button,textarea):focus-visible{
+  outline:2px solid rgba(237,145,164,.75)!important;outline-offset:2px;
+}
+@media(max-width:370px){
+  #staff-chat-compose{padding:8px}
+  #staff-chat-compose .staff-chat-compose-row{gap:4px}
+  #staff-chat-compose :is(.staff-chat-add-file,.staff-chat-emoji-toggle,.staff-chat-submit){
+    width:33px;height:34px;
+  }
+}
