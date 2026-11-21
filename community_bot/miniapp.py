@@ -678,7 +678,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-burrow-trail.js', 'nora-burrow-trail.json',
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js', 'profile-track.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
-                 'community.js', 'avatars.js', 'commands.js',
+                 'community.js', 'staff-chat.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'durak.js', 'durak.css',
                  'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
