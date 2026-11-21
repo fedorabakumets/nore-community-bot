@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
@@ -142,7 +143,7 @@ async def auto_approve_join_request(
     try:
         await bot.approve_chat_join_request(request.chat.id, request.from_user.id)
     except (TelegramBadRequest, TelegramForbiddenError) as error:
-        logger.warning("Community join request approval failed (%s)", type(error).__name__)
+        logging.getLogger(__name__).warning("Community join request approval failed (%s)", type(error).__name__)
 
 
 @router.chat_member()
