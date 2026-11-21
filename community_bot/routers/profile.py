@@ -3,14 +3,17 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InputRichMessage, Message
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardMarkup, InputRichBlockButtons, InputRichBlockParagraph,
+    InputRichMessage, Message, RichMessageButton, RichTextBold,
+)
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file, replace_block
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.group_friendship import DECISION_PREFIX, group_friend_decision, group_profile_friend
-from community_bot.group_profile import FRIEND_PREFIX, _avatar, send_group_profile
+from community_bot.group_profile import FRIEND_PREFIX, _avatar, restore_group_profile_card, send_group_profile
 from community_bot.helpers import (
     can_view_profile,
     format_warn_entry,
@@ -18,6 +21,10 @@ from community_bot.helpers import (
     render_profile,
     resolve_command_target,
 )
+from community_bot.domain import reputation_tier
+from community_bot.ephemeral import keep_in_chat
+from community_bot.reply_rich import bot_publication
+from community_bot.shop_catalog import shop_prices_for
 from community_bot.keyboards import (
     close_btn,
     compact_profile_keyboard,
@@ -150,6 +157,122 @@ router.callback_query.register(
 router.callback_query.register(
     group_friend_decision, F.data.startswith(DECISION_PREFIX), F.message.chat.type.in_({"group", "supergroup"}),
 )
+
+LIMITS_CALLBACK = "gprofile:limits:"
+
+
+async def _limits_price(db: Database, settings: Settings, user: dict) -> int | None:
+    item = await db.get_shop_item("reset_limits")
+    if not item or not int(item.get("enabled") or 0):
+        return None
+    prices = shop_prices_for(
+        user, settings.restricted_reputation_threshold, await db.priced_shop_map(),
+    )
+    return prices.get("reset_limits")
+
+
+def _limits_confirmation(user: dict, price: int, uid: int, token: str) -> InputRichMessage:
+    balance = int(user["cookies"])
+    return InputRichMessage(blocks=[
+        InputRichBlockParagraph(text=[RichTextBold(text="♻️ Восстановление лимитов")]),
+        InputRichBlockParagraph(
+            text=f"Все дневные лимиты будут сброшены.\n"
+                 f"Цена: {price} 🍪 · Баланс: {balance} 🍪\n"
+                 "Таймер 60 секунд между треками останется."
+        ),
+        InputRichBlockButtons(align="center", buttons=[
+            RichMessageButton(text=f"Подтвердить · {price} 🍪", style="success",
+                              callback_data=f"{LIMITS_CALLBACK}pay:{uid}:{token}"),
+        ]),
+        InputRichBlockButtons(align="center", buttons=[
+            RichMessageButton(text="←", style="link",
+                              callback_data=f"{LIMITS_CALLBACK}back:{uid}:{token}"),
+        ]),
+    ], skip_entity_detection=True)
+
+
+@router.callback_query(
+    F.data.startswith(LIMITS_CALLBACK), F.message.chat.type.in_({"group", "supergroup"}),
+)
+async def group_profile_limits(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    """Use the existing shop intent/payment path, editing the same group card."""
+    message = callback.message
+    if not isinstance(message, Message) or not callback.data:
+        await callback.answer("Карточка профиля больше недоступна.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    if len(parts) not in (4, 5) or parts[:2] != ["gprofile", "limits"]:
+        await callback.answer("Неверная кнопка.", show_alert=True)
+        return
+    _, _, action, raw_uid, *rest = parts
+    if not raw_uid.isdecimal() or action not in {"restore", "back", "pay"}:
+        await callback.answer("Некорректная операция.", show_alert=True)
+        return
+    uid = int(raw_uid)
+    if uid != callback.from_user.id:
+        await callback.answer("Восстановить лимиты может только владелец профиля.", show_alert=True)
+        return
+
+    user = await db.get_user(uid)
+    if user is None:
+        await callback.answer("Профиль недоступен.", show_alert=True)
+        return
+
+    if action == "back":
+        if rest:
+            await db.cancel_wallet_intent(uid, rest[0])
+        ok = await restore_group_profile_card(message, db, settings, user, uid)
+        await callback.answer("" if ok else "Не удалось вернуть карточку.", show_alert=not ok)
+        return
+
+    price = await _limits_price(db, settings, user)
+    if price is None:
+        await callback.answer("Сброс лимитов сейчас не продаётся в магазине.", show_alert=True)
+        return
+
+    if action == "restore" and not rest:
+        token = await db.create_wallet_intent(uid, "reset_limits", price)
+        try:
+            with keep_in_chat(), bot_publication():
+                await message.edit_text(
+                    parse_mode=None, rich_message=_limits_confirmation(user, price, uid, token),
+                )
+        except (TelegramBadRequest, TelegramNotFound):
+            await db.cancel_wallet_intent(uid, token)
+            await callback.answer("Не удалось открыть подтверждение покупки.", show_alert=True)
+            return
+        await callback.answer()
+        return
+
+    if action != "pay" or len(rest) != 1:
+        await callback.answer("Подтверждение недоступно.", show_alert=True)
+        return
+
+    token = rest[0]
+    intent = await db.get_wallet_intent(uid, token)
+    if not intent or intent["item"] != "reset_limits" or int(intent["target_id"]) != uid:
+        await callback.answer("Подтверждение устарело. Открой покупку заново.", show_alert=True)
+        return
+    if int(intent["price"]) != price:
+        await callback.answer("Цена изменилась. Открой покупку заново.", show_alert=True)
+        return
+
+    ok, error = await db.buy_item(uid, "reset_limits", price, intent_id=token)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+
+    from community_bot.life import unlock
+    from community_bot.notify import vitrine_consumed
+
+    await unlock(db, uid, "shop_first")
+    await vitrine_consumed(message.bot, db, "reset_limits")
+    fresh = await db.get_user(uid) or user
+    edited = await restore_group_profile_card(message, db, settings, fresh, uid)
+    await callback.answer("Лимиты восстановлены ✓" if edited else "Лимиты восстановлены. Открой профиль заново.")
+
+
 
 
 @router.callback_query(F.data.startswith("profile:"))
