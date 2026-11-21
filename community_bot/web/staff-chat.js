@@ -13,8 +13,14 @@ window.NoraStaffChat = (() => {
   let gesture = null, gestureTimer = null;
 
   const cache = new Map();
-  let draft = '', replyTarget = null, attachment = null, sending = false, emojiOpen = false;
+  let draft = '', replyTarget = null, attachments = [], attachmentKind = 'file';
+  let sending = false, emojiOpen = false, uploadProgress = 0, uploadXHR = null;
+  let recorder = null, microphone = null, recordTimer = null, recordStarted = 0;
+  let recording = false, recordingCancelled = false;
+  const previewUrls = new Map();
   const maxUpload = 12 * 1024 * 1024;
+  const maxAlbumUpload = 30 * 1024 * 1024;
+  const maxAlbumItems = 6;
   const quickEmoji = ['😂','❤️','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
   const mediaLabels = {
     photo: 'Фото', video: 'Видео', animation: 'GIF',
@@ -87,7 +93,22 @@ window.NoraStaffChat = (() => {
     </section>`;
   };
 
-  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[]), JSON.stringify(m.reactions||[])].join('|');
+  const msgSignature = m => [m.edited_at || '', m.reply_text || '', m.reply_name || '', m.text || '', m.media_type || '', m.has_thumbnail ? '1' : '0', JSON.stringify(m.rich||[]), JSON.stringify(m.reactions||[]),
+    JSON.stringify((m.album||[]).map(photo=>[photo.id,photo.media_type,photo.has_thumbnail]))].join('|');
+  function groupAlbums(items){
+    const result=[], seen=new Set();
+    for(const m of items){
+      const key=String(m.media_group_id||'');
+      if(key && ['photo','video'].includes(m.media_type)){
+        if(seen.has(key))continue;
+        const group=items.filter(other=>other.media_group_id===key && ['photo','video'].includes(other.media_type));
+        seen.add(key);
+        if(group.length>1){result.push({...m,album:group});continue;}
+      }
+      result.push(m);
+    }
+    return result;
+  }
   const reactionMarkup = (reactions,id) => (Array.isArray(reactions) ? reactions : [])
     .filter(item=>reactionSet.includes(item.emoji) && Number(item.count)>0)
     .map(item=>`<button type="button" class="staff-chat-react-chip${item.mine?' is-mine':''}"
@@ -115,6 +136,9 @@ window.NoraStaffChat = (() => {
         <b>${esc(m.reply_name || 'Сообщение')}</b><span>${esc((m.reply_text || mediaLabels[m.reply_media_type] || 'Сообщение').slice(0,90))}</span>
       </button>` : '';
     const body = m.text ? `<div class="staff-chat-text">${esc(m.text)}</div>` : '';
+    const media = m.album?.length>1
+      ? `<div class="staff-chat-album-grid" aria-label="Альбом из ${m.album.length} файлов">${m.album.map(mediaTile).join('')}</div>`
+      : mediaTile(m);
     const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
     const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
     const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
@@ -128,7 +152,7 @@ window.NoraStaffChat = (() => {
        ${avatar}<div class="staff-chat-bubble">
          <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${more}</div>
          ${actions}
-         ${quote}${mediaTile(m)}${richRow(m)}${body}
+         ${quote}${media}${richRow(m)}${body}
          <div class="staff-chat-reactions" data-chat-reactions="${id}">${reactionMarkup(m.reactions,id)}</div>
          ${reactionPicker(id)}
        </div>
@@ -158,17 +182,19 @@ window.NoraStaffChat = (() => {
       <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
         <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
+        <div class="staff-chat-record-status" id="staff-chat-record-status" hidden aria-live="polite"></div>
         <div class="staff-chat-compose-row">
           <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="Прикрепить файл" title="Прикрепить файл">＋</button>
-          <input id="staff-chat-file" type="file" accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.mp4,.mov,.webm,.mp3,.m4a,.ogg,.oga,.opus,.aac,.wav,.pdf,.txt" hidden>
+          <input id="staff-chat-file" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.mp4,.mov,.webm,.mp3,.m4a,.ogg,.oga,.opus,.aac,.wav,.pdf,.txt" hidden>
           <textarea id="staff-chat-draft" rows="1" maxlength="3000" placeholder="Сообщение в чат…" aria-label="Сообщение в Telegram-чат"></textarea>
+          <button type="button" class="staff-chat-record-toggle" data-chat-record aria-label="Записать голосовое" title="Голосовое">🎙</button>
           <button type="button" class="staff-chat-emoji-toggle" data-chat-emoji-toggle aria-label="Эмодзи" title="Эмодзи">☺</button>
           <button type="submit" id="staff-chat-submit" class="staff-chat-submit" aria-label="Отправить в чат" disabled>➤</button>
         </div>
         <div class="staff-chat-emoji-palette" id="staff-chat-emoji-palette" hidden>
           ${quickEmoji.map(emoji=>`<button type="button" data-chat-emoji="${esc(emoji)}" aria-label="Добавить ${esc(emoji)}">${emoji}</button>`).join('')}
         </div>
-        <p class="staff-chat-compose-hint"><span aria-hidden="true">●</span> Отправка от бота Норы с подписью автора · до 12 МБ</p>
+        <p class="staff-chat-compose-hint"><span aria-hidden="true">●</span> От имени бота Норы с подписью автора · 12 МБ на файл, альбом до 30 МБ</p>
       </form>
     </section>`;
   }
@@ -362,6 +388,7 @@ window.NoraStaffChat = (() => {
       void richCover(node);
   }
   function applyMessages(feed, items, force=false) {
+    items=groupAlbums(items);
     const existing = new Map([...feed.querySelectorAll('.staff-chat-message')]
       .map(el => [Number(el.dataset.messageId),el]));
     const firstExisting = existing.keys().next().value;
