@@ -27,3 +27,5 @@ jobs:
           node --check community_bot/web/home-screen.js
           node --check community_bot/web/home.js
           node --check community_bot/web/app.js
+      - name: Profile wizard avatar upload regression
+        run: node --test tests/test_profile_wizard_upload.mjs
