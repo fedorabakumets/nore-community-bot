@@ -82,7 +82,12 @@ def _search_alias(value: str) -> str:
         return ALIASES[normalized]
     if re.fullmatch(r"[a-z\\[\\];',.\\s]+", normalized) and any("a" <= c <= "z" for c in normalized):
         corrected = _normalize(normalized.translate(_KEYBOARD_TRANSLATION))
-        return ALIASES.get(corrected, corrected)
+        if corrected in ALIASES:
+            return ALIASES[corrected]
+        if max(SequenceMatcher(None, corrected, _normalize(name)).ratio()
+               for name, _ in POPULAR) >= 0.77:
+            return corrected
+    # Keep Latin city names (Berlin, Paris, etc.) for the worldwide geocoder.
     return value
 
 
