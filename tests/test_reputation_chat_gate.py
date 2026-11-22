@@ -43,13 +43,13 @@ async def setup_gate(monkeypatch, tmp_path, *, reputation: int, admin: bool = Fa
         restrict_chat_member=AsyncMock(),
         send_message=AsyncMock(),
     )
-    settings = SimpleNamespace(community_chat_id=-100123, restricted_reputation_threshold=0)
+    settings = SimpleNamespace(community_chat_id=-100123, restricted_reputation_threshold=50)
     return db, bot, settings, activity
 
 
 @pytest.mark.asyncio
 async def test_below_bronze_message_is_deleted_and_member_remuted(monkeypatch, tmp_path):
-    db, bot, settings, activity = await setup_gate(monkeypatch, tmp_path, reputation=-1)
+    db, bot, settings, activity = await setup_gate(monkeypatch, tmp_path, reputation=49)
     middleware = group.CommunityModerationMiddleware()
     handler = AsyncMock(return_value="delivered")
     data = {"db": db, "bot": bot, "settings": settings}
@@ -67,7 +67,7 @@ async def test_below_bronze_message_is_deleted_and_member_remuted(monkeypatch, t
 
 @pytest.mark.asyncio
 async def test_bronze_member_can_write(monkeypatch, tmp_path):
-    db, bot, settings, activity = await setup_gate(monkeypatch, tmp_path, reputation=0)
+    db, bot, settings, activity = await setup_gate(monkeypatch, tmp_path, reputation=50)
     handler = AsyncMock(return_value="delivered")
     result = await group.CommunityModerationMiddleware()(
         handler, message(), {"db": db, "bot": bot, "settings": settings},
@@ -112,7 +112,7 @@ async def test_unmute_command_cannot_override_reputation_gate(monkeypatch):
     respond = AsyncMock()
     monkeypatch.setattr(group, "_respond", respond)
     bot = SimpleNamespace(restrict_chat_member=AsyncMock())
-    settings = SimpleNamespace(restricted_reputation_threshold=0)
+    settings = SimpleNamespace(restricted_reputation_threshold=50)
     await group.unmute_member(message(), SimpleNamespace(), settings, bot)
     bot.restrict_chat_member.assert_not_awaited()
     assert "ниже бронзы" in respond.await_args.args[1].lower()
@@ -125,11 +125,11 @@ async def test_miniapp_chat_relay_cannot_bypass_reputation_gate(monkeypatch, tmp
     db = Database(tmp_path / "miniapp-rep-gate.db")
     await db.initialize()
     await db.ensure_user(17, telegram_name="Участник")
-    await db.execute("UPDATE users SET reputation=-2 WHERE user_id=17")
+    await db.execute("UPDATE users SET reputation=49 WHERE user_id=17")
     monkeypatch.setattr(staff_chat_send, "staff_allowed", AsyncMock(return_value=True))
     bot = SimpleNamespace(send_message=AsyncMock())
     settings = SimpleNamespace(
-        community_chat_id=-100123, restricted_reputation_threshold=0,
+        community_chat_id=-100123, restricted_reputation_threshold=50,
     )
 
     class Request(dict):
