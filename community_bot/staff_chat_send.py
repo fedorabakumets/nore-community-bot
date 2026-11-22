@@ -190,9 +190,8 @@ async def _publish(request: web.Request, *, text: str, reply: object,
         # mean that Telegram delivered the message successfully.
         request.app["staff_chat_last_sent"][uid] = now
         try:
-            # Only real Telegram messages: no inline/reply keyboards on any media type.
-            kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to,
-                      "reply_markup": None}
+            # No reply_markup is provided: normal Telegram messages, no buttons.
+            kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to}
             if kind == "voice":
                 filename, payload = files[0]
                 gate = request.app.get("staff_chat_voice_gate")
