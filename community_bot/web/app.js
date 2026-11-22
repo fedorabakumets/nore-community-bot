@@ -113,6 +113,7 @@ function showCitySetup() {
     </form>
   </section>`;
   const form = $('#city-setup-form');
+  window.NoraCity.mount(form);
   form.onsubmit = async event => {
     event.preventDefault();
     if (busy) return;
@@ -122,7 +123,7 @@ function showCitySetup() {
     button.textContent = 'Сохраняем…';
     error.textContent = '';
     try {
-      await api('city', {city: form.elements.city.value});
+      await api('city', {city_id: window.NoraCity.choice(form)});
       await openApp(await api('me'));
     } catch (err) {
       error.textContent = err.message;
@@ -187,6 +188,7 @@ function showApplication(application) {
     </form>
   </section>`;
   const form = $('#application-form');
+  window.NoraCity.mount(form);
   form.onsubmit = async event => {
     event.preventDefault();
     if (busy) return;
@@ -197,6 +199,7 @@ function showApplication(application) {
     submit.textContent = 'Отправляем…';
     error.textContent = '';
     try {
+      answers.city_id = window.NoraCity.choice(form);
       const result = await api('application', {...answers, ban_version: application.ban_version});
       if (result.status === 'admitted') await openApp(await api('me'));
       else showApplication(result);
@@ -694,7 +697,29 @@ async function startApp() {
 void startApp();
 
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
-function editProfile(){const u=data.user;const revision=data.revision;sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2><form id="profile-form"><label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label><label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label><label>Город<input name="city" minlength="2" maxlength="100" required value="${esc(u.city||'')}"></label><label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label><label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label><p class="sub">Имя — до 50, город — от 2 до 100, увлечения — до 500, описание — до 280 символов. Возраст — от 14 до 120.</p><button class="primary" id="pay" type="submit">Сохранить профиль</button></form>`);$('#profile-form').onsubmit=e=>{e.preventDefault();const fields=Object.fromEntries(new FormData(e.target));perform('profile',{fields,revision})}}
+function editProfile(){
+  const u=data.user, revision=data.revision;
+  sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2>
+    <form id="profile-form">
+      <label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label>
+      <label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label>
+      <label>Город<input name="city" minlength="2" maxlength="100" required value="${esc(u.city||'')}"></label>
+      <label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label>
+      <label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label>
+      <p class="sub">Для изменения города выбери вариант из подсказок. Возраст — от 14 до 120.</p>
+      <button class="primary" id="pay" type="submit">Сохранить профиль</button>
+    </form>`);
+  const form=$('#profile-form');
+  window.NoraCity.mount(form,u.city||'');
+  form.onsubmit=e=>{
+    e.preventDefault();
+    try{
+      const fields=Object.fromEntries(new FormData(form));
+      const city_id=window.NoraCity.choice(form,u.city||'');
+      perform('profile',{fields,revision,...(city_id?{city_id}:{})});
+    }catch(error){toast(error.message)}
+  };
+}
 const AVATAR_MAX_MB = 64;
 const AVATAR_ACCEPT = 'image/*,.heic,.heif';
 async function uploadPhoto(file, endpoint, headers) {
