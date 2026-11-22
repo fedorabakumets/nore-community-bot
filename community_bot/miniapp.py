@@ -70,11 +70,11 @@ async def protection(request, handler):
             path = request.path
             ban = await db.ban_reset_state(uid)
             if not await private_allowed(db, settings, uid, ban=ban):
-                if path not in {'/api/me', '/api/application', '/api/application/photo'}:
+                if path not in {'/api/me', '/api/application', '/api/application/photo', '/api/cities'}:
                     return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
                                              status=403, headers={'Cache-Control': 'no-store'})
                 request['application_ban'] = ban
-            elif path not in {'/api/me', '/api/city'}:
+            elif path not in {'/api/me', '/api/city', '/api/cities'}:
                 registered = await db.get_user(uid)
                 if not registered or not str(registered.get('city') or '').strip():
                     return web.json_response(
@@ -82,7 +82,7 @@ async def protection(request, handler):
                         status=403, headers={'Cache-Control': 'no-store'},
                     )
             profile_optional = path in {
-                '/api/me', '/api/city', '/api/application', '/api/application/photo',
+                '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
                 '/api/community/chat',
@@ -161,6 +161,7 @@ async def application_onboarding(db, uid, ban):
 
 async def submit_application(request):
     from community_bot.application_form import validate_application_age, validate_city
+    from community_bot.city_lookup import resolve_city_id, resolve_city_text
     from community_bot.routers.private import _notify_application_decision
 
     if 'application_ban' not in request:
@@ -188,7 +189,8 @@ async def submit_application(request):
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
                 raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
             answers[field] = value.strip()
-        answers['city'] = validate_city(answers['city'])
+        answers['city'] = (await resolve_city_id(body['city_id']) if isinstance(body.get('city_id'), str)
+                           else await resolve_city_text(answers['city']))
         answers['age'] = validate_application_age(body.get('age'))
     except (ValueError, TypeError) as error:
         message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'
@@ -308,14 +310,31 @@ async def overview(request):
     })
 
 
+async def city_suggestions(request):
+    from community_bot.city_lookup import popular_cities, search_cities
+
+    query = request.query.get('q', '').strip()
+    try:
+        if not query:
+            cities, _ = popular_cities()
+        elif len(query) <= 100:
+            cities = await search_cities(query)
+        else:
+            raise ValueError('Слишком длинный запрос')
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
+    return web.json_response({'items': cities}, headers={'Cache-Control': 'no-store'})
+
+
 async def set_city(request):
-    from community_bot.application_form import validate_city
+    from community_bot.city_lookup import resolve_city_id, resolve_city_text
 
     payload = await request.json()
-    if not isinstance(payload, dict) or set(payload) != {'city'}:
-        return web.json_response({'error': 'Укажи город'}, status=400)
+    if not isinstance(payload, dict) or set(payload) not in ({'city_id'}, {'city'}):
+        return web.json_response({'error': 'Выбери город из списка'}, status=400)
     try:
-        city = validate_city(payload['city'])
+        city = (await resolve_city_id(payload['city_id']) if 'city_id' in payload
+                else await resolve_city_text(payload['city']))
     except ValueError as error:
         return web.json_response({'error': str(error)}, status=400)
     user = await actor(request)
@@ -445,9 +464,16 @@ async def save_profile(request):
 
     user = await actor(request)
     data = await request.json()
-    if not isinstance(data, dict) or set(data) != {'fields', 'revision'} or not isinstance(data['revision'], str):
+    if (not isinstance(data, dict) or not {'fields', 'revision'} <= set(data)
+            or set(data) - {'fields', 'revision', 'city_id'}
+            or not isinstance(data['revision'], str)):
         raise ValueError('Некорректный запрос профиля')
     fields = validate_profile_fields(data['fields'])
+    if 'city' in fields and fields['city'] != user.get('city'):
+        from community_bot.city_lookup import resolve_city_id, resolve_city_text
+
+        fields['city'] = (await resolve_city_id(data['city_id']) if isinstance(data.get('city_id'), str)
+                          else await resolve_city_text(fields['city']))
     if not await request.app['db'].save_self_profile(user['user_id'], fields, data['revision']):
         return web.json_response({'error': 'Профиль уже изменился в боте. Обнови ЛК перед сохранением'}, status=409)
     return web.json_response({'ok': True, 'message': 'Профиль сохранён — изменения уже видны в боте'})
@@ -552,6 +578,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/admin/upload', admin_web.upload)
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
+    app.router.add_get('/api/cities', city_suggestions)
     app.router.add_post('/api/city', set_city)
     app.router.add_post('/api/application', submit_application)
     app.router.add_post('/api/application/photo', upload_application_photo)
