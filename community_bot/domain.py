@@ -79,7 +79,8 @@ def discounted_price(base_price: int, discount: int) -> int:
 
 
 def normalize_phrase(text: str) -> str:
-    return " ".join(text.casefold().strip().split())
+    # Telegram users mix ASCII hyphen and typographic minus signs in −реп.
+    return " ".join(text.casefold().replace("−", "-").replace("–", "-").strip().split())
 
 
 def reputation_delta(text: str) -> int | None:
