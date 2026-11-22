@@ -879,6 +879,7 @@ window.NoraStaffChat = (() => {
       name:button.dataset.chatName || 'Сообщение',
       preview:button.dataset.chatPreview || 'Ответ в Telegram'
     };
+    hideSendConfirmation();
     composeUpdate();
     document.getElementById('staff-chat-draft')?.focus();
   }
@@ -1589,7 +1590,7 @@ window.NoraStaffChat = (() => {
     const answer = event.target.closest('[data-chat-answer]');
     if(answer){selectReply(answer);return;}
     if(event.target.closest('[data-chat-cancel-reply]')){
-      replyTarget=null;composeUpdate();return;
+      replyTarget=null;hideSendConfirmation();composeUpdate();return;
     }
     const remove=event.target.closest('[data-chat-remove-file]');
     if(remove){
@@ -1599,6 +1600,7 @@ window.NoraStaffChat = (() => {
         forgetUpload(attachments[index]);
         attachments.splice(index,1);
         if(!attachments.length)attachmentKind='file';
+        hideSendConfirmation();
         composeUpdate();
       }
       return;
@@ -1624,7 +1626,7 @@ window.NoraStaffChat = (() => {
           field.value=draft;
           field.focus();
           field.setSelectionRange(start+symbol.length,start+symbol.length);
-          composeUpdate();postTyping();
+          hideSendConfirmation();composeUpdate();postTyping();
         }
       }
       return;
