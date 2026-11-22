@@ -408,7 +408,12 @@ async def test_miniapp_city_screen_and_api_gate(db):
     locked.assert_not_awaited()
 
     req.path = '/api/city'
-    req.body = {'city': '  Новосибирск  '}
+    req.body = {'city_id': 'bad-choice'}
+    invalid = await protection(req, set_city)
+    assert invalid.status == 400
+    assert (await db.get_user(7))['city'] is None
+
+    req.body = {'city_id': 'p:2'}
     saved = await protection(req, set_city)
     assert saved.status == 200
     assert json.loads(saved.body) == {'ok': True, 'city': 'Новосибирск'}
