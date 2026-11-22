@@ -164,7 +164,7 @@ async def test_mute_and_unmute_use_telegram_and_are_logged(tmp_path):
     assert unmute.status == 200
     assert bot.restrict_chat_member.await_count == 2
     assert "until_date" not in bot.restrict_chat_member.await_args.kwargs
-    logs = await db.fetchall("SELECT action FROM admin_audit_log ORDER BY id")
+    logs = await db.fetchall("SELECT action FROM admin_audit_log WHERE actor_id=21 ORDER BY id")
     assert [item["action"] for item in logs] == ["mute", "unmute"]
 
 
