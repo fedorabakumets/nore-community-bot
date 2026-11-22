@@ -168,7 +168,7 @@ class CityGateMiddleware(BaseMiddleware):
             if not suggestions:
                 await event.reply("Город не найден. Попробуй другое название в ответ.")
                 return None
-            text = CITY_PROMPT + "\n\nВыбери свой город из вариантов (область и страна указаны для уточнения):"
+            text = CITY_PROMPT + "\n\nВыбери найденный город (область и страна помогают отличить одноимённые города):"
             sent = await event.reply(text, reply_markup=city_keyboard(actor.id, suggestions=suggestions))
             if isinstance(sent, Message):
                 await db.set_bot_state(_prompt_key(event.chat.id, actor.id), str(sent.message_id))
