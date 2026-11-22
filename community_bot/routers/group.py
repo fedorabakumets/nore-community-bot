@@ -218,6 +218,7 @@ class CommunityModerationMiddleware(BaseMiddleware):
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque[float]] = defaultdict(deque)
         self._admin_cache: dict[tuple[int, int], tuple[float, bool]] = {}
+        self._restricted_notices: dict[int, float] = {}
 
     async def _is_telegram_admin(self, bot: Bot, chat_id: int, user_id: int) -> bool:
         key = (chat_id, user_id)
@@ -259,7 +260,40 @@ class CommunityModerationMiddleware(BaseMiddleware):
                 with contextlib.suppress(TelegramAPIError):
                     await event.delete()
                 return None
-            await register_telegram_user(db, event.from_user)
+            user = await register_telegram_user(db, event.from_user)
+            # A Telegram mute alone is not an access check: a manual unmute,
+            # a missed reputation update or a reconnect can restore posting.
+            # Enforce the reputation gate before activity rewards and handlers.
+            if (
+                isinstance(settings, Settings)
+                and isinstance(bot, Bot)
+                and settings.community_chat_id
+                and event.chat.id == settings.community_chat_id
+                and not event.sender_chat
+                and not event.from_user.is_bot
+                and int(user["reputation"]) < settings.restricted_reputation_threshold
+                and not await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
+            ):
+                with contextlib.suppress(TelegramAPIError):
+                    await event.delete()
+                with contextlib.suppress(TelegramAPIError):
+                    await bot.restrict_chat_member(
+                        event.chat.id,
+                        event.from_user.id,
+                        permissions=ChatPermissions(can_send_messages=False),
+                    )
+                now = time.monotonic()
+                if now - self._restricted_notices.get(event.from_user.id, -float("inf")) >= 600:
+                    if len(self._restricted_notices) > 2000:
+                        self._restricted_notices.clear()
+                    self._restricted_notices[event.from_user.id] = now
+                    with contextlib.suppress(TelegramAPIError):
+                        await bot.send_message(
+                            event.from_user.id,
+                            "🔞 Репутация ниже бронзы. Писать в чат Норы нельзя. "
+                            "Восстанови репутацию через магазин в личном чате с Норой.",
+                        )
+                return None
             if (
                 isinstance(settings, Settings)
                 and isinstance(bot, Bot)
@@ -854,7 +888,11 @@ async def _lift_community_mutes(bot: Bot, db: Database, settings: Settings, acto
                 member = await bot.get_chat_member(chat_id, uid)
                 if not isinstance(member, ChatMemberRestricted) or not member.is_member or member.can_send_messages:
                     continue
-                if not await can_manage_user(db, settings, actor_id, uid) or await needs_reapplication(db, uid):
+                if (
+                    int(row["reputation"]) < settings.restricted_reputation_threshold
+                    or not await can_manage_user(db, settings, actor_id, uid)
+                    or await needs_reapplication(db, uid)
+                ):
                     skipped += 1
                     continue
                 await bot.restrict_chat_member(
@@ -917,6 +955,9 @@ async def unmute_member(message: Message, db: Database, settings: Settings, bot:
         return
     target, args = await _take_target(message, db, settings, "Ответьте человеку или напишите «Нора размут @имя».")
     if not target:
+        return
+    if int(target["reputation"]) < settings.restricted_reputation_threshold:
+        await _respond(message, "🔞 Репутация ниже бронзы: сначала нужно её восстановить.")
         return
     try:
         await bot.restrict_chat_member(message.chat.id, int(target["user_id"]), permissions=_full_permissions())
