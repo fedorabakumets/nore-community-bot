@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS reputation_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_rep_actor_date ON reputation_actions(actor_id, action_date);
 
+-- Every shield charge is one use and expires 24 hours after it was granted.
+CREATE TABLE IF NOT EXISTS reputation_shields (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    granted_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reputation_shields_active
+    ON reputation_shields(user_id, expires_at);
+
 CREATE TABLE IF NOT EXISTS pending_transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_id INTEGER NOT NULL REFERENCES users(user_id),
@@ -716,6 +726,27 @@ class Database:
                 await db.execute("ALTER TABLE users ADD COLUMN profile_title TEXT NOT NULL DEFAULT ''")
             if "hate_shields" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN hate_shields INTEGER NOT NULL DEFAULT 0")
+            # One-time transition: existing indefinite shield balances receive 24 hours
+            # from first startup on this version. Never issue them again on restart.
+            shield_migration = await (await db.execute(
+                "SELECT value FROM bot_state WHERE key='reputation_shields_ttl_migration_v1'"
+            )).fetchone()
+            if not shield_migration:
+                migrated_at = utcnow()
+                expires_at = (datetime.fromisoformat(migrated_at) + timedelta(hours=24)).isoformat()
+                legacy = await (await db.execute(
+                    "SELECT user_id, hate_shields FROM users WHERE hate_shields > 0"
+                )).fetchall()
+                for old in legacy:
+                    await db.executemany(
+                        "INSERT INTO reputation_shields(user_id, granted_at, expires_at) VALUES (?, ?, ?)",
+                        [(int(old["user_id"]), migrated_at, expires_at)] * int(old["hate_shields"]),
+                    )
+                await db.execute(
+                    "INSERT INTO bot_state(key, value) VALUES ('reputation_shields_ttl_migration_v1', ?)",
+                    (migrated_at,),
+                )
+            await db.execute("DELETE FROM reputation_shields WHERE expires_at <= ?", (utcnow(),))
             if "moderator_note" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN moderator_note TEXT NOT NULL DEFAULT ''")
             if "profile_bio" not in columns:
@@ -978,7 +1009,18 @@ class Database:
         return user
 
     async def get_user(self, user_id: int) -> dict[str, Any] | None:
-        return await self.fetchone("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user = await self.fetchone("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        if user and int(user.get("hate_shields") or 0):
+            # Never display an expired shield, even before a cleanup job runs.
+            user["hate_shields"] = await self.active_hate_shields(user_id)
+        return user
+
+    async def active_hate_shields(self, user_id: int) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) AS count FROM reputation_shields WHERE user_id=? AND expires_at > ?",
+            (user_id, utcnow()),
+        )
+        return int(row["count"]) if row else 0
 
     async def set_role(self, user_id: int, role: str) -> None:
         await self.execute(
@@ -1992,15 +2034,29 @@ class Database:
         return int(row["count"]) if row else 0
 
     async def consume_hate_shield(self, user_id: int) -> bool:
+        """Use one non-expired charge (earliest expiration first), atomically."""
         now = utcnow()
         async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                "DELETE FROM reputation_shields WHERE user_id=? AND expires_at <= ?",
+                (user_id, now),
+            )
             cursor = await db.execute(
-                "UPDATE users SET hate_shields = hate_shields - 1, updated_at = ? "
-                "WHERE user_id = ? AND hate_shields > 0",
-                (now, user_id),
+                "SELECT id FROM reputation_shields "
+                "WHERE user_id=? AND expires_at > ? ORDER BY expires_at, id LIMIT 1",
+                (user_id, now),
+            )
+            charge = await cursor.fetchone()
+            if charge:
+                await db.execute("DELETE FROM reputation_shields WHERE id=?", (charge["id"],))
+            await db.execute(
+                "UPDATE users SET hate_shields=(SELECT COUNT(*) FROM reputation_shields "
+                "WHERE user_id=? AND expires_at > ?), updated_at=? WHERE user_id=?",
+                (user_id, now, now, user_id),
             )
             await db.commit()
-            return cursor.rowcount == 1
+            return charge is not None
 
     @staticmethod
     async def _change_reputation_value(db, user_id: int, delta: int, now: str) -> int:
@@ -2595,9 +2651,15 @@ class Database:
         elif item == "forgive":
             await db.execute("UPDATE users SET warnings = 0 WHERE user_id = ?", (user_id,))
         elif item == "rep_shield":
+            expires_at = (datetime.fromisoformat(now) + timedelta(hours=24)).isoformat()
             await db.execute(
-                "UPDATE users SET hate_shields = hate_shields + 1, updated_at = ? WHERE user_id = ?",
-                (now, user_id),
+                "INSERT INTO reputation_shields(user_id, granted_at, expires_at) VALUES (?, ?, ?)",
+                (user_id, now, expires_at),
+            )
+            await db.execute(
+                "UPDATE users SET hate_shields=(SELECT COUNT(*) FROM reputation_shields "
+                "WHERE user_id=? AND expires_at > ?), updated_at=? WHERE user_id=?",
+                (user_id, now, now, user_id),
             )
         elif item == "private_profile":
             cursor = await db.execute(
