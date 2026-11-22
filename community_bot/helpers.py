@@ -359,8 +359,12 @@ def compact_profile_text(user: dict[str, Any], settings: Settings, role_name: st
     name = str(user.get("profile_name") or user.get("telegram_name") or f"ID {user['user_id']}")
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
     identity = f" · @{html.escape(str(user['username']))}" if user.get("username") else ""
+    tgk = (
+        f' · <a href="{html.escape(str(user["tg_channel_url"]), quote=True)}">ТГК</a>'
+        if user.get("tg_channel_url") else ""
+    )
     lines = [
-        f"<b>{user_link(int(user['user_id']), name)}</b>{identity}",
+        f"<b>{user_link(int(user['user_id']), name)}</b>{identity}{tgk}",
         f"{html.escape(role_display_name(str(user['role']), role_name))} · Возраст: {profile_age(user) or '—'}",
     ]
     lines.append(f"📍 Город: {html.escape(str(user.get('city') or 'не указан'))}")

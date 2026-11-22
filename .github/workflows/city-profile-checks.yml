@@ -19,7 +19,9 @@ jobs:
       - name: Python lint
         run: python -m ruff check community_bot/application_form.py community_bot/city_lookup.py community_bot/city_gate.py community_bot/database.py community_bot/profile_fields.py community_bot/miniapp.py community_bot/main.py community_bot/group_profile.py community_bot/helpers.py community_bot/social_profiles.py community_bot/routers/private.py community_bot/release_backup.py tests/test_city_gate.py tests/test_city_validation.py tests/test_miniapp.py tests/test_release_backup.py
       - name: Regression tests
-        run: python -m pytest -q tests/test_city_gate.py tests/test_city_validation.py tests/test_miniapp.py tests/test_private_access.py tests/test_release_backup.py
+        run: |
+          python -m compileall -q community_bot/routers/profile.py
+          python -m pytest -q tests/test_tgk_profiles.py tests/test_chat_profile_compact.py tests/test_city_gate.py tests/test_city_validation.py tests/test_miniapp.py tests/test_private_access.py tests/test_release_backup.py
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
