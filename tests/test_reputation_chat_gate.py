@@ -116,3 +116,26 @@ async def test_unmute_command_cannot_override_reputation_gate(monkeypatch):
     await group.unmute_member(message(), SimpleNamespace(), settings, bot)
     bot.restrict_chat_member.assert_not_awaited()
     assert "ниже бронзы" in respond.await_args.args[1].lower()
+
+
+@pytest.mark.asyncio
+async def test_miniapp_chat_relay_cannot_bypass_reputation_gate(monkeypatch, tmp_path):
+    from community_bot import staff_chat_send
+
+    db = Database(tmp_path / "miniapp-rep-gate.db")
+    await db.initialize()
+    await db.ensure_user(17, telegram_name="Участник")
+    await db.execute("UPDATE users SET reputation=-2 WHERE user_id=17")
+    monkeypatch.setattr(staff_chat_send, "staff_allowed", AsyncMock(return_value=True))
+    bot = SimpleNamespace(send_message=AsyncMock())
+    settings = SimpleNamespace(
+        community_chat_id=-100123, restricted_reputation_threshold=0,
+    )
+
+    class Request(dict):
+        app = {"db": db, "settings": settings, "bot": bot}
+
+    credentials, denied = await staff_chat_send._member(Request(actor={"id": 17}))
+    assert credentials is None
+    assert denied.status == 403
+    bot.send_message.assert_not_awaited()
