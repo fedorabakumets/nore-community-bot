@@ -203,3 +203,15 @@ async def test_city_backfilled_from_approved_legacy_application(tmp_path):
     await db.execute("ALTER TABLE users DROP COLUMN city")
     await db.initialize()
     assert (await db.get_user(12))["city"] == "Казань"
+
+
+async def test_city_typo_suggests_verified_popular_match(monkeypatch):
+    async def unavailable(*_args, **_kwargs):
+        raise ValueError("offline")
+
+    monkeypatch.setattr("community_bot.city_lookup._geocoding", unavailable)
+    candidates = await search_cities("Масква")
+    assert candidates
+    assert candidates[0]["name"] == "Москва"
+    assert candidates[0]["id"].startswith("p:")
+
