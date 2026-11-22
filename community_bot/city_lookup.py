@@ -125,7 +125,9 @@ def _search_alias(value: str) -> str:
     normalized = _normalize(value)
     if normalized in ALIASES:
         return ALIASES[normalized]
-    if re.fullmatch(r"[a-z\\[\\];',.\\s]+", normalized) and any("a" <= c <= "z" for c in normalized):
+    if any("a" <= c <= "z" for c in normalized) and all(
+        c in _LATIN_KEYS or c.isspace() for c in normalized
+    ):
         corrected = _normalize(normalized.translate(_KEYBOARD_TRANSLATION))
         if corrected in ALIASES:
             return ALIASES[corrected]
