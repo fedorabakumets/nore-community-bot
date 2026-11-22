@@ -160,7 +160,7 @@ async def application_onboarding(db, uid, ban):
 
 
 async def submit_application(request):
-    from community_bot.application_form import validate_application_age, validate_city
+    from community_bot.application_form import validate_application_age
     from community_bot.city_lookup import resolve_city_id, resolve_city_text
     from community_bot.routers.private import _notify_application_decision
 
