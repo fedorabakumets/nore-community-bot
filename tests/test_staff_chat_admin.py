@@ -150,8 +150,8 @@ def test_staff_admin_only_opens_from_message_three_dot_menu():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "community_bot" / "web"
     source = (root / "staff-chat.js").read_text(encoding="utf-8")
-    assert 'data-chat-more="\${id}"' in source
-    assert 'data-chat-admin-message="\${id}"' in source
+    assert 'data-chat-more="${id}"' in source
+    assert 'data-chat-admin-message="${id}"' in source
     assert "openChatAdminFromMessage(" in source
     assert "insertAdjacentElement('afterend',node)" in source
     assert "data-chat-confirm-toggle" in source
