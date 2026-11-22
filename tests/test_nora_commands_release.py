@@ -120,7 +120,7 @@ async def test_unaddressed_group_commands_are_ordinary_text(text):
 
 @pytest.mark.parametrize('phrase', sorted(POSITIVE_REPUTATION_PHRASES | NEGATIVE_REPUTATION_PHRASES))
 async def test_reputation_is_exact_and_never_swept(phrase):
-    assert reputation_delta(phrase) == (5 if phrase in POSITIVE_REPUTATION_PHRASES else -5)
+    assert reputation_delta(phrase) == (5 if phrase in POSITIVE_REPUTATION_PHRASES else -10)
     for text in [phrase + ' пояснение', 'пояснение ' + phrase, 'Нора ' + phrase]:
         assert reputation_delta(text) is None
     event = message(phrase, reply_to_message=message('Оригинал', uid=8))
