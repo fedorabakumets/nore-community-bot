@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import re
 from difflib import SequenceMatcher
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -67,6 +69,49 @@ def _popular_item(index: int) -> dict[str, Any]:
     return {"id": f"p:{index}", "name": name, "region": "", "country": country}
 
 
+@lru_cache(maxsize=1)
+def _russian_places() -> tuple[tuple[str, str], ...]:
+    """Bundled Apache-2.0 list of verified Russian settlements and transliterations."""
+    filename = Path(__file__).with_name("city_catalog_ru.csv")
+    return tuple(
+        (parts[0], parts[1])
+        for line in filename.read_text(encoding="utf-8-sig").splitlines()
+        if len(parts := line.split(",", 1)) == 2
+    )
+
+
+def _russian_item(index: int) -> dict[str, Any]:
+    return {"id": f"r:{index}", "name": _russian_places()[index][0],
+            "region": "", "country": "Россия"}
+
+
+def _russian_matches(query: str) -> list[dict[str, Any]]:
+    """Typos in less-popular place names still work when geocoding is offline."""
+    normalized = _normalize(query)
+    scored: list[tuple[float, int]] = []
+    for i, (name, english) in enumerate(_russian_places()):
+        name_key = _normalize(name)
+        translit_key = _normalize(english)
+        if normalized == name_key or normalized == translit_key:
+            score = 4.0
+        elif name_key.startswith(normalized) or translit_key.startswith(normalized):
+            score = 3.0 + len(normalized) / max(len(name_key), 1)
+        elif normalized in name_key or normalized in translit_key:
+            score = 2.0
+        elif len(normalized) >= 4:
+            likeness = max(
+                SequenceMatcher(None, normalized, name_key).ratio(),
+                SequenceMatcher(None, normalized, translit_key).ratio(),
+            )
+            score = 1.0 + likeness if likeness >= 0.78 else 0
+        else:
+            score = 0
+        if score:
+            scored.append((score, i))
+    scored.sort(reverse=True)
+    return [_russian_item(i) for _, i in scored[:12]]
+
+
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().replace("ё", "е").replace("-", " ").split())
 
@@ -85,7 +130,7 @@ def _search_alias(value: str) -> str:
         if corrected in ALIASES:
             return ALIASES[corrected]
         if max(SequenceMatcher(None, corrected, _normalize(name)).ratio()
-               for name, _ in POPULAR) >= 0.77:
+               for name, _ in (*POPULAR, *_russian_places())) >= 0.80:
             return corrected
     # Keep Latin city names (Berlin, Paris, etc.) for the worldwide geocoder.
     return value
@@ -128,17 +173,16 @@ async def search_cities(query: str, limit: int = 12) -> list[dict]:
         return _city_cache[key][:limit]
     alias = _search_alias(query)
     target = _normalize(alias)
-    local = [_popular_item(i) for i, (name, _country) in enumerate(POPULAR)
-             if target in _normalize(name) or _normalize(name) in target]
-    # Suggest a verified popular city for a small spelling mistake, never
-    # silently accept or rewrite the unverified free-text input.
-    if not local and len(normalized) >= 4:
+    popular = [_popular_item(i) for i, (name, _country) in enumerate(POPULAR)
+               if target in _normalize(name) or _normalize(name) in target]
+    if not popular and len(normalized) >= 4:
         close = sorted(
             ((SequenceMatcher(None, target, _normalize(name)).ratio(), index)
              for index, (name, _) in enumerate(POPULAR)),
             reverse=True,
         )
-        local = [_popular_item(index) for score, index in close if score >= 0.77][:3]
+        popular = [_popular_item(index) for score, index in close if score >= 0.77][:3]
+    local = popular + _russian_matches(target)
     external = []
     try:
         response = await _geocoding("search", {"name": alias, "count": 20, "language": "ru"})
@@ -182,6 +226,10 @@ async def resolve_city_id(choice: str) -> str:
         index = int(choice[2:])
         if 0 <= index < len(POPULAR):
             return POPULAR[index][0]
+    if re.fullmatch(r"r:[0-9]{1,5}", choice):
+        index = int(choice[2:])
+        if index < len(_russian_places()):
+            return _russian_places()[index][0]
     if re.fullmatch(r"g:[0-9]{1,12}", choice):
         try:
             row = await _geocoding("get", {"id": int(choice[2:]), "language": "ru"})
