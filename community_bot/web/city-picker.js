@@ -99,7 +99,7 @@ window.NoraCity = (() => {
     const observer = new MutationObserver(() => {
       if (!form.isConnected) { controller.abort(); observer.disconnect(); clearTimeout(timer); }
     });
-    observer.observe(document.querySelector('#app') || document.body, {childList:true, subtree:true});
+    observer.observe(form.closest('dialog') || document.querySelector('#app') || document.body, {childList:true, subtree:true});
     if (original) feedback.textContent = 'Изменяешь город? Выбери новое значение из подсказок.';
   }
   function choice(form, original = '') {
