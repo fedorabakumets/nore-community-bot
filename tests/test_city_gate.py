@@ -175,7 +175,8 @@ async def test_tracked_prompt_survives_empty_rich_reply_preview(city_setup, monk
     gate = CityGateMiddleware()
     await gate(handler, member_message("/profile", group=True), data)
     assert await db.get_bot_state("city_prompt:-100123:7") == "22"
-    await gate(handler, member_message("Екатеринбург", group=True, reply=prompt.model_copy(update={"text": None})), data)
+    blank_preview = prompt.model_copy(update={"text": None})
+    await gate(handler, member_message("Екатеринбург", group=True, reply=blank_preview), data)
     assert (await db.get_user(7))["city"] is None
     assert reply.await_count == 2
 
