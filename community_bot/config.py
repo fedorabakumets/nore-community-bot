@@ -78,7 +78,8 @@ def load_settings() -> Settings:
         welcome_cover=os.getenv("WELCOME_COVER", "").strip() or None,
         event_pass_price=max(0, _as_int("EVENT_PASS_PRICE")),
         support_price=max(0, _as_int("SUPPORT_PRICE")),
-        restricted_reputation_threshold=_as_int("RESTRICTED_REPUTATION_THRESHOLD"),
+        # Enforce the new bronze minimum even if Railway still has the old 0 setting.
+        restricted_reputation_threshold=max(50, _as_int("RESTRICTED_REPUTATION_THRESHOLD", 50)),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip(),
         cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 1)),
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
