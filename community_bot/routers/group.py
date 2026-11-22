@@ -2111,7 +2111,7 @@ async def _apply_chat_reputation(db, bot, settings, chat_id, user, target, delta
         from community_bot.notify import emit
 
         await emit(bot, db, int(target["user_id"]), "pet", pet_line)
-    if chat_id == settings.community_chat_id:
+    if chat_id == getattr(settings, "community_chat_id", None):
         access = await sync_reputation_chat_access(
             db, settings, bot, chat_id, int(target["user_id"]), new_value,
         )
