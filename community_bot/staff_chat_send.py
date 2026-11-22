@@ -92,6 +92,13 @@ async def _member(request: web.Request):
             {"error": "Писать в тестовом чате могут только администраторы и модераторы"},
             status=403,
         )
+    # Posts through the Mini App are sent by the bot itself and would bypass
+    # Telegram message moderation without this server-side check.
+    user = await db.get_user(uid)
+    if user and int(user["reputation"]) < getattr(settings, "restricted_reputation_threshold", 0):
+        return None, web.json_response(
+            {"error": "Репутация ниже бронзы: писать в чат нельзя"}, status=403,
+        )
     bot = request.app.get("bot")
     if bot is None or not settings.community_chat_id:
         return None, web.json_response({"error": "Чат Норы пока недоступен"}, status=503)
