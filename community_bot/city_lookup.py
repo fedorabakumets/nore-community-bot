@@ -36,9 +36,21 @@ POPULAR = (
     ("Ереван", "Армения"), ("Баку", "Азербайджан"),
     ("Тбилиси", "Грузия"),
 )
-ALIASES = {"спб": "Санкт-Петербург", "питер": "Санкт-Петербург",
-           "петербург": "Санкт-Петербург", "мск": "Москва",
-           "екб": "Екатеринбург", "нск": "Новосибирск"}
+ALIASES = {
+    "спб": "Санкт-Петербург", "питер": "Санкт-Петербург",
+    "петербург": "Санкт-Петербург", "санкт питербург": "Санкт-Петербург",
+    "спбг": "Санкт-Петербург", "spb": "Санкт-Петербург",
+    "saint petersburg": "Санкт-Петербург", "st petersburg": "Санкт-Петербург",
+    "piter": "Санкт-Петербург",
+    "мск": "Москва", "moskva": "Москва", "moscow": "Москва",
+    "екб": "Екатеринбург", "нск": "Новосибирск",
+    "н новгород": "Нижний Новгород", "нн": "Нижний Новгород",
+    "kazan": "Казань", "novosibirsk": "Новосибирск",
+}
+# Russian words accidentally entered with an English keyboard layout.
+_LATIN_KEYS = "qwertyuiop[]asdfghjkl;'zxcvbnm,."
+_RUSSIAN_KEYS = "йцукенгшщзхъфывапролджэячсмитьбю"
+_KEYBOARD_TRANSLATION = str.maketrans(_LATIN_KEYS, _RUSSIAN_KEYS)
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/"
 _city_cache: dict[str, list[dict[str, Any]]] = {}
 
@@ -57,6 +69,21 @@ def _popular_item(index: int) -> dict[str, Any]:
 
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().replace("ё", "е").replace("-", " ").split())
+
+
+def city_label_matches(value: str, selected: str) -> bool:
+    """The displayed input must agree with the verified selection token."""
+    return _normalize(value) == _normalize(selected)
+
+
+def _search_alias(value: str) -> str:
+    normalized = _normalize(value)
+    if normalized in ALIASES:
+        return ALIASES[normalized]
+    if re.fullmatch(r"[a-z\\[\\];',.\\s]+", normalized) and any("a" <= c <= "z" for c in normalized):
+        corrected = _normalize(normalized.translate(_KEYBOARD_TRANSLATION))
+        return ALIASES.get(corrected, corrected)
+    return value
 
 
 def _from_geocoder(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -94,14 +121,15 @@ async def search_cities(query: str, limit: int = 12) -> list[dict]:
     key = normalized
     if key in _city_cache:
         return _city_cache[key][:limit]
-    alias = ALIASES.get(normalized, query)
-    local = [_popular_item(i) for i, (name, country) in enumerate(POPULAR)
-             if normalized in _normalize(name) or _normalize(alias) == _normalize(name)]
+    alias = _search_alias(query)
+    target = _normalize(alias)
+    local = [_popular_item(i) for i, (name, _country) in enumerate(POPULAR)
+             if target in _normalize(name) or _normalize(name) in target]
     # Suggest a verified popular city for a small spelling mistake, never
     # silently accept or rewrite the unverified free-text input.
     if not local and len(normalized) >= 4:
         close = sorted(
-            ((SequenceMatcher(None, normalized, _normalize(name)).ratio(), index)
+            ((SequenceMatcher(None, target, _normalize(name)).ratio(), index)
              for index, (name, _) in enumerate(POPULAR)),
             reverse=True,
         )
@@ -128,7 +156,13 @@ async def search_cities(query: str, limit: int = 12) -> list[dict]:
                 continue
         seen.add(unique)
         found.append(item)
-    # Local exact matches first, then the source's population-ranked candidates.
+    # Exact and strong name matches first; geocoder candidates remain verified
+    # towns, but distant matches must never silently overwrite typed text.
+    found.sort(key=lambda item: (
+        city_label_matches(item["name"], alias),
+        _normalize(item["name"]).startswith(target),
+        SequenceMatcher(None, target, _normalize(item["name"])).ratio(),
+    ), reverse=True)
     result = found[:20]
     if len(_city_cache) >= 200:
         _city_cache.pop(next(iter(_city_cache)))
