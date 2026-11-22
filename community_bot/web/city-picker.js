@@ -39,6 +39,8 @@ window.NoraCity = (() => {
         meta.textContent = [city.region, city.country].filter(Boolean).join(' · ');
         button.append(name, meta);
         button.addEventListener('click', () => {
+          ++seq;
+          clearTimeout(timer);
           input.value = city.name;
           input.dataset.cityId = city.id;
           input.setAttribute('aria-expanded', 'false');
@@ -63,6 +65,9 @@ window.NoraCity = (() => {
       }
     }
     input.addEventListener('input', () => {
+      ++seq; // Immediately reject results for the previous input, before debounce.
+      list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
       input.dataset.cityId = '';
       feedback.textContent = 'Выбери город из подсказок.';
       clearTimeout(timer);
