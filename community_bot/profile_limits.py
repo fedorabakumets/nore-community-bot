@@ -12,10 +12,12 @@ from zoneinfo import ZoneInfo
 
 from community_bot.domain import reputation_tier
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, moscow_now
-from community_bot.routers.song_requests import DAILY_LIMIT as SONG_DAILY_LIMIT
 
 
 async def profile_limits(db, settings, user: dict) -> list[tuple[str, str]]:
+    # Import lazily to avoid a group_profile -> routers -> group_profile startup cycle.
+    from community_bot.routers.song_requests import DAILY_LIMIT as SONG_DAILY_LIMIT
+
     user_id = int(user["user_id"])
     tier = reputation_tier(int(user["reputation"]), settings.restricted_reputation_threshold)
     local_date = datetime.now(ZoneInfo(getattr(settings, "timezone", "Europe/Moscow"))).date()
