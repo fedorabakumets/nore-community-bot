@@ -11,6 +11,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 logger = logging.getLogger(__name__)
 BROADCAST_MARKER = "invite_chat_20261121_v1:"
 BROADCAST_DONE = "invite_chat_20261121_v1:complete"
+CHAT_PROMPT_MARKER = "chat_prompt_20261122_v1:"
+CHAT_PROMPT_DONE = "chat_prompt_20261122_v1:complete"
 
 
 def _telegram_link(url: str) -> bool:
@@ -125,9 +127,53 @@ async def broadcast_entry_once(bot, db, settings) -> tuple[int, int]:
     return sent, blocked
 
 
+async def broadcast_chat_prompt_once(bot, db, settings) -> tuple[int, int]:
+    """Send the one-button chat invitation once, tracking each recipient across restarts."""
+    if await db.get_bot_state(CHAT_PROMPT_DONE) == "1":
+        return 0, 0
+    url = getattr(settings, "community_invite_url", "")
+    if not _telegram_link(url):
+        logger.warning("Chat prompt broadcast skipped: no valid t.me link")
+        return 0, 0
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Открыть чат", url=url),
+    ]])
+    sent, blocked, incomplete = 0, 0, False
+    for row in await db.list_all_users():
+        uid = int(row["user_id"])
+        if uid <= 0 or await db.get_bot_state(f"{CHAT_PROMPT_MARKER}{uid}"):
+            continue
+        for attempt in range(2):
+            try:
+                await bot.send_message(uid, "Пообщаемся?", reply_markup=markup)
+            except TelegramRetryAfter as error:
+                await asyncio.sleep(error.retry_after + 0.1)
+                if attempt == 0:
+                    continue
+                incomplete = True
+                logger.warning("Chat prompt rate limited for %s", uid)
+            except (TelegramForbiddenError, TelegramBadRequest):
+                blocked += 1
+                await db.set_bot_state(f"{CHAT_PROMPT_MARKER}{uid}", "blocked")
+            except TelegramAPIError as error:
+                incomplete = True
+                logger.warning("Chat prompt failed for %s (%s)", uid, type(error).__name__)
+            else:
+                sent += 1
+                await db.set_bot_state(f"{CHAT_PROMPT_MARKER}{uid}", "sent")
+            break
+        await asyncio.sleep(0.075)
+    if not incomplete:
+        await db.set_bot_state(CHAT_PROMPT_DONE, "1")
+    logger.info("Chat prompt: sent=%s blocked=%s complete=%s", sent, blocked, not incomplete)
+    return sent, blocked
+
+
 async def run_entry_release(bot, db, settings) -> None:
     try:
         await accept_waiting_applications(bot, db, settings)
         await broadcast_entry_once(bot, db, settings)
+        await broadcast_chat_prompt_once(bot, db, settings)
     except Exception:
         logger.exception("Automatic onboarding and invitation release failed")
