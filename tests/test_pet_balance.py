@@ -43,7 +43,7 @@ async def test_expedition_requires_both_stats_and_saves_departure_result(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, monkeypatch):
+async def test_return_intent_ends_only_its_expedition_and_recovers_ai_after_care(tmp_path, monkeypatch):
     db = Database(tmp_path / 'pet.db')
     await db.initialize()
     await db.ensure_user(1)
@@ -64,11 +64,13 @@ async def test_return_intent_ends_only_its_expedition_and_restores_ai(tmp_path, 
         cabinet_api.pet_action(request(db, 1, {'token': token})),
     )
     assert sorted(call.status for call in calls) == [200, 409]
-    assert await assistant_access_error(1, db) is None
+    assert '50' in await assistant_access_error(1, db)
     returned = await db.get_pet(1)
     assert returned['expedition_until'] is None and returned['expedition_loot'] is None
     assert all(returned[key] == pet[key] for key in ('hunger', 'thirst', 'mood'))
     assert (await db.get_user(1))['cookies'] == balance
+    await db.execute('UPDATE pets SET hunger=50,thirst=50 WHERE user_id=1')
+    assert await assistant_access_error(1, db) is None
     assert await db.claim_expedition_notice(1) is None
     await db.execute('UPDATE pets SET hunger=100, thirst=100 WHERE user_id=1')
     assert (await db.start_expedition(1))[0]

@@ -16,6 +16,7 @@ from community_bot.economy import (
     loan_repay_amount,
 )
 from community_bot.miniapp import actor
+from community_bot.pet_care import MIN_PET_NEEDS, care_error, needs_care
 from community_bot.pet_progress import CONSUMABLES, dashboard, redeem
 from community_bot.pets_talk import SPECIES
 from community_bot.rsvp import event_lock
@@ -70,6 +71,8 @@ async def pet_data(db, user, *, development=False):
         species_label=SPECIES.get(pet["species"], ("", "питомец"))[1],
         last_find=loot.label() if loot and not pet["expedition_until"] else None,
         enabled=await db.feature_enabled("tamagotchi"),
+        needs_care=needs_care(pet),
+        min_needs=MIN_PET_NEEDS,
     )
     if development:
         from community_bot.expedition import EXPEDITION_DURATION
@@ -94,9 +97,13 @@ async def pet_prepare(request):
     actions = {"food", "water", "expedition", "return", "rename"} | {f"reward:{kind}" for kind in CONSUMABLES}
     if action not in actions or (action != "return" and not await db.feature_enabled("tamagotchi")):
         raise ValueError("Это действие питомца сейчас недоступно")
-    pet = await db.get_pet(user["user_id"], settle=False)
+    pet = await db.get_pet(user["user_id"])
     if not pet:
         raise ValueError("Сначала заведи питомца в магазине")
+    if action in {"rename", "expedition"}:
+        error = care_error(pet)
+        if error:
+            raise ValueError(error)
     payload = {"action": action}
     if action == "return":
         until = body.get("expedition_until")
@@ -142,6 +149,12 @@ async def pet_action(request):
             ok, message, _ = await db.use_pet_supply(user["user_id"], action, intent_id=token)
             return result(ok, "Питомец доволен!" if ok else message)
         if action == "rename":
+            pet = await db.get_pet(user["user_id"])
+            if not pet:
+                return result(False, "Сначала заведи питомца в магазине")
+            error = care_error(pet)
+            if error:
+                return result(False, error)
             async with db.connect() as connection:
                 await connection.execute("BEGIN IMMEDIATE")
                 error = await db._consume_wallet_intent(
@@ -150,10 +163,14 @@ async def pet_action(request):
                 if error:
                     await connection.rollback()
                     return result(False, error)
-                await connection.execute(
-                    "UPDATE pets SET name=?,updated_at=? WHERE user_id=?",
+                cursor = await connection.execute(
+                    "UPDATE pets SET name=?,updated_at=? WHERE user_id=? "
+                    "AND hunger>=50 AND thirst>=50",
                     (intent["payload"]["name"], datetime.now(UTC).isoformat(), user["user_id"]),
                 )
+                if cursor.rowcount != 1:
+                    await connection.rollback()
+                    return result(False, "Сытость и вода должны быть не ниже 50/100.")
                 await connection.commit()
             return result(True, "Имя питомца обновлено в боте и миниапке")
     return result(False, "Неизвестное действие")

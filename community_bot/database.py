@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 
+from community_bot.pet_care import HUNGER_DECAY_PER_HOUR, THIRST_DECAY_PER_HOUR, care_error
+
 PROFILE_PHOTO_PREFIX = "nora-avatar:"
 
 SCHEMA = """
@@ -3311,8 +3313,8 @@ class Database:
                 last_tick = max(last_tick, until_dt.astimezone(UTC))
                 hours = max(0, int((now_dt - last_tick).total_seconds() // 3600))
             if hours and not on_expedition:
-                hunger = max(0, int(pet["hunger"]) - hours * 2)
-                thirst = max(0, int(pet["thirst"]) - hours * 3)
+                hunger = max(0, int(pet["hunger"]) - hours * HUNGER_DECAY_PER_HOUR)
+                thirst = max(0, int(pet["thirst"]) - hours * THIRST_DECAY_PER_HOUR)
                 sleeping = int(hunger == 0 or thirst == 0)
                 target = max(0, (hunger + thirst) // 2 - (20 if sleeping else 0))
                 old_mood = int(pet["mood"])
@@ -3456,9 +3458,11 @@ class Database:
         return True, "ok", await self.get_pet(user_id, settle=False)
 
     async def rename_pet(self, user_id: int, name: str) -> bool:
+        await self.settle_pet(user_id)
         async with self.connect() as db:
             cursor = await db.execute(
-                "UPDATE pets SET name = ?, updated_at = ? WHERE user_id = ?",
+                "UPDATE pets SET name = ?, updated_at = ? WHERE user_id = ? "
+                "AND hunger >= 50 AND thirst >= 50",
                 (name, utcnow(), user_id),
             )
             await db.commit()
@@ -3518,11 +3522,15 @@ class Database:
         async with self.connect() as db:
             await db.execute("BEGIN IMMEDIATE")
             row = await (await db.execute(
-                "SELECT expedition_until, mood FROM pets WHERE user_id = ?", (user_id,)
+                "SELECT expedition_until, mood, hunger, thirst FROM pets WHERE user_id = ?", (user_id,)
             )).fetchone()
             if not row or row["expedition_until"]:
                 await db.rollback()
                 return False, "Питомец сейчас недоступен."
+            error = care_error(row)
+            if error:
+                await db.rollback()
+                return False, error
             if int(row["mood"]) >= 100:
                 await db.rollback()
                 return False, "Настроение питомца уже на максимуме."
@@ -4791,9 +4799,13 @@ class Database:
                 leftover = remaining_label(str(row["expedition_until"]), timezone)
                 await db.rollback()
                 return False, f"Питомец ещё в экспедиции ({leftover}).", 0
-            if not row or int(row["hunger"]) < 50 or int(row["thirst"]) < 50:
+            if not row:
                 await db.rollback()
-                return False, "Для похода сытость и вода должны быть не ниже 50.", 0
+                return False, "Сначала заведите питомца.", 0
+            error = care_error(row)
+            if error:
+                await db.rollback()
+                return False, error, 0
             loot = json.dumps(roll_expedition_loot(int(row["mood"])).to_json(), ensure_ascii=False)
 
             cursor = await db.execute(
