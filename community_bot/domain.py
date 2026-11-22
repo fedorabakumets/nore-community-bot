@@ -36,6 +36,10 @@ NEGATIVE_REPUTATION_PHRASES = NEGATIVE_SOCIAL_ACTIONS | {
 }
 
 
+BRONZE_REPUTATION_MIN = 50
+REPUTATION_UP_DELTA = 5
+REPUTATION_DOWN_DELTA = -10
+
 STARTING_REPUTATION = 69
 AUTO_REPUTATION_CAP = 69
 DAILY_REPUTATION_CAP = 89
@@ -54,7 +58,7 @@ class ReputationTier:
     ai_daily_requests: int
 
 
-def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier:
+def reputation_tier(value: int, restricted_threshold: int = BRONZE_REPUTATION_MIN) -> ReputationTier:
     if value < restricted_threshold:
         return ReputationTier("restricted", "🔞", "ограничен", 0, 0, False, 0)
     if value >= 90:
@@ -65,7 +69,7 @@ def reputation_tier(value: int, restricted_threshold: int = 0) -> ReputationTier
 
 
 def ai_limits_text() -> str:
-    return ", ".join(f"{tier.label} — {tier.ai_daily_requests}" for tier in map(reputation_tier, (0, 70, 90)))
+    return ", ".join(f"{tier.label} — {tier.ai_daily_requests}" for tier in map(reputation_tier, (0, 50, 70, 90)))
 
 
 def discounted_price(base_price: int, discount: int) -> int:
@@ -81,10 +85,10 @@ def normalize_phrase(text: str) -> str:
 def reputation_delta(text: str) -> int | None:
     phrase = normalize_phrase(text)
     if phrase in POSITIVE_REPUTATION_PHRASES:
-        return 5
+        return REPUTATION_UP_DELTA
     if phrase in NEGATIVE_REPUTATION_PHRASES:
-        return -5
-    return {"plus": 5, "minus": -5}.get(interaction_emoji(phrase))
+        return REPUTATION_DOWN_DELTA
+    return {"plus": REPUTATION_UP_DELTA, "minus": REPUTATION_DOWN_DELTA}.get(interaction_emoji(phrase))
 
 
 _DURATION_RE = re.compile(r"^(\d+)([mhdwмчдн])$", re.IGNORECASE)
