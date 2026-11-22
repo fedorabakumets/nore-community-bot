@@ -145,7 +145,7 @@ async def test_actual_reputation_reply_survives_and_changes_sqlite(tmp_path, mon
         replies.append((text, current_reply_ttl()))
 
     monkeypatch.setattr(Message, 'reply', reply)
-    settings = SimpleNamespace(timezone='Europe/Moscow', restricted_reputation_threshold=0)
+    settings = SimpleNamespace(timezone='Europe/Moscow', restricted_reputation_threshold=50)
     event = message('не согласен', reply_to_message=message('Оригинал', uid=8))
     bot = SimpleNamespace(delete_message=AsyncMock())
 
@@ -153,8 +153,8 @@ async def test_actual_reputation_reply_survives_and_changes_sqlite(tmp_path, mon
         await group_reply_actions(event, db, settings, bot)
 
     await GroupHousekeepingMiddleware()(handle, event, {'bot': bot})
-    assert (await db.get_user(8))['reputation'] == 75
-    assert len(replies) == 1 and '75' in replies[0][0] and replies[0][1] is None
+    assert (await db.get_user(8))['reputation'] == 70
+    assert len(replies) == 1 and '70' in replies[0][0] and replies[0][1] is None
     bot.delete_message.assert_not_awaited()
 
 
