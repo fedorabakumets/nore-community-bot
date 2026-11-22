@@ -40,6 +40,7 @@ from community_bot.life import (
     unlock,
 )
 from community_bot.permissions import PERM_POST
+from community_bot.reputation_chat_access import sync_reputation_chat_access
 from community_bot.rsvp import attendance_action, event_lock, published_event, refresh_event_markup
 from community_bot.shop_catalog import (
     GIFTABLE_ITEMS,
@@ -106,12 +107,19 @@ async def _deliver_shop(
         ok, error = await db.buy_item(buyer_id, item, price, target_id=target_id, intent_id=intent_id)
         if not ok:
             return False, error
-        if item == "forgive" and settings.community_chat_id:
-            with suppress(*_TG_ERRORS):
-                await bot.restrict_chat_member(
-                    settings.community_chat_id,
-                    target_id,
-                    permissions=_full_chat_permissions(),
+        if item in {"forgive", "restore_rep"} and settings.community_chat_id:
+            fresh = await db.get_user(target_id)
+            value = int(fresh["reputation"]) if fresh else 0
+            if item == "forgive" and value >= settings.restricted_reputation_threshold:
+                with suppress(*_TG_ERRORS):
+                    await bot.restrict_chat_member(
+                        settings.community_chat_id,
+                        target_id,
+                        permissions=_full_chat_permissions(),
+                    )
+            else:
+                await sync_reputation_chat_access(
+                    db, settings, bot, settings.community_chat_id, target_id, value,
                 )
     from community_bot.notify import vitrine_consumed
 
