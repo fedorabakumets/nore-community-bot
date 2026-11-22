@@ -122,3 +122,30 @@ def test_real_city_spellings_are_validated_without_guessing():
     assert validate_city("  Нью-Йорк  ") == "Нью-Йорк"
     assert city_lookup.city_label_matches("санкт петербург", "Санкт-Петербург")
     assert not city_lookup.city_label_matches("Казань", "Москва")
+
+
+@pytest.mark.asyncio
+async def test_smaller_city_typo_is_resolved_using_local_catalog(monkeypatch):
+    monkeypatch.setattr(city_lookup, "_city_cache", {})
+
+    async def offline(*_args, **_kwargs):
+        raise ValueError("offline")
+
+    monkeypatch.setattr(city_lookup, "_geocoding", offline)
+    cities = await city_lookup.search_cities("Абаакан")
+    assert cities
+    assert cities[0]["name"] == "Абакан"
+    assert cities[0]["id"].startswith("r:")
+    assert await city_lookup.resolve_city_id(cities[0]["id"]) == "Абакан"
+
+
+@pytest.mark.asyncio
+async def test_nonpopular_city_transliteration_is_searchable_offline(monkeypatch):
+    monkeypatch.setattr(city_lookup, "_city_cache", {})
+
+    async def offline(*_args, **_kwargs):
+        raise ValueError("offline")
+
+    monkeypatch.setattr(city_lookup, "_geocoding", offline)
+    choices = await city_lookup.search_cities("Abakan")
+    assert choices[0]["name"] == "Абакан"
