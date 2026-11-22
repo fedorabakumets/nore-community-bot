@@ -26,7 +26,7 @@ BUYABLE = frozenset(ITEM_LABELS) | {'support'}
 DESCRIPTIONS = {
     'restore_rep': '+10 к репутации в пределах доступного максимума.',
     'forgive': 'Очистить предупреждения и снять мут в чате.',
-    'rep_shield': 'Один щит поглощает одно понижение репутации.',
+    'rep_shield': 'Один щит поглощает один −реп в течение 24 часов после получения. После удара исчезает.',
     'immunity_24h': 'Защита от отрицательных оценок на 24 часа. Повторная покупка продлевает срок.',
     'private_profile': 'Скрывай и открывай профиль в настройках приватности после покупки.',
     'ornate_profile': 'Включить особое оформление карточки профиля в боте.',
@@ -34,7 +34,7 @@ DESCRIPTIONS = {
     'tamagotchi': 'Выбрать питомца и придумать ему имя. Один питомец на человека.',
     'pet_meal': '+40 сытости питомцу, максимум 100.',
     'pet_drink': '+50 жаждоутоления питомцу, максимум 100.',
-    'season_pack': 'Щит от −реп и +40 сытости питомцу.',
+    'season_pack': 'Один щит от −реп на 24 часа и +40 сытости питомцу.',
     'support': 'Выбери сумму поддержки проекта в печеньках.',
 }
 
@@ -71,7 +71,8 @@ async def shop_data(db, user, settings):
             reason = 'Оформление уже куплено'
         products.append({
             'sku': sku, 'title': plain_shop_text(item['title']), 'category': item['category_slug'],
-            'description': plain_shop_text(item['description']) or DESCRIPTIONS.get(sku, ''),
+            'description': (DESCRIPTIONS[sku] if sku in {'rep_shield', 'season_pack'} else
+                            plain_shop_text(item['description']) or DESCRIPTIONS.get(sku, '')),
             'price': prices.get(sku), 'base_price': item['price'], 'buyable': not reason,
             'reason': reason, 'giftable': sku in GIFTABLE_ITEMS,
             'mode': 'pet' if sku == 'tamagotchi' else 'video' if sku == 'video_avatar' else (
@@ -171,7 +172,8 @@ async def quote(db, settings, user, data):
         raise ValueError('У получателя пока нет питомца')
     token = await db.create_wallet_intent(user['user_id'], sku, price, target_id=target, payload=payload)
     return {'token': token, 'price': price, 'title': plain_shop_text(item['title']), 'recipient': label,
-            'description': plain_shop_text(item['description']) or DESCRIPTIONS.get(sku, ''),
+            'description': (DESCRIPTIONS[sku] if sku in {'rep_shield', 'season_pack'} else
+                            plain_shop_text(item['description']) or DESCRIPTIONS.get(sku, '')),
             'gift': target != user['user_id'], 'base_price': item['price'],
             'needs_video': sku == 'video_avatar'}
 
