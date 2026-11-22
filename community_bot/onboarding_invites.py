@@ -172,8 +172,9 @@ async def broadcast_chat_prompt_once(bot, db, settings) -> tuple[int, int]:
 
 async def run_entry_release(bot, db, settings) -> None:
     try:
+        # The current short invitation takes precedence over the older onboarding blast.
+        await broadcast_chat_prompt_once(bot, db, settings)
         await accept_waiting_applications(bot, db, settings)
         await broadcast_entry_once(bot, db, settings)
-        await broadcast_chat_prompt_once(bot, db, settings)
     except Exception:
         logger.exception("Automatic onboarding and invitation release failed")
