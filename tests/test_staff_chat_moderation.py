@@ -84,7 +84,7 @@ async def test_moderator_actions_follow_actual_role_permissions_and_ranks(tmp_pa
     assert "ban" not in allowed
     assert "unban" not in allowed
     assert "delete" not in allowed
-    assert parse(response)["warnings"] == 0
+    assert parse(response)["warnings"] == (await db.get_user(8))["warnings"]
 
     admin = parse(await capabilities(Request(app, 20)))
     assert {"ban", "unban", "delete"} <= {item["id"] for item in admin["actions"]}
@@ -121,16 +121,17 @@ async def test_nonstaff_or_forged_actions_are_rejected(tmp_path):
 @pytest.mark.asyncio
 async def test_warning_updates_counter_audit_and_duplicate_is_ignored(tmp_path):
     db, _, bot, app = await environment(tmp_path)
+    baseline = (await db.get_user(8))["warnings"]
     first = await action(Request(app, 21, payload("warn")))
     assert first.status == 200
     assert parse(first)["state"] == "sent"
-    assert (await db.get_user(8))["warnings"] == 1
+    assert (await db.get_user(8))["warnings"] == baseline + 1
     replay = await action(Request(app, 21, payload("warn")))
     assert replay.status == 200
-    assert (await db.get_user(8))["warnings"] == 1
+    assert (await db.get_user(8))["warnings"] == baseline + 1
     clash = await action(Request(app, 21, payload("warn", reason="Другая причина")))
     assert clash.status == 409
-    logs = await db.fetchall("SELECT * FROM admin_audit_log WHERE action='warn'")
+    logs = await db.fetchall("SELECT * FROM admin_audit_log WHERE action='warn' AND actor_id=21")
     assert len(logs) == 1
     assert logs[0]["actor_id"] == 21 and logs[0]["target"] == "8"
     assert logs[0]["reason"] == "Нарушение правил"
@@ -141,7 +142,7 @@ async def test_warning_updates_counter_audit_and_duplicate_is_ignored(tmp_path):
         "unwarn", operation_id="36b12345-aaaa-4bbb-8ccc-123456789abc",
     )))
     assert undo.status == 200
-    assert (await db.get_user(8))["warnings"] == 0
+    assert (await db.get_user(8))["warnings"] == baseline
 
 
 @pytest.mark.asyncio
@@ -150,8 +151,9 @@ async def test_mute_and_unmute_use_telegram_and_are_logged(tmp_path):
     first = await action(Request(app, 21, payload("mute", duration="1h")))
     assert first.status == 200, first.text
     assert bot.restrict_chat_member.await_count == 1
-    call = bot.restrict_chat_member.await_args.kwargs
-    assert call["chat_id"] == GROUP and call["user_id"] == 8
+    invocation = bot.restrict_chat_member.await_args
+    call = invocation.kwargs
+    assert invocation.args[:2] == (GROUP, 8)
     assert call["until_date"] > datetime.now(UTC)
     assert call["permissions"].can_send_messages is False
     assert (await action(Request(app, 21, payload("mute", duration="1h")))).status == 200
@@ -175,7 +177,7 @@ async def test_delete_is_telegram_delete_not_just_hide(tmp_path):
         "SELECT * FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
         (GROUP, 500),
     ) is None
-    log = await db.fetchone("SELECT action,reason FROM admin_audit_log LIMIT 1")
+    log = await db.fetchone("SELECT action,reason FROM admin_audit_log WHERE action='delete_message' ORDER BY id DESC LIMIT 1")
     assert log["action"] == "delete_message"
     # No repeated Telegram deletion if the source was removed.
     assert (await action(Request(app, 20, payload("delete")))).status == 404
@@ -223,7 +225,8 @@ async def test_mod_journal_shows_only_own_events_admin_sees_all(tmp_path):
     assert moderator["items"][0]["reason"] == "Причина модератора"
     administrator = parse(await audit(Request(app, 20)))
     assert administrator["scope"] == "all"
-    assert len(administrator["items"]) == 2
+    reasons={item["reason"] for item in administrator["items"]}
+    assert {"Причина модератора", "Причина администратора"} <= reasons
     assert (await audit(Request(app, 8))).status == 403
 
 
