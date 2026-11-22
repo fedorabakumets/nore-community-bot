@@ -1716,13 +1716,20 @@ async def buy_shop_item(
     if not ok:
         await callback.answer(error, show_alert=True)
         return
-    if item == "forgive" and settings.community_chat_id:
-        try:
-            await bot.restrict_chat_member(
-                settings.community_chat_id, callback.from_user.id, permissions=_full_permissions()
+    if item in {"forgive", "restore_rep"} and settings.community_chat_id:
+        fresh_rep = await db.get_user(callback.from_user.id)
+        value = int(fresh_rep["reputation"]) if fresh_rep else 0
+        if item == "forgive" and value >= settings.restricted_reputation_threshold:
+            try:
+                await bot.restrict_chat_member(
+                    settings.community_chat_id, callback.from_user.id, permissions=_full_permissions()
+                )
+            except TelegramBadRequest:
+                pass
+        else:
+            await sync_reputation_chat_access(
+                db, settings, bot, settings.community_chat_id, callback.from_user.id, value,
             )
-        except TelegramBadRequest:
-            pass
     elif item in {"event_pass", "support"}:
         for owner_id in settings.owner_ids:
             await safe_send(
