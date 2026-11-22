@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from difflib import SequenceMatcher
 from typing import Any
 
 import aiohttp
@@ -56,7 +55,7 @@ def _popular_item(index: int) -> dict[str, Any]:
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"[\\s\-]+", " ", value.casefold().replace("ё", "е")).strip()
+    return " ".join(value.casefold().replace("ё", "е").replace("-", " ").split())
 
 
 def _from_geocoder(row: dict[str, Any]) -> dict[str, Any] | None:
