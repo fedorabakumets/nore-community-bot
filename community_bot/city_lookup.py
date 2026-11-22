@@ -147,6 +147,10 @@ async def resolve_city_id(choice: str) -> str:
 async def resolve_city_text(value: str) -> str:
     """Compatible with older clients, without accepting arbitrary strings."""
     value = validate_city(value)
+    # Older Mini App builds still post text; accept only exact known places.
+    for name, _country in POPULAR:
+        if _normalize(name) == _normalize(value):
+            return name
     matches = await search_cities(value)
     exact = [item for item in matches if _normalize(item["name"]) == _normalize(value)]
     if len(exact) == 1:
