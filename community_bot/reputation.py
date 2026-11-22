@@ -49,7 +49,7 @@ async def _change_reputation(db, settings, actor, target, delta, local_date):
     extra: str | None = None
     if delta < 0 and await db.consume_hate_shield(target_id):
         applied = 0
-        extra = "🛡 Щит поглотил −реп."
+        extra = "🛡 Щит поглотил один −реп и исчез. Защита действует максимум 24 часа."
     else:
         applied, extra = await pet_guard_reputation(db, target_id, delta, local_date)
     new_value = await db.apply_reputation(actor_id, target_id, applied, local_date)
