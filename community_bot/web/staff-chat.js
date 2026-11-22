@@ -11,6 +11,10 @@ window.NoraStaffChat = (() => {
   const reactionSet = ['❤️','😂','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
   const reactionBusy = new Set();
   let moderationContext=null, moderationBusy=false;
+  let adminAccess=null,adminTarget=null,adminView='home',adminMetric='',adminNewValue=0;
+  let adminBusy=false,adminNotice='',adminSelectedId='';
+  let confirmationEnabled=true;
+  try{confirmationEnabled=localStorage.getItem('nora-staff-chat-confirm')!=='off';}catch{}
   let gesture = null, gestureTimer = null;
 
   const cache = new Map();
@@ -21,7 +25,7 @@ window.NoraStaffChat = (() => {
     onConfirmed:(restored)=>{
       if(!restored){
         draft='';replyTarget=null;emojiOpen=false;contextId=null;signature='';
-        clearUploads();prepareComposer();void load(true);
+        clearUploads();hideSendConfirmation();prepareComposer();void load(true);
       }
       composeUpdate();
     }
@@ -160,7 +164,7 @@ window.NoraStaffChat = (() => {
       <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="Копировать текст" title="Копировать">⧉</button>
       <button type="button" class="staff-chat-mod-trigger" data-chat-mod-message="${id}" title="Модерация" aria-label="Модерация сообщения">🛡</button>
       ${link}${hideButton}</div>`;
-    return `<article class="staff-chat-message" data-message-id="${id}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
+    return `<article class="staff-chat-message" data-message-id="${id}" data-chat-user-id="${Number(m.user_id)||0}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
          <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${more}</div>
          ${actions}
@@ -181,9 +185,10 @@ window.NoraStaffChat = (() => {
           <h1>Чат Норы</h1>
           <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span>
         </div>
-        <button type="button" class="staff-chat-mod-log-button" data-chat-mod-log aria-label="Журнал модерации" title="Журнал модерации">☷ <span>Журнал</span></button>
+        <button type="button" class="staff-chat-admin-toggle" data-chat-admin-toggle aria-expanded="false" aria-controls="staff-chat-admin-panel" hidden>⚙ <span>Админка</span></button>
         <span class="staff-chat-team-label">КОМАНДА</span>
       </header>
+      <section id="staff-chat-admin-panel" class="staff-chat-admin-panel" aria-label="Админка тестового чата" hidden></section>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
         <p class="staff-chat-empty">Подключаем чат…</p>
       </div>
@@ -196,6 +201,7 @@ window.NoraStaffChat = (() => {
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
         <div class="staff-chat-compose-file" id="staff-chat-compose-file" hidden></div>
         <div id="staff-chat-delivery" class="staff-chat-delivery" role="status" hidden></div>
+        <div id="staff-chat-send-confirm" class="staff-chat-send-confirm" hidden></div>
         <div class="staff-chat-record-status" id="staff-chat-record-status" hidden aria-live="polite"></div>
         <div class="staff-chat-compose-row">
           <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="Прикрепить файл" title="Прикрепить файл">＋</button>
@@ -814,12 +820,30 @@ window.NoraStaffChat = (() => {
       xhr.send(form);
     });
   }
-  async function sendCompose() {
+
+  function hideSendConfirmation(){
+    const node=document.getElementById('staff-chat-send-confirm');
+    if(node){node.hidden=true;node.replaceChildren();}
+  }
+  function showSendConfirmation(text){
+    const node=document.getElementById('staff-chat-send-confirm');
+    if(!node)return;
+    node.innerHTML='<b>Отправить сообщение?</b>'+
+      '<small>От имени бота, с именем автора и без кнопок'+
+      (attachments.length?' · вложений: '+attachments.length:'')+'</small>'+
+      (text?'<p>'+esc(text.slice(0,240))+'</p>':'')+
+      '<div class="staff-chat-send-controls"><button type="button" data-chat-send-back>Назад</button>'+
+      '<button type="button" data-chat-send-confirm>Отправить</button></div>';
+    node.hidden=false;
+  }
+  async function sendCompose(skipConfirm=false) {
     if(sending||delivery.pending||recording||(!draft.trim()&&!attachments.length))return;
     const text=draft.trim(),reply_to=replyTarget?.id||null;
     if(text.length>(attachments.length?800:3000)){
       toast('Слишком длинный текст для сообщения с вложением');return;
     }
+    if(confirmationEnabled&&!skipConfirm){showSendConfirmation(text);return;}
+    hideSendConfirmation();
     const operationId=delivery.begin();
     if(!operationId)return;
     sending=true;uploadProgress=0;composeUpdate();
@@ -1126,6 +1150,146 @@ window.NoraStaffChat = (() => {
     app?.style.removeProperty('--staff-chat-viewport-top');
   }
 
+
+  // All authorization and permission/rank checks occur again in the server endpoints.
+  const adminStats=[
+    {key:'cookies',title:'🍪 Печеньки',minimum:0,maximum:1000000,permission:'can_cookies'},
+    {key:'reputation',title:'⭐ Репутация',minimum:-20,maximum:100,permission:'can_profile'},
+    {key:'likes',title:'💜 Лайки',minimum:0,maximum:1000000,permission:'can_likes'}
+  ];
+  function activeAdminStat(){return adminStats.find(item=>item.key===adminMetric);}
+  function closeChatAdmin(){
+    const node=document.getElementById('staff-chat-admin-panel');
+    if(node){node.hidden=true;node.replaceChildren();}
+    document.querySelector('[data-chat-admin-toggle]')?.setAttribute('aria-expanded','false');
+  }
+  function recentChatAuthors(){
+    const seen=new Set(),out=[];
+    for(const item of [...document.querySelectorAll('#staff-chat-feed [data-chat-user-id]')].reverse()){
+      const id=Number(item.dataset.chatUserId);
+      if(!Number.isSafeInteger(id)||id<=0||seen.has(id))continue;
+      seen.add(id);
+      out.push({id,name:(item.querySelector('.staff-chat-author')?.textContent||String(id)).slice(0,50)});
+      if(out.length>=30)break;
+    }
+    return out;
+  }
+  function renderChatAdmin(){
+    const node=document.getElementById('staff-chat-admin-panel');
+    if(!node||node.hidden||!adminAccess)return;
+    const header='<header class="staff-chat-admin-heading"><b>⚙ Админка</b>'+
+      '<button type="button" data-chat-admin-close aria-label="Закрыть окно">×</button></header>';
+    let view='';
+    if(adminView==='home'){
+      view='<label class="staff-chat-admin-switch"><span><b>Подтверждать отправку</b>'+
+        '<small>Выключи, чтобы отправлять сразу</small></span>'+
+        '<input type="checkbox" role="switch" data-chat-confirm-toggle '+
+        (confirmationEnabled?'checked':'')+'></label>';
+      if(adminAccess.can_cookies||adminAccess.can_profile){
+        view+='<form id="staff-chat-admin-search" class="staff-chat-admin-form">'+
+          '<label for="staff-chat-admin-user">Управление участником</label>'+
+          '<select id="staff-chat-admin-user"><option value="">Выбери из чата…</option>'+
+          recentChatAuthors().map(person=>'<option value="'+person.id+'">'+
+            esc(person.name)+' · '+person.id+'</option>').join('')+'</select>'+
+          '<div class="staff-chat-admin-row"><input id="staff-chat-admin-id" type="text" '+
+          'inputmode="numeric" maxlength="12" pattern="[0-9]{1,12}" placeholder="Или Telegram ID" value="'+
+          esc(adminSelectedId)+'" required><button type="submit">Найти</button></div></form>';
+      }else view+='<p class="staff-chat-admin-muted">Для изменения показателей нужны права администратора.</p>';
+      view+='<button type="button" class="staff-chat-admin-subtle" data-chat-mod-log>☷ Журнал модерации</button>';
+    }else if(adminView==='person'&&adminTarget){
+      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К поиску</button>'+
+        '<div class="staff-chat-admin-person"><b>'+esc(adminTarget.name)+'</b>'+
+        '<small>Telegram ID '+adminTarget.id+'</small></div>'+
+        '<div class="staff-chat-admin-stats">'+adminStats.map(stat=>
+          '<button type="button" data-chat-admin-stat="'+stat.key+'" '+
+          (adminAccess[stat.permission]?'':'disabled')+'><span>'+stat.title+'</span>'+
+          '<b>'+Number(adminTarget[stat.key]).toLocaleString('ru-RU')+'</b><span>›</span></button>'
+        ).join('')+'</div>';
+    }else if(adminView==='edit'&&adminTarget){
+      const stat=activeAdminStat();
+      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К показателям</button>'+
+        '<form id="staff-chat-admin-edit" class="staff-chat-admin-form">'+
+        '<label for="staff-chat-admin-value">'+stat.title+' · '+esc(adminTarget.name)+'</label>'+
+        '<input id="staff-chat-admin-value" type="number" step="1" min="'+stat.minimum+
+        '" max="'+stat.maximum+'" value="'+Number(adminTarget[stat.key])+'" required>'+
+        '<small>Сейчас: '+Number(adminTarget[stat.key]).toLocaleString('ru-RU')+'</small>'+
+        '<button type="submit">Продолжить</button></form>';
+    }else if(adminView==='confirm'&&adminTarget){
+      const stat=activeAdminStat();
+      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ Изменить число</button>'+
+        '<p class="staff-chat-admin-summary">Подтверди изменение '+stat.title+
+        ' для <b>'+esc(adminTarget.name)+'</b>: <b>'+
+        Number(adminTarget[stat.key]).toLocaleString('ru-RU')+
+        ' → '+Number(adminNewValue).toLocaleString('ru-RU')+'</b></p>'+
+        '<button class="staff-chat-admin-primary" type="button" data-chat-admin-save '+
+        (adminBusy?'disabled':'')+'>'+(adminBusy?'Сохраняем…':'Подтвердить изменение')+'</button>';
+    }
+    node.innerHTML=header+'<div class="staff-chat-admin-content">'+
+      (adminNotice?'<p class="staff-chat-admin-notice">'+esc(adminNotice)+'</p>':'')+
+      view+'</div>';
+  }
+  async function initChatAdmin(){
+    try{
+      const info=await api('community/chat/admin');
+      if(tab!=='staffchat')return;
+      adminAccess=info;
+      const control=document.querySelector('[data-chat-admin-toggle]');
+      if(control)control.hidden=!info.can_open;
+    }catch{
+      if(tab==='staffchat'){adminAccess=null;closeChatAdmin();}
+    }
+  }
+  function toggleChatAdmin(){
+    const node=document.getElementById('staff-chat-admin-panel');
+    if(!node||!adminAccess?.can_open)return;
+    if(!node.hidden){closeChatAdmin();return;}
+    adminView='home';adminNotice='';node.hidden=false;
+    document.querySelector('[data-chat-admin-toggle]')?.setAttribute('aria-expanded','true');
+    renderChatAdmin();
+  }
+  async function lookupChatAdminUser(raw){
+    const id=String(raw||'').trim();
+    if(adminBusy)return;
+    if(!/^[0-9]{1,12}$/.test(id)||Number(id)<=0){
+      adminNotice='Укажи корректный Telegram ID';renderChatAdmin();return;
+    }
+    adminSelectedId=id;adminBusy=true;adminNotice='Загружаем профиль…';renderChatAdmin();
+    try{
+      const data=await api('community/chat/admin?target_id='+encodeURIComponent(id));
+      if(tab!=='staffchat')return;
+      adminTarget=data.target;adminView='person';adminNotice='';
+    }catch(error){adminNotice=error.message||'Не удалось открыть профиль';}
+    finally{adminBusy=false;if(tab==='staffchat')renderChatAdmin();}
+  }
+  function prepareChatAdminValue(){
+    const stat=activeAdminStat(),field=document.getElementById('staff-chat-admin-value');
+    if(!stat||!field||!adminTarget)return;
+    const value=Number(field.value);
+    if(!field.value.trim()||!Number.isSafeInteger(value)||value<stat.minimum||value>stat.maximum){
+      adminNotice='Допустимо целое число от '+stat.minimum+' до '+stat.maximum;
+      renderChatAdmin();return;
+    }
+    if(value===Number(adminTarget[stat.key])){
+      adminNotice='Значение уже установлено';renderChatAdmin();return;
+    }
+    adminNewValue=value;adminView='confirm';adminNotice='';renderChatAdmin();
+  }
+  async function saveChatAdminValue(){
+    const stat=activeAdminStat();
+    if(!stat||!adminAccess?.[stat.permission]||!adminTarget||adminBusy)return;
+    adminBusy=true;adminNotice='';renderChatAdmin();
+    try{
+      const result=await api('community/chat/admin',{
+        target_id:Number(adminTarget.id),metric:stat.key,value:adminNewValue,
+        expected:Number(adminTarget[stat.key]),confirmed:true
+      });
+      if(tab!=='staffchat')return;
+      adminTarget=result.target;adminView='person';adminNotice='Показатель сохранён';
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+    }catch(error){adminNotice=error.message||'Изменение не сохранено';}
+    finally{adminBusy=false;if(tab==='staffchat')renderChatAdmin();}
+  }
+
   function moderationTitle(name) {
     return '<header class="nora-staff-mod-head"><span>🛡</span><div><small>МОДЕРАЦИЯ НОРЫ</small><h3>'+esc(name)+'</h3></div></header>';
   }
@@ -1269,12 +1433,14 @@ window.NoraStaffChat = (() => {
     loading=false;signature='';contextId=null;
     newCount=0;unreadIds.clear();
     if(tab !== 'staffchat'){
+      adminAccess=null;adminTarget=null;closeChatAdmin();
       if(recorder)stopRecording(true);
       clearUploads();
       clearAssets();clearChatViewport();return;
     }
     syncChatViewport();
     prepareComposer();
+    void initChatAdmin();
     delivery.restore();
     updateUnread();
     void load();
@@ -1289,6 +1455,12 @@ window.NoraStaffChat = (() => {
     if(event.target?.id === 'staff-chat-compose'){
       event.preventDefault();
       void sendCompose();
+    }else if(event.target?.id==='staff-chat-admin-search'){
+      event.preventDefault();
+      void lookupChatAdminUser(document.getElementById('staff-chat-admin-id')?.value);
+    }else if(event.target?.id==='staff-chat-admin-edit'){
+      event.preventDefault();
+      prepareChatAdminValue();
     }
   });
   document.addEventListener('input',event=>{
@@ -1300,23 +1472,51 @@ window.NoraStaffChat = (() => {
       return;
     }
     if(event.target?.id === 'staff-chat-draft'){
-      draft=event.target.value;composeUpdate();postTyping();
+      draft=event.target.value;hideSendConfirmation();composeUpdate();postTyping();
     }
   });
   document.addEventListener('change',event=>{
+    if(event.target?.matches?.('[data-chat-confirm-toggle]')){
+      confirmationEnabled=!!event.target.checked;
+      try{localStorage.setItem('nora-staff-chat-confirm',confirmationEnabled?'on':'off');}catch{}
+      if(!confirmationEnabled)hideSendConfirmation();
+      return;
+    }
+    if(event.target?.id==='staff-chat-admin-user'){
+      const input=document.getElementById('staff-chat-admin-id');
+      if(input&&event.target.value)input.value=event.target.value;
+      return;
+    }
     if(event.target?.id !== 'staff-chat-file')return;
     const selected=[...(event.target.files||[])];
     if(!selected.length)return;
-    chooseFiles(selected);
+    chooseFiles(selected);hideSendConfirmation();
     event.target.value='';
   });
 
   document.addEventListener('click',event=>{
     if(tab !== 'staffchat')return;
+    if(event.target.closest('[data-chat-admin-toggle]')){toggleChatAdmin();return;}
+    if(event.target.closest('[data-chat-admin-close]')){closeChatAdmin();return;}
+    if(event.target.closest('[data-chat-send-back]')){hideSendConfirmation();return;}
+    if(event.target.closest('[data-chat-send-confirm]')){void sendCompose(true);return;}
+    const editStat=event.target.closest('[data-chat-admin-stat]');
+    if(editStat&&adminTarget){
+      const spec=adminStats.find(s=>s.key===editStat.dataset.chatAdminStat);
+      if(!spec||!adminAccess?.[spec.permission])return;
+      adminMetric=spec.key;adminView='edit';adminNotice='';renderChatAdmin();return;
+    }
+    if(event.target.closest('[data-chat-admin-back]')){
+      adminView=adminView==='confirm'?'edit':adminView==='edit'?'person':'home';
+      adminNotice='';renderChatAdmin();return;
+    }
+    if(event.target.closest('[data-chat-admin-save]')){void saveChatAdminValue();return;}
+    const adminNode=document.getElementById('staff-chat-admin-panel');
+    if(adminNode&&!adminNode.hidden&&!event.target.closest('#staff-chat-admin-panel'))closeChatAdmin();
     if(event.target.closest('[data-chat-mod-close]')){
       document.getElementById('sheet')?.close();return;
     }
-    if(event.target.closest('[data-chat-mod-log]')){void openModerationLog();return;}
+    if(event.target.closest('[data-chat-mod-log]')){closeChatAdmin();void openModerationLog();return;}
     const modMessage=event.target.closest('[data-chat-mod-message]');
     if(modMessage){void openModeration(Number(modMessage.dataset.chatModMessage));return;}
     const modAction=event.target.closest('[data-chat-mod-action]');
