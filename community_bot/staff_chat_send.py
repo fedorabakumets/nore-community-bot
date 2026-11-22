@@ -95,7 +95,7 @@ async def _member(request: web.Request):
     # Posts through the Mini App are sent by the bot itself and would bypass
     # Telegram message moderation without this server-side check.
     user = await db.get_user(uid)
-    if user and int(user["reputation"]) < getattr(settings, "restricted_reputation_threshold", 0):
+    if user and int(user["reputation"]) < getattr(settings, "restricted_reputation_threshold", 50):
         return None, web.json_response(
             {"error": "Репутация ниже бронзы: писать в чат нельзя"}, status=403,
         )
