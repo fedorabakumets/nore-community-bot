@@ -37,8 +37,10 @@ assert.ok(source.includes('stopRecording(true)'), 'Recordings must be stopped on
 assert.match(html, /id="staff-chat-delivery"/);
 assert.ok(source.includes("form.append('operation_id'"), 'Media operation ID included');
 assert.ok(source.includes('delivery.check()'), 'Status recovery wired');
-assert.match(html, /data-chat-admin-toggle/, 'Compact admin must be in chat header');
-assert.match(html, /id="staff-chat-admin-panel"/);
+assert.doesNotMatch(html, /data-chat-admin-toggle/, 'Header must not contain the admin button');
+assert.doesNotMatch(html, /id="staff-chat-admin-panel"/, 'Admin panel belongs to a message');
+assert.ok(source.includes('data-chat-admin-message='), 'Three-dot message actions contain the admin trigger');
+assert.ok(source.includes("insertAdjacentElement('afterend',node)"), 'Admin panel mounts inside selected message');
 assert.ok(source.includes('data-chat-mod-log'), 'Journal must remain in admin popover');
 assert.ok(source.includes('data-chat-confirm-toggle'), 'Optional send confirmation switch exists');
 assert.ok(source.includes('community/chat/admin?target_id='), 'Stat editor uses the secured API');
