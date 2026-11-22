@@ -659,7 +659,10 @@ async def main() -> None:
             "polling",
             lambda: dispatcher.start_polling(
                 bot,
-                allowed_updates=sorted({*dispatcher.resolve_used_update_types(), "my_chat_member", "widget_query", "message", "edited_message"}),
+                allowed_updates=sorted({
+                    *dispatcher.resolve_used_update_types(),
+                    "my_chat_member", "widget_query", "message", "edited_message",
+                }),
                 db=db,
                 settings=settings,
                 emergency_stop=emergency_stop,
