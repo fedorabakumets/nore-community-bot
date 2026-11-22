@@ -617,11 +617,11 @@ class Database:
         from community_bot.pet_progress import SCHEMA as pet_schema
         from community_bot.pet_video import SCHEMA as pet_video_schema
         from community_bot.referral_campaign import SCHEMA as referral_schema
-        from community_bot.staff_chat import SCHEMA as staff_chat_schema
         from community_bot.rocket_api import SCHEMA as rocket_schema
         from community_bot.sea_api import SCHEMA as sea_schema
         from community_bot.seasonal import SCHEMA as seasonal_schema
         from community_bot.social_profiles import SCHEMA as presence_schema
+        from community_bot.staff_chat import SCHEMA as staff_chat_schema
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         async with self.connect() as db:
