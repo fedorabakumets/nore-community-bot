@@ -115,6 +115,7 @@ from community_bot.permissions import (
     PERM_WARN,
 )
 from community_bot.reaction_authors import ReactionAuthors
+from community_bot.reputation_chat_access import sync_reputation_chat_access
 from community_bot.reply_rich import bot_publication
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
@@ -278,12 +279,10 @@ class CommunityModerationMiddleware(BaseMiddleware):
             ):
                 with contextlib.suppress(TelegramAPIError):
                     await event.delete()
-                with contextlib.suppress(TelegramAPIError):
-                    await bot.restrict_chat_member(
-                        event.chat.id,
-                        event.from_user.id,
-                        permissions=ChatPermissions(can_send_messages=False),
-                    )
+                await sync_reputation_chat_access(
+                    db, settings, bot, event.chat.id,
+                    event.from_user.id, int(user["reputation"]),
+                )
                 now = time.monotonic()
                 if now - self._restricted_notices.get(event.from_user.id, -float("inf")) >= 600:
                     if len(self._restricted_notices) > 2000:
@@ -815,16 +814,14 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
         from community_bot.notify import emit
 
         await emit(bot, db, target_id, "pet", pet_line)
-    if new_value < settings.restricted_reputation_threshold:
-        try:
-            await bot.restrict_chat_member(
-                callback.message.chat.id,
-                target_id,
-                permissions=ChatPermissions(can_send_messages=False),
-            )
-            await callback.message.answer("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
-        except TelegramBadRequest:
-            pass
+    if callback.message.chat.id == settings.community_chat_id:
+        access = await sync_reputation_chat_access(
+            db, settings, bot, callback.message.chat.id, target_id, new_value,
+        )
+        if new_value < settings.restricted_reputation_threshold:
+            await callback.message.answer("🔞 Репутация ниже 50: отправка сообщений в чат ограничена.")
+        elif access == "restored":
+            await callback.message.answer("✅ Репутация снова от 50: доступ к чату восстановлен.")
     if isinstance(callback.message, Message):
         await refresh_group_profile(callback.message, db, settings, target_id)
 
@@ -2107,16 +2104,14 @@ async def _apply_chat_reputation(db, bot, settings, chat_id, user, target, delta
         from community_bot.notify import emit
 
         await emit(bot, db, int(target["user_id"]), "pet", pet_line)
-    if new_value < settings.restricted_reputation_threshold:
-        try:
-            await bot.restrict_chat_member(
-                chat_id,
-                int(target["user_id"]),
-                permissions=ChatPermissions(can_send_messages=False),
-            )
-            await send("🔞 Пользователь ограничен: доступен только магазин в личном чате с ботом.")
-        except TelegramBadRequest:
-            pass
+    if chat_id == settings.community_chat_id:
+        access = await sync_reputation_chat_access(
+            db, settings, bot, chat_id, int(target["user_id"]), new_value,
+        )
+        if new_value < settings.restricted_reputation_threshold:
+            await send("🔞 Репутация ниже 50: отправка сообщений в чат ограничена.")
+        elif access == "restored":
+            await send("✅ Репутация снова от 50: доступ к чату восстановлен.")
     return True
 
 
