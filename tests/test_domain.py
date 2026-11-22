@@ -25,7 +25,10 @@ def test_reputation_tiers_do_not_overlap() -> None:
     assert reputation_tier(70).can_minus is True
     assert reputation_tier(-1).key == "restricted"
     assert reputation_tier(95).discount == 10
-    assert reputation_tier(40).discount == 2
+    assert reputation_tier(50).discount == 2
+    assert reputation_tier(49).key == "restricted"
+    assert reputation_tier(40).discount == 0
+    assert reputation_tier(50).key == "bronze"
 
 
 def test_discount_rounds_up() -> None:
@@ -36,7 +39,11 @@ def test_discount_rounds_up() -> None:
 
 def test_reputation_phrases() -> None:
     assert reputation_delta(" +РЕП ") == 5
-    assert reputation_delta("не   согласен") == -5
+    assert reputation_delta("не   согласен") == -10
+    assert reputation_delta("-реп") == -10
+    assert reputation_delta("пнуть") == -10
+    assert reputation_delta("ударить") == -10
+    assert reputation_delta("−реп") is None
     assert reputation_delta("обычный текст") is None
 
 
