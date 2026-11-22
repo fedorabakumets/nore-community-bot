@@ -284,6 +284,12 @@ async def _publish(request: web.Request, *, text: str, reply: object,
                 )
                 if not existing:
                     await capture(db, settings, message)
+                # Verified Mini App author; the Telegram bot remains the message sender.
+                await db.execute(
+                    "UPDATE staff_chat_messages SET app_author_id=?, app_author_name=? "
+                    "WHERE chat_id=? AND message_id=?",
+                    (uid, name, settings.community_chat_id, message.message_id),
+                )
         except Exception:
             logger.exception("Staff chat composer: message sent but archive failed")
         receipt = {

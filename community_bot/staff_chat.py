@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS staff_chat_messages (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL DEFAULT 0,
+    app_author_id INTEGER NOT NULL DEFAULT 0,
+    app_author_name TEXT NOT NULL DEFAULT '',
     author_name TEXT NOT NULL,
     username TEXT NOT NULL DEFAULT '',
     text TEXT NOT NULL DEFAULT '',
@@ -291,9 +293,13 @@ class StaffChatCaptureMiddleware(BaseMiddleware):
 
 
 _QUERY = """
-    SELECT m.message_id id, m.user_id, m.author_name name, m.username,
+    SELECT m.message_id id,
+           CASE WHEN m.app_author_id > 0 THEN m.app_author_id ELSE m.user_id END user_id,
+           CASE WHEN m.app_author_id > 0 THEN m.app_author_name ELSE m.author_name END name,
+           m.username,
            m.text, m.media_type, m.media_group_id, m.rich_json, m.reply_to_id, m.sent_at, m.edited_at,
-           r.author_name reply_name, r.text reply_text, r.media_type reply_media_type,
+           CASE WHEN r.app_author_id > 0 THEN r.app_author_name ELSE r.author_name END reply_name,
+           r.text reply_text, r.media_type reply_media_type,
            CASE WHEN m.media_file_id != '' THEN 1 ELSE 0 END has_media,
            CASE WHEN m.media_thumb_file_id != '' THEN 1 ELSE 0 END has_thumbnail,
            CASE WHEN u.avatar_file_id IS NOT NULL AND u.avatar_file_id != ''
@@ -301,7 +307,7 @@ _QUERY = """
     FROM staff_chat_messages m
     LEFT JOIN staff_chat_messages r
       ON r.chat_id=m.chat_id AND r.message_id=m.reply_to_id
-    LEFT JOIN users u ON u.user_id=m.user_id
+    LEFT JOIN users u ON u.user_id=CASE WHEN m.app_author_id > 0 THEN m.app_author_id ELSE m.user_id END
 """
 
 

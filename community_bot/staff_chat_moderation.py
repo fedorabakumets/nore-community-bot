@@ -69,7 +69,9 @@ async def _auth(request: web.Request):
 
 async def _source(db, chat_id: int, message_id: int):
     return await db.fetchone(
-        """SELECT message_id, user_id, author_name
+        """SELECT message_id,
+                  CASE WHEN app_author_id > 0 THEN app_author_id ELSE user_id END AS user_id,
+                  CASE WHEN app_author_id > 0 THEN app_author_name ELSE author_name END AS author_name
            FROM staff_chat_messages WHERE chat_id=? AND message_id=?""",
         (chat_id, message_id),
     )
