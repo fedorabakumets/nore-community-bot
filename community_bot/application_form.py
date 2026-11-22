@@ -19,6 +19,6 @@ def validate_city(value: object) -> str:
     if (not 2 <= len(city) <= 100
             or sum(char.isalpha() for char in city) < 2
             or any(not (char.isalpha() or char.isdigit() or char in " -'’.(),") for char in city)
-            or re.search(r'([^\\W\\d_])\\1{4,}', city, flags=re.IGNORECASE)):
+            or any(ch.isalpha() and ch * 5 in city.casefold() for ch in city.casefold())):
         raise ValueError(error)
     return city
