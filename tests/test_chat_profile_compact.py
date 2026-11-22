@@ -225,7 +225,7 @@ async def test_group_friendship_request_and_removal(tmp_path, monkeypatch, decli
     assert edited.blocks[-1].buttons[2].text == "👤"
 
 
-@pytest.mark.parametrize(("direction", "value"), [("up", 65), ("down", 55)])
+@pytest.mark.parametrize(("direction", "value"), [("up", 65), ("down", 50)])
 async def test_reputation_button_pings_target_only_on_success(tmp_path, monkeypatch, direction, value):
     db = Database(tmp_path / "reputation.db")
     await db.initialize()
