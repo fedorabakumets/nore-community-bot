@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 import aiohttp
@@ -96,6 +97,15 @@ async def search_cities(query: str, limit: int = 12) -> list[dict]:
     alias = ALIASES.get(normalized, query)
     local = [_popular_item(i) for i, (name, country) in enumerate(POPULAR)
              if normalized in _normalize(name) or _normalize(alias) == _normalize(name)]
+    # Suggest a verified popular city for a small spelling mistake, never
+    # silently accept or rewrite the unverified free-text input.
+    if not local and len(normalized) >= 4:
+        close = sorted(
+            ((SequenceMatcher(None, normalized, _normalize(name)).ratio(), index)
+             for index, (name, _) in enumerate(POPULAR)),
+            reverse=True,
+        )
+        local = [_popular_item(index) for score, index in close if score >= 0.77][:3]
     external = []
     try:
         response = await _geocoding("search", {"name": alias, "count": 20, "language": "ru"})
