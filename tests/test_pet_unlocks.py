@@ -30,6 +30,8 @@ async def test_ai_access_explains_pet_level_and_expedition(tmp_path):
     await db.execute("UPDATE pets SET expedition_until=? WHERE user_id=7", (
         (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
     ))
+    assert '50' in await assistant_access_error(7, db)
+    await db.execute('UPDATE pets SET hunger=50,thirst=50 WHERE user_id=7')
     assert await assistant_access_error(7, db) is None
     await db.execute("UPDATE feature_flags SET enabled=0 WHERE key='tamagotchi'")
     assert "временно отключены" in await assistant_access_error(7, db)

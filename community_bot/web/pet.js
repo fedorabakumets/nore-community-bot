@@ -10,8 +10,8 @@ window.NoraPet = (() => {
     const r = d.rules;
     return [
       ['Питомец и его характеристики', [
-        ['hunger', 'Что означает сытость?', 'Сытость убывает на 2 за каждый полный час вне похода. При нуле питомец засыпает. Чтобы уйти в поход, сытость и вода должны быть не ниже 50. Сытость сама по себе не даёт XP.'],
-        ['thirst', 'Что означает вода?', 'Вода убывает на 3 за каждый полный час вне похода. При нуле питомец засыпает. Еду и воду можно восстановить припасами, через магазин или наградой.'],
+        ['hunger', 'Что означает сытость?', 'Сытость убывает на 4 за каждый полный час вне похода. При значении ниже 50 у сытости или воды возможности питомца отключаются до восстановления обоих показателей. При нуле питомец засыпает. Чтобы уйти в поход, сытость и вода должны быть не ниже 50. Сытость сама по себе не даёт XP.'],
+        ['thirst', 'Что означает вода?', 'Вода убывает на 6 за каждый полный час вне похода. При нуле питомец засыпает. Еду и воду можно восстановить припасами, через магазин или наградой.'],
         ['mood', 'Как меняется настроение?', 'Вне похода настроение меняется до 1 за полный час в сторону среднего сытости и воды. Сон понижает это целевое значение на 20. Поглаживание прибавляет до 50, награда восьмого этапа поднимает настроение до 100. Высокое настроение улучшает шансы и размер находки в походе и шанс защиты от −реп.'],
         ['guard', 'Когда питомец защищает от −реп?', 'Бодрствующий питомец с сытостью от 70 может перехватить −реп после проверок иммунитета и щита. Шанс от 5% до 30% зависит от настроения. После успешной защиты она недоступна до следующего дня сообщества.'],
       ]],
@@ -83,8 +83,9 @@ window.NoraPet = (() => {
     }).join('');
   }
 
-  function petGameButton(label) {
-    return '<button type="button" class="nora-pixel-button pet2-play" data-play-with-pet><span>'
+  function petGameButton(label, disabled = false) {
+    return '<button type="button" class="nora-pixel-button pet2-play" data-play-with-pet'
+      + (disabled ? ' disabled' : '') + '><span>'
       + esc(label) + '</span><span aria-hidden="true">↗</span></button>';
   }
 
@@ -111,7 +112,7 @@ window.NoraPet = (() => {
       const complete = q.progress >= q.target;
       const xp = complete ? (q.xp ? '+' + q.xp + ' XP' : '✓')
         : d.stage === d.stages.length || d.daily_xp >= d.rules.daily_xp ? 'Без XP' : '+' + d.rules.quest_xp + ' XP';
-      const label = q.play_with_pet ? petGameButton(q.label) : '<span>' + esc(q.label) + '</span>';
+      const label = q.play_with_pet ? petGameButton(q.label, !data.pet.enabled || data.pet.needs_care) : '<span>' + esc(q.label) + '</span>';
       return '<li><div>' + label + '<progress max="' + q.target + '" value="' + q.progress
         + '" aria-label="' + esc(q.label) + '"></progress></div><span class="pet2-quest-score"><b>'
         + q.progress + '/' + q.target + '</b><small>' + xp + '</small></span></li>';
@@ -145,6 +146,7 @@ window.NoraPet = (() => {
     trackStage(p);
     queueMicrotask(clock);
     const away = !!p.expedition_until;
+    const careLocked = !!p.needs_care;
     const next = d.stages[d.stage];
     const age = Math.max(0, Math.floor((Date.now() - Date.parse(p.created_at)) / 86400000));
     const products = Object.fromEntries((data.products || []).map(item => [item.sku, item]));
@@ -163,20 +165,22 @@ window.NoraPet = (() => {
     return '<div class="pet2"><section class="card pet2-profile">'
       + '<div class="pet2-identity"><div class="pet2-art">' + art + '</div><div class="pet2-name">'
       + '<p>' + esc(p.species_label) + ' · ' + age + ' дн. вместе</p><h2>'
-      + NoraPrefix(p.prefix) + esc(p.name) + '</h2><p>' + (away ? 'В походе' : p.sleeping ? 'Спит' : 'Бодрствует')
-      + '</p></div><button class="text-btn" id="rename-pet"' + (p.enabled ? '' : ' disabled')
+      + NoraPrefix(p.prefix) + esc(p.name) + '</h2><p>' + (away ? 'В походе' : p.sleeping ? 'Спит' : careLocked ? 'Нужен уход' : 'Бодрствует')
+      + '</p></div><button class="text-btn" id="rename-pet"' + (p.enabled && !careLocked ? '' : ' disabled')
       + '>Имя</button></div><div class="pet2-rank"><strong>' + esc(d.level_name) + ' · ур. ' + d.level
       + '</strong>' + question('levels', 'Основные уровни') + '<span>Этап ' + d.stage + ' / ' + d.stages.length
       + '</span></div><div class="pet2-meters">' + meter('Сытость', p.hunger, 'hunger') + meter('Вода', p.thirst, 'thirst')
       + meter('Настроение', p.mood, 'mood') + '</div></section>'
       + (!p.enabled ? '<p class="sub">Функции питомца временно выключены администрацией.</p>' : '')
+      + (careLocked ? '<p class="sub pet2-note" role="status">🔒 Питомцу нужен уход: сытость и вода должны быть от '
+        + number(p.min_needs || 50) + '. Доступ к походам, поглаживанию, Норе ИИ и загрузкам восстановится после кормления.</p>' : '')
       + '<section class="card pet2-panel"><div class="pet2-heading">' + section('Уход', 'care')
       + '<button class="text-btn" data-open-pet-shop>Магазин</button></div><div class="pet2-actions">'
       + action('food', 'Покормить', '+20 · порций ' + number(p.food_units), !p.enabled || !p.food_units || p.hunger >= 100)
       + action('water', 'Напоить', '+20 · порций ' + number(p.water_units), !p.enabled || !p.water_units || p.thirst >= 100)
-      + petGameButton('Погладить')
+      + petGameButton('Погладить', !p.enabled || careLocked || away)
       + (away ? action('return', 'Вернуть из похода', 'Без награды · ' + trip, false)
-        : action('expedition', 'В поход', trip, !p.enabled || p.hunger < 50 || p.thirst < 50))
+        : action('expedition', 'В поход', trip, !p.enabled || careLocked))
       + '</div><div class="pet2-shop"><button class="text-btn" data-product="pet_meal">Обед · ' + supplyPrice('pet_meal')
       + '</button><button class="text-btn" data-product="pet_drink">Поилка · ' + supplyPrice('pet_drink') + '</button></div>'
       + (p.last_find ? '<p class="sub pet2-note">Последняя находка · ' + esc(p.last_find) + '</p>' : '') + '</section>'

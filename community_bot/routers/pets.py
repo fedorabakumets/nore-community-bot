@@ -20,6 +20,7 @@ from community_bot.expedition import (
 )
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
 from community_bot.menu_art import menu_cover
+from community_bot.pet_care import care_error, needs_care
 from community_bot.pets_talk import SPECIES, aftercare_line, pet_pronouns, species_meta
 from community_bot.shop_catalog import shop_header_lines, shop_prices_for
 from community_bot.states import PetFlow
@@ -51,6 +52,8 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
     mood = int(pet["mood"])
     sleeping = bool(int(pet["sleeping"]))
     status = f"💤 {words['sleep_status']}" if sleeping else f"✨ {words['awake']}"
+    notice = ("🔒 Нужен уход: для доступа к возможностям питомца сытость и вода "
+              "должны быть не ниже 50. Кормление и поилка доступны.\n\n") if needs_care(pet) else ""
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
@@ -61,6 +64,7 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
         f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"
         f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n\n"
+        f"{notice}"
         f"{_expedition_line(pet, words, timezone)}"
         "Печеньки питомец приносит только из экспедиции — сам по себе он их не фармит."
     )
@@ -281,7 +285,10 @@ async def use_supply(callback: CallbackQuery, db: Database, settings: Settings) 
 async def begin_rename(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
     if not callback.message:
         return
-    pet = await db.get_pet(callback.from_user.id, settle=False)
+    pet = await db.get_pet(callback.from_user.id)
+    if pet and (error := care_error(pet)):
+        await callback.answer(error, show_alert=True)
+        return
     await state.set_state(PetFlow.rename)
     await state.set_data({"flow_kind": "pet_rename"})
     await callback.answer()
@@ -301,7 +308,11 @@ async def rename_pet(message: Message, state: FSMContext, db: Database) -> None:
     if not 1 <= len(name) <= 24:
         await message.answer("Имя должно содержать от 1 до 24 символов.")
         return
-    pet = await db.get_pet(message.from_user.id, settle=False)
+    pet = await db.get_pet(message.from_user.id)
+    if pet and (error := care_error(pet)):
+        await state.clear()
+        await message.answer(error)
+        return
     if not await db.rename_pet(message.from_user.id, name):
         await state.clear()
         await message.answer("Питомец не найден.")

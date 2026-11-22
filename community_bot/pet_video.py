@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from community_bot.nora import strip_address
+from community_bot.pet_care import care_error
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, VIDEO_MAX_MB, level, moscow_now
 from community_bot.private_rich import standalone_rich_message
 from community_bot.profile_track import MAX_TRACK_MB
@@ -159,7 +160,7 @@ class PetVideoQueue:
             return f"Скачивание {kind} открывается на 3-м уровне питомца."
         if pet.get("expedition_until"):
             return f"Пока питомец в походе, скачивание {kind} недоступно. Его можно вернуть через «Питомец»."
-        return None
+        return care_error(pet)
 
     async def _delivery_error(self, user_id, kind="видео"):
         error = await self._access_error(user_id, kind)

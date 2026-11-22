@@ -33,6 +33,7 @@ from community_bot.nora import reply_for, reply_ttl_seconds, rule_intent, strip_
 from community_bot.nora_knowledge import is_nora_topic
 from community_bot.nora_speech import CLOSE_SPEECH_CARD
 from community_bot.openrouter_chat import OpenRouterChat, archive_question
+from community_bot.pet_care import care_error
 from community_bot.pet_progress import level
 from community_bot.pet_video import PetVideoQueue, video_command
 from community_bot.private_rich import standalone_rich_message
@@ -57,7 +58,7 @@ async def assistant_access_error(user_id: int, db: Database | None) -> str | Non
         return "Нора ИИ открывается на 2 уровне питомца."
     if pet.get("expedition_until"):
         return "Пока питомец в походе, Нора ИИ недоступна. Верните питомца через «Питомец» или /pet."
-    return None
+    return care_error(pet)
 
 
 def _noted_answer(prompt: str, answer: str, settings: Settings) -> str:
