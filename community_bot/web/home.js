@@ -149,7 +149,7 @@ function profileWizard(index){
         const file=form.querySelector('input').files[0];
         if(file){
           button.textContent='Загружаем фото…';
-          await uploadProfilePhoto(file,revision);
+          await uploadPhoto(file, 'profile/avatar', {'X-Profile-Revision': revision});
         }
       }
       else {const value=form.elements.value.value.trim();await api('profile',{fields:{[key]:value},revision})}
