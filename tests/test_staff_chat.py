@@ -374,8 +374,9 @@ async def test_staff_chat_composer_role_identity_reply_and_rate_limit(tmp_path):
     kwargs = bot.send_message.await_args.kwargs
     assert kwargs["chat_id"] == GROUP
     assert kwargs["reply_parameters"].message_id == 71
-    assert kwargs["parse_mode"] is None
-    assert kwargs["text"].startswith("💬 Модератор Марина · через Mini App Норы\n\nТест")
+    assert kwargs["parse_mode"] == "HTML"
+    assert kwargs["text"] == '📱<b><a href="tg://user?id=20">Модератор Марина</a></b> | Тест'
+    assert "reply_markup" not in kwargs
     saved = await db.fetchone(
         "SELECT text FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 72),
     )
@@ -467,7 +468,9 @@ async def test_staff_chat_attachment_upload_caption_and_validation(tmp_path):
     assert called["photo"].filename == "nora.jpg"
     assert called["photo"].data == b"\xff\xd8\xffTEST"
     assert "Обложка" in called["caption"]
-    assert called["parse_mode"] is None
+    assert called["parse_mode"] == "HTML"
+    assert 'href="tg://user?id=20"' in called["caption"]
+    assert "reply_markup" not in called
 
     # Upload inspection denies executable files before Telegram is called.
     class BadRequest(Request):
@@ -903,7 +906,9 @@ async def test_stage7_browser_voice_sent_as_real_telegram_voice(monkeypatch, tmp
     call=bot.send_voice.await_args.kwargs
     assert call["voice"].filename == "nora-voice.ogg"
     assert call["voice"].data == b"OggS-verified-transcode"
-    assert call["caption"].startswith("💬 Модератор · через Mini App Норы")
+    assert call["caption"].startswith('📱<b><a href="tg://user?id=20">')
+    assert call["parse_mode"] == "HTML"
+    assert "reply_markup" not in call
     stored=await db.fetchone(
         "SELECT media_type,media_file_id FROM staff_chat_messages WHERE chat_id=? AND message_id=?",
         (GROUP, 501),
