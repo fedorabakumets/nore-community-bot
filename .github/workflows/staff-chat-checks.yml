@@ -1,7 +1,7 @@
 name: Staff Chat Media Checks
 on:
   push:
-    branches: [cursor/nora-2-update-d133]
+    branches: [cursor/nora-2-update-d133, cursor/nora-stage9-validation]
     paths:
       - "community_bot/staff_chat.py"
       - "community_bot/community_scope.py"
