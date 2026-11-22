@@ -88,19 +88,18 @@ window.NoraCity = (() => {
       if (event.key === 'ArrowUp') { event.preventDefault(); if (current > 0) buttons[current-1].focus(); else input.focus(); }
       if (event.key === 'Escape') { event.preventDefault(); list.hidden = true; input.focus(); }
     });
+    const controller = new AbortController();
     document.addEventListener('pointerdown', event => {
       if (!form.isConnected) return;
       if (event.target !== input && !list.contains(event.target)) {
         list.hidden = true;
         input.setAttribute('aria-expanded', 'false');
       }
-    }, {signal: (() => {
-      const controller = new AbortController();
-      new MutationObserver((observer) => {
-        if (!form.isConnected) { controller.abort(); observer.disconnect(); }
-      }).observe(document.querySelector('#app') || document.body, {childList:true, subtree:true});
-      return controller.signal;
-    })()});
+    }, {signal:controller.signal});
+    const observer = new MutationObserver(() => {
+      if (!form.isConnected) { controller.abort(); observer.disconnect(); clearTimeout(timer); }
+    });
+    observer.observe(document.querySelector('#app') || document.body, {childList:true, subtree:true});
     if (original) feedback.textContent = 'Изменяешь город? Выбери новое значение из подсказок.';
   }
   function choice(form, original = '') {
