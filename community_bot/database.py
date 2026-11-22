@@ -1012,7 +1012,14 @@ class Database:
         user = await self.fetchone("SELECT * FROM users WHERE user_id = ?", (user_id,))
         if user and int(user.get("hate_shields") or 0):
             # Never display an expired shield, even before a cleanup job runs.
-            user["hate_shields"] = await self.active_hate_shields(user_id)
+            count = await self.active_hate_shields(user_id)
+            if count != int(user["hate_shields"]):
+                await self.execute(
+                    "UPDATE users SET hate_shields=(SELECT COUNT(*) FROM reputation_shields "
+                    "WHERE user_id=? AND expires_at > ?) WHERE user_id=?",
+                    (user_id, utcnow(), user_id),
+                )
+            user["hate_shields"] = count
         return user
 
     async def active_hate_shields(self, user_id: int) -> int:
@@ -1021,6 +1028,15 @@ class Database:
             (user_id, utcnow()),
         )
         return int(row["count"]) if row else 0
+
+    async def hate_shield_expiry(self, user_id: int) -> str | None:
+        """The next active shield expiration, for displaying remaining validity."""
+        row = await self.fetchone(
+            "SELECT MIN(expires_at) AS until FROM reputation_shields "
+            "WHERE user_id=? AND expires_at > ?",
+            (user_id, utcnow()),
+        )
+        return str(row["until"]) if row and row["until"] else None
 
     async def set_role(self, user_id: int, role: str) -> None:
         await self.execute(
@@ -1775,6 +1791,7 @@ class Database:
                 (now, user_id),
             )
             await self.remove_stored_profile_photo(db, user_id)
+            await db.execute("DELETE FROM reputation_shields WHERE user_id=?", (user_id,))
             await db.execute(
                 """UPDATE users SET profile_name=NULL, age=NULL, birth_date=NULL, hobbies=NULL, profile_bio='',
                    avatar_file_id=NULL, avatar_media_type='photo', role='member', custom_status=NULL,
