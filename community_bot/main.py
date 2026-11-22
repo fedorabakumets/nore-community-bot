@@ -210,16 +210,14 @@ async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> No
         restored = await db.restore_daily_reputation(datetime.now(timezone).date())
         if not settings.community_chat_id:
             continue
+        from community_bot.reputation_chat_access import sync_reputation_chat_access
+
         for user in restored:
             if int(user["reputation"]) >= settings.restricted_reputation_threshold:
-                with contextlib.suppress(Exception):
-                    from community_bot.routers.group import _full_permissions
-
-                    await bot.restrict_chat_member(
-                        settings.community_chat_id,
-                        int(user["user_id"]),
-                        permissions=_full_permissions(),
-                    )
+                await sync_reputation_chat_access(
+                    db, settings, bot, settings.community_chat_id,
+                    int(user["user_id"]), int(user["reputation"]),
+                )
 
 
 async def scheduled_messages_job(db: Database, settings: Settings, bot: Bot) -> None:
