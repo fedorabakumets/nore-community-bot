@@ -11,10 +11,14 @@ def validate_application_age(value: object) -> int:
 
 
 def validate_city(value: object) -> str:
-    """Normalize a participant's free-text city without geolocating them."""
+    """Basic input hygiene; existence is checked by city_lookup before saving."""
+    error = 'Напиши название города (2–100 символов), затем выбери его из подсказок.'
     if not isinstance(value, str):
-        raise ValueError('Укажи город текстом (от 2 до 100 символов).')
+        raise ValueError(error)
     city = ' '.join(value.split())
-    if not 2 <= len(city) <= 100 or any(ord(char) < 32 or ord(char) == 127 for char in city):
-        raise ValueError('Укажи город текстом (от 2 до 100 символов).')
+    if (not 2 <= len(city) <= 100
+            or sum(char.isalpha() for char in city) < 2
+            or any(not (char.isalpha() or char.isdigit() or char in " -'’.(),") for char in city)
+            or re.search(r'([^\\W\\d_])\\1{4,}', city, flags=re.IGNORECASE)):
+        raise ValueError(error)
     return city
