@@ -1271,19 +1271,67 @@ async def application_age(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(age=value)
     await state.set_state(ApplicationForm.city)
-    await message.answer("Из какого ты города?", reply_markup=flow_reply_keyboard())
+    from community_bot.city_gate import city_keyboard
+
+    await message.answer(
+        "📍 Из какого ты города? Выбери из кнопок ниже или напиши название, чтобы найти другой.",
+        reply_markup=city_keyboard(message.from_user.id, prefix="appcity"),
+    )
 
 
 @router.message(ApplicationForm.city)
 async def application_city(message: Message, state: FSMContext) -> None:
+    from community_bot.city_gate import city_keyboard
+    from community_bot.city_lookup import search_cities
+
     try:
-        city = validate_city(message.text)
+        options = await search_cities(message.text or "")
     except ValueError as error:
         await message.answer(str(error))
         return
+    if not options:
+        await message.answer("Не нашёл такой город. Попробуй написать иначе.")
+        return
+    await message.answer(
+        "📍 Выбери свой город из найденных вариантов:",
+        reply_markup=city_keyboard(message.from_user.id, suggestions=options, prefix="appcity"),
+    )
+
+
+@router.callback_query(ApplicationForm.city, F.data.startswith("appcity:"))
+async def application_city_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    from community_bot.city_gate import city_keyboard
+    from community_bot.city_lookup import resolve_city_id
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 4 or parts[2] != str(callback.from_user.id):
+        await callback.answer("Эта кнопка не для твоей анкеты.", show_alert=True)
+        return
+    if parts[1] == "page" and len(parts) == 4:
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 0
+        await callback.message.edit_text(
+            "📍 Выбери город из списка или напиши название сообщением.",
+            reply_markup=city_keyboard(callback.from_user.id, page=page, prefix="appcity"),
+        )
+        await callback.answer()
+        return
+    if parts[1] != "pick" or len(parts) != 5:
+        await callback.answer("Кнопка устарела.", show_alert=True)
+        return
+    try:
+        city = await resolve_city_id(parts[3] + ":" + parts[4])
+    except ValueError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
     await state.update_data(city=city)
     await state.set_state(ApplicationForm.bio)
-    await message.answer("Расскажи немного о себе.", reply_markup=flow_reply_keyboard())
+    await callback.message.edit_text(f"✅ Город: <b>{html.escape(city)}</b>", parse_mode="HTML",
+                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
+    await callback.answer("Город выбран")
+    await callback.message.answer("Расскажи немного о себе.", reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.bio)
