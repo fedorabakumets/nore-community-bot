@@ -141,6 +141,9 @@ class PrivateAccessMiddleware(BaseMiddleware):
             }
             allowed |= not ban and action.startswith('birthday:claim:')
             allowed |= action.startswith('updates:page:')
+            # City buttons are part of the application flow, before admission.
+            # Keep the exception limited to the active city step.
+            allowed |= current == 'ApplicationForm:city' and action.startswith('appcity:')
             if allowed:
                 return await handler(event, data)
             await event.answer('Сначала заполни анкету и дождись одобрения.', show_alert=True)
