@@ -239,3 +239,22 @@ async def test_owner_only_overrides_explicit_permissions_and_rank(tmp_path):
     assert "ban" in {entry["id"] for entry in owner["actions"]}
     assert parse(await capabilities(Request(app, 20, message_id="504")))["actions"] == []
     bot.delete_message.assert_not_awaited()
+
+
+
+def test_stage9_routes_are_exposed_without_adding_an_unserved_script():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "community_bot" / "miniapp.py").read_text(
+        encoding="utf-8"
+    )
+    for route in (
+        "app.router.add_get('/api/community/chat/moderation', staff_chat_moderation.capabilities)",
+        "app.router.add_post('/api/community/chat/moderation', staff_chat_moderation.action)",
+        "app.router.add_get('/api/community/chat/moderation/logs', staff_chat_moderation.audit)",
+    ):
+        assert route in source
+    from community_bot.miniapp import ROOT
+    assert (ROOT / "staff-chat.js").is_file()
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    assert "/staff-chat.js?v=stage9-mod-20261122" in html

@@ -3947,3 +3947,9 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 #sheet .nora-staff-mod-entry small{color:#c3aebd}
 #sheet .nora-staff-mod-entry p{margin:0;font-size:12px;overflow-wrap:anywhere}
 @media(max-width:380px){#app[data-screen="staffchat"] .staff-chat-mod-log-button span{display:none}}
+
+@media(max-width:500px){
+  /* The moderation journal replaces the redundant "TEAM" header badge. */
+  #app[data-screen="staffchat"] .staff-chat-team-label{display:none}
+  #app[data-screen="staffchat"] .staff-chat-mod-log-button{padding-inline:8px}
+}
