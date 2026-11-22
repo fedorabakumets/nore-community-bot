@@ -3897,3 +3897,53 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
   border-color:rgba(239,166,127,.4);color:#ffcca7;
 }
 #app[data-screen="staffchat"] #staff-chat-compose #staff-chat-draft:disabled{opacity:.72}
+
+
+/* Staff chat stage 9: moderation choices share the app's existing bottom drawer. */
+#app[data-screen="staffchat"] .staff-chat-header .staff-chat-mod-log-button{
+  display:inline-flex;align-items:center;gap:5px;flex:none;
+  min-height:30px;padding:5px 9px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:11px;color:#cbb9c7;
+  font:600 11px/1 Rubik,Arial,sans-serif;
+}
+#app[data-screen="staffchat"] .staff-chat-actions .staff-chat-mod-trigger{
+  display:grid;place-items:center;flex:none;
+  width:28px;height:28px;padding:0;
+  border-radius:7px;border:0;
+  background:rgba(193,101,134,.13);color:#f0c7d3;
+  font-size:16px;cursor:pointer;
+}
+#sheet .nora-staff-mod {display:grid;gap:13px;max-width:100%;padding:3px 2px 9px;color:#f3eaf1;font:400 13px/1.5 Rubik,Arial,sans-serif}
+#sheet .nora-staff-mod-head {display:flex;gap:11px;align-items:center}
+#sheet .nora-staff-mod-head>span {display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:rgba(164,63,98,.16);font-size:21px}
+#sheet .nora-staff-mod-head small {color:#b89dab;font-size:9px;letter-spacing:.12em}
+#sheet .nora-staff-mod-head h3 {margin:1px 0;font-size:18px;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+#sheet .nora-staff-mod-meta,#sheet .nora-staff-mod-footnote{font-size:11px;color:#ac9ba9;margin:0}
+#sheet .nora-staff-mod-actions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#sheet .nora-staff-mod-actions button,#sheet .nora-staff-mod-close,#sheet .nora-staff-mod-confirm-row button {min-height:42px;border:1px solid rgba(255,255,255,.09);border-radius:12px;background:rgba(255,255,255,.055);color:#f0e7ed;font:600 12px/1.3 Rubik,Arial,sans-serif;padding:9px 12px}
+#sheet .nora-staff-mod-actions button {display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left}
+#sheet .nora-staff-mod-actions button span {font-size:18px;color:#a78b9b}
+#sheet .nora-staff-mod-warning {margin:0;padding:10px;border-radius:11px;border:1px solid rgba(225,160,108,.22);background:rgba(180,102,55,.10);color:#e9c7ab;font-size:12px}
+#sheet .nora-staff-mod-success {margin:0;color:#9edabb}
+#sheet .nora-staff-mod-label {display:grid;gap:6px;color:#c7b3c0;font-size:12px;font-weight:600}
+#sheet .nora-staff-mod-label select,#sheet .nora-staff-mod-label textarea {
+  min-height:42px;width:100%;max-width:100%;box-sizing:border-box;
+  padding:10px 12px;border-radius:11px;
+  color:#f3eaf1;background:#251f28;border:1px solid rgba(255,255,255,.13);
+  font:400 15px/1.45 Rubik,Arial,sans-serif;
+}
+#sheet .nora-staff-mod-label textarea{min-height:78px;resize:vertical}
+#sheet .nora-staff-mod-confirm-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+#sheet .nora-staff-mod-confirm-row .nora-staff-mod-danger{
+  background:rgba(183,60,92,.24);border-color:rgba(232,114,139,.33);color:#ffd2dd
+}
+#sheet .nora-staff-mod button:disabled{opacity:.5}
+#sheet .nora-staff-mod-entries{display:grid;gap:9px;max-height:54dvh;overflow-y:auto;overscroll-behavior:contain}
+#sheet .nora-staff-mod-entry {display:grid;gap:4px;padding:9px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.035)}
+#sheet .nora-staff-mod-entry div {display:flex;gap:8px;justify-content:space-between;align-items:center}
+#sheet .nora-staff-mod-entry time{color:#ad9ba7;font-size:10px}
+#sheet .nora-staff-mod-entry small{color:#c3aebd}
+#sheet .nora-staff-mod-entry p{margin:0;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:380px){#app[data-screen="staffchat"] .staff-chat-mod-log-button span{display:none}}

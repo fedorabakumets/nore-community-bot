@@ -37,5 +37,10 @@ assert.ok(source.includes('stopRecording(true)'), 'Recordings must be stopped on
 assert.match(html, /id="staff-chat-delivery"/);
 assert.ok(source.includes("form.append('operation_id'"), 'Media operation ID included');
 assert.ok(source.includes('delivery.check()'), 'Status recovery wired');
+assert.match(html, /data-chat-mod-log/);
+assert.ok(source.includes('data-chat-mod-message'), 'Moderation must be accessible from message');
+assert.ok(source.includes('data-chat-mod-execute'), 'Moderation requires explicit confirmation');
+assert.ok(source.includes('community/chat/moderation/logs'), 'Moderation journal exists');
+
 
 console.log('NORA stage 7 media UI smoke checks passed');

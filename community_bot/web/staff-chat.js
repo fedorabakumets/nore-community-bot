@@ -10,6 +10,7 @@ window.NoraStaffChat = (() => {
   const unreadIds = new Set();
   const reactionSet = ['❤️','😂','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
   const reactionBusy = new Set();
+  let moderationContext=null, moderationBusy=false;
   let gesture = null, gestureTimer = null;
 
   const cache = new Map();
@@ -157,6 +158,7 @@ window.NoraStaffChat = (() => {
       <button type="button" class="staff-chat-react-open" data-chat-react-open="${id}" aria-label="Поставить реакцию" title="Реакция">☺</button>
       ${replyButton}
       <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="Копировать текст" title="Копировать">⧉</button>
+      <button type="button" class="staff-chat-mod-trigger" data-chat-mod-message="${id}" title="Модерация" aria-label="Модерация сообщения">🛡</button>
       ${link}${hideButton}</div>`;
     return `<article class="staff-chat-message" data-message-id="${id}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
@@ -179,6 +181,7 @@ window.NoraStaffChat = (() => {
           <h1>Чат Норы</h1>
           <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span>
         </div>
+        <button type="button" class="staff-chat-mod-log-button" data-chat-mod-log aria-label="Журнал модерации" title="Журнал модерации">☷ <span>Журнал</span></button>
         <span class="staff-chat-team-label">КОМАНДА</span>
       </header>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
@@ -1122,6 +1125,141 @@ window.NoraStaffChat = (() => {
     app?.style.removeProperty('--staff-chat-viewport-height');
     app?.style.removeProperty('--staff-chat-viewport-top');
   }
+
+  function moderationTitle(name) {
+    return '<header class="nora-staff-mod-head"><span>🛡</span><div><small>МОДЕРАЦИЯ НОРЫ</small><h3>'+esc(name)+'</h3></div></header>';
+  }
+  function moderationCloseButton() {
+    return '<button type="button" class="nora-staff-mod-close" data-chat-mod-close>Закрыть</button>';
+  }
+  function moderationError(message) {
+    sheet('<section class="nora-staff-mod">'+moderationTitle('Ошибка')+
+      '<p class="nora-staff-mod-warning">'+esc(message)+'</p>'+moderationCloseButton()+'</section>');
+  }
+  function moderationMenu(info) {
+    moderationContext=info;
+    const buttons=(info.actions||[]).map(action=>
+      '<button type="button" data-chat-mod-action="'+esc(action.id)+'">'+
+      esc(action.label)+' <span aria-hidden="true">›</span></button>').join('');
+    sheet('<section class="nora-staff-mod">'+moderationTitle(info.target_name || 'Сообщение')+
+      '<div class="nora-staff-mod-meta">Сообщение №'+Number(info.message_id)+
+      (info.target_id?' · '+Number(info.warnings||0)+' предупреждений':' · автор недоступен')+'</div>'+
+      (buttons?'<div class="nora-staff-mod-actions">'+buttons+'</div>':
+        '<p class="nora-staff-mod-warning">Нет прав для действий с этим участником или сообщение не содержит доступного автора.</p>')+
+      '<p class="nora-staff-mod-footnote">Права проверяются сервером перед каждым действием. Удаление из Telegram отличается от скрытия в Норе.</p>'+
+      moderationCloseButton()+'</section>');
+  }
+  async function openModeration(id) {
+    if(!Number.isSafeInteger(id)||id<=0||tab!=='staffchat')return;
+    sheet('<section class="nora-staff-mod">'+moderationTitle('Проверка прав…')+'</section>');
+    try{
+      const info=await api('community/chat/moderation?message_id='+id);
+      if(tab==='staffchat')moderationMenu(info);
+    }catch(error){moderationError(error.message||'Не удалось открыть модерацию');}
+  }
+  function moderationConfirm(action) {
+    const info=moderationContext;
+    if(!info||(info.actions||[]).every(entry=>entry.id!==action))return;
+    const label=info.actions.find(entry=>entry.id===action).label;
+    const needsDuration=action==='ban'||action==='mute';
+    const durations=needsDuration
+      ? '<label class="nora-staff-mod-label">Срок<select id="staff-chat-mod-duration">'+
+        (action==='ban'
+          ? '<option value="1d">1 день</option><option value="7d" selected>7 дней</option><option value="forever">Навсегда</option>'
+          : '<option value="10m">10 минут</option><option value="1h" selected>1 час</option><option value="12h">12 часов</option><option value="1d">1 день</option><option value="7d">7 дней</option>')+
+        '</select></label>' : '';
+    const risk=action==='ban'
+      ? 'Бан в основном чате сбрасывает профиль и прогресс по существующим правилам Норы. Действие потенциально необратимо.'
+      : action==='kick'
+        ? 'Участник будет исключён из чата Telegram. Он сможет вступить повторно.'
+        : action==='delete'
+          ? 'Сообщение будет удалено из Telegram и зеркала Норы для всех.'
+          : action==='warn'
+            ? 'Предупреждение влияет на счётчик пользователя. На установленных порогах действует автоматическая лесенка наказаний.'
+            : 'Действие изменит реальное состояние участника в Telegram или Норе.';
+    sheet('<section class="nora-staff-mod" data-chat-mod-confirm="'+esc(action)+'">'+
+      moderationTitle(label)+'<p>Участник: <b>'+esc(info.target_name)+'</b></p>'+
+      '<div class="nora-staff-mod-warning">'+esc(risk)+'</div>'+
+      durations+
+      '<label class="nora-staff-mod-label">Причина<textarea id="staff-chat-mod-reason" rows="3" maxlength="250" placeholder="Напиши причину, минимум 3 символа" required></textarea></label>'+
+      '<div class="nora-staff-mod-confirm-row">'+
+      '<button type="button" data-chat-mod-back>Назад</button>'+
+      '<button type="button" class="nora-staff-mod-danger" data-chat-mod-execute="'+esc(action)+'">Подтвердить</button>'+
+      '</div></section>');
+  }
+  function moderationOpId() {
+    if(window.crypto?.randomUUID)return window.crypto.randomUUID();
+    const bytes=new Uint8Array(16);
+    if(window.crypto?.getRandomValues)window.crypto.getRandomValues(bytes);
+    else throw Error('Безопасное подтверждение недоступно на этом устройстве');
+    bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    const hex=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+    return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+  }
+  async function executeModeration(action) {
+    const info=moderationContext;
+    if(moderationBusy||!info||!(info.actions||[]).some(x=>x.id===action))return;
+    const reason=document.getElementById('staff-chat-mod-reason')?.value?.trim()||'';
+    const duration=document.getElementById('staff-chat-mod-duration')?.value||'';
+    if(reason.length<3||reason.length>250){toast('Укажи причину: 3–250 символов');return;}
+    let opId;
+    try{opId=moderationOpId();}catch(error){toast(error.message);return;}
+    moderationBusy=true;
+    const button=document.querySelector('[data-chat-mod-execute]');
+    if(button){button.disabled=true;button.textContent='Выполняем…';}
+    let confirmed=false;
+    try{
+      const result=await api('community/chat/moderation',{
+        message_id:Number(info.message_id),action,reason,duration,
+        operation_id:opId,confirmed:true
+      });
+      confirmed=!!result.ok && result.state==='sent';
+    }catch(error){
+      // The operation may have reached Telegram despite the HTTP error.
+      // Never issue the same action using another key automatically.
+      try{
+        const receipt=await api('community/chat/delivery/'+opId);
+        confirmed=receipt.state==='sent';
+      }catch{}
+      if(!confirmed){
+        moderationError('Telegram мог применить действие, но ответ не подтвердился. Проверь журнал и сам чат. Не повторяй наказание вслепую.');
+        moderationBusy=false;
+        return;
+      }
+    }finally{
+      moderationBusy=false;
+    }
+    if(confirmed){
+      moderationContext=null;
+      sheet('<section class="nora-staff-mod">'+moderationTitle('Готово')+
+        '<p class="nora-staff-mod-success">Действие подтверждено. Запись добавлена в журнал Норы.</p>'+
+        '<button type="button" data-chat-mod-log>Открыть журнал</button>'+
+        moderationCloseButton()+'</section>');
+      signature='';void load(true);
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+    }
+  }
+  async function openModerationLog() {
+    sheet('<section class="nora-staff-mod">'+moderationTitle('Журнал действий')+
+      '<p>Загружаем записи…</p></section>');
+    try{
+      const result=await api('community/chat/moderation/logs');
+      if(tab!=='staffchat')return;
+      const items=Array.isArray(result.items)?result.items:[];
+      const entries=items.slice(0,30).map(item=>
+        '<article class="nora-staff-mod-entry"><div><b>'+esc(item.action||'Действие')+
+        '</b><time>'+esc(item.created_at||'')+'</time></div>'+
+        '<small>'+esc(item.actor||'')+' → '+esc(item.target||'')+'</small>'+
+        '<p>'+esc(item.reason||item.details||'Без причины')+'</p></article>').join('');
+      sheet('<section class="nora-staff-mod">'+moderationTitle('Журнал действий')+
+        '<p class="nora-staff-mod-footnote">'+
+        (result.scope==='all'?'Последние действия команды':'Только твои последние действия')+
+        '</p><div class="nora-staff-mod-entries">'+
+        (entries||'<p>Записей пока нет.</p>')+'</div>'+
+        moderationCloseButton()+'</section>');
+    }catch(error){moderationError(error.message||'Не удалось загрузить журнал');}
+  }
+
   function mount() {
     cancelChatGesture();
     reactionBusy.clear();
@@ -1175,6 +1313,20 @@ window.NoraStaffChat = (() => {
 
   document.addEventListener('click',event=>{
     if(tab !== 'staffchat')return;
+    if(event.target.closest('[data-chat-mod-close]')){
+      document.getElementById('sheet')?.close();return;
+    }
+    if(event.target.closest('[data-chat-mod-log]')){void openModerationLog();return;}
+    const modMessage=event.target.closest('[data-chat-mod-message]');
+    if(modMessage){void openModeration(Number(modMessage.dataset.chatModMessage));return;}
+    const modAction=event.target.closest('[data-chat-mod-action]');
+    if(modAction){moderationConfirm(modAction.dataset.chatModAction);return;}
+    if(event.target.closest('[data-chat-mod-back]')){
+      if(moderationContext)moderationMenu(moderationContext);
+      return;
+    }
+    const modExecute=event.target.closest('[data-chat-mod-execute]');
+    if(modExecute){void executeModeration(modExecute.dataset.chatModExecute);return;}
 
     if(event.target.closest('[data-chat-check-delivery]')){
       void delivery.check();return;
