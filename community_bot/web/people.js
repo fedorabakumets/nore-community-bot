@@ -4,7 +4,7 @@ window.NoraPeople = (() => {
   let seq=0,started=false,heartbeatTimer=null,person=null,avatarURL=null,generation=0,loading=false,privacyRequest=0;
   function presenceLine(p) {
     if(!p?.visible)return 'Активность скрыта';
-    if(p.online)return 'В сети в Норе';
+    if(p.online)return 'В сети';
     if(!Number.isFinite(p.last_seen)||p.last_seen<=0)return 'Ещё не был в сети';
     // User-visible status deliberately does not distinguish exact exit from
     // last heartbeat: that distinction describes telemetry, not a person's intent.
