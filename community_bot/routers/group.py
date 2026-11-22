@@ -57,6 +57,8 @@ from community_bot.database import Database
 from community_bot.domain import (
     NEGATIVE_REPUTATION_PHRASES,
     POSITIVE_REPUTATION_PHRASES,
+    REPUTATION_DOWN_DELTA,
+    REPUTATION_UP_DELTA,
     cookies_phrase,
     discounted_price,
     is_permanent_duration,
@@ -782,7 +784,7 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     if await is_bot(db, target):
         await callback.answer("Репутация ботов не меняется.", show_alert=True)
         return
-    delta = 5 if action == "rep_up" else -5
+    delta = REPUTATION_UP_DELTA if action == "rep_up" else REPUTATION_DOWN_DELTA
     timezone = ZoneInfo(settings.timezone)
     local_date = datetime.now(timezone).date()
     from community_bot.reputation import change_community_reputation
@@ -2146,7 +2148,10 @@ async def group_reaction(
     votes = added & {"plus", "minus"}
     if len(votes) == 1:
         vote = votes.pop()
-        if await _apply_chat_reputation(db, bot, settings, chat_id, user, target, 5 if vote == "plus" else -5, send):
+        if await _apply_chat_reputation(
+            db, bot, settings, chat_id, user, target,
+            REPUTATION_UP_DELTA if vote == "plus" else REPUTATION_DOWN_DELTA, send,
+        ):
             from community_bot.pet_progress import record_telegram_event
 
             await record_telegram_event(db, user.id, vote, (chat_id, f"reaction:{event_update.update_id}", event.date))
