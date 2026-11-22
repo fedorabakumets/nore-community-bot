@@ -5,22 +5,23 @@ window.NoraPeople = (() => {
   function presenceLine(p) {
     if(!p?.visible)return 'Активность скрыта';
     if(p.online)return 'В сети в Норе';
-    if(!Number.isFinite(p.last_seen)||p.last_seen<=0)return 'Ещё не заходил(а) в Нору';
-    // An explicit foreground-off request records departure; missing pagehide
-    // cannot be called an exact exit, so identify it as last known activity.
-    const exactExit=Number.isFinite(p.last_exit)&&p.last_exit>0
-      && Math.abs(p.last_seen-p.last_exit)<0.001;
-    const at=new Date((exactExit?p.last_exit:p.last_seen)*1000);
+    if(!Number.isFinite(p.last_seen)||p.last_seen<=0)return 'Ещё не был в сети';
+    // User-visible status deliberately does not distinguish exact exit from
+    // last heartbeat: that distinction describes telemetry, not a person's intent.
+    const at=new Date(p.last_seen*1000);
     if(Number.isNaN(at.getTime()))return 'Время активности недоступно';
-    // Compare calendar dates in the viewer's local timezone, not elapsed hours.
-    const today=new Date();
-    const yesterday=new Date(today);
+    const now=new Date();
+    const minutes=Math.max(0,Math.floor((now-at)/60000));
+    if(minutes<1)return 'Был только что';
+    if(minutes<60)return 'Был '+minutes+' '+plural(minutes,'минуту','минуты','минут')+' назад';
+    if(at.toDateString()===now.toDateString())return 'Был в '+at.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    const yesterday=new Date(now);
     yesterday.setDate(yesterday.getDate()-1);
-    const day=at.toDateString()===today.toDateString()?'сегодня'
-      :at.toDateString()===yesterday.toDateString()?'вчера'
-      :at.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'});
-    const time=at.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
-    return (exactExit?'Вышел(а) из Норы ':'Был(а) в сети в Норе ')+day+' в '+time;
+    if(at.toDateString()===yesterday.toDateString())return 'Был в сети вчера';
+    const days=Math.round((Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())-
+      Date.UTC(at.getFullYear(),at.getMonth(),at.getDate()))/86400000);
+    if(days<=7)return 'Был в сети '+days+' '+plural(days,'день','дня','дней')+' назад';
+    return 'Был в сети давно';
   }
   function beat(active) {
     if(!started||!auth||data?.profile.fill_percent!==100)return;
@@ -107,7 +108,7 @@ window.NoraPeople = (() => {
     if(b.hasAttribute('data-privacy-locked')){sheet('<h2>Закрытый профиль</h2><p class="sub">Купи закрытый профиль в магазине, чтобы скрывать и открывать его в настройках.</p><button class="primary" data-product="private_profile">Посмотреть в магазине</button>');return}
     if(b.hasAttribute('data-presence-settings')||b.hasAttribute('data-lk-privacy')){
       const request=++privacyRequest;
-      try{const s=await api('presence');if(request!==privacyRequest)return;sheet(`<h2>Приватность</h2><div class="card"><h3>${data.user.profile_private?'Профиль скрыт':'Профиль открыт'}</h3><p class="sub">${data.privacy_owned?'Скрывай и открывай профиль без повторной покупки. Описание, увлечения, баланс и репутация скрыты от других пользователей.':'Чтобы скрывать профиль, купи «Закрытый профиль» в магазине.'}</p><button class="secondary" ${data.privacy_owned?'data-privacy-toggle':'data-privacy-locked'}>${data.privacy_owned?(data.user.profile_private?'Открыть профиль':'Скрыть профиль'):'🔒 Скрыть профиль'}</button></div><h3 class="lk-presence-title">Видимость активности</h3><p class="sub">Все участники Норы видят, когда ты в миниапке, а после выхода — точное время с пометкой «сегодня» или «вчера» (для более ранних посещений — дата). Если сигнал выхода не дошёл, показывается время последней активности. Это не статус Telegram. Закрытый профиль скрывает активность автоматически.</p><label class="presence-choice"><span>Показывать активность в Норе</span><input type="checkbox" id="presence-visible" ${s.hidden?'':'checked'}></label>`)}catch(err){toast(err.message)}
+      try{const s=await api('presence');if(request!==privacyRequest)return;sheet(`<h2>Приватность</h2><div class="card"><h3>${data.user.profile_private?'Профиль скрыт':'Профиль открыт'}</h3><p class="sub">${data.privacy_owned?'Скрывай и открывай профиль без повторной покупки. Описание, увлечения, баланс и репутация скрыты от других пользователей.':'Чтобы скрывать профиль, купи «Закрытый профиль» в магазине.'}</p><button class="secondary" ${data.privacy_owned?'data-privacy-toggle':'data-privacy-locked'}>${data.privacy_owned?(data.user.profile_private?'Открыть профиль':'Скрыть профиль'):'🔒 Скрыть профиль'}</button></div><h3 class="lk-presence-title">Видимость активности</h3><p class="sub">Виден только статус активности в Mini App: время, «вчера» или количество дней. После недели отображается «Был в сети давно». Это не статус Telegram. Это не статус Telegram. Закрытый профиль скрывает активность автоматически.</p><label class="presence-choice"><span>Показывать активность в Норе</span><input type="checkbox" id="presence-visible" ${s.hidden?'':'checked'}></label>`)}catch(err){toast(err.message)}
     }
   });
   document.addEventListener('change',async e=>{if(e.target.id!=='presence-visible')return;const el=e.target;el.disabled=true;try{await api('presence',{hidden:!el.checked});toast('Видимость активности сохранена')}catch(err){el.checked=!el.checked;toast(err.message)}finally{el.disabled=false}});
