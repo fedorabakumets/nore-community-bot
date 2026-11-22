@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -35,13 +38,95 @@ from community_bot.keyboards import (
 )
 from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import text_blocks
-from community_bot.profile_fields import parse_birth_date
+from community_bot.profile_fields import normalize_tg_channel_url, parse_birth_date
 from community_bot.profile_track import audio_block, get_track
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="profile")
+
+TGK_CALLBACK = "gprofile:tgk:"
+TGK_PROMPT = "🔗 ТГК:"
+
+
+async def _send_tgk_prompt(message: Message, db: Database, owner_id: int) -> None:
+    expiry = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+    with keep_in_chat(), bot_publication():
+        sent = await message.reply(
+            f"{TGK_PROMPT} настройка канала для владельца профиля.\n"
+            "Ответь на это сообщение одной ссылкой t.me/название или t.me/+приглашение.\n"
+            "Чтобы удалить ТГК, ответь словом «удалить». Запрос действует 24 часа."
+        )
+    await db.execute(
+        "DELETE FROM profile_tgk_prompts WHERE expires_at <= ?", (datetime.now(UTC).isoformat(),),
+    )
+    await db.execute(
+        "INSERT OR REPLACE INTO profile_tgk_prompts(chat_id,message_id,user_id,expires_at) "
+        "VALUES (?,?,?,?)",
+        (sent.chat.id, sent.message_id, owner_id, expiry),
+    )
+
+
+@router.callback_query(F.data.startswith(TGK_CALLBACK))
+async def request_tgk(callback: CallbackQuery, db: Database) -> None:
+    if not callback.data or not isinstance(callback.message, Message):
+        await callback.answer("Карточка недоступна.", show_alert=True)
+        return
+    raw_id = callback.data[len(TGK_CALLBACK):]
+    if not raw_id.isdecimal() or int(raw_id) != callback.from_user.id:
+        await callback.answer("Установить ТГК может только владелец профиля.", show_alert=True)
+        return
+    if not await db.get_user(callback.from_user.id):
+        await callback.answer("Профиль не найден.", show_alert=True)
+        return
+    await _send_tgk_prompt(callback.message, db, callback.from_user.id)
+    await callback.answer("Ответь на сообщение ссылкой на свой ТГК.")
+
+
+@router.message(Command("tgk"))
+async def change_own_tgk(message: Message, db: Database) -> None:
+    if not message.from_user:
+        return
+    await register_telegram_user(db, message.from_user)
+    await _send_tgk_prompt(message, db, message.from_user.id)
+
+
+@router.message(F.text, F.reply_to_message.text.startswith(TGK_PROMPT))
+async def save_tgk_reply(message: Message, db: Database) -> None:
+    if not message.from_user or not message.reply_to_message:
+        return
+    prompt = await db.fetchone(
+        "SELECT user_id,expires_at FROM profile_tgk_prompts WHERE chat_id=? AND message_id=?",
+        (message.chat.id, message.reply_to_message.message_id),
+    )
+    if not prompt:
+        return
+    if int(prompt["user_id"]) != message.from_user.id:
+        await message.reply("Изменить ТГК может только владелец профиля.")
+        return
+    if str(prompt["expires_at"]) <= datetime.now(UTC).isoformat():
+        await db.execute(
+            "DELETE FROM profile_tgk_prompts WHERE chat_id=? AND message_id=?",
+            (message.chat.id, message.reply_to_message.message_id),
+        )
+        await message.reply("Запрос устарел. Открой профиль и нажми «ТГК» ещё раз.")
+        return
+    try:
+        url = normalize_tg_channel_url(message.text or "")
+        await db.update_profile(message.from_user.id, "tg_channel_url", url)
+    except ValueError as error:
+        await message.reply(str(error) + ". Ответь на то же сообщение правильной ссылкой.")
+        return
+    await db.execute(
+        "DELETE FROM profile_tgk_prompts WHERE chat_id=? AND message_id=?",
+        (message.chat.id, message.reply_to_message.message_id),
+    )
+    with keep_in_chat(), bot_publication():
+        await message.reply(
+            f"✅ ТГК привязан: {url}\nОткрой профиль заново, чтобы ссылка появилась у имени."
+            if url else "✅ ТГК удалён из профиля."
+        )
 
 
 async def send_profile_card(

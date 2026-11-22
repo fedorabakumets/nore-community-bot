@@ -3,11 +3,44 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 EDITABLE = {'profile_name': (1, 50), 'hobbies': (1, 500), 'profile_bio': (1, 280), 'city': (2, 100)}
 REVISION_FIELDS = (*EDITABLE, 'birth_date', 'avatar_file_id', 'avatar_media_type', 'profile_private')
+
+
+def normalize_tg_channel_url(value: str) -> str:
+    """Allow only Telegram channel/user paths or private channel invitations.
+
+    Telegram channel ownership cannot be established from a bare URL.
+    """
+    if not isinstance(value, str) or len(value) > 200:
+        raise ValueError('Пришли ссылку на Telegram-канал, например https://t.me/channel')
+    raw = value.strip()
+    if raw.lower() in {'-', 'удалить'}:
+        return ''
+    if raw.startswith('@'):
+        path = raw[1:]
+    else:
+        match = re.fullmatch(
+            r'(?:https?://)?(?:t\.me|telegram\.me)/([a-zA-Z0-9_+/-]+)/?',
+            raw, flags=re.IGNORECASE,
+        )
+        if not match:
+            raise ValueError('Нужна ссылка t.me/название или t.me/+приглашение')
+        path = match.group(1)
+    if re.fullmatch(r'[a-zA-Z0-9_]{5,32}', path):
+        if path.lower() in {'share', 'proxy', 'login', 'joinchat', 'addstickers', 'addemoji'}:
+            raise ValueError('Укажи ссылку именно на свой Telegram-канал')
+    elif re.fullmatch(r'\+[a-zA-Z0-9_-]{8,128}', path):
+        pass
+    elif re.fullmatch(r'joinchat/[a-zA-Z0-9_-]{8,128}', path):
+        pass
+    else:
+        raise ValueError('Неверная ссылка на Telegram-канал')
+    return f'https://t.me/{path}'
 
 
 def age_on(birth_date: str, today: date) -> int:
