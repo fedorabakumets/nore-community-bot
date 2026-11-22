@@ -161,7 +161,7 @@ async def application_onboarding(db, uid, ban):
 
 async def submit_application(request):
     from community_bot.application_form import validate_application_age
-    from community_bot.city_lookup import resolve_city_id, resolve_city_text
+    from community_bot.city_lookup import city_label_matches, resolve_city_id, resolve_city_text
     from community_bot.routers.private import _notify_application_decision
 
     if 'application_ban' not in request:
@@ -189,8 +189,11 @@ async def submit_application(request):
             if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
                 raise ValueError(f'Заполни поле «{label}» (до {limit} символов).')
             answers[field] = value.strip()
-        answers['city'] = (await resolve_city_id(body['city_id']) if isinstance(body.get('city_id'), str)
-                           else await resolve_city_text(answers['city']))
+        chosen_city = (await resolve_city_id(body['city_id']) if isinstance(body.get('city_id'), str)
+                       else await resolve_city_text(answers['city']))
+        if isinstance(body.get('city_id'), str) and not city_label_matches(answers['city'], chosen_city):
+            raise ValueError('Выбранный город не совпадает с введённым. Выбери город заново.')
+        answers['city'] = chosen_city
         answers['age'] = validate_application_age(body.get('age'))
     except (ValueError, TypeError) as error:
         message = str(error) if not isinstance(error, (json.JSONDecodeError, TypeError)) else 'Проверь ответы в анкете.'
@@ -469,11 +472,16 @@ async def save_profile(request):
             or not isinstance(data['revision'], str)):
         raise ValueError('Некорректный запрос профиля')
     fields = validate_profile_fields(data['fields'])
-    if 'city' in fields and fields['city'] != user.get('city'):
-        from community_bot.city_lookup import resolve_city_id, resolve_city_text
+    if 'city_id' in data and ('city' not in fields or not isinstance(data['city_id'], str)):
+        raise ValueError('Выбери город из списка')
+    if 'city' in fields and (fields['city'] != user.get('city') or 'city_id' in data):
+        from community_bot.city_lookup import city_label_matches, resolve_city_id, resolve_city_text
 
-        fields['city'] = (await resolve_city_id(data['city_id']) if isinstance(data.get('city_id'), str)
-                          else await resolve_city_text(fields['city']))
+        selected_city = (await resolve_city_id(data['city_id']) if 'city_id' in data
+                         else await resolve_city_text(fields['city']))
+        if 'city_id' in data and not city_label_matches(fields['city'], selected_city):
+            raise ValueError('Выбранный город не совпадает с введённым. Выбери город заново.')
+        fields['city'] = selected_city
     if not await request.app['db'].save_self_profile(user['user_id'], fields, data['revision']):
         return web.json_response({'error': 'Профиль уже изменился в боте. Обнови ЛК перед сохранением'}, status=409)
     return web.json_response({'ok': True, 'message': 'Профиль сохранён — изменения уже видны в боте'})
