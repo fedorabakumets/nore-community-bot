@@ -4078,3 +4078,19 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 @media(prefers-reduced-motion:reduce){
   #app[data-screen="staffchat"] :is(.staff-chat-admin-panel,.staff-chat-admin-content){animation:none}
 }
+
+/* Stage 10: contextual staff controls belong to the message menu, not the header. */
+#app[data-screen="staffchat"] .staff-chat-actions{flex-wrap:wrap;gap:7px;justify-content:flex-end}
+#app[data-screen="staffchat"] .staff-chat-actions .staff-chat-admin-message-trigger{
+  display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;
+  border-radius:8px;background:rgba(183,77,112,.17);color:#edb9cd;font-size:19px;
+}
+#app[data-screen="staffchat"] .staff-chat-bubble > .staff-chat-admin-panel{
+  position:relative;top:auto;right:auto;left:auto;z-index:6;display:block;
+  box-sizing:border-box;width:100%;max-width:100%;min-height:0;
+  max-height:min(54dvh,450px);margin:6px 0 11px;padding:12px;
+  border-radius:15px;background:rgba(28,24,33,.92);box-shadow:0 12px 30px rgba(0,0,0,.23);
+  animation:staffChatAdminEnter .19s cubic-bezier(.2,.8,.2,1) both;
+}
+#app[data-screen="staffchat"] .staff-chat-admin-content,
+#app[data-screen="staffchat"] .staff-chat-admin-stats button{min-width:0}

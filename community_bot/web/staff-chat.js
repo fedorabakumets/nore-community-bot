@@ -12,7 +12,7 @@ window.NoraStaffChat = (() => {
   const reactionBusy = new Set();
   let moderationContext=null, moderationBusy=false;
   let adminAccess=null,adminTarget=null,adminView='home',adminMetric='',adminNewValue=0;
-  let adminBusy=false,adminNotice='',adminSelectedId='';
+  let adminBusy=false,adminNotice='',adminSelectedId='',adminSourceMessageId=null;
   let confirmationEnabled=true;
   try{confirmationEnabled=localStorage.getItem('nora-staff-chat-confirm')!=='off';}catch{}
   let gesture = null, gestureTimer = null;
@@ -163,6 +163,7 @@ window.NoraStaffChat = (() => {
       ${replyButton}
       <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="Копировать текст" title="Копировать">⧉</button>
       <button type="button" class="staff-chat-mod-trigger" data-chat-mod-message="${id}" title="Модерация" aria-label="Модерация сообщения">🛡</button>
+      <button type="button" class="staff-chat-admin-message-trigger" data-chat-admin-message="${id}" title="Админка сообщения" aria-label="Админка сообщения">⚙</button>
       ${link}${hideButton}</div>`;
     return `<article class="staff-chat-message" data-message-id="${id}" data-chat-user-id="${Number(m.user_id)||0}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
@@ -185,10 +186,8 @@ window.NoraStaffChat = (() => {
           <h1>Чат Норы</h1>
           <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span>
         </div>
-        <button type="button" class="staff-chat-admin-toggle" data-chat-admin-toggle aria-expanded="false" aria-controls="staff-chat-admin-panel" hidden>⚙ <span>Админка</span></button>
         <span class="staff-chat-team-label">КОМАНДА</span>
       </header>
-      <section id="staff-chat-admin-panel" class="staff-chat-admin-panel" aria-label="Админка тестового чата" hidden></section>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
         <p class="staff-chat-empty">Подключаем чат…</p>
       </div>
@@ -1160,9 +1159,8 @@ window.NoraStaffChat = (() => {
   ];
   function activeAdminStat(){return adminStats.find(item=>item.key===adminMetric);}
   function closeChatAdmin(){
-    const node=document.getElementById('staff-chat-admin-panel');
-    if(node){node.hidden=true;node.replaceChildren();}
-    document.querySelector('[data-chat-admin-toggle]')?.setAttribute('aria-expanded','false');
+    document.querySelector('#staff-chat-feed [data-chat-admin-panel]')?.remove();
+    adminSourceMessageId=null;
   }
   function recentChatAuthors(){
     const seen=new Set(),out=[];
@@ -1176,9 +1174,9 @@ window.NoraStaffChat = (() => {
     return out;
   }
   function renderChatAdmin(){
-    const node=document.getElementById('staff-chat-admin-panel');
-    if(!node||node.hidden||!adminAccess)return;
-    const header='<header class="staff-chat-admin-heading"><b>⚙ Админка</b>'+
+    const node=document.querySelector('#staff-chat-feed [data-chat-admin-panel]');
+    if(!node||!node.isConnected||!adminAccess)return;
+    const header='<header class="staff-chat-admin-heading"><b>⚙ Управление сообщением</b>'+
       '<button type="button" data-chat-admin-close aria-label="Закрыть окно">×</button></header>';
     let view='';
     if(adminView==='home'){
@@ -1198,14 +1196,17 @@ window.NoraStaffChat = (() => {
       }else view+='<p class="staff-chat-admin-muted">Для изменения показателей нужны права администратора.</p>';
       view+='<button type="button" class="staff-chat-admin-subtle" data-chat-mod-log>☷ Журнал модерации</button>';
     }else if(adminView==='person'&&adminTarget){
-      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К поиску</button>'+
+      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К выбору участника</button>'+
         '<div class="staff-chat-admin-person"><b>'+esc(adminTarget.name)+'</b>'+
         '<small>Telegram ID '+adminTarget.id+'</small></div>'+
         '<div class="staff-chat-admin-stats">'+adminStats.map(stat=>
           '<button type="button" data-chat-admin-stat="'+stat.key+'" '+
           (adminAccess[stat.permission]?'':'disabled')+'><span>'+stat.title+'</span>'+
           '<b>'+Number(adminTarget[stat.key]).toLocaleString('ru-RU')+'</b><span>›</span></button>'
-        ).join('')+'</div>';
+        ).join('')+'</div>'+
+        '<label class="staff-chat-admin-switch"><span><b>Подтверждать отправку</b><small>Настройка чата</small></span>'+
+        '<input type="checkbox" role="switch" data-chat-confirm-toggle '+(confirmationEnabled?'checked':'')+'></label>'+
+        '<button type="button" class="staff-chat-admin-subtle" data-chat-mod-log>☷ Журнал модерации</button>';
     }else if(adminView==='edit'&&adminTarget){
       const stat=activeAdminStat();
       view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К показателям</button>'+
@@ -1231,22 +1232,44 @@ window.NoraStaffChat = (() => {
   }
   async function initChatAdmin(){
     try{
-      const info=await api('community/chat/admin');
-      if(tab!=='staffchat')return;
-      adminAccess=info;
-      const control=document.querySelector('[data-chat-admin-toggle]');
-      if(control)control.hidden=!info.can_open;
+      const access=await api('community/chat/admin');
+      if(tab==='staffchat')adminAccess=access;
     }catch{
       if(tab==='staffchat'){adminAccess=null;closeChatAdmin();}
     }
   }
-  function toggleChatAdmin(){
-    const node=document.getElementById('staff-chat-admin-panel');
-    if(!node||!adminAccess?.can_open)return;
-    if(!node.hidden){closeChatAdmin();return;}
-    adminView='home';adminNotice='';node.hidden=false;
-    document.querySelector('[data-chat-admin-toggle]')?.setAttribute('aria-expanded','true');
+  async function openChatAdminFromMessage(article){
+    if(!article||tab!=='staffchat')return;
+    const messageId=Number(article.dataset.messageId);
+    if(!Number.isSafeInteger(messageId)||messageId<=0)return;
+    if(adminSourceMessageId===messageId&&article.querySelector('[data-chat-admin-panel]')){
+      closeChatAdmin();return;
+    }
+    closeChatAdmin();
+    if(!adminAccess)await initChatAdmin();
+    if(!adminAccess?.can_open||tab!=='staffchat'||!article.isConnected){
+      toast('Админка сообщений недоступна');return;
+    }
+    const menu=article.querySelector('[data-chat-menu]');
+    if(menu)menu.hidden=true;
+    article.querySelector('[data-chat-more]')?.setAttribute('aria-expanded','false');
+    const bubble=article.querySelector('.staff-chat-bubble');
+    if(!bubble)return;
+    adminSourceMessageId=messageId;
+    adminTarget=null;
+    adminView='home';adminNotice='';
+    const node=document.createElement('section');
+    node.className='staff-chat-admin-panel';
+    node.dataset.chatAdminPanel=String(messageId);
+    node.setAttribute('aria-label','Управление сообщением №'+messageId);
+    if(menu)menu.insertAdjacentElement('afterend',node);
+    else bubble.prepend(node);
+    const uid=Number(article.dataset.chatUserId);
+    adminSelectedId=Number.isSafeInteger(uid)&&uid>0?String(uid):'';
     renderChatAdmin();
+    if(adminSelectedId&&(adminAccess.can_cookies||adminAccess.can_profile)){
+      await lookupChatAdminUser(adminSelectedId);
+    }
   }
   async function lookupChatAdminUser(raw){
     const id=String(raw||'').trim();
@@ -1254,13 +1277,14 @@ window.NoraStaffChat = (() => {
     if(!/^[0-9]{1,12}$/.test(id)||Number(id)<=0){
       adminNotice='Укажи корректный Telegram ID';renderChatAdmin();return;
     }
+    const sourceId=adminSourceMessageId;
     adminSelectedId=id;adminBusy=true;adminNotice='Загружаем профиль…';renderChatAdmin();
     try{
       const data=await api('community/chat/admin?target_id='+encodeURIComponent(id));
-      if(tab!=='staffchat')return;
+      if(tab!=='staffchat'||adminSourceMessageId!==sourceId)return;
       adminTarget=data.target;adminView='person';adminNotice='';
-    }catch(error){adminNotice=error.message||'Не удалось открыть профиль';}
-    finally{adminBusy=false;if(tab==='staffchat')renderChatAdmin();}
+    }catch(error){if(adminSourceMessageId===sourceId){adminView='home';adminNotice=error.message||'Не удалось открыть профиль';}}
+    finally{adminBusy=false;if(tab==='staffchat'&&adminSourceMessageId===sourceId)renderChatAdmin();}
   }
   function prepareChatAdminValue(){
     const stat=activeAdminStat(),field=document.getElementById('staff-chat-admin-value');
@@ -1497,7 +1521,8 @@ window.NoraStaffChat = (() => {
 
   document.addEventListener('click',event=>{
     if(tab !== 'staffchat')return;
-    if(event.target.closest('[data-chat-admin-toggle]')){toggleChatAdmin();return;}
+    const fromMessage=event.target.closest('[data-chat-admin-message]');
+    if(fromMessage){void openChatAdminFromMessage(fromMessage.closest('.staff-chat-message'));return;}
     if(event.target.closest('[data-chat-admin-close]')){closeChatAdmin();return;}
     if(event.target.closest('[data-chat-send-back]')){hideSendConfirmation();return;}
     if(event.target.closest('[data-chat-send-confirm]')){void sendCompose(true);return;}
@@ -1512,8 +1537,8 @@ window.NoraStaffChat = (() => {
       adminNotice='';renderChatAdmin();return;
     }
     if(event.target.closest('[data-chat-admin-save]')){void saveChatAdminValue();return;}
-    const adminNode=document.getElementById('staff-chat-admin-panel');
-    if(adminNode&&!adminNode.hidden&&!event.target.closest('#staff-chat-admin-panel'))closeChatAdmin();
+    const adminNode=document.querySelector('#staff-chat-feed [data-chat-admin-panel]');
+    if(adminNode&&!event.target.closest('[data-chat-admin-panel]')&&!event.target.closest('[data-chat-more]'))closeChatAdmin();
     if(event.target.closest('[data-chat-mod-close]')){
       document.getElementById('sheet')?.close();return;
     }
@@ -1576,6 +1601,7 @@ window.NoraStaffChat = (() => {
     const more = event.target.closest('[data-chat-more]');
     if(more){
       closeChatPickers();
+      closeChatAdmin();
       const menu=more.closest('.staff-chat-message')?.querySelector('[data-chat-menu]');
       if(!menu)return;
       const opened=!menu.hidden;
