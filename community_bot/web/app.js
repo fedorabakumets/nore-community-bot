@@ -11,6 +11,15 @@ if (tg) {
 }
 const auth=tg?.initData||'';const demo=false;let tab='home',filter='all',data,busy=false;
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function tgkLink(url){
+  const href=String(url||'');
+  if(!/^https:\/\/t\.me\/(?:[A-Za-z0-9_]{5,32}|\+[A-Za-z0-9_-]{8,128}|joinchat\/[A-Za-z0-9_-]{8,128})$/.test(href))return '';
+  return `<a class="tgk-link" data-tgk href="${esc(href)}" aria-label="Открыть ТГК в Telegram" title="Telegram-канал"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.6 3.3 2.7 10.7c-1.1.4-1.1 1.1-.2 1.4l4.9 1.6 1.9 5.7c.3.8.6.9 1.2.3l2.7-2.6 5.1 3.8c1 .6 1.6.3 1.8-.8l3.1-15c.3-1.3-.4-2-1.6-1.8ZM9 13.5l10.4-6.7-8 8.7-.4 3-2-5Z"/></svg></a>`;
+}
+document.addEventListener('click',event=>{
+  const link=event.target.closest('a[data-tgk]');
+  if(link&&tg?.openTelegramLink){event.preventDefault();tg.openTelegramLink(link.href);}
+});
 function profileTabLocked(target) {
   return data.profile.fill_percent < 100 && !['home','commands','lk','notices','admin','reputation','staffchat'].includes(target)
     && !(target==='events'&&data.events_admin);

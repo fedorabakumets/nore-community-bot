@@ -300,7 +300,8 @@ async def overview(request):
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',
                                         'cookies', 'cookie_debt', 'reputation', 'profile_bio',
-                                        'birth_date', 'hobbies', 'city', 'warnings', 'profile_private',
+                                        'birth_date', 'hobbies', 'city', 'tg_channel_url',
+                                        'warnings', 'profile_private',
                                         'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
         'staff_chat_available': role in {'owner', 'admin', 'moderator'},
         'admin_available': await has_permission(

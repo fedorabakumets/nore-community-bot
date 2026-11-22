@@ -149,11 +149,17 @@ async def group_profile_body(
         if (value := str(user.get(field) or "").strip())
     ]
     track = await get_track(db, uid) if not user.get("profile_private") else None
+    tgk = (
+        RichMessageButton(text="ТГК", style="link", url=str(user["tg_channel_url"]))
+        if user.get("tg_channel_url")
+        else RichMessageButton(text="ТГК", style="link", callback_data=f"gprofile:tgk:{uid}")
+    )
     body = [
         reputation,
         InputRichBlockParagraph(text=[
             RichTextBold(text=name), "  ",
             RichTextButton(button=RichMessageButton(text=like, style="link", callback_data=f"{LIKE_PREFIX}{uid}")),
+            "  ", RichTextButton(button=tgk),
         ]),
         InputRichBlockParagraph(text=subtitle),
         *details,
@@ -216,7 +222,9 @@ async def send_group_profile(
     if sent is None:
         audio_inline = False
         balance, score = _stats(user, settings)
-        text = f"<b>{escape(name)}</b>\n{escape(subtitle)}"
+        tgk_url = str(user.get("tg_channel_url") or "")
+        tgk_label = f' · <a href="{escape(tgk_url, quote=True)}">ТГК</a>' if tgk_url else ""
+        text = f"<b>{escape(name)}</b>{tgk_label}\n{escape(subtitle)}"
         for detail in details:
             content = escape(detail.blocks[0].text)
             text += f"\n<blockquote expandable>{detail.summary}\n{content}</blockquote>"
@@ -233,6 +241,7 @@ async def send_group_profile(
                     [ibtn(like, f"{LIKE_PREFIX}{int(user['user_id'])}")], votes,
                     [ibtn("♻️ Восстановить", f"gprofile:limits:restore:{int(user['user_id'])}"),
                      ibtn("🎁 Подарить", f"gprofile:limits:gift:{int(user['user_id'])}")], commands,
+                    *([[ibtn("ТГК", f"gprofile:tgk:{int(user['user_id'])}")]] if not tgk_url else []),
                 ]),
             )
     if track and not audio_inline:

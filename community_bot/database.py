@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
     birth_date TEXT,
     hobbies TEXT,
     city TEXT,
+    tg_channel_url TEXT NOT NULL DEFAULT '',
     avatar_file_id TEXT,
     avatar_media_type TEXT NOT NULL DEFAULT 'photo',
     role TEXT NOT NULL DEFAULT 'member',
@@ -523,6 +524,14 @@ CREATE TABLE IF NOT EXISTS ui_owners (
     PRIMARY KEY(chat_id, message_id)
 );
 
+CREATE TABLE IF NOT EXISTS profile_tgk_prompts (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY(chat_id, message_id)
+);
+
 CREATE TABLE IF NOT EXISTS event_offers (
     event_id TEXT PRIMARY KEY,
     chat_id INTEGER NOT NULL,
@@ -706,6 +715,8 @@ class Database:
                         "UPDATE users SET city=? WHERE user_id=? AND TRIM(COALESCE(city,''))=''",
                         (city, row["user_id"]),
                     )
+            if "tg_channel_url" not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN tg_channel_url TEXT NOT NULL DEFAULT ''")
             if "avatar_media_type" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN avatar_media_type TEXT NOT NULL DEFAULT 'photo'")
             pet_columns = {str(row[1]) for row in await (await db.execute("PRAGMA table_info(pets)")).fetchall()}
@@ -1645,6 +1656,7 @@ class Database:
             "profile_ornate",
             "moderator_note",
             "profile_bio",
+            "tg_channel_url",
         }
         if field not in allowed:
             raise ValueError("Недопустимое поле профиля")
@@ -1656,6 +1668,10 @@ class Database:
             from community_bot.application_form import validate_city
 
             value = validate_city(value)
+        elif field == "tg_channel_url":
+            from community_bot.profile_fields import normalize_tg_channel_url
+
+            value = normalize_tg_channel_url(value)
         sql = f"UPDATE users SET {field} = ?, updated_at = ? WHERE user_id = ?"
         params = (value, utcnow(), user_id)
         if field == "avatar_file_id":

@@ -4102,3 +4102,12 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 .city-suggestion-option:hover,.city-suggestion-option:focus-visible{border-color:#d14760;background:#382631}
 .city-suggestion-option small{display:block;color:#afa9b7;font-size:10px}
 .city-picker-feedback{display:block;margin:5px 0 10px;color:#c7b2bd;font-size:11px;line-height:1.45}
+
+/* Telegram channel is a small inline profile affordance, not another card. */
+.tgk-link{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:29px;height:29px;border-radius:50%;color:#58b6e7;background:rgba(60,150,204,.10);border:1px solid rgba(98,181,226,.22);text-decoration:none;vertical-align:middle}
+.tgk-link svg{width:20px;height:20px;display:block;flex:none}
+.tgk-link:focus-visible{outline:2px solid #58b6e7;outline-offset:2px}
+.lk-identity-heading .tgk-link{margin-top:0;flex-shrink:0}
+.lk-identity-heading .tgk-link svg{width:20px;height:20px}
+.person-name-line{display:flex;align-items:center;gap:7px;min-width:0}
+.person-name-line h2{margin:0;min-width:0;overflow-wrap:anywhere}
