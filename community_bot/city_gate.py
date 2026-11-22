@@ -34,7 +34,8 @@ def _is_city_prompt(message: Message) -> bool:
     return CITY_PROMPT_PREFIX in str(blocks)
 
 
-def _keyboard(user_id: int, *, page: int = 0, suggestions: list[dict] | None = None):
+def city_keyboard(user_id: int, *, page: int = 0, suggestions: list[dict] | None = None,
+                  prefix: str = 'city'):
     if suggestions is None:
         options, pages = popular_cities(page)
         page = min(max(0, page), pages - 1)
@@ -43,26 +44,26 @@ def _keyboard(user_id: int, *, page: int = 0, suggestions: list[dict] | None = N
     rows = [
         [InlineKeyboardButton(
             text="📍 " + item["name"] + ((" · " + item["region"]) if item.get("region") else ""),
-            callback_data=f'city:pick:{user_id}:{item["id"]}',
+            callback_data=f'{prefix}:pick:{user_id}:{item["id"]}',
         )]
         for item in options
     ]
     if pages:
         rows.append([
-            InlineKeyboardButton(text="◀", callback_data=f"city:page:{user_id}:{(page - 1) % pages}"),
+            InlineKeyboardButton(text="◀", callback_data=f"{prefix}:page:{user_id}:{(page - 1) % pages}"),
             InlineKeyboardButton(text=f"🌍 Все города · {page + 1}/{pages}",
-                                 callback_data=f"city:page:{user_id}:{(page + 1) % pages}"),
-            InlineKeyboardButton(text="▶", callback_data=f"city:page:{user_id}:{(page + 1) % pages}"),
+                                 callback_data=f"{prefix}:page:{user_id}:{(page + 1) % pages}"),
+            InlineKeyboardButton(text="▶", callback_data=f"{prefix}:page:{user_id}:{(page + 1) % pages}"),
         ])
     else:
         rows.append([InlineKeyboardButton(text="🌍 Все популярные города",
-                                          callback_data=f"city:page:{user_id}:0")])
+                                          callback_data=f"{prefix}:page:{user_id}:0")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _ask_city(source: Message, db, uid: int) -> None:
     # A reply to this Rich message can be located through its blocks or stored ID.
-    sent = await source.reply(CITY_PROMPT, reply_markup=_keyboard(uid))
+    sent = await source.reply(CITY_PROMPT, reply_markup=city_keyboard(uid))
     if isinstance(sent, Message):
         await db.set_bot_state(_prompt_key(source.chat.id, uid), str(sent.message_id))
 
@@ -95,6 +96,8 @@ class CityGateMiddleware(BaseMiddleware):
             return await handler(event, data)
         if not user:
             return await handler(event, data)
+        if action.startswith('appcity:'):
+            return await handler(event, data)
 
         source = event.message if isinstance(event, CallbackQuery) else event
         if not isinstance(source, Message):
@@ -122,7 +125,7 @@ class CityGateMiddleware(BaseMiddleware):
                         page = int(parts[3])
                     except ValueError:
                         page = 0
-                    await source.edit_text(CITY_PROMPT, reply_markup=_keyboard(actor.id, page=page))
+                    await source.edit_text(CITY_PROMPT, reply_markup=city_keyboard(actor.id, page=page))
                     await event.answer()
                     return None
                 if parts[1] == "pick" and len(parts) == 5:
@@ -164,7 +167,7 @@ class CityGateMiddleware(BaseMiddleware):
                 await event.reply("Город не найден. Попробуй другое название в ответ.")
                 return None
             text = CITY_PROMPT + "\n\nВыбери найденный город (регион указан, если названия совпадают):"
-            sent = await event.reply(text, reply_markup=_keyboard(actor.id, suggestions=suggestions))
+            sent = await event.reply(text, reply_markup=city_keyboard(actor.id, suggestions=suggestions))
             if isinstance(sent, Message):
                 await db.set_bot_state(_prompt_key(event.chat.id, actor.id), str(sent.message_id))
             return None
