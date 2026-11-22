@@ -43,7 +43,8 @@ def test_reputation_phrases() -> None:
     assert reputation_delta("-реп") == -10
     assert reputation_delta("пнуть") == -10
     assert reputation_delta("ударить") == -10
-    assert reputation_delta("−реп") is None
+    assert reputation_delta("−реп") == -10
+    assert reputation_delta("–реп") == -10
     assert reputation_delta("обычный текст") is None
 
 
