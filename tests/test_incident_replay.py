@@ -119,7 +119,7 @@ async def test_moderation_uses_sent_time_not_replay_arrival(monkeypatch, tmp_pat
     await db.ensure_user(17, telegram_name="Участник")
     monkeypatch.setattr(group, "Settings", SimpleNamespace)
     monkeypatch.setattr(group, "Bot", SimpleNamespace)
-    monkeypatch.setattr(group, "register_telegram_user", AsyncMock(return_value={"user_id": 17}))
+    monkeypatch.setattr(group, "register_telegram_user", AsyncMock(return_value={"user_id": 17, "reputation": 69}))
     monkeypatch.setattr(Message, "delete", AsyncMock(return_value=True))
     monkeypatch.setattr(group, "needs_reapplication", AsyncMock(return_value=False))
     monkeypatch.setattr(group, "rank_of_user", AsyncMock(return_value=0))
@@ -133,7 +133,7 @@ async def test_moderation_uses_sent_time_not_replay_arrival(monkeypatch, tmp_pat
         restrict_chat_member=AsyncMock(),
         send_message=AsyncMock(),
     )
-    settings = SimpleNamespace(community_chat_id=-100123)
+    settings = SimpleNamespace(community_chat_id=-100123, restricted_reputation_threshold=0)
     middleware = group.CommunityModerationMiddleware()
     forward = AsyncMock()
 
