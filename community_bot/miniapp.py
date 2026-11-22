@@ -263,6 +263,7 @@ async def overview(request):
 
     stats = {
         'likes': await count(db, user['user_id']),
+        'shield_expires_at': await db.hate_shield_expiry(user['user_id']),
         'prefix': await prefix_for(db, settings, user['user_id']),
         'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
         'tier': tier.label, 'discount': tier.discount, 'daily_actions': tier.daily_actions,
