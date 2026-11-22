@@ -101,3 +101,59 @@ async def test_admin_cannot_edit_owner_and_stale_changes_do_not_apply(tmp_path):
     after = await db.get_user(22)
     assert int(after["cookies"]) == old
     assert not await db.fetchall("SELECT * FROM transactions WHERE user_id=?", (22,))
+
+
+
+@pytest.mark.asyncio
+async def test_bot_post_preserves_original_sender_and_exposes_real_app_author(tmp_path):
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+    from aiogram.types import Chat, Message, User
+    from community_bot.staff_chat import feed
+    from community_bot.staff_chat_send import send_text
+    from community_bot.staff_chat_moderation import _source
+
+    db, app = await setup(tmp_path)
+    bot_id = 999000
+    message = Message(
+        message_id=765, date=datetime.now(UTC),
+        chat=Chat(id=app["settings"].community_chat_id, type="supergroup"),
+        from_user=User(id=bot_id, is_bot=True, first_name="Нора"),
+        text="📱Участник 20 | Привет",
+    )
+    app.update(
+        bot=SimpleNamespace(send_message=AsyncMock(return_value=message)),
+        staff_chat_send_locks={}, staff_chat_last_sent={},
+    )
+    result = await send_text(Request(
+        app, 20, {"text": "Привет", "reply_to": None, "operation_id": None}
+    ))
+    assert result.status == 200, result.text
+    source = await db.fetchone(
+        "SELECT user_id, app_author_id, app_author_name FROM staff_chat_messages "
+        "WHERE chat_id=? AND message_id=?",
+        (app["settings"].community_chat_id, 765),
+    )
+    assert source["user_id"] == bot_id
+    assert source["app_author_id"] == 20
+    assert source["app_author_name"] == "Участник 20"
+
+    response = await feed(Request(app, 20))
+    items = json.loads(response.text)["items"]
+    assert items[0]["user_id"] == 20
+    assert items[0]["name"] == "Участник 20"
+    target = await _source(db, app["settings"].community_chat_id, 765)
+    assert target["user_id"] == 20
+
+
+def test_staff_admin_only_opens_from_message_three_dot_menu():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "community_bot" / "web"
+    source = (root / "staff-chat.js").read_text(encoding="utf-8")
+    assert 'data-chat-more="\${id}"' in source
+    assert 'data-chat-admin-message="\${id}"' in source
+    assert "openChatAdminFromMessage(" in source
+    assert "insertAdjacentElement('afterend',node)" in source
+    assert "data-chat-confirm-toggle" in source
+    assert 'data-chat-admin-toggle' not in source
+    assert 'id="staff-chat-admin-panel"' not in source
