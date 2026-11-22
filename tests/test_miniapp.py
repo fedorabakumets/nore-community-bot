@@ -42,7 +42,7 @@ def test_telegram_signature_and_ttl():
 class Request(dict):
     def __init__(self, db, uid=7, body=None):
         super().__init__(actor={'id': uid, 'first_name': 'Анна'})
-        self.app = {'db': db, 'settings': SimpleNamespace(restricted_reputation_threshold=0, timezone='Europe/Moscow',
+        self.app = {'db': db, 'settings': SimpleNamespace(restricted_reputation_threshold=50, timezone='Europe/Moscow',
                                                      is_owner=lambda uid: uid == 99, moderator_ids=frozenset(),
                                                      bot_token='test-only', community_chat_id=0), 'bot': None}
         self.body = body or {}
