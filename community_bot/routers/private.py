@@ -29,7 +29,7 @@ from aiogram.types import (
 )
 
 from community_bot.aliases import command_or_alias
-from community_bot.application_form import validate_application_age, validate_city
+from community_bot.application_form import validate_application_age
 from community_bot.audit import format_audit_log, person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
