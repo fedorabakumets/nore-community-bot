@@ -43,7 +43,9 @@ def city_keyboard(user_id: int, *, page: int = 0, suggestions: list[dict] | None
         options, pages = suggestions[:12], 0
     rows = [
         [InlineKeyboardButton(
-            text="📍 " + item["name"] + ((" · " + item["region"]) if item.get("region") else ""),
+            text="📍 " + item["name"]
+            + ((" · " + item["region"]) if item.get("region") else "")
+            + ((" · " + item["country"]) if suggestions is not None and item.get("country") else ""),
             callback_data=f'{prefix}:pick:{user_id}:{item["id"]}',
         )]
         for item in options
@@ -166,7 +168,7 @@ class CityGateMiddleware(BaseMiddleware):
             if not suggestions:
                 await event.reply("Город не найден. Попробуй другое название в ответ.")
                 return None
-            text = CITY_PROMPT + "\n\nВыбери найденный город (регион указан, если названия совпадают):"
+            text = CITY_PROMPT + "\n\nВыбери свой город из вариантов (область и страна указаны для уточнения):"
             sent = await event.reply(text, reply_markup=city_keyboard(actor.id, suggestions=suggestions))
             if isinstance(sent, Message):
                 await db.set_bot_state(_prompt_key(event.chat.id, actor.id), str(sent.message_id))
