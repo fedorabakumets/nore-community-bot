@@ -276,7 +276,12 @@ async def overview(request):
     levels = [{'label': label, 'range': span, 'discount': tier_for(value).discount,
                'daily_actions': tier_for(value).daily_actions, 'can_minus': tier_for(value).can_minus,
                'ai_daily_requests': tier_for(value).ai_daily_requests}
-              for value, label, span in [(0, 'Бронза', 'до 69'), (70, 'Серебро', '70–89'), (90, 'Золото', '90–100')]]
+              for value, label, span in [
+                  (49, 'Ограничен', 'ниже 50'),
+                  (50, 'Бронза', '50–69'),
+                  (70, 'Серебро', '70–89'),
+                  (90, 'Золото', '90–100'),
+              ]]
     history = await db.list_transactions(user['user_id'], 4)
     from community_bot.economy import describe_transactions
     from community_bot.updates import UPDATES
