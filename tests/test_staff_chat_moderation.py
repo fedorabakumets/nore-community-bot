@@ -257,4 +257,6 @@ def test_stage9_routes_are_exposed_without_adding_an_unserved_script():
     from community_bot.miniapp import ROOT
     assert (ROOT / "staff-chat.js").is_file()
     html = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert "/staff-chat.js?v=stage9-mod-20261122" in html
+    # The cache-busting version changes as the chat UI evolves.
+    assert '/staff-chat.js?v=' in html
+    assert '/style.css?v=' in html
