@@ -81,28 +81,34 @@ async def _recipient_id(db) -> int:
             return int(person["user_id"])
 
     rows = await db.fetchall(
-        "SELECT user_id, username, profile_name FROM users "
+        "SELECT user_id, username, profile_name, telegram_name FROM users "
         "WHERE lower(trim(COALESCE(profile_name, '')))=? "
+        "OR lower(trim(COALESCE(telegram_name, '')))=? "
         "OR lower(trim(COALESCE(username, '')))=? LIMIT 10",
-        (TARGET_PROFILE_NAME.casefold(), TARGET_USERNAME.casefold()),
+        (TARGET_PROFILE_NAME.casefold(), TARGET_PROFILE_NAME.casefold(),
+         TARGET_USERNAME.casefold()),
     )
     by_profile = [p for p in rows if str(p.get("profile_name") or "").strip().casefold()
                   == TARGET_PROFILE_NAME.casefold()]
+    by_telegram_name = [p for p in rows if str(p.get("telegram_name") or "").strip().casefold()
+                        == TARGET_PROFILE_NAME.casefold()]
+    # A custom NORA name is more precise than a Telegram first name.
+    by_display = by_profile if by_profile else by_telegram_name
     by_username = [p for p in rows if str(p.get("username") or "").strip().casefold()
                    == TARGET_USERNAME.casefold()]
-    both = [p for p in by_profile if p in by_username]
+    both = [p for p in by_display if p in by_username]
 
     if len(both) == 1:
         person = both[0]
-    elif len(by_username) == 1 and not by_profile:
+    elif len(by_username) == 1 and not by_display:
         person = by_username[0]
-    elif len(by_profile) == 1 and not by_username:
-        person = by_profile[0]
+    elif len(by_display) == 1 and not by_username:
+        person = by_display[0]
     else:
         # Do not credit a random similarly-named profile if IDs conflict.
         logger.error(
-            "Cannot safely resolve story target dedzyTWO: profile matches=%s, username matches=%s",
-            len(by_profile), len(by_username),
+            "Cannot safely resolve story target dedzyTWO: display matches=%s, username matches=%s",
+            len(by_display), len(by_username),
         )
         raise ValueError("Не удалось однозначно найти профиль dedzyTWO в Норе")
 
