@@ -36,6 +36,8 @@ window.NoraHome=(()=>{
   let currentStory = 'nora';
   let playbackAttempt = 0;
   let likeInProgress = false;
+  let storySession = 0;
+  let morphTimer = null;
 
   function preloadStory() {
     if (!storyVideo.hasAttribute('src')) storyVideo.src = originalStory;
@@ -61,22 +63,43 @@ window.NoraHome=(()=>{
     }
   }
 
+  function cancelTelegramMorph() {
+    if (morphTimer !== null) {
+      clearTimeout(morphTimer);
+      morphTimer = null;
+    }
+  }
+
   function showTelegramButton() {
     if (currentStory !== 'dj' || storyAction.classList.contains('is-telegram')) return;
+    cancelTelegramMorph();
     storyAction.classList.add('is-telegram');
     storyAction.setAttribute('aria-label', 'Открыть Telegram-канал артиста');
     storyAction.setAttribute('title', 'Перейти в Telegram-канал');
   }
 
+  function showLikedHeartThenTelegram(session, delay = 360) {
+    if (currentStory !== 'dj' || !storyDialog.open || session !== storySession) return;
+    storyAction.classList.add('is-liked');
+    if (storyAction.classList.contains('is-telegram') || morphTimer !== null) return;
+    // The red heart gets one short visual beat before the one-way TG morph.
+    morphTimer = setTimeout(() => {
+      morphTimer = null;
+      if (session === storySession && storyDialog.open) showTelegramButton();
+    }, delay);
+  }
+
   function openStory(trigger) {
     if (storyDialog.open) return;
     storyOpener = trigger;
+    const session = ++storySession;
+    cancelTelegramMorph();
     currentStory = trigger.dataset.homeStory === 'dj' ? 'dj' : 'nora';
     storyError.hidden = true;
     storyProgress.value = 0;
     likeInProgress = false;
     storyAction.disabled = false;
-    storyAction.classList.remove('is-telegram');
+    storyAction.classList.remove('is-telegram', 'is-liked');
     storyAction.hidden = currentStory !== 'dj';
     storyAction.setAttribute('aria-label', 'Поставить лайк профилю @dedzytwo');
     storyAction.setAttribute('title', 'Поставить лайк @dedzytwo');
@@ -91,6 +114,13 @@ window.NoraHome=(()=>{
     storyVideo.muted = false;
     storyDialog.showModal();
     startStoryPlayback();
+    if (currentStory === 'dj') {
+      api('story/dedzytwo/status').then(result => {
+        if (result.liked && session === storySession && storyDialog.open && !likeInProgress) {
+          showLikedHeartThenTelegram(session, 280);
+        }
+      }).catch(() => { /* Viewer can still tap to like when status is unavailable. */ });
+    }
   }
 
   storyAction.addEventListener('click', async () => {
@@ -99,21 +129,28 @@ window.NoraHome=(()=>{
       telegram(artistChannel);
       return;
     }
+    const session = storySession;
     likeInProgress = true;
     storyAction.disabled = true;
+    // Immediate visual feedback, rolled back if the server rejects the like.
+    storyAction.classList.add('is-liked');
     try {
-      await api('story/dedzytwo/like', {});
-      tg?.HapticFeedback?.notificationOccurred?.('success');
-      showTelegramButton();
+      const result = await api('story/dedzytwo/like', {});
+      if (session === storySession && storyDialog.open && result.liked) {
+        tg?.HapticFeedback?.notificationOccurred?.('success');
+        showLikedHeartThenTelegram(session);
+      }
     } catch (error) {
-      toast(error.message);
-      // A duplicate or a self-like cannot be counted; the channel remains available.
-      if (/уже поставил|Себе поставить лайк нельзя|скрыт или недоступен/i.test(error.message)) {
-        showTelegramButton();
+      if (session === storySession && storyDialog.open) {
+        storyAction.classList.remove('is-liked');
+        toast(error.message);
+        if (storyVideo.currentTime >= artistSwitchAt) showTelegramButton();
       }
     } finally {
-      likeInProgress = false;
-      storyAction.disabled = false;
+      if (session === storySession) {
+        likeInProgress = false;
+        storyAction.disabled = false;
+      }
     }
   });
   storyDialog.querySelector('.home-story-close').addEventListener('click', closeStory);
@@ -135,7 +172,8 @@ window.NoraHome=(()=>{
     storyProgress.value = storyVideo.duration > 0 && Number.isFinite(storyVideo.duration)
       ? storyVideo.currentTime / storyVideo.duration
       : 0;
-    if (currentStory === 'dj' && storyVideo.currentTime >= artistSwitchAt) {
+    if (currentStory === 'dj' && storyVideo.currentTime >= artistSwitchAt
+        && !likeInProgress && morphTimer === null) {
       showTelegramButton();
     }
   });
@@ -147,6 +185,8 @@ window.NoraHome=(()=>{
   storyDialog.addEventListener('close', () => {
     if (storyDialog.open) return;
     playbackAttempt++;
+    storySession++;
+    cancelTelegramMorph();
     storyVideo.pause();
     if (storyVideo.currentTime > 0) storyVideo.currentTime = 0;
     (storyOpener?.isConnected ? storyOpener : document.querySelector('[data-home-story]'))?.focus();
