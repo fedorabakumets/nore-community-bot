@@ -1,7 +1,8 @@
-"""Track Telegram mutes owned by the reputation gate.
+"""Synchronize Telegram chat permissions with the reputation gate.
 
-A reputation recovery must not silently undo an unrelated moderator mute.
-Only mutes applied by this gate are eligible for automatic release.
+The gate tags its own restrictions. For older users, a recovery operation can
+also release legacy, untagged reputation mutes, while preserving timed/staff
+mutes and pending admission checks.
 """
 from __future__ import annotations
 
@@ -22,6 +23,30 @@ def _key(chat_id: int, user_id: int) -> str:
     return f"reputation_chat_mute:{chat_id}:{user_id}"
 
 
+async def _release_is_safe(db: Database, chat_id: int, user_id: int) -> bool:
+    """Never bypass the captcha, re-application or recorded moderator mutes."""
+    from community_bot.access import needs_reapplication
+
+    if await needs_reapplication(db, user_id):
+        return False
+    if await db.fetchone(
+        "SELECT 1 FROM captcha_pending WHERE chat_id=? AND user_id=?",
+        (chat_id, user_id),
+    ):
+        return False
+
+    # Telegram does not indicate *why* an indefinite mute was imposed.
+    # Preserve an outstanding moderator mute even if the reputation mute is tagged.
+    last_moderation = await db.fetchone(
+        "SELECT action FROM admin_audit_log "
+        "WHERE target=? AND (action IN ('mute', 'unmute') "
+        "OR (action='warn' AND details LIKE '%+ мут%')) "
+        "ORDER BY id DESC LIMIT 1",
+        (str(user_id),),
+    )
+    return not last_moderation or last_moderation["action"] == "unmute"
+
+
 async def sync_reputation_chat_access(
     db: Database,
     settings: Settings,
@@ -29,21 +54,27 @@ async def sync_reputation_chat_access(
     chat_id: int,
     user_id: int,
     reputation: int,
+    *,
+    allow_legacy_recovery: bool = False,
 ) -> str | None:
-    """Return 'restricted', 'restored', or None; never free an unowned mute."""
-    if not settings.community_chat_id or chat_id != settings.community_chat_id:
+    """Return 'restricted'/'restored' or None when nothing was safely changed.
+
+    allow_legacy_recovery is for an explicit positive-reputation event or shop
+    restoration. Older reputation mutes were not tracked by this mechanism.
+    """
+    if not bot or not settings.community_chat_id or chat_id != settings.community_chat_id:
         return None
     key = _key(chat_id, user_id)
     restricted = reputation < settings.restricted_reputation_threshold
     owned = await db.get_bot_state(key) == "1"
-    if not restricted and not owned:
+    if not restricted and not owned and not allow_legacy_recovery:
         return None
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         if member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}:
             return None
         if restricted:
-            # Existing staff/Telegram mutes are not ours: do not claim them.
+            # Do not take ownership of unrelated restrictions.
             if member.status != ChatMemberStatus.MEMBER:
                 return None
             await bot.restrict_chat_member(
@@ -53,21 +84,28 @@ async def sync_reputation_chat_access(
             await db.set_bot_state(key, "1")
             return "restricted"
 
-        # Recovered to bronze. Release only a mute installed by this gate.
         if member.status == ChatMemberStatus.RESTRICTED and getattr(member, "is_member", False):
             if not member.can_send_messages:
                 until = getattr(member, "until_date", None)
-                # An explicit timed staff mute overrides our former restriction.
+                # A timed moderator mute must never disappear after +реп.
                 if isinstance(until, datetime) and until > datetime.now(UTC):
-                    await db.set_bot_state(key, "0")
+                    if owned:
+                        await db.set_bot_state(key, "0")
+                    return None
+                if not await _release_is_safe(db, chat_id, user_id):
                     return None
                 await bot.restrict_chat_member(
                     chat_id, user_id,
                     permissions=ChatPermissions(**dict.fromkeys(ChatPermissions.model_fields, True)),
+                    use_independent_chat_permissions=True,
                 )
                 await db.set_bot_state(key, "0")
                 return "restored"
-        await db.set_bot_state(key, "0")
+        if owned:
+            await db.set_bot_state(key, "0")
     except TelegramAPIError as error:
-        logger.warning("Could not sync reputation chat access for %s (%s)", user_id, type(error).__name__)
+        logger.warning(
+            "Could not sync reputation chat access for %s (%s)",
+            user_id, type(error).__name__,
+        )
     return None
