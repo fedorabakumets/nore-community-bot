@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -19,12 +21,9 @@ EXPECTED_PARTS = 15
 EXPECTED_SIZE = 8_597_446
 EXPECTED_SHA256 = "52986d0e5b4952cb4cfcdde6d9b7279e0c8d442c6763e3323d0b0774e4e6a629"
 ASSEMBLY_LOCK = asyncio.Lock()
+ANNOUNCEMENT_LOCK = asyncio.Lock()
 logger = logging.getLogger(__name__)
-STORY_LIKE_PREFIX = "story_like:dedzytwo:"
-
-
-def _like_key(actor_id: int) -> str:
-    return f"{STORY_LIKE_PREFIX}{actor_id}"
+NOTICE_PREFIX = "story_notice:dedzytwo:"
 
 
 
@@ -66,55 +65,91 @@ async def poster(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(POSTER, headers={"Cache-Control": "public, max-age=86400"})
 
 
+def _announcement(actor: dict, target_id: int) -> str:
+    actor_id = int(actor["id"])
+    username = actor.get("username")
+    # Signed Telegram initData, escaped before inserting in HTML.
+    name = ("@" + username if isinstance(username, str)
+            and re.fullmatch(r"[A-Za-z0-9_]{5,32}", username)
+            else "@" + str(actor.get("first_name") or "участник").lstrip("@"))
+    return (
+        f'❤️ <a href="tg://user?id={actor_id}">{html.escape(name)}</a>'
+        f' лайкнул сторис <a href="tg://user?id={target_id}">@dedzytwo</a>'
+    )
+
+
+async def _send_pending(request: web.Request) -> int:
+    """Deliver any pending like announcements without incrementing likes on retries."""
+    from community_bot.group_message_close import without_group_close
+
+    bot = request.app.get("bot")
+    chat_id = getattr(request.app["settings"], "community_chat_id", 0)
+    if bot is None or not chat_id:
+        logger.warning("DJ story like announcements not sent: bot or community_chat_id missing")
+        return 0
+
+    sent = 0
+    async with ANNOUNCEMENT_LOCK:
+        rows = await request.app["db"].fetchall(
+            "SELECT key,value FROM bot_state WHERE key GLOB ? ORDER BY key LIMIT 20",
+            (NOTICE_PREFIX + "*",),
+        )
+        for row in rows:
+            try:
+                payload = json.loads(row["value"])
+                text = payload["text"]
+                # Send as a simple linked Telegram message; the generic Rich
+                # conversion is not needed for this notification.
+                with without_group_close():
+                    await bot.send_message(chat_id, text, parse_mode="HTML")
+                await request.app["db"].execute(
+                    "DELETE FROM bot_state WHERE key=? AND value=?",
+                    (row["key"], row["value"]),
+                )
+                sent += 1
+            except Exception:
+                # Leave the exact event in the outbox for a later view/request.
+                logger.exception("Could not send DJ story like notification: %s", row["key"])
+    return sent
+
+
 async def status(request: web.Request) -> web.Response:
-    """Restore a viewer's one-time like state on every story opening."""
-    liked = bool(await request.app["db"].get_bot_state(_like_key(request["actor"]["id"])))
+    """Like state follows the shared daily limit, including a paid reset."""
+    from community_bot.friends_api import _recipient
+    from community_bot.social_likes import liked_today
+
+    await _send_pending(request)
+    target_id = await _recipient(request.app["db"], "@dedzytwo")
+    liked = await liked_today(request.app["db"], int(request["actor"]["id"]), target_id)
     return web.json_response({"liked": liked})
 
 
 async def like(request: web.Request) -> web.Response:
-    """Give the profile one like per story viewer, and announce new likes once."""
+    """Credit one profile like per limit cycle, with a durable chat announcement."""
     from community_bot.friends_api import _recipient
-    from community_bot.social_likes import ALREADY_PROFILE_LIKED, ONCE_LIKED, count, give
+    from community_bot.social_likes import ALREADY_PROFILE_LIKED, count, give
 
     db = request.app["db"]
     actor = request["actor"]
-    actor_id = int(actor["id"])
     target_id = await _recipient(db, "@dedzytwo")
-    key = _like_key(actor_id)
-
-    # Still checked atomically in give(): this fast path makes retries idempotent.
-    if await db.get_bot_state(key):
-        return web.json_response({"ok": True, "liked": True, "created": False})
-
-    error = await give(db, actor_id, target_id, once_key=key)
-    if error in (ONCE_LIKED, ALREADY_PROFILE_LIKED):
-        return web.json_response({"ok": True, "liked": True, "created": False})
-    if error:
+    notice_key = NOTICE_PREFIX + secrets.token_hex(16)
+    notification = (
+        notice_key,
+        json.dumps({"text": _announcement(actor, target_id)}, ensure_ascii=False),
+    )
+    error = await give(db, int(actor["id"]), target_id, notice=notification)
+    if error and error != ALREADY_PROFILE_LIKED:
         raise ValueError(error)
 
-    settings = request.app["settings"]
-    bot = request.app.get("bot")
-    chat_id = getattr(settings, "community_chat_id", 0)
-    announced = False
-    if bot is not None and chat_id:
-        username = actor.get("username")
-        # Telegram initData is signed, but escaped before HTML rendering.
-        name = ("@" + username if isinstance(username, str)
-                and re.fullmatch(r"[A-Za-z0-9_]{5,32}", username)
-                else "@" + str(actor.get("first_name") or "участник").lstrip("@"))
-        message = (
-            f'❤️ <a href="tg://user?id={actor_id}">{html.escape(name)}</a>'
-            f' лайкнул сторис <a href="tg://user?id={target_id}">@dedzytwo</a>'
-        )
-        try:
-            await bot.send_message(chat_id, message, parse_mode="HTML")
-            announced = True
-        except Exception:
-            # Never re-credit or re-announce a committed like on HTTP retry.
-            logger.exception("Could not announce Dedzytwo story like in community chat")
+    # Exactly one accepted like creates a pending event. Repeats can only
+    # retry an unsent announcement, never enqueue another one.
+    await _send_pending(request)
+    if error == ALREADY_PROFILE_LIKED:
+        return web.json_response({"ok": True, "liked": True, "created": False})
 
+    pending = bool(await db.get_bot_state(notice_key))
     return web.json_response({
         "ok": True, "liked": True, "created": True,
-        "announced": announced, "likes": await count(db, target_id),
+        "announced": not pending, "notification_pending": pending,
+        "likes": await count(db, target_id),
     })
