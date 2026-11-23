@@ -164,7 +164,8 @@ async def _update_pin_rich(bot, chat_id: int, message_id: int, pin_url: str) -> 
     raw_blocks = _body(post)
     if not raw_blocks:
         return  # Non-Rich media cannot be transformed without changing its format.
-    is_morning = await bot.community_db.get_bot_state("morning_pin_message_id") == str(message_id)
+    db = getattr(bot, "community_db", None)
+    is_morning = bool(db and await db.get_bot_state("morning_pin_message_id") == str(message_id))
     blocks = _without_close_buttons(raw_blocks) if is_morning else raw_blocks
     original = InputRichMessage(blocks=blocks)
     updated = _home_screen_rich(original, pin_url)
