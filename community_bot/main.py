@@ -217,6 +217,7 @@ async def daily_reputation_job(db: Database, settings: Settings, bot: Bot) -> No
                 await sync_reputation_chat_access(
                     db, settings, bot, settings.community_chat_id,
                     int(user["user_id"]), int(user["reputation"]),
+                    allow_legacy_recovery=True,
                 )
 
 
