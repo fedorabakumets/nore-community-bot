@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
+import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -16,6 +19,13 @@ EXPECTED_PARTS = 15
 EXPECTED_SIZE = 8_597_446
 EXPECTED_SHA256 = "52986d0e5b4952cb4cfcdde6d9b7279e0c8d442c6763e3323d0b0774e4e6a629"
 ASSEMBLY_LOCK = asyncio.Lock()
+logger = logging.getLogger(__name__)
+STORY_LIKE_PREFIX = "story_like:dedzytwo:"
+
+
+def _like_key(actor_id: int) -> str:
+    return f"{STORY_LIKE_PREFIX}{actor_id}"
+
 
 
 def _assemble() -> Path:
@@ -56,14 +66,55 @@ async def poster(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(POSTER, headers={"Cache-Control": "public, max-age=86400"})
 
 
+async def status(request: web.Request) -> web.Response:
+    """Restore a viewer's one-time like state on every story opening."""
+    liked = bool(await request.app["db"].get_bot_state(_like_key(request["actor"]["id"])))
+    return web.json_response({"liked": liked})
+
+
 async def like(request: web.Request) -> web.Response:
-    """Delegate to the same atomic daily-likes system used by NORA profiles."""
+    """Give the profile one like per story viewer, and announce new likes once."""
     from community_bot.friends_api import _recipient
-    from community_bot.social_likes import count, give
+    from community_bot.social_likes import ALREADY_PROFILE_LIKED, ONCE_LIKED, count, give
 
     db = request.app["db"]
+    actor = request["actor"]
+    actor_id = int(actor["id"])
     target_id = await _recipient(db, "@dedzytwo")
-    error = await give(db, request["actor"]["id"], target_id)
+    key = _like_key(actor_id)
+
+    # Still checked atomically in give(): this fast path makes retries idempotent.
+    if await db.get_bot_state(key):
+        return web.json_response({"ok": True, "liked": True, "created": False})
+
+    error = await give(db, actor_id, target_id, once_key=key)
+    if error in (ONCE_LIKED, ALREADY_PROFILE_LIKED):
+        return web.json_response({"ok": True, "liked": True, "created": False})
     if error:
         raise ValueError(error)
-    return web.json_response({"ok": True, "likes": await count(db, target_id)})
+
+    settings = request.app["settings"]
+    bot = request.app.get("bot")
+    chat_id = getattr(settings, "community_chat_id", 0)
+    announced = False
+    if bot is not None and chat_id:
+        username = actor.get("username")
+        # Telegram initData is signed, but escaped before HTML rendering.
+        name = ("@" + username if isinstance(username, str)
+                and re.fullmatch(r"[A-Za-z0-9_]{5,32}", username)
+                else "@" + str(actor.get("first_name") or "участник").lstrip("@"))
+        message = (
+            f'❤️ <a href="tg://user?id={actor_id}">{html.escape(name)}</a>'
+            f' лайкнул сторис <a href="tg://user?id={target_id}">@dedzytwo</a>'
+        )
+        try:
+            await bot.send_message(chat_id, message, parse_mode="HTML")
+            announced = True
+        except Exception:
+            # Never re-credit or re-announce a committed like on HTTP retry.
+            logger.exception("Could not announce Dedzytwo story like in community chat")
+
+    return web.json_response({
+        "ok": True, "liked": True, "created": True,
+        "announced": announced, "likes": await count(db, target_id),
+    })
