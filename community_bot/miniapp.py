@@ -86,6 +86,7 @@ async def protection(request, handler):
                 '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
                 '/api/story/dedzytwo/like',
+                '/api/story/dedzytwo/status',
                 '/api/community/chat',
             } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
             if not profile_optional:
