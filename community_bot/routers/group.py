@@ -102,6 +102,7 @@ from community_bot.keyboards import (
     shop_home_keyboard,
     transfer_keyboard,
 )
+from community_bot.profile_fields import normalize_tg_channel_url
 from community_bot.permissions import (
     PERM_ADMIN_PANEL,
     PERM_BAN,
@@ -208,13 +209,14 @@ async def community_membership_changed(event: ChatMemberUpdated, db: Database, s
         await send_member_welcome(bot, event.chat.id, member.user)
 
 
-async def text_moderation_reason(db, settings, flags, text, activity_count):
+async def text_moderation_reason(db, settings, flags, text, activity_count, *, allow_tgk_link=False):
     blocked_reason = None
     if flags.get("quiet_hours") and 0 <= datetime.now(ZoneInfo(settings.timezone)).hour < 7:
         blocked_reason = "Включён ночной режим: чат открыт с 07:00."
     if flags.get("raid_mode") and activity_count <= 2:
         blocked_reason = "Включён рейд-режим: первые сообщения новых участников проходят проверку."
-    if flags.get("link_filter") and any(marker in text.casefold() for marker in ("http://", "https://", "t.me/")):
+    if (flags.get("link_filter") and not allow_tgk_link
+            and any(marker in text.casefold() for marker in ("http://", "https://", "t.me/"))):
         blocked_reason = "Ссылки сейчас запрещены настройками чата."
     if flags.get("word_filter") and text:
         from community_bot.life import matches_stop_word
@@ -324,8 +326,26 @@ class CommunityModerationMiddleware(BaseMiddleware):
                 chat_admin = await self._is_telegram_admin(bot, event.chat.id, event.from_user.id)
                 member = (not chat_admin) and await rank_of_user(db, settings, event.from_user.id) < 40
                 text = event.text or event.caption or ""
+                allow_tgk_link = False
+                if member and event.text and event.reply_to_message and any(
+                    part in event.text.casefold() for part in ("t.me/", "telegram.me/")
+                ):
+                    prompt = await db.fetchone(
+                        "SELECT user_id,expires_at FROM profile_tgk_prompts WHERE chat_id=? AND message_id=?",
+                        (event.chat.id, event.reply_to_message.message_id),
+                    )
+                    if (prompt and int(prompt["user_id"]) == event.from_user.id
+                            and str(prompt["expires_at"]) > datetime.now(UTC).isoformat()):
+                        try:
+                            normalize_tg_channel_url(event.text)
+                        except ValueError:
+                            pass
+                        else:
+                            allow_tgk_link = True
                 blocked_reason = (
-                    await text_moderation_reason(db, settings, flags, text, activity_count) if member else None
+                    await text_moderation_reason(
+                        db, settings, flags, text, activity_count, allow_tgk_link=allow_tgk_link,
+                    ) if member else None
                 )
                 media_filter_on = bool(flags.get("media_filter"))
                 sticker_filter_on = bool(flags.get("sticker_filter"))
