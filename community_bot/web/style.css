@@ -4118,6 +4118,25 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
   background: linear-gradient(145deg, #c73c67, #383139 55%, #5b2b45);
   box-shadow: none;
 }
+/* Keep the supplied DJ poster completely inside the round story thumbnail. */
+#app .home-story-trigger-dj {
+  overflow: hidden;
+  isolation: isolate;
+}
+#app .home-story-trigger-dj > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 50%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  object-position: center;
+  clip-path: circle(50% at 50% 50%);
+}
+
 #home-story-viewer .home-story-action {
   position: absolute;
   z-index: 3;
