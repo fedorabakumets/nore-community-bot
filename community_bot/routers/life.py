@@ -120,6 +120,7 @@ async def _deliver_shop(
             else:
                 await sync_reputation_chat_access(
                     db, settings, bot, settings.community_chat_id, target_id, value,
+                    allow_legacy_recovery=item == "restore_rep",
                 )
     from community_bot.notify import vitrine_consumed
 
