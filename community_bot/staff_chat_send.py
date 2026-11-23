@@ -16,6 +16,8 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import BufferedInputFile, InputMediaPhoto, ReplyParameters
 from aiohttp import web
 
+from community_bot.group_message_close import without_group_close
+from community_bot.reply_rich import bot_publication
 from community_bot.staff_chat import capture, staff_allowed
 from community_bot import staff_chat_delivery as dispatch
 
@@ -165,7 +167,7 @@ async def _publish(request: web.Request, *, text: str, reply: object,
         return web.json_response({"error": str(exc)}, status=400)
     name = _author(await db.get_user(uid), request["actor"])
     author_link = f'<b><a href="tg://user?id={uid}">{html.escape(name)}</a></b>'
-    body = f"📱{author_link} | {html.escape(content)}" if content else f"📱{author_link}"
+    body = f"📱{author_link}   {html.escape(content)}" if content else f"📱{author_link}"
     locks = request.app["staff_chat_send_locks"]
     lock = locks.setdefault(uid, asyncio.Lock())
     async with lock:
@@ -197,47 +199,49 @@ async def _publish(request: web.Request, *, text: str, reply: object,
         # mean that Telegram delivered the message successfully.
         request.app["staff_chat_last_sent"][uid] = now
         try:
-            # No reply_markup is provided: normal Telegram messages, no buttons.
-            kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to}
-            if kind == "voice":
-                filename, payload = files[0]
-                gate = request.app.get("staff_chat_voice_gate")
-                if gate is not None:
-                    async with gate:
+            # Keep Mini App output plain, including replies to Telegram messages.
+            with bot_publication(), without_group_close():
+                # No reply_markup is provided: normal Telegram messages, no buttons.
+                kwargs = {"chat_id": settings.community_chat_id, "reply_parameters": reply_to}
+                if kind == "voice":
+                    filename, payload = files[0]
+                    gate = request.app.get("staff_chat_voice_gate")
+                    if gate is not None:
+                        async with gate:
+                            normalized = await _voice_ogg(filename, payload)
+                    else:
                         normalized = await _voice_ogg(filename, payload)
-                else:
-                    normalized = await _voice_ogg(filename, payload)
-                sent = await bot.send_voice(
-                    **kwargs, voice=BufferedInputFile(normalized, filename="nora-voice.ogg"),
-                    caption=body, parse_mode="HTML",
-                )
-            elif len(files) > 1:
-                media = [
-                    InputMediaPhoto(
-                        media=BufferedInputFile(payload, filename=filename),
-                        caption=body if index == 0 else None, parse_mode="HTML",
+                    sent = await bot.send_voice(
+                        **kwargs, voice=BufferedInputFile(normalized, filename="nora-voice.ogg"),
+                        caption=body, parse_mode="HTML",
                     )
-                    for index, (filename, payload) in enumerate(files)
-                ]
-                sent = await bot.send_media_group(**kwargs, media=media)
-            elif files:
-                filename, content_bytes = files[0]
-                upload = BufferedInputFile(content_bytes, filename=filename)
-                extension = PurePath(filename).suffix.lower()
-                if extension in _PHOTO:
-                    sent = await bot.send_photo(**kwargs, photo=upload, caption=body, parse_mode="HTML")
-                elif extension in _VIDEO:
-                    sent = await bot.send_video(
-                        **kwargs, video=upload, caption=body, parse_mode="HTML", supports_streaming=True,
-                    )
-                elif extension == ".gif":
-                    sent = await bot.send_animation(**kwargs, animation=upload, caption=body, parse_mode="HTML")
-                elif extension in _AUDIO:
-                    sent = await bot.send_audio(**kwargs, audio=upload, caption=body, parse_mode="HTML")
+                elif len(files) > 1:
+                    media = [
+                        InputMediaPhoto(
+                            media=BufferedInputFile(payload, filename=filename),
+                            caption=body if index == 0 else None, parse_mode="HTML",
+                        )
+                        for index, (filename, payload) in enumerate(files)
+                    ]
+                    sent = await bot.send_media_group(**kwargs, media=media)
+                elif files:
+                    filename, content_bytes = files[0]
+                    upload = BufferedInputFile(content_bytes, filename=filename)
+                    extension = PurePath(filename).suffix.lower()
+                    if extension in _PHOTO:
+                        sent = await bot.send_photo(**kwargs, photo=upload, caption=body, parse_mode="HTML")
+                    elif extension in _VIDEO:
+                        sent = await bot.send_video(
+                            **kwargs, video=upload, caption=body, parse_mode="HTML", supports_streaming=True,
+                        )
+                    elif extension == ".gif":
+                        sent = await bot.send_animation(**kwargs, animation=upload, caption=body, parse_mode="HTML")
+                    elif extension in _AUDIO:
+                        sent = await bot.send_audio(**kwargs, audio=upload, caption=body, parse_mode="HTML")
+                    else:
+                        sent = await bot.send_document(**kwargs, document=upload, caption=body, parse_mode="HTML")
                 else:
-                    sent = await bot.send_document(**kwargs, document=upload, caption=body, parse_mode="HTML")
-            else:
-                sent = await bot.send_message(**kwargs, text=body, parse_mode="HTML")
+                    sent = await bot.send_message(**kwargs, text=body, parse_mode="HTML")
         except ValueError as exc:
             if operation_id:
                 await dispatch.finish(db, uid, operation_id, "failed", error=str(exc))
