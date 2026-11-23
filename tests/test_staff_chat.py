@@ -375,7 +375,7 @@ async def test_staff_chat_composer_role_identity_reply_and_rate_limit(tmp_path):
     assert kwargs["chat_id"] == GROUP
     assert kwargs["reply_parameters"].message_id == 71
     assert kwargs["parse_mode"] == "HTML"
-    assert kwargs["text"] == '📱<b><a href="tg://user?id=20">Модератор Марина</a></b> | Тест'
+    assert kwargs["text"] == '📱<b><a href="tg://user?id=20">Модератор Марина</a></b>   Тест'
     assert "reply_markup" not in kwargs
     saved = await db.fetchone(
         "SELECT text FROM staff_chat_messages WHERE chat_id=? AND message_id=?", (GROUP, 72),
