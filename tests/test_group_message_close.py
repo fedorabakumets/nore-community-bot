@@ -38,10 +38,10 @@ from community_bot.group_message_close import (
     GroupCloseCallbackMiddleware,
     GroupCloseSendMiddleware,
     GroupMessageActorsMiddleware,
+    _update_pin_rich,
     group_message_actors,
     normalize_current_pin,
     without_group_close,
-    _update_pin_rich,
 )
 from community_bot.message_widgets import WidgetUpdateMiddleware
 from tests.test_game_invitations import db as room_db
