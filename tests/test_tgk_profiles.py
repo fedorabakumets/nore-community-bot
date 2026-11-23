@@ -10,7 +10,8 @@ from aiogram.types import Chat, Message, User
 from community_bot.database import Database
 from community_bot.group_profile import group_profile_body
 from community_bot.profile_fields import normalize_tg_channel_url
-from community_bot.routers.profile import request_tgk, save_tgk_reply
+from community_bot.routers.group import text_moderation_reason
+from community_bot.routers.profile import PendingTgkReply, request_tgk, save_tgk_reply
 
 
 @pytest.mark.parametrize(
@@ -133,3 +134,44 @@ async def test_tgk_prompt_expires(tmp_path, monkeypatch):
     await save_tgk_reply(reply, db)
     assert (await db.get_user(7))["tg_channel_url"] == ""
     assert await db.fetchone("SELECT * FROM profile_tgk_prompts") is None
+
+
+async def test_tgk_reply_matches_prompt_by_id_without_telegram_text(tmp_path, monkeypatch):
+    """Replies to Rich messages often have no reply_to_message.text."""
+    db = Database(tmp_path / "tgk-rich-reply.db")
+    await db.initialize()
+    await db.ensure_user(7, telegram_name="Анна")
+    chat = Chat(id=-100123, type="supergroup")
+    prompt = Message(message_id=41, date=1725000000, chat=chat)
+    await db.execute(
+        "INSERT INTO profile_tgk_prompts(chat_id,message_id,user_id,expires_at) VALUES(?,?,?,?)",
+        (chat.id, prompt.message_id, 7, (datetime.now(UTC) + timedelta(hours=1)).isoformat()),
+    )
+    reply = Message(
+        message_id=42, date=1725000000, chat=chat, reply_to_message=prompt,
+        from_user=User(id=7, is_bot=False, first_name="Анна"),
+        text="https://t.me/my_channel",
+    )
+    match = PendingTgkReply()
+    assert await match(reply, db)
+    unrelated = reply.model_copy(update={
+        "reply_to_message": Message(message_id=999, date=1725000000, chat=chat),
+    })
+    assert not await match(unrelated, db)
+    monkeypatch.setattr(Message, "reply", AsyncMock())
+    await save_tgk_reply(reply, db)
+    assert (await db.get_user(7))["tg_channel_url"] == "https://t.me/my_channel"
+    assert not await match(reply, db)  # One-time prompt consumed on success.
+
+
+async def test_tgk_link_moderation_exception_is_narrow():
+    settings = SimpleNamespace(timezone="Europe/Moscow")
+    flags = {"link_filter": True}
+    url = "https://t.me/my_channel"
+    assert await text_moderation_reason(None, settings, flags, url, 10) is not None
+    assert await text_moderation_reason(
+        None, settings, flags, url, 10, allow_tgk_link=True,
+    ) is None
+    assert await text_moderation_reason(
+        None, settings, flags, "https://example.com", 10,
+    ) is not None
