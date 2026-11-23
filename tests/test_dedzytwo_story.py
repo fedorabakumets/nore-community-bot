@@ -196,3 +196,21 @@ async def test_story_announcement_prefers_nora_display_name(tmp_path):
     message = bot.send_message.call_args.args[1]
     assert "@Ромочка</a> лайкнул сторис" in message
     assert "@dedzyTWO</a>" in message
+
+
+async def test_story_resolves_telegram_name_when_custom_profile_name_is_empty(tmp_path):
+    import json
+
+    from community_bot.social_likes import count
+
+    db, bot, req = await _story_test_context(tmp_path)
+    await db.execute(
+        "UPDATE users SET username=NULL, profile_name=NULL, telegram_name='dedzyTWO' "
+        "WHERE user_id=8"
+    )
+    assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": False}
+    result = json.loads((await dedzytwo_story.like(req)).body)
+    assert result["created"] is True
+    assert (await count(db, 8)) == 1
+    assert await db.get_bot_state(dedzytwo_story.TARGET_ID_KEY) == "8"
+    bot.send_message.assert_awaited_once()
