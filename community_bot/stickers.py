@@ -5,12 +5,14 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from weakref import WeakValueDictionary
 
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from community_bot.ephemeral import keep_in_chat
+from community_bot.group_message_close import without_group_close
 
 STICKER_PACK_NAME = "vstickere"
 STICKER_PACK_URL = f"https://t.me/addstickers/{STICKER_PACK_NAME}"
@@ -63,7 +65,8 @@ async def send_context_sticker(bot, db, chat_id: int, kind: str, source_message_
             if not path.is_file():
                 logger.warning("Context sticker missing: %s", kind)
                 return False
-            with keep_in_chat():
+            # No extra deletion controls after a morning digest sticker.
+            with keep_in_chat(), (without_group_close() if kind == "morning" else nullcontext()):
                 sent = await bot.send_sticker(
                     chat_id=chat_id, sticker=FSInputFile(path), disable_notification=True,
                 )

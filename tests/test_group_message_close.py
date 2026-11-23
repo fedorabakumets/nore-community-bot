@@ -38,8 +38,10 @@ from community_bot.group_message_close import (
     GroupCloseCallbackMiddleware,
     GroupCloseSendMiddleware,
     GroupMessageActorsMiddleware,
+    _update_pin_rich,
     group_message_actors,
     normalize_current_pin,
+    without_group_close,
 )
 from community_bot.message_widgets import WidgetUpdateMiddleware
 from tests.test_game_invitations import db as room_db
@@ -365,3 +367,55 @@ async def test_rich_close_reaches_callback_handler_with_widget_middleware_enable
     ]
     assert session.calls[-2].message_id == sent.message_id
     assert session.calls[-1].text is None
+
+
+async def test_explicit_plain_group_messages_and_stickers_have_no_close_companion(db):
+    bot = fake_bot(db)
+    sent_methods = []
+
+    async def telegram(_bot, method):
+        sent_methods.append(method)
+        return message(mid=len(sent_methods) + 10)
+
+    middleware = GroupCloseSendMiddleware()
+    with without_group_close():
+        await middleware(telegram, bot, SendMessage(chat_id=GROUP, text="📱Имя   Сообщение"))
+        await middleware(telegram, bot, SendSticker(chat_id=GROUP, sticker="morning-sticker"))
+    assert len(sent_methods) == 2
+    assert isinstance(sent_methods[0], SendMessage)
+    assert isinstance(sent_methods[1], SendSticker)
+    assert sent_methods[0].reply_markup is None
+
+
+async def test_existing_morning_pin_loses_only_close_and_keeps_install_button(db):
+    await db.set_bot_state("morning_pin_message_id", "10")
+    original = InputRichMessage(blocks=[
+        InputRichBlockParagraph(text="NORA DAILY"),
+        InputRichBlockButtons(buttons=[
+            RichMessageButton(text="❌", callback_data="nora:close:0"),
+            RichMessageButton(text="📲 Добавить Нору на экран",
+                              url="https://t.me/test_nora?startapp=nora_home_screen"),
+        ]),
+    ])
+    pinned = message(rich=original.model_dump(exclude_none=True))
+    edits = []
+
+    class BotWrapper:
+        id = NORA.id
+        community_db = db
+
+        async def get_chat(self, chat_id):
+            return SimpleNamespace(pinned_message=pinned)
+
+        async def __call__(self, method):
+            edits.append(method)
+
+    await _update_pin_rich(BotWrapper(), GROUP, 10, "https://t.me/test_nora?startapp")
+    assert len(edits) == 1
+    rich = edits[0].rich_message
+    buttons = [button for block in rich.blocks if isinstance(block, InputRichBlockButtons)
+               for button in block.buttons]
+    assert len(buttons) == 1
+    assert buttons[0].text == "📲 Добавить Нору на экран"
+    assert buttons[0].url == "https://t.me/test_nora?startapp=nora_home_screen"
+    assert edits[0].reply_markup.inline_keyboard[0][0].text == "НОРА"

@@ -161,12 +161,15 @@ async def _update_pin_rich(bot, chat_id: int, message_id: int, pin_url: str) -> 
     if (not isinstance(post, Message) or post.message_id != message_id
             or not post.from_user or post.from_user.id != bot.id):
         return
-    blocks = _body(post)
-    if not blocks:
+    raw_blocks = _body(post)
+    if not raw_blocks:
         return  # Non-Rich media cannot be transformed without changing its format.
+    db = getattr(bot, "community_db", None)
+    is_morning = bool(db and await db.get_bot_state("morning_pin_message_id") == str(message_id))
+    blocks = _without_close_buttons(raw_blocks) if is_morning else raw_blocks
     original = InputRichMessage(blocks=blocks)
     updated = _home_screen_rich(original, pin_url)
-    if updated is original:
+    if updated is original and blocks == raw_blocks:
         return
     with without_group_close():
         await bot(EditMessageText(
@@ -284,6 +287,20 @@ def _rich(blocks, markup, data, original=None):
     return InputRichMessage(blocks=merged, **extra)
 
 
+def _without_close_buttons(blocks):
+    """Remove dismiss controls while keeping the other Rich buttons."""
+    cleaned = []
+    for block in blocks:
+        if block.get("type") != "buttons":
+            cleaned.append(block)
+            continue
+        buttons = [button for button in block.get("buttons", [])
+                   if not _close_action(button.get("callback_data"))]
+        if buttons:
+            cleaned.append({**block, "buttons": buttons})
+    return cleaned
+
+
 def _body(result):
     rich = getattr(result, "rich_message", None)
     return _reusable(rich.model_dump(exclude_none=True)["blocks"]) if rich else None
@@ -299,11 +316,14 @@ async def _migrate_current_pin(bot, message):
         return  # A native photo or poll can keep its pin, but cannot be edited into Rich text.
     record = await _edit_record(db, chat_id, mid)
     markup = _without_pin_link(message.reply_markup)
+    is_morning = await db.get_bot_state("morning_pin_message_id") == str(mid)
+    rich = (InputRichMessage(blocks=_without_close_buttons(blocks))
+            if is_morning else _rich(blocks, markup, record.data))
     try:
         with without_group_close():
             async with asyncio.timeout(5):
                 await bot(EditMessageText(
-                    chat_id=chat_id, message_id=mid, rich_message=_rich(blocks, markup, record.data),
+                    chat_id=chat_id, message_id=mid, rich_message=rich,
                 ))
         await _remember(db, chat_id, mid, CloseRecord(record.data, rich=True), message.date.timestamp())
     except TelegramBadRequest as error:

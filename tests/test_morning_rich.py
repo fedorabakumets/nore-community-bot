@@ -58,6 +58,8 @@ async def test_rich_send_pin_retry_without_duplicate(tmp_path, monkeypatch):
         async def me(self):
             return SimpleNamespace(username="test_bot")
         async def send_rich_message(self, chat, *, rich_message, reply_markup):
+            from community_bot.group_message_close import _SKIP_GROUP_CLOSE
+            assert _SKIP_GROUP_CLOSE.get(), "Morning Rich post must bypass automatic close buttons"
             assert reply_markup.inline_keyboard[0][0].text == "НОРА"
             assert reply_markup.inline_keyboard[0][0].url == "https://t.me/test_bot?startapp"
             self.calls.append(rich_message)

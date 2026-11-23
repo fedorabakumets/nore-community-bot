@@ -256,3 +256,27 @@ async def test_morning_pin_retry_keeps_single_followup_sticker(sticker_db):
     assert await _pin_morning(bot, sticker_db, -100123, 40, "2026-10-26")
     bot.send_sticker.assert_awaited_once()
     assert await sticker_db.get_bot_state("morning_digest_day") == "2026-10-26"
+
+
+async def test_morning_sticker_skips_auto_close_companion(sticker_db):
+    from aiogram.methods import SendSticker
+    from community_bot.group_message_close import GroupCloseSendMiddleware
+
+    calls = []
+    middleware = GroupCloseSendMiddleware()
+    bot = SimpleNamespace(
+        community_db=sticker_db,
+        community_settings=SimpleNamespace(community_chat_id=-100123),
+        default=SimpleNamespace(parse_mode=None),
+    )
+
+    async def telegram(_bot, method):
+        calls.append(method)
+        return SimpleNamespace(message_id=200)
+
+    async def send_sticker(**kwargs):
+        return await middleware(telegram, bot, SendSticker(**kwargs))
+
+    bot.send_sticker = send_sticker
+    assert await send_context_sticker(bot, sticker_db, -100123, "morning", 101)
+    assert len(calls) == 1 and isinstance(calls[0], SendSticker)
