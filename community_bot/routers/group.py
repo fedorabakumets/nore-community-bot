@@ -825,6 +825,7 @@ async def profile_action(callback: CallbackQuery, db: Database, settings: Settin
     if callback.message.chat.id == settings.community_chat_id:
         access = await sync_reputation_chat_access(
             db, settings, bot, callback.message.chat.id, target_id, new_value,
+            allow_legacy_recovery=delta > 0,
         )
         if new_value < settings.restricted_reputation_threshold:
             await callback.message.answer("🔞 Репутация ниже 50: отправка сообщений в чат ограничена.")
@@ -1737,6 +1738,7 @@ async def buy_shop_item(
         else:
             await sync_reputation_chat_access(
                 db, settings, bot, settings.community_chat_id, callback.from_user.id, value,
+                allow_legacy_recovery=item == "restore_rep",
             )
     elif item in {"event_pass", "support"}:
         for owner_id in settings.owner_ids:
@@ -2122,6 +2124,7 @@ async def _apply_chat_reputation(db, bot, settings, chat_id, user, target, delta
     if chat_id == getattr(settings, "community_chat_id", None):
         access = await sync_reputation_chat_access(
             db, settings, bot, chat_id, int(target["user_id"]), new_value,
+            allow_legacy_recovery=delta > 0,
         )
         if new_value < settings.restricted_reputation_threshold:
             await send("🔞 Репутация ниже 50: отправка сообщений в чат ограничена.")
