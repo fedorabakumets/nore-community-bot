@@ -24,7 +24,9 @@ ASSEMBLY_LOCK = asyncio.Lock()
 ANNOUNCEMENT_LOCK = asyncio.Lock()
 logger = logging.getLogger(__name__)
 NOTICE_PREFIX = "story_notice:dedzytwo:"
-TARGET_USERNAME = "@ourcreator"  # Actual Telegram account of the dedzyTWO profile.
+TARGET_USERNAME = "ourcreator"
+TARGET_PROFILE_NAME = "dedzyTWO"
+TARGET_ID_KEY = "story_owner:dedzytwo:user_id"
 
 
 
@@ -66,16 +68,73 @@ async def poster(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(POSTER, headers={"Cache-Control": "public, max-age=86400"})
 
 
-def _announcement(actor: dict, target_id: int) -> str:
+async def _recipient_id(db) -> int:
+    """Resolve the DJ's actual NORA profile once, then keep its stable Telegram ID.
+
+    Telegram usernames can be missing or stale in our database. The Mini App's
+    visible name comes from users.profile_name, not users.username.
+    """
+    cached = await db.get_bot_state(TARGET_ID_KEY)
+    if cached and cached.isdecimal():
+        person = await db.get_user(int(cached))
+        if person:
+            return int(person["user_id"])
+
+    rows = await db.fetchall(
+        "SELECT user_id, username, profile_name, telegram_name FROM users "
+        "WHERE lower(trim(COALESCE(profile_name, '')))=? "
+        "OR lower(trim(COALESCE(telegram_name, '')))=? "
+        "OR lower(trim(COALESCE(username, '')))=? LIMIT 10",
+        (TARGET_PROFILE_NAME.casefold(), TARGET_PROFILE_NAME.casefold(),
+         TARGET_USERNAME.casefold()),
+    )
+    by_profile = [p for p in rows if str(p.get("profile_name") or "").strip().casefold()
+                  == TARGET_PROFILE_NAME.casefold()]
+    by_telegram_name = [p for p in rows if str(p.get("telegram_name") or "").strip().casefold()
+                        == TARGET_PROFILE_NAME.casefold()]
+    # A custom NORA name is more precise than a Telegram first name.
+    by_display = by_profile if by_profile else by_telegram_name
+    by_username = [p for p in rows if str(p.get("username") or "").strip().casefold()
+                   == TARGET_USERNAME.casefold()]
+    both = [p for p in by_display if p in by_username]
+
+    if len(both) == 1:
+        person = both[0]
+    elif len(by_username) == 1 and not by_display:
+        person = by_username[0]
+    elif len(by_display) == 1 and not by_username:
+        person = by_display[0]
+    else:
+        # Do not credit a random similarly-named profile if IDs conflict.
+        logger.error(
+            "Cannot safely resolve story target dedzyTWO: display matches=%s, username matches=%s",
+            len(by_display), len(by_username),
+        )
+        raise ValueError("Не удалось однозначно найти профиль dedzyTWO в Норе")
+
+    user_id = int(person["user_id"])
+    await db.set_bot_state(TARGET_ID_KEY, str(user_id))
+    return user_id
+
+
+def _announcement(actor: dict, target_id: int, *, actor_profile=None, target_profile=None) -> str:
     actor_id = int(actor["id"])
     username = actor.get("username")
     # Signed Telegram initData, escaped before inserting in HTML.
-    name = ("@" + username if isinstance(username, str)
+    display_name = (actor_profile or {}).get("profile_name")
+    name = ("@" + str(display_name).lstrip("@") if display_name
+            else "@" + username if isinstance(username, str)
             and re.fullmatch(r"[A-Za-z0-9_]{5,32}", username)
             else "@" + str(actor.get("first_name") or "участник").lstrip("@"))
+    recipient = (
+        (target_profile or {}).get("profile_name")
+        or (target_profile or {}).get("telegram_name")
+        or TARGET_PROFILE_NAME
+    )
     return (
         f'❤️ <a href="tg://user?id={actor_id}">{html.escape(name)}</a>'
-        f' лайкнул сторис <a href="tg://user?id={target_id}">{TARGET_USERNAME}</a>'
+        f' лайкнул сторис <a href="tg://user?id={target_id}">'
+        f'@{html.escape(str(recipient).lstrip("@"))}</a>'
     )
 
 
@@ -128,27 +187,31 @@ async def notification_worker(app) -> None:
 
 async def status(request: web.Request) -> web.Response:
     """Like state follows the shared daily limit, including a paid reset."""
-    from community_bot.friends_api import _recipient
     from community_bot.social_likes import liked_today
 
     await _send_pending(request.app)
-    target_id = await _recipient(request.app["db"], TARGET_USERNAME)
+    target_id = await _recipient_id(request.app["db"])
     liked = await liked_today(request.app["db"], int(request["actor"]["id"]), target_id)
     return web.json_response({"liked": liked})
 
 
 async def like(request: web.Request) -> web.Response:
     """Credit one profile like per limit cycle, with a durable chat announcement."""
-    from community_bot.friends_api import _recipient
     from community_bot.social_likes import ALREADY_PROFILE_LIKED, count, give
 
     db = request.app["db"]
     actor = request["actor"]
-    target_id = await _recipient(db, TARGET_USERNAME)
+    target_id = await _recipient_id(db)
     notice_key = NOTICE_PREFIX + secrets.token_hex(16)
     notification = (
         notice_key,
-        json.dumps({"text": _announcement(actor, target_id)}, ensure_ascii=False),
+        json.dumps({
+            "text": _announcement(
+                actor, target_id,
+                actor_profile=await db.get_user(int(actor["id"])),
+                target_profile=await db.get_user(target_id),
+            ),
+        }, ensure_ascii=False),
     )
     error = await give(db, int(actor["id"]), target_id, notice=notification)
     if error and error != ALREADY_PROFILE_LIKED:
