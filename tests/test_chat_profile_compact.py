@@ -241,7 +241,11 @@ async def test_reputation_button_pings_target_only_on_success(tmp_path, monkeypa
     )
     post = AsyncMock()
     monkeypatch.setattr(Message, "answer", post)
-    await group.profile_action(callback, db, settings, SimpleNamespace())
+    bot = SimpleNamespace(
+        get_chat_member=AsyncMock(return_value=SimpleNamespace(status="member")),
+        restrict_chat_member=AsyncMock(),
+    )
+    await group.profile_action(callback, db, settings, bot)
     post.assert_awaited_once()
     ping = post.await_args.args[0]
     assert '<a href="tg://user?id=2">Анна</a>' in ping and f"теперь {value}" in ping
@@ -252,7 +256,7 @@ async def test_reputation_button_pings_target_only_on_success(tmp_path, monkeypa
     for _ in range(2):
         await db.apply_reputation(1, 2, 0, day)
     callback.id = "over-limit"
-    await group.profile_action(callback, db, settings, SimpleNamespace())
+    await group.profile_action(callback, db, settings, bot)
     post.assert_awaited_once()
     assert "Дневной лимит исчерпан" in callback.answer.await_args.args[0]
     assert callback.answer.await_args.kwargs["show_alert"]
