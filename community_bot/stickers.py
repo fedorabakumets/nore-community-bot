@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import nullcontext
 import logging
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from weakref import WeakValueDictionary
 
