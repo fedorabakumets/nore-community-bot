@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -92,7 +92,21 @@ async def change_own_tgk(message: Message, db: Database) -> None:
     await _send_tgk_prompt(message, db, message.from_user.id)
 
 
-@router.message(F.text, F.reply_to_message.text.startswith(TGK_PROMPT))
+class PendingTgkReply(Filter):
+    """Match an actual stored prompt, even if Telegram omits its text for Rich replies."""
+
+    async def __call__(self, message: Message, db: Database) -> bool:
+        source = message.reply_to_message
+        if not source or not message.text:
+            return False
+        prompt = await db.fetchone(
+            "SELECT 1 FROM profile_tgk_prompts WHERE chat_id=? AND message_id=?",
+            (message.chat.id, source.message_id),
+        )
+        return prompt is not None
+
+
+@router.message(F.text, PendingTgkReply())
 async def save_tgk_reply(message: Message, db: Database) -> None:
     if not message.from_user or not message.reply_to_message:
         return
