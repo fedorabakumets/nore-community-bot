@@ -1,0 +1,33 @@
+name: Mini App and Morning Close Controls
+
+on:
+  pull_request:
+    branches: [cursor/nora-2-update-d133]
+    paths:
+      - "community_bot/staff_chat_send.py"
+      - "community_bot/morning.py"
+      - "community_bot/group_message_close.py"
+      - "community_bot/stickers.py"
+      - "tests/test_staff_chat.py"
+      - "tests/test_morning_rich.py"
+      - "tests/test_group_message_close.py"
+      - "tests/test_stickers.py"
+      - ".github/workflows/miniapp-morning-close-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Compile touched Python modules
+        run: python -m compileall -q community_bot/staff_chat_send.py community_bot/morning.py community_bot/group_message_close.py community_bot/stickers.py
+      - name: Run focused regression tests
+        run: python -m pytest -q tests/test_group_message_close.py tests/test_morning_rich.py tests/test_stickers.py tests/test_staff_chat.py
