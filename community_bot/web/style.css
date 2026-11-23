@@ -4111,3 +4111,53 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 .lk-identity-heading .tgk-link svg{width:20px;height:20px}
 .person-name-line{display:flex;align-items:center;gap:7px;min-width:0}
 .person-name-line h2{margin:0;min-width:0;overflow-wrap:anywhere}
+
+
+/* Dedzytwo story: one calm, centered touch target, morphed entirely in the UI. */
+#app .home-story-trigger-dj {
+  background: linear-gradient(145deg, #c73c67, #383139 55%, #5b2b45);
+  box-shadow: none;
+}
+#home-story-viewer .home-story-action {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: 70px;
+  height: 70px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 50%;
+  background: rgba(19,17,22,.58);
+  color: #fff;
+  box-shadow: 0 10px 36px rgba(0,0,0,.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  transition: background .35s ease, border-color .35s ease, transform .35s ease;
+}
+#home-story-viewer .home-story-action[hidden] { display: none; }
+#home-story-viewer .home-story-action:disabled { opacity: .8; cursor: wait; }
+#home-story-viewer .home-story-action:active { transform: scale(.94); }
+#home-story-viewer .home-story-action.is-telegram {
+  background: rgba(25,42,54,.68);
+  border-color: rgba(255,255,255,.36);
+}
+#home-story-viewer .home-story-action span {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  transition: opacity .36s ease, transform .45s cubic-bezier(.2,.8,.2,1);
+}
+#home-story-viewer .home-story-action svg { width: 34px; height: 34px; }
+#home-story-viewer .home-story-action .story-icon-heart { opacity: 1; transform: scale(1) rotate(0); }
+#home-story-viewer .home-story-action .story-icon-tg { opacity: 0; transform: scale(.55) rotate(-20deg); }
+#home-story-viewer .home-story-action.is-telegram .story-icon-heart { opacity: 0; transform: scale(.55) rotate(18deg); }
+#home-story-viewer .home-story-action.is-telegram .story-icon-tg { opacity: 1; transform: scale(1) rotate(0); }
+@media (prefers-reduced-motion: reduce) {
+  #home-story-viewer .home-story-action,
+  #home-story-viewer .home-story-action span { transition: none; }
+}

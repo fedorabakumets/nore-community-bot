@@ -85,6 +85,7 @@ async def protection(request, handler):
                 '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
                 '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
+                '/api/story/dedzytwo/like',
                 '/api/community/chat',
             } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
             if not profile_optional:
@@ -122,7 +123,7 @@ async def protection(request, handler):
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
                                     '/api/sea', '/api/durak', '/api/barricade', '/api/games/', '/api/seasonal',
-                                    '/api/people', '/api/presence', '/api/community')):
+                                    '/api/people', '/api/presence', '/api/community', '/api/story/')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
         response = web.json_response(
@@ -579,6 +580,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
         app.router.add_get('/game/' + name, lambda _, track=name: web.FileResponse(
             ASSETS / 'game' / track, headers={'Content-Type': 'audio/mpeg'}))
     app.router.add_get('/healthz', lambda _: web.json_response({'ok': True}))
+    from community_bot import dedzytwo_story
+    app.router.add_get('/story/dedzytwo.mp4', dedzytwo_story.video)
+    app.router.add_get('/story/dedzytwo-poster.jpg', dedzytwo_story.poster)
+    app.router.add_post('/api/story/dedzytwo/like', dedzytwo_story.like)
     from community_bot import admin_web
 
     if bot is not None:
