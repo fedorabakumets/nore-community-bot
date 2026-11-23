@@ -1045,6 +1045,7 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
     from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 
     from community_bot.ephemeral import keep_in_chat
+    from community_bot.group_message_close import without_group_close
     from community_bot.morning_rich import render_rich_brief
 
     chat_id = settings.community_chat_id
@@ -1062,7 +1063,7 @@ async def _publish_morning_digest(bot, db, settings, *, force: bool = False) -> 
     # A lost response may mean Telegram accepted the message. Stop retries if the
     # process dies or the network fails before we can store its message ID.
     await db.set_bot_state("morning_send_unknown_day", today)
-    with keep_in_chat():
+    with keep_in_chat(), without_group_close():
         sent = None
         if callable(rich_send):
             try:
