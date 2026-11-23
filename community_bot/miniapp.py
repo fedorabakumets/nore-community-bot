@@ -586,6 +586,23 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/story/dedzytwo-poster.jpg', dedzytwo_story.poster)
     app.router.add_get('/api/story/dedzytwo/status', dedzytwo_story.status)
     app.router.add_post('/api/story/dedzytwo/like', dedzytwo_story.like)
+    if bot is not None and getattr(settings, 'community_chat_id', 0):
+        async def start_story_notifications(application):
+            application['dedzy_story_notices_task'] = asyncio.create_task(
+                dedzytwo_story.notification_worker(application),
+            )
+
+        async def close_story_notifications(application):
+            task = application.get('dedzy_story_notices_task')
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        app.on_startup.append(start_story_notifications)
+        app.on_cleanup.append(close_story_notifications)
     from community_bot import admin_web
 
     if bot is not None:
