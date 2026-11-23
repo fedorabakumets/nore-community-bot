@@ -62,6 +62,8 @@ async def test_like_once_per_limit_cycle_and_announces_after_reset(tmp_path):
     assert (await count(db, 8)) == 1
     bot.send_message.assert_awaited_once()
 
+    # The old release left this permanent marker behind on real accounts.
+    await db.set_bot_state("story_like:dedzytwo:7", "1")
     # Use the real reset_limits shop effect, not a made-up test-only reset.
     async with db.connect() as connection:
         await connection.execute("BEGIN IMMEDIATE")
@@ -69,6 +71,7 @@ async def test_like_once_per_limit_cycle_and_announces_after_reset(tmp_path):
             connection, 7, "reset_limits", datetime.now(UTC).isoformat(),
         ) is None
         await connection.commit()
+    assert await db.get_bot_state("story_like:dedzytwo:7") is None
     assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": False}
 
     after_reset = json.loads((await dedzytwo_story.like(req)).body)
