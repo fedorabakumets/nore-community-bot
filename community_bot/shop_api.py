@@ -222,13 +222,34 @@ async def purchase(db, settings, bot, user, token):
             await vitrine_consumed(bot, db, sku)
         except Exception as error:
             logger.warning('Shop notice deferred: %s', type(error).__name__)
-        if sku == 'forgive' and getattr(settings, 'community_chat_id', 0):
-            from community_bot.routers.life import _full_chat_permissions
+        if sku in {'restore_rep', 'forgive'} and getattr(settings, 'community_chat_id', 0):
+            from community_bot.reputation_chat_access import sync_reputation_chat_access
 
-            try:
-                await bot.restrict_chat_member(settings.community_chat_id, target, permissions=_full_chat_permissions())
-            except TelegramAPIError:
-                result = 'Предупреждения очищены. Снять мут автоматически не удалось — обратись к администратору.'
+            updated = await db.get_user(target)
+            reputation = int(updated['reputation']) if updated else 0
+            if sku == 'restore_rep':
+                access = await sync_reputation_chat_access(
+                    db, settings, bot, settings.community_chat_id, target, reputation,
+                    allow_legacy_recovery=True,
+                )
+                if access == 'restored':
+                    result = 'Репутация восстановлена. Доступ к чату Норы открыт!'
+                elif reputation < settings.restricted_reputation_threshold:
+                    result = 'Репутация повышена. Для доступа к чату нужно минимум 50.'
+                else:
+                    result = 'Репутация повышена. Если мут остался, он мог быть выдан модератором.'
+            elif reputation >= settings.restricted_reputation_threshold:
+                from community_bot.routers.life import _full_chat_permissions
+
+                try:
+                    await bot.restrict_chat_member(
+                        settings.community_chat_id, target,
+                        permissions=_full_chat_permissions(),
+                    )
+                except TelegramAPIError:
+                    result = 'Предупреждения очищены. Снять мут не удалось — обратись к администратору.'
+            else:
+                result = 'Предупреждения очищены. Для доступа к чату восстанови репутацию до 50.'
     return True, result
 
 
