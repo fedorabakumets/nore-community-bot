@@ -5,8 +5,8 @@ import asyncio
 import hashlib
 import html
 import logging
-import re
 import os
+import re
 import tempfile
 from pathlib import Path
 
