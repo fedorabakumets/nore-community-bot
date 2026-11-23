@@ -16,10 +16,10 @@ from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import BufferedInputFile, InputMediaPhoto, ReplyParameters
 from aiohttp import web
 
+from community_bot import staff_chat_delivery as dispatch
 from community_bot.group_message_close import without_group_close
 from community_bot.reply_rich import bot_publication
 from community_bot.staff_chat import capture, staff_allowed
-from community_bot import staff_chat_delivery as dispatch
 
 logger = logging.getLogger(__name__)
 MAX_TEXT = 3000
