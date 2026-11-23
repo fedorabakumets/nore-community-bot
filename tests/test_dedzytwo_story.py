@@ -55,7 +55,7 @@ async def test_like_once_per_limit_cycle_and_announces_after_reset(tmp_path):
     msg = bot.send_message.call_args
     assert msg.args[0] == -100987654321
     assert "@nora_fan</a> лайкнул сторис" in msg.args[1]
-    assert "@ourcreator</a>" in msg.args[1]
+    assert "@dedzyTWO</a>" in msg.args[1]
     assert "tg://user?id=8" in msg.args[1]
     assert msg.kwargs["parse_mode"] == "HTML"
     assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": True}
@@ -134,3 +134,65 @@ async def test_preexisting_profile_like_is_not_counted_twice(tmp_path):
     assert response == {"ok": True, "liked": True, "created": False}
     assert (await count(db, 8)) == 1
     bot.send_message.assert_not_awaited()
+
+
+async def test_story_resolves_nora_display_name_without_saved_telegram_username(tmp_path):
+    import json
+
+    from community_bot.social_likes import count
+
+    db, bot, req = await _story_test_context(tmp_path)
+    # This was the real production failure: profile exists in NORA, but the
+    # Telegram username lookup doesn't find it in users.username.
+    await db.execute("UPDATE users SET username=NULL WHERE user_id=8")
+    assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": False}
+    assert await db.get_bot_state(dedzytwo_story.TARGET_ID_KEY) == "8"
+
+    first = json.loads((await dedzytwo_story.like(req)).body)
+    assert first["created"] and first["announced"]
+    assert (await count(db, 8)) == 1
+    assert "@dedzyTWO</a>" in bot.send_message.call_args.args[1]
+
+    # The story is now attached to Telegram's immutable numeric user ID,
+    # so changes to both profile name and @username do not break the link.
+    await db.execute(
+        "UPDATE users SET username='newcreator', profile_name='DJ Новый' WHERE user_id=8"
+    )
+    assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": True}
+    duplicate = json.loads((await dedzytwo_story.like(req)).body)
+    assert duplicate["created"] is False
+    bot.send_message.assert_awaited_once()
+
+
+async def test_story_target_never_guesses_if_display_name_is_ambiguous(tmp_path):
+    import pytest
+
+    db, bot, req = await _story_test_context(tmp_path)
+    await db.ensure_user(9, telegram_name="Другой")
+    await db.execute("UPDATE users SET username=NULL WHERE user_id=8")
+    await db.execute("UPDATE users SET profile_name='dedzyTWO' WHERE user_id=9")
+    with pytest.raises(ValueError, match="однозначно"):
+        await dedzytwo_story.status(req)
+    bot.send_message.assert_not_awaited()
+    assert await db.get_bot_state(dedzytwo_story.TARGET_ID_KEY) is None
+
+
+async def test_story_target_rejects_conflicting_username_and_profile_id(tmp_path):
+    import pytest
+
+    db, _, req = await _story_test_context(tmp_path)
+    await db.ensure_user(9, telegram_name="Другой")
+    await db.execute("UPDATE users SET username=NULL WHERE user_id=8")
+    await db.execute("UPDATE users SET username='ourcreator' WHERE user_id=9")
+    with pytest.raises(ValueError, match="однозначно"):
+        await dedzytwo_story.like(req)
+    assert await db.get_bot_state(dedzytwo_story.TARGET_ID_KEY) is None
+
+
+async def test_story_announcement_prefers_nora_display_name(tmp_path):
+    db, bot, req = await _story_test_context(tmp_path)
+    await db.execute("UPDATE users SET profile_name='Ромочка' WHERE user_id=7")
+    await dedzytwo_story.like(req)
+    message = bot.send_message.call_args.args[1]
+    assert "@Ромочка</a> лайкнул сторис" in message
+    assert "@dedzyTWO</a>" in message
