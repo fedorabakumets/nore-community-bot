@@ -30,6 +30,7 @@ from mutagen.mp3 import MP3
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import delete_user_command
+from community_bot.pet_care import care_error
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, moscow_now
 
 router = Router(name="song_requests")
@@ -351,10 +352,20 @@ async def _remaining(db: Database, user_id: int, chat_id: int) -> int:
     return max((max(0, math.ceil(float(value) + COOLDOWN_SECONDS - now)) for value in timestamps if value), default=0)
 
 
+async def song_care_error(db: Database, user_id: int) -> str | None:
+    """Read settled pet needs before song search, selection, or delivery."""
+    pet = await db.get_pet(user_id)
+    return care_error(pet) if pet else None
+
+
 async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
     if bot is None:
         return
     async with _SEND_LOCK:
+        care_problem = await song_care_error(db, choice.user_id)
+        if care_problem:
+            await bot.send_message(choice.chat_id, care_problem)
+            return
         quota_error = await _quota_error(db, choice.user_id)
         if quota_error:
             await bot.send_message(choice.chat_id, quota_error)
@@ -384,6 +395,10 @@ async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
                 path = await asyncio.wait_for(
                     asyncio.to_thread(_download_sync, song, temp, str(cookie_file)), timeout=100,
                 )
+                care_problem = await song_care_error(db, choice.user_id)
+                if care_problem:
+                    await bot.send_message(choice.chat_id, care_problem)
+                    return
                 sent = await bot.send_audio(
                     choice.chat_id, FSInputFile(path), title=song.title,
                     performer=song.artist, duration=song.duration or None,
@@ -446,6 +461,10 @@ async def request_song(message: Message, settings: Settings, db: Database) -> No
     if not enabled():
         await message.answer("Музыкальные запросы пока не подключены. Нужна настройка Яндекса владельцем.")
         return
+    care_problem = await song_care_error(db, message.from_user.id)
+    if care_problem:
+        await message.answer(care_problem)
+        return
     if link is not None:
         try:
             song = await find_song_by_link(link)
@@ -501,6 +520,10 @@ async def song_chosen(callback: CallbackQuery, db: Database) -> None:
             return
     except (ValueError, AttributeError):
         await callback.answer("Неверный запрос.", show_alert=True)
+        return
+    care_problem = await song_care_error(db, callback.from_user.id)
+    if care_problem:
+        await callback.answer(care_problem, show_alert=True)
         return
     await callback.answer("Загружаю песню…")
     await send_song(callback.bot, db, choice, choice.tracks[index])

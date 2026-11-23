@@ -168,7 +168,7 @@ async def test_direct_yandex_link_uses_exact_track_without_search(monkeypatch):
         answer=AsyncMock(),
         bot=bot,
     )
-    db = SimpleNamespace()
+    db = SimpleNamespace(get_pet=AsyncMock(return_value=None))
     await songs.request_song(message, SimpleNamespace(community_chat_id=-100), db)
     find_by_link.assert_awaited_once()
     search_by_name.assert_not_awaited()
@@ -352,3 +352,83 @@ async def test_daily_song_counter_uses_moscow_calendar_day(tmp_path, monkeypatch
     assert await songs._daily_used(db, 42) == 1
     assert await db.get_bot_state("song:daily:42:2026-11-21") == "1"
     assert await db.get_bot_state("song:daily:42:2026-11-22") == "1"
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hunger,thirst", [(49, 100), (100, 49), (49, 49)])
+@pytest.mark.parametrize("text", ["Нора песня Кино", "https://music.yandex.ru/album/321/track/987"])
+async def test_low_pet_needs_block_song_query_and_direct_links(tmp_path, monkeypatch, hunger, thirst, text):
+    from community_bot.database import Database
+
+    db = Database(tmp_path / "blocked-song.db")
+    await db.initialize()
+    await db.ensure_user(10)
+    await db.add_cookies(10, 10, "test")
+    assert (await db.purchase_pet(10, "cat", "Кот", 1))[0]
+    await db.execute("UPDATE pets SET hunger=?,thirst=? WHERE user_id=10", (hunger, thirst))
+    monkeypatch.setenv("NORA_SONGS_ENABLED", "1")
+    search = AsyncMock()
+    by_link = AsyncMock()
+    monkeypatch.setattr(songs, "find_songs", search)
+    monkeypatch.setattr(songs, "find_song_by_link", by_link)
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=10, is_bot=False),
+        sender_chat=None, forward_origin=None, via_bot=None,
+        chat=SimpleNamespace(id=10, type="private"),
+        text=text, answer=AsyncMock(), bot=SimpleNamespace(),
+    )
+    await songs.request_song(message, SimpleNamespace(community_chat_id=-100), db)
+    assert "50" in message.answer.await_args.args[0]
+    search.assert_not_awaited()
+    by_link.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_song_query_recovers_at_50_and_old_choice_cannot_bypass_gate(tmp_path, monkeypatch):
+    from community_bot.database import Database
+
+    db = Database(tmp_path / "song-choice.db")
+    await db.initialize()
+    await db.ensure_user(10)
+    await db.add_cookies(10, 10, "test")
+    assert (await db.purchase_pet(10, "cat", "Кот", 1))[0]
+    monkeypatch.setenv("NORA_SONGS_ENABLED", "1")
+    song = songs.Song("987", "321", "Песня", "Артист", 90)
+    find = AsyncMock(return_value=[song])
+    monkeypatch.setattr(songs, "find_songs", find)
+    await db.execute("UPDATE pets SET hunger=50,thirst=50 WHERE user_id=10")
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=10, is_bot=False),
+        sender_chat=None, forward_origin=None, via_bot=None,
+        chat=SimpleNamespace(id=10, type="private"),
+        text="Нора песня Кино", answer=AsyncMock(), bot=SimpleNamespace(),
+    )
+    await songs.request_song(message, SimpleNamespace(community_chat_id=-100), db)
+    find.assert_awaited_once_with("Кино")
+    assert "Выбери песню" in message.answer.await_args.args[0]
+    key = message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data.split(":")[1]
+    bot = SimpleNamespace(send_audio=AsyncMock(), send_message=AsyncMock())
+    callback = SimpleNamespace(
+        data=f"song:{key}:0", from_user=SimpleNamespace(id=10),
+        message=SimpleNamespace(chat=SimpleNamespace(id=10)), answer=AsyncMock(), bot=bot,
+    )
+    await db.set_bot_state("song:file_id:987", "cached-audio")
+    try:
+        await db.execute("UPDATE pets SET hunger=49,thirst=100 WHERE user_id=10")
+        await songs.song_chosen(callback, db)
+        assert "50" in callback.answer.await_args.args[0]
+        assert callback.answer.await_args.kwargs["show_alert"] is True
+        bot.send_audio.assert_not_awaited()
+        await songs.send_song(bot, db, songs._CHOICES[key], song)
+        assert "50" in bot.send_message.await_args.args[1]
+        assert await songs._daily_used(db, 10) == 0
+        assert await db.get_bot_state("song:last_user:10") is None
+
+        await db.execute("UPDATE pets SET hunger=50,thirst=50 WHERE user_id=10")
+        assert await songs.song_care_error(db, 10) is None
+        await songs.song_chosen(callback, db)
+        bot.send_audio.assert_awaited_once()
+        assert await songs._daily_used(db, 10) == 1
+    finally:
+        songs._CHOICES.pop(key, None)
