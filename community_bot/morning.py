@@ -1103,15 +1103,18 @@ async def _refresh_today(bot, db, settings, now: datetime) -> bool:
     """Migrate today's known morning caption in place, preserving its photo and pin."""
     from aiogram.exceptions import TelegramBadRequest
 
+    from community_bot.group_message_close import without_group_close
+
     message_id = await db.get_bot_state("morning_pin_message_id")
     if not message_id:
         return False  # Never create an unsolicited duplicate if the old post cannot be identified.
     brief = await collect_brief(now)
     text = render_brief(brief)
     try:
-        await bot.edit_message_caption(
-            chat_id=settings.community_chat_id, message_id=int(message_id), caption=text, parse_mode="HTML",
-        )
+        with without_group_close():
+            await bot.edit_message_caption(
+                chat_id=settings.community_chat_id, message_id=int(message_id), caption=text, parse_mode="HTML",
+            )
     except TelegramBadRequest as exc:
         reason = str(exc).casefold()
         if "message is not modified" in reason:
@@ -1119,10 +1122,11 @@ async def _refresh_today(bot, db, settings, now: datetime) -> bool:
         elif "no caption" in reason:
             from aiogram.types import LinkPreviewOptions
 
-            await bot.edit_message_text(
-                chat_id=settings.community_chat_id, message_id=int(message_id), text=text, parse_mode="HTML",
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
+            with without_group_close():
+                await bot.edit_message_text(
+                    chat_id=settings.community_chat_id, message_id=int(message_id), text=text, parse_mode="HTML",
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
         else:
             logger.warning("Не удалось обновить подпись существующего утреннего закрепа")
             return False
