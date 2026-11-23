@@ -4140,7 +4140,7 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 #home-story-viewer .home-story-action {
   position: absolute;
   z-index: 3;
-  top: 58%;
+  top: 76%;
   left: 50%;
   translate: -50% -50%;
   width: 70px;
@@ -4182,6 +4182,25 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 #home-story-viewer .home-story-action.is-liked:not(.is-telegram) {
   border-color: rgba(255,71,100,.62);
   box-shadow: 0 0 0 3px rgba(255,51,85,.12), 0 0 23px rgba(255,51,85,.2);
+}
+/* The like remains visibly red even after the main icon morphs to Telegram. */
+#home-story-viewer .home-story-action.is-liked.is-telegram::after {
+  content: '♥';
+  position: absolute;
+  z-index: 2;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border: 2px solid #ff3355;
+  border-radius: 50%;
+  background: #21171f;
+  color: #ff3355;
+  font: 700 19px/1 Arial, sans-serif;
+  box-shadow: 0 0 13px rgba(255,51,85,.45);
+  pointer-events: none;
 }
 #home-story-viewer .home-story-action .story-icon-tg { opacity: 0; transform: scale(.55) rotate(-20deg); }
 #home-story-viewer .home-story-action.is-telegram .story-icon-heart { opacity: 0; transform: scale(.55) rotate(18deg); }

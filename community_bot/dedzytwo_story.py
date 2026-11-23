@@ -24,6 +24,7 @@ ASSEMBLY_LOCK = asyncio.Lock()
 ANNOUNCEMENT_LOCK = asyncio.Lock()
 logger = logging.getLogger(__name__)
 NOTICE_PREFIX = "story_notice:dedzytwo:"
+TARGET_USERNAME = "@ourcreator"  # Actual Telegram account of the dedzyTWO profile.
 
 
 
@@ -74,7 +75,7 @@ def _announcement(actor: dict, target_id: int) -> str:
             else "@" + str(actor.get("first_name") or "участник").lstrip("@"))
     return (
         f'❤️ <a href="tg://user?id={actor_id}">{html.escape(name)}</a>'
-        f' лайкнул сторис <a href="tg://user?id={target_id}">@dedzytwo</a>'
+        f' лайкнул сторис <a href="tg://user?id={target_id}">{TARGET_USERNAME}</a>'
     )
 
 
@@ -131,7 +132,7 @@ async def status(request: web.Request) -> web.Response:
     from community_bot.social_likes import liked_today
 
     await _send_pending(request.app)
-    target_id = await _recipient(request.app["db"], "@dedzytwo")
+    target_id = await _recipient(request.app["db"], TARGET_USERNAME)
     liked = await liked_today(request.app["db"], int(request["actor"]["id"]), target_id)
     return web.json_response({"liked": liked})
 
@@ -143,7 +144,7 @@ async def like(request: web.Request) -> web.Response:
 
     db = request.app["db"]
     actor = request["actor"]
-    target_id = await _recipient(db, "@dedzytwo")
+    target_id = await _recipient(db, TARGET_USERNAME)
     notice_key = NOTICE_PREFIX + secrets.token_hex(16)
     notification = (
         notice_key,

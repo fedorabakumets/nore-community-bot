@@ -74,11 +74,13 @@ window.NoraHome=(()=>{
     if (currentStory !== 'dj' || storyAction.classList.contains('is-telegram')) return;
     cancelTelegramMorph();
     storyAction.classList.add('is-telegram');
-    storyAction.setAttribute('aria-label', 'Открыть Telegram-канал артиста');
+    storyAction.setAttribute('aria-label', storyAction.classList.contains('is-liked')
+      ? 'Открыть Telegram-канал артиста. Лайк поставлен'
+      : 'Открыть Telegram-канал артиста');
     storyAction.setAttribute('title', 'Перейти в Telegram-канал');
   }
 
-  function showLikedHeartThenTelegram(session, delay = 360) {
+  function showLikedHeartThenTelegram(session, delay = 520) {
     if (currentStory !== 'dj' || !storyDialog.open || session !== storySession) return;
     storyAction.classList.add('is-liked');
     if (storyAction.classList.contains('is-telegram') || morphTimer !== null) return;
@@ -101,8 +103,8 @@ window.NoraHome=(()=>{
     storyAction.disabled = false;
     storyAction.classList.remove('is-telegram', 'is-liked');
     storyAction.hidden = currentStory !== 'dj';
-    storyAction.setAttribute('aria-label', 'Поставить лайк профилю @dedzytwo');
-    storyAction.setAttribute('title', 'Поставить лайк @dedzytwo');
+    storyAction.setAttribute('aria-label', 'Поставить лайк профилю @ourcreator');
+    storyAction.setAttribute('title', 'Поставить лайк @ourcreator');
     storyVideo.pause();
     storyVideo.src = currentStory === 'dj' ? artistStory : originalStory;
     storyVideo.poster = currentStory === 'dj'
@@ -117,7 +119,7 @@ window.NoraHome=(()=>{
     if (currentStory === 'dj') {
       api('story/dedzytwo/status').then(result => {
         if (result.liked && session === storySession && storyDialog.open && !likeInProgress) {
-          showLikedHeartThenTelegram(session, 280);
+          showLikedHeartThenTelegram(session, 420);
         }
       }).catch(() => { /* Viewer can still tap to like when status is unavailable. */ });
     }

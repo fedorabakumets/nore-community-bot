@@ -23,7 +23,9 @@ async def _story_test_context(tmp_path, *, fail_first_send=False):
     await db.initialize()
     await db.ensure_user(7, telegram_name="Анна")
     await db.ensure_user(8, telegram_name="Артист")
-    await db.execute("UPDATE users SET username='dedzytwo' WHERE user_id=8")
+    await db.execute(
+        "UPDATE users SET username='ourcreator', profile_name='dedzyTWO' WHERE user_id=8"
+    )
     bot = SimpleNamespace(send_message=AsyncMock())
     if fail_first_send:
         bot.send_message.side_effect = [RuntimeError("temporary Telegram failure"), None]
@@ -53,7 +55,8 @@ async def test_like_once_per_limit_cycle_and_announces_after_reset(tmp_path):
     msg = bot.send_message.call_args
     assert msg.args[0] == -100987654321
     assert "@nora_fan</a> лайкнул сторис" in msg.args[1]
-    assert "@dedzytwo</a>" in msg.args[1]
+    assert "@ourcreator</a>" in msg.args[1]
+    assert "tg://user?id=8" in msg.args[1]
     assert msg.kwargs["parse_mode"] == "HTML"
     assert json.loads((await dedzytwo_story.status(req)).body) == {"liked": True}
 
