@@ -583,6 +583,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import dedzytwo_story
     app.router.add_get('/story/dedzytwo.mp4', dedzytwo_story.video)
     app.router.add_get('/story/dedzytwo-poster.jpg', dedzytwo_story.poster)
+    app.router.add_get('/api/story/dedzytwo/status', dedzytwo_story.status)
     app.router.add_post('/api/story/dedzytwo/like', dedzytwo_story.like)
     from community_bot import admin_web
 
