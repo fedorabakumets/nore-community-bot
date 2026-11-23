@@ -78,19 +78,19 @@ def _announcement(actor: dict, target_id: int) -> str:
     )
 
 
-async def _send_pending(request: web.Request) -> int:
+async def _send_pending(app) -> int:
     """Deliver any pending like announcements without incrementing likes on retries."""
     from community_bot.group_message_close import without_group_close
 
-    bot = request.app.get("bot")
-    chat_id = getattr(request.app["settings"], "community_chat_id", 0)
+    bot = app.get("bot")
+    chat_id = getattr(app["settings"], "community_chat_id", 0)
     if bot is None or not chat_id:
         logger.warning("DJ story like announcements not sent: bot or community_chat_id missing")
         return 0
 
     sent = 0
     async with ANNOUNCEMENT_LOCK:
-        rows = await request.app["db"].fetchall(
+        rows = await app["db"].fetchall(
             "SELECT key,value FROM bot_state WHERE key GLOB ? ORDER BY key LIMIT 20",
             (NOTICE_PREFIX + "*",),
         )
@@ -102,7 +102,7 @@ async def _send_pending(request: web.Request) -> int:
                 # conversion is not needed for this notification.
                 with without_group_close():
                     await bot.send_message(chat_id, text, parse_mode="HTML")
-                await request.app["db"].execute(
+                await app["db"].execute(
                     "DELETE FROM bot_state WHERE key=? AND value=?",
                     (row["key"], row["value"]),
                 )
@@ -113,12 +113,24 @@ async def _send_pending(request: web.Request) -> int:
     return sent
 
 
+async def notification_worker(app) -> None:
+    """Retry announcements that failed on the request that credited the like."""
+    while True:
+        try:
+            await _send_pending(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("DJ story announcement retry cycle failed")
+        await asyncio.sleep(30)
+
+
 async def status(request: web.Request) -> web.Response:
     """Like state follows the shared daily limit, including a paid reset."""
     from community_bot.friends_api import _recipient
     from community_bot.social_likes import liked_today
 
-    await _send_pending(request)
+    await _send_pending(request.app)
     target_id = await _recipient(request.app["db"], "@dedzytwo")
     liked = await liked_today(request.app["db"], int(request["actor"]["id"]), target_id)
     return web.json_response({"liked": liked})
@@ -143,7 +155,7 @@ async def like(request: web.Request) -> web.Response:
 
     # Exactly one accepted like creates a pending event. Repeats can only
     # retry an unsent announcement, never enqueue another one.
-    await _send_pending(request)
+    await _send_pending(request.app)
     if error == ALREADY_PROFILE_LIKED:
         return web.json_response({"ok": True, "liked": True, "created": False})
 
