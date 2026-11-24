@@ -197,7 +197,13 @@ window.NoraShop=(()=>{
     else writeRoute(tab,true);
     history.replaceState({...history.state,noraGameExit:true},'',location.href);
   }
+  const profileDialog=$('#sheet');
+  const nativeProfileBack=Boolean(tg?.isVersionAtLeast?.('6.1')&&
+    typeof tg.BackButton?.show==='function'&&typeof tg.BackButton?.onClick==='function');
+  function profileOpen(){return profileDialog.open&&Boolean(profileDialog.querySelector('#person-profile'))}
   function syncBack(){
+    const profileBack=nativeProfileBack&&profileOpen();
+    profileDialog.classList.toggle('native-profile-back',profileBack);
     const game=currentGame();
     if(game&&!history.state?.noraGameExit&&!afterGameBack){
       // Preserve a same-document Back destination, including for direct game links.
@@ -214,7 +220,7 @@ window.NoraShop=(()=>{
         window.removeEventListener('beforeunload',confirmUnload);
       }
     }
-    if(game||category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide();
+    if(profileBack||game||category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide();
   }
   function exitGameView(onExit){
     requestGameExit(()=>{
@@ -321,6 +327,7 @@ window.NoraShop=(()=>{
   });
   function goBack(){
     if(!data||backPending||afterGameBack||$('#game-exit').open)return;
+    if(profileOpen()&&$('.avatar-viewer[open]')){$('.avatar-viewer[open]').close();return}
     if($('#sheet').open){$('#sheet').close();return}
     if(window.NoraGame?.isOpen?.()){exitGameView(window.NoraGame.close);return}
     if(tab==='durak'&&window.NoraDurak?.back())return;
@@ -335,6 +342,14 @@ window.NoraShop=(()=>{
     else if(tab==='shop')navigate(null);
   }
   tg?.BackButton?.onClick?.(goBack);
+  // Profile is a dialog over the current route, not a separate history entry.
+  // Watch both opening/closing and content replacement inside the shared sheet.
+  const profileBackObserver=new MutationObserver(()=>{
+    if(data&&(profileOpen()||profileDialog.classList.contains('native-profile-back')))syncBack();
+    else if(!data)profileDialog.classList.remove('native-profile-back');
+  });
+  profileBackObserver.observe(profileDialog,{attributes:true,attributeFilter:['open']});
+  profileBackObserver.observe($('#sheet-content'),{childList:true});
   document.addEventListener('keydown',event=>{
     if(event.key==='Escape'&&!event.defaultPrevented&&!event.repeat&&gameViews.has(tab)&&
         !window.NoraGame?.isOpen?.()&&!document.querySelector('dialog[open]')){
