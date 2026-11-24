@@ -4268,6 +4268,11 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
   border-left: 2px solid currentColor; border-bottom: 2px solid currentColor;
   transform: rotate(45deg) translate(2px,-2px);
 }
+/* Keep the drawn arrow only as a fallback outside supported Telegram clients. */
+#sheet.native-profile-back:has(#person-profile) > #dismiss { display: none; }
+#sheet.native-profile-back #person-profile .profile-heading:not(:has(.person-photo img)) {
+  padding-top: max(var(--safe-top, 0px), calc(var(--device-top, 0px) + 48px));
+}
 #sheet #person-profile { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px; }
 #sheet #person-profile .profile-heading {
   display: flex; flex-direction: column; align-items: center; text-align: center;
