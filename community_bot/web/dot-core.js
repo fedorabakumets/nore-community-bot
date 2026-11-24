@@ -12,7 +12,7 @@ globalThis.NoraDotCore=(()=>{
     {name:"VOID",start:100,color:[230,215,255],gap:130,shift:79,description:"Предела больше нет"},
     {name:"PARADOX",start:130,color:[102,224,239],gap:178,shift:108,description:"Тап меняет гравитацию"}
   ];
-  const PARADOX_START=130, INVERT_GRAVITY=670, SOFT_GRAVITY=420;
+  const PARADOX_START=130, INVERT_GRAVITY=670, SOFT_GRAVITY=780;
   const softMode=n=>n>=45&&n<70;
   const gravityMode=n=>softMode(n)||n>=PARADOX_START;
   const acceleration=n=>softMode(n)?SOFT_GRAVITY:INVERT_GRAVITY;
@@ -44,7 +44,7 @@ globalThis.NoraDotCore=(()=>{
   }
   function advance(s,dt,passed){
     s.time+=dt;s.distance+=speedAt(s.time,passed)*dt;
-    const limit=softMode(passed)?250:440;
+    const limit=softMode(passed)?340:440;
     s.vy=gravityMode(passed)?clamp(s.vy+(s.gravity||1)*acceleration(passed)*dt,-limit,limit):Math.min(440,s.vy+670*dt);
     s.y+=s.vy*dt;
   }
@@ -60,7 +60,7 @@ globalThis.NoraDotCore=(()=>{
   function flipGravity(s,passed){
     s.gravity=-s.gravity;
     // PRESSURE is the forgiving training mode: immediately move in the new direction.
-    if(softMode(passed))s.vy=s.gravity*clamp(Math.abs(s.vy)*.45,100,145);
+    if(softMode(passed))s.vy=s.gravity*clamp(Math.abs(s.vy)*.55,145,190);
   }
   function paradoxPilot(s,target,deadband,passed){
     const stopping=softMode(passed)?s.y+s.vy*.07:s.y+s.vy*Math.abs(s.vy)/(2*acceleration(passed));
