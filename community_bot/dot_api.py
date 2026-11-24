@@ -7,6 +7,7 @@ import secrets
 import shutil
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 from aiohttp import web
 
@@ -31,9 +32,24 @@ CREATE TABLE IF NOT EXISTS mini_dot_records (
     achieved_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mini_dot_rank ON mini_dot_records(cookies DESC, passed DESC, achieved_at, user_id);
+CREATE TABLE IF NOT EXISTS mini_dot_reward_results (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    reward INTEGER NOT NULL CHECK(reward >= 0),
+    world_record INTEGER NOT NULL DEFAULT 0,
+    limit_reached INTEGER NOT NULL DEFAULT 0,
+    awarded_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mini_dot_reward_window ON mini_dot_reward_results(user_id, awarded_at) WHERE reward > 0;
+CREATE TABLE IF NOT EXISTS mini_dot_intro_seen (
+    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    seen_at REAL NOT NULL
+);
 """
 MAX_TICKS = 432_000
 TICKET_TTL = 86_400
+REWARD_WINDOW = 86_400
+REWARD_LIMIT = 2
 RUNNER = Path(__file__).with_name("dot_replay.mjs")
 REPLAY_LIMIT = asyncio.Semaphore(2)
 
@@ -57,8 +73,9 @@ async def issue(db, uid, now=None):
             "INSERT INTO mini_dot_sessions(token,user_id,seed,issued_at,expires_at) VALUES(?,?,?,?,?)",
             (token, uid, seed, now, now + TICKET_TTL),
         )
+        seen = await one(conn, "SELECT 1 FROM mini_dot_intro_seen WHERE user_id=?", (uid,))
         await conn.commit()
-    return {"token": token, "seed": seed}
+    return {"token": token, "seed": seed, "intro_seen": bool(seen)}
 
 
 def validate_input(body):
@@ -110,15 +127,23 @@ async def replay(seed, ticks, flaps):
     return result
 
 
+async def reward_result(conn, session):
+    row = await one(conn, "SELECT reward,world_record,limit_reached FROM mini_dot_reward_results WHERE token=?",
+                    (session["token"],))
+    return {"new_record": bool(session["new_record"]), "reward": row["reward"] if row else 0,
+            "world_record": bool(row and row["world_record"]), "limit_reached": bool(row and row["limit_reached"])}
+
+
 async def finish(db, uid, body, now=None):
     token, ticks, flaps = validate_input(body)
+    fixed_now = now
     now = time.time() if now is None else now
     async with db.connect() as conn:
         session = await one(conn, "SELECT * FROM mini_dot_sessions WHERE token=? AND user_id=?", (token, uid))
-    if not session or session["expires_at"] < now:
-        raise ValueError("Сессия DOT истекла")
-    if session["used"]:
-        return bool(session["new_record"])
+        if not session or session["expires_at"] < now:
+            raise ValueError("Сессия DOT истекла")
+        if session["used"]:
+            return await reward_result(conn, session)
     if ticks / 120 > now - session["issued_at"] + 2:
         raise ValueError("Неверная продолжительность полёта")
     try:
@@ -129,12 +154,32 @@ async def finish(db, uid, body, now=None):
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
         current = await one(conn, "SELECT * FROM mini_dot_sessions WHERE token=? AND user_id=?", (token, uid))
-        if not current:
+        now = time.time() if fixed_now is None else fixed_now
+        if not current or current["expires_at"] < now:
             raise ValueError("Сессия DOT истекла")
         if current["used"]:
-            return bool(current["new_record"])
+            return await reward_result(conn, current)
         best = await one(conn, "SELECT cookies,passed FROM mini_dot_records WHERE user_id=?", (uid,))
+        world = await one(conn, "SELECT MAX(cookies) AS score FROM mini_dot_records")
+        world_record = cookies > max(0, world["score"] or 0)
         improved = best is None or (cookies, passed) > (best["cookies"], best["passed"])
+        recent = await one(conn, "SELECT COUNT(*) AS n FROM mini_dot_reward_results "
+                           "WHERE user_id=? AND reward>0 AND awarded_at>?", (uid, now - REWARD_WINDOW))
+        limit_reached = world_record and recent["n"] >= REWARD_LIMIT
+        reward = cookies if world_record and not limit_reached else 0
+        # Record, wallet and one-use settlement share the same write transaction.
+        if reward:
+            stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
+            await conn.execute("UPDATE users SET cookies=cookies+?,updated_at=? WHERE user_id=?",
+                               (reward, stamp, uid))
+            await conn.execute(
+                "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES(?,?,?,?,?)",
+                (uid, reward, "dot_record", "DOT: мировой рекорд", stamp),
+            )
+        await conn.execute(
+            "INSERT INTO mini_dot_reward_results(token,user_id,reward,world_record,limit_reached,awarded_at) "
+            "VALUES(?,?,?,?,?,?)", (token, uid, reward, int(world_record), int(limit_reached), now),
+        )
         if improved:
             await conn.execute(
                 "INSERT INTO mini_dot_records(user_id,cookies,passed,achieved_at) VALUES(?,?,?,?) "
@@ -146,7 +191,8 @@ async def finish(db, uid, body, now=None):
             (cookies, passed, int(improved), token),
         )
         await conn.commit()
-    return improved
+    return {"new_record": improved, "reward": reward, "world_record": world_record,
+            "limit_reached": limit_reached}
 
 
 async def leaderboard(db, settings, uid):
@@ -206,13 +252,23 @@ async def finish_handler(request):
     if request.content_length and request.content_length > 2_000_000:
         raise web.HTTPRequestEntityTooLarge(max_size=2_000_000, actual_size=request.content_length)
     db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
-    improved = await finish(db, uid, await request.json())
+    settlement = await finish(db, uid, await request.json())
     result = await leaderboard(db, settings, uid)
-    result["new_record"] = improved
+    result.update(settlement)
     return web.json_response(result)
 
 
+async def intro_handler(request):
+    db, uid = request.app["db"], request["actor"]["id"]
+    async with db.connect() as conn:
+        await conn.execute("INSERT OR IGNORE INTO mini_dot_intro_seen(user_id,seen_at) VALUES(?,?)",
+                           (uid, time.time()))
+        await conn.commit()
+    return web.json_response({"ok": True})
+
+
 def register(app):
+    app.router.add_post("/api/dot/intro", intro_handler)
     app.router.add_post("/api/dot/start", start_handler)
     app.router.add_get("/api/dot/top", top_handler)
     app.router.add_post("/api/dot/finish", finish_handler)

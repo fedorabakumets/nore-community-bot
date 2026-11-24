@@ -5,6 +5,7 @@ window.NoraDot = (() => {
   let root,canvas,ctx,hud,score,progress,overlay,title,detail,button,soundButton,abort,observer;
   let raf=0,last=0,acc=0,run,mode="ready",muted=false,audio,master;
   let results,resultsBody,restart,queuedTicket=null,ticketRequest=null,flightTicket=null,flaps=[],flightId=0,viewId=0,resultRequest=null,connectTimer=0,initialStartPending=false;
+  let intro=null,introTimer=0,introKey="",introActive=false,introStarted=false;
   let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,flapAt=-10;
   let reduced=false,scaleX=1,scaleY=1,paceNode,meterNode,pauseButton,lastPace=-1,lastSpeed="",renderAt=0,bank=0,cameraY=0,noiseBuffer=null,nearFlash=0,nearIds=new Set(),stageNode,stageBanner,stageTitle,stageDescription,stageTimer=0,theme=STAGES[0].color.slice();
   const motion=()=>window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches||false;
@@ -86,6 +87,7 @@ window.NoraDot = (() => {
     if(particles.length>180)particles.splice(0,particles.length-180);
   }
   function input(){
+    if(introActive)return;
     if(!root||document.hidden||document.querySelector("dialog[open]")||mode==="crash"||initialStartPending)return;
     wakeAudio();
     if(mode==="over"||mode==="ready"){
@@ -102,11 +104,56 @@ window.NoraDot = (() => {
     run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);flapAt=run.time;stretch=1;
     burst(X-7,run.y+4,7,[255,75,103],48);rings.push({x:X,y:run.y,life:.19,max:.19,color:[255,85,117],size:12});sfx("flap");
   }
+  const INTRO_FRAMES=[
+    ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
+    ["ЗАБЕРИ","ВСЕ","ПЕЧЕНЬКИ"],
+    ["НЕ БОЛЕЕ","ДВУХ НАГРАД","ЗА 24 ЧАСА"]
+  ];
+  function introStorageKey(){
+    const id=typeof data!=="undefined"?data?.user?.user_id:null;
+    return "nora.dot.reward-intro.v1."+(id||"device");
+  }
+  function closeIntro(remember=false){
+    clearTimeout(introTimer);introTimer=0;
+    if(intro){intro.remove();intro=null;}
+    if(root)root.inert=false;
+    introActive=false;introStarted=false;
+    if(remember){
+      try{localStorage.setItem(introKey,"1");}catch{}
+      api("dot/intro",{}).catch(()=>{});
+    }
+  }
+  function showIntroFrame(index){
+    if(!introActive||!intro)return;
+    const frame=INTRO_FRAMES[index];
+    if(!frame){intro.classList.add("dot-intro-out");introTimer=setTimeout(()=>closeIntro(true),reduced?30:620);return;}
+    const words=intro.querySelector(".dot-intro-words");
+    words.innerHTML=frame.map((line,i)=>'<span style="--word:'+i+'">'+line+'</span>').join("");
+    words.classList.toggle("dot-intro-accent",index===1);
+    introTimer=setTimeout(()=>showIntroFrame(index+1),reduced?1800:2250);
+  }
+  function launchIntro(){
+    if(!introActive||introStarted)return;
+    introStarted=true;clearTimeout(introTimer);showIntroFrame(0);
+  }
+  function prepareIntro(){
+    introKey=introStorageKey();
+    try{if(localStorage.getItem(introKey)==="1")return;}catch{}
+    intro=document.createElement("div");intro.className="dot-intro-screen";intro.setAttribute("role","dialog");intro.setAttribute("aria-modal","true");
+    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа.");
+    intro.innerHTML='<div class="dot-intro-logo">D<span>O</span>T</div><div class="dot-intro-words" aria-hidden="true"></div><div class="dot-intro-line" aria-hidden="true"></div>';
+    document.body.append(intro);root.inert=true;introActive=true;introStarted=false;
+    introTimer=setTimeout(launchIntro,450);
+  }
   function primeTicket(){
     if(queuedTicket||ticketRequest||!root)return;
     const view=viewId;
     const promise=api("dot/start",{}).then(ticket=>{
-      if(view===viewId&&root&&ticket&&Number.isInteger(ticket.seed)&&typeof ticket.token==="string")queuedTicket=ticket;
+      if(view===viewId&&root&&ticket&&Number.isInteger(ticket.seed)&&typeof ticket.token==="string"){
+        queuedTicket=ticket;
+        if(introActive&&ticket.intro_seen){try{localStorage.setItem(introKey,"1");}catch{}closeIntro(false);}
+        else if(introActive)launchIntro();
+      }
     }).catch(()=>{});
     ticketRequest=promise;promise.finally(()=>{if(ticketRequest===promise)ticketRequest=null;});
   }
@@ -127,6 +174,8 @@ window.NoraDot = (() => {
   function renderRanking(payload,message=""){
     if(!root||!resultsBody)return;
     const leaders=payload?.top||[],mine=payload?.self,record=!!payload?.new_record;
+    const reward=Number(payload?.reward||0),world=!!payload?.world_record;
+    const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':payload?.limit_reached?'<div class="dot-reward-limit">Мировой рекорд! Лимит наград на 24 часа исчерпан.</div>':'';
     const slots=[2,1,3].map(rank=>{
       const row=leaders.find(p=>p.rank===rank);
       if(!row)return '<div class="dot-podium-slot rank-'+rank+' dot-podium-empty"><span class="dot-rank-avatar">·</span><span class="dot-rank-name">Свободно</span><span class="dot-rank-score">—</span><span class="dot-podium-step">'+rank+'</span></div>';
@@ -134,7 +183,7 @@ window.NoraDot = (() => {
     }).join("");
     const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+'<span><b>Ты на '+mine.rank+' месте</b><small>Личный рекорд</small></span><b>🍪 '+mine.cookies+'</b></button>':(!mine&&payload?'<p class="dot-rank-status">У тебя пока нет сохранённого результата.</p>':'');
     const podium=payload?'<div class="dot-podium">'+slots+'</div>': '<div class="dot-rank-loading">'+(message?esc(message):'<span class="dot-rank-spinner"></span> Обновляем топ…')+'</div>';
-    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>🍪 '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ NEW RECORD</b>':'')+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
+    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>🍪 '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
     results.classList.toggle("has-record",record);
   }
   function finishFlight(){
@@ -143,7 +192,7 @@ window.NoraDot = (() => {
     const still=()=>view===viewId&&id===flightId&&root?.isConnected&&mode==="over";
     const request=ticket?api("dot/finish",record):api("dot/top");
     resultRequest=request;
-    request.then(payload=>{if(still())renderRanking(payload,ticket?"":"Тренировочная партия: результат не записан.");}).catch(async()=>{
+    request.then(payload=>{if(payload?.reward>0&&typeof toast==="function")toast("DOT: +"+payload.reward+" 🍪 за мировой рекорд");if(still())renderRanking(payload,ticket?"":"Тренировочная партия: результат не записан.");}).catch(async()=>{
       if(!still())return;
       try{const payload=await api("dot/top");if(still())renderRanking(payload,"Не удалось подтвердить результат этой партии.");}
       catch{if(still())renderRanking(null,"Топ временно недоступен.");}
@@ -329,7 +378,7 @@ window.NoraDot = (() => {
     raf=requestAnimationFrame(tick);
   }
   function screen(){
-    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>ПЕЧЕНЬКИ</span><strong>🍪 <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button></div></div></div><p class="dot-note">Печеньки считаются только в этой партии</p></section>';
+    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>ПЕЧЕНЬКИ</span><strong>🍪 <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button></div></div></div></section>';
   }
   function mount(next){
     if(root===next&&root)return;unmount();if(!next)return;
@@ -350,10 +399,10 @@ window.NoraDot = (() => {
     window.addEventListener("blur",pause,options);
     if(window.ResizeObserver){observer=new ResizeObserver(resize);observer.observe(canvas);}
     else window.addEventListener("resize",resize,options);
-    reset();resize();draw(0);primeTicket();raf=requestAnimationFrame(tick);
+    reset();resize();draw(0);prepareIntro();primeTicket();raf=requestAnimationFrame(tick);
   }
   function unmount(){
-    viewId++;flightId++;clearTimeout(connectTimer);connectTimer=0;initialStartPending=false;queuedTicket=null;ticketRequest=null;cancelAnimationFrame(raf);raf=0;abort?.abort();abort=null;observer?.disconnect();observer=null;
+    closeIntro(false);viewId++;flightId++;clearTimeout(connectTimer);connectTimer=0;initialStartPending=false;queuedTicket=null;ticketRequest=null;cancelAnimationFrame(raf);raf=0;abort?.abort();abort=null;observer?.disconnect();observer=null;
     if(audio){const old=audio;audio=null;master=null;noiseBuffer=null;try{void old.close().catch(()=>{});}catch{}}
     root=canvas=ctx=null;last=acc=0;particles=[];rings=[];labels=[];trail=[];
   }
