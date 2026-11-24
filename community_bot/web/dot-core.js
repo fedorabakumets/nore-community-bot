@@ -20,7 +20,13 @@ globalThis.NoraDotCore=(()=>{
   const speedAt=(t,passed=0)=>{
     const base=Math.min(365,125+t*3.1);
     const pulse=clamp((passed-70)/12,0,1)*(.5+.5*Math.sin(t*2.1));
-    return Math.min(softMode(passed)?245:365,base*(1-.12*pulse));
+    const normal=base*(1-.12*pulse);
+    if(softMode(passed))return Math.min(245,normal);
+    if(passed>=70&&passed<82){
+      const progress=clamp((passed-70)/12,0,1);
+      return lerp(Math.min(245,normal),normal,progress);
+    }
+    return Math.min(365,normal);
   };
   const widths={static:46,zigzag:46,lift:46,iris:46,tunnel:90,double:82,phantom:46,hybrid:46};
   const typeNames={static:"",zigzag:"ZIG",lift:"SHIFT",iris:"IRIS",tunnel:"TUNNEL",double:"DOUBLE",phantom:"GHOST",hybrid:"SHIFT · IRIS"};
@@ -105,6 +111,7 @@ globalThis.NoraDotCore=(()=>{
     function add(){
       const index=r.generated+1,stage=stageAt(index-1),level=STAGES[stage],type=typeFor(index,stage);
       const baseSpeed=speedAt(witness.time,index-1),priorCenter=previous?.center??H*.48;
+      const spacingSpeed=stage===4&&index<=82?Math.max(baseSpeed,Math.min(365,125+witness.time*3.1)*.90):baseSpeed;
       const easy=index%7===0&&index-1!==level.start;
       const desired=easy?"static":type;
       let accepted=null,nextWitness=null;
@@ -118,7 +125,7 @@ globalThis.NoraDotCore=(()=>{
         const margin=gap/2+amp+Math.abs(second)+25;
         const direction=random()<.5?-1:1;
         const center=clamp(attempt>=9?witness.y:priorCenter+(kind==="zigzag"?direction*(shift*.55+random()*shift*.45):(random()-.5)*shift*2),margin,H-margin);
-        const interval=Math.max(170,baseSpeed*(stage===3?(index===46?2.1:1.40):stage===4&&index===71?1.65:stage===6?(index===PARADOX_START+1?2.1:1.30):stage>=4?1.02:1.16))+(previous?Math.max(0,previous.width-46):0)+(easy?55:0)+(attempt>=9?50:0);
+        const interval=Math.max(170,spacingSpeed*(stage===3?(index===46?2.1:1.40):stage===4&&index===71?1.65:stage===6?(index===PARADOX_START+1?2.1:1.30):stage>=4?1.02:1.16))+(previous?Math.max(0,previous.width-46):0)+(easy?55:0)+(attempt>=9?50:0);
         const x=previous?previous.x+interval:W-30;
         const g={index,stage,type:kind,x,width,center,gap,amp,squeeze,second,rate:.85+stage*.14,phase:random()*Math.PI*2,collected:false,passed:false};
         const path=witnessFor(witness,g,index-1);
