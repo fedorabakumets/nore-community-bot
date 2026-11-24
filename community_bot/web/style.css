@@ -4638,7 +4638,7 @@ body.nora-profile-music #app[data-screen="lk"],
 }
 #app[data-screen="lk"] .lk-photo-wrap .profile-photo:has(img)::after,
 #sheet #person-profile .person-photo:has(img)::after {
-  background:linear-gradient(to bottom,transparent 48%,color-mix(in srgb,var(--music-profile-base) 18%,transparent) 60%,color-mix(in srgb,var(--music-profile-base) 52%,transparent) 75%,color-mix(in srgb,var(--music-profile-base) 85%,transparent) 87%,var(--music-profile-base) 98%);
+  background:none; content:none;
 }
 #app[data-screen="lk"] :is(.tg-profile-fields,.lk-group,.tg-profile-economy,.lk-account,.lk-completion,.tg-profile-action-icon,.profile-track,.profile-track-toggle,.profile-track-save,.profile-library-open,#change-avatar),
 #sheet #person-profile :is(.tg-profile-fields,.stat,.person-locked,.profile-track,.profile-track-toggle,.profile-track-save,.profile-library-open),
@@ -4646,8 +4646,8 @@ body.nora-profile-music #app[data-screen="lk"],
 #sheet:has(#person-profile) > #dismiss {
   transition:background-color .48s ease,border-color .48s ease,color .48s ease,box-shadow .48s ease;
 }
-body.nora-profile-music #app[data-screen="lk"] :is(.profile-track,.profile-track-toggle,.profile-track-save,#change-avatar),
-#sheet.nora-profile-music #person-profile :is(.profile-track,.profile-track-toggle,.profile-track-save),
+body.nora-profile-music #app[data-screen="lk"] :is(.profile-track-toggle,.profile-track-save,#change-avatar),
+#sheet.nora-profile-music #person-profile :is(.profile-track-toggle,.profile-track-save),
 #sheet.nora-profile-music:has(#person-profile) > #dismiss { background-color:var(--profile-button); border-color:var(--profile-rule); }
 body.nora-profile-music:has(#app[data-screen="lk"]) #nav {
   background-color:#2e3b49c9;
@@ -4662,3 +4662,40 @@ body.nora-profile-music:has(#app[data-screen="lk"])::after { background:var(--mu
   #app[data-screen="lk"] :is(.tg-profile-fields,.lk-group,.tg-profile-economy,.tg-profile-action-icon,.profile-track,.profile-track-toggle),
   #sheet #person-profile :is(.tg-profile-fields,.stat,.profile-track,.profile-track-toggle),#sheet #person-profile .person-actions button::before {transition:none}
 }
+
+/* Seamless profile music scene: one canvas under the photo, player and safe areas. */
+html {
+  background-color:var(--nora-background,#111013);
+}
+html.nora-music-shell {
+  background-color:#354451;
+  overscroll-behavior-y:none;
+}
+html.nora-music-shell body { overscroll-behavior-y:none; }
+body:has(#app[data-screen="lk"]) {
+  min-height:100vh; min-height:100dvh;
+}
+body:has(> .nora-profile-waves) > .nora-profile-waves,
+#sheet:has(#person-profile) > .nora-profile-waves {
+  background:radial-gradient(ellipse at 50% 15%,#52657588,transparent 72%),var(--music-profile-base);
+}
+/* Keep the fixed canvas visible through the lower edge of the photo, instead of
+   painting an opaque rectangle over it. The mask applies only to the image. */
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo:has(img),
+#sheet #person-profile .person-photo:has(img) {
+  background:transparent;
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo img,
+#sheet #person-profile .person-photo img {
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 42%,#000d 59%,#0008 73%,#0003 85%,transparent 100%);
+  mask-image:linear-gradient(to bottom,#000 0%,#000 42%,#000d 59%,#0008 73%,#0003 85%,transparent 100%);
+}
+#app[data-screen="lk"] .lk-identity > .profile-track,
+#sheet #person-profile > .profile-track {
+  background:transparent; border:0; box-shadow:none;
+}
+body.nora-profile-music:has(#app[data-screen="lk"])::before,
+body.nora-profile-music:has(#app[data-screen="lk"])::after {
+  background:transparent; pointer-events:none;
+}
+#sheet.nora-profile-music:has(#person-profile) { overscroll-behavior-y:none; }
