@@ -68,9 +68,8 @@ BUILTIN_TITLES: dict[str, tuple[str, str]] = {
     "nora": ("Нора", "Ответ на обращение «Нора, …»: погода, новости, музыка, кино и вопрос про бота."),
 }
 
-NORA_OPTIONS = {"music_limit": "5", "news_limit": "2"}
+NORA_OPTIONS = {"news_limit": "2"}
 OPTION_LABELS = {
-    "music_limit": "Треков в чарте",
     "news_limit": "Новостей за раз",
 }
 
