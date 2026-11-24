@@ -4397,3 +4397,6 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 #app[data-screen="lk"] .tg-profile-actions > .tg-profile-action { min-height:50px; gap:6px; }
 #app[data-screen="lk"] .tg-profile-action-icon { color:#fff; }
 #app[data-screen="lk"] .tg-profile-action small { font-size:12px; font-variant-numeric:tabular-nums; color:var(--profile-muted); }
+
+/* The profile itself receives initial dialog focus; real controls retain keyboard focus rings. */
+#sheet #person-profile:focus { outline:none; }
