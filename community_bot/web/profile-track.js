@@ -629,14 +629,15 @@ window.NoraProfileTrack = (() => {
   }
 
   async function loadNowSaved(state) {
+    const request = state.saveStatusRequest = (state.saveStatusRequest || 0) + 1;
     try {
       const ref = trackReference(state);
       const result = await api('music-library/current?' + new URLSearchParams(ref));
-      if (active !== state || state.savePending) return;
+      if (active !== state || state.savePending || request !== state.saveStatusRequest) return;
       state.saved = result.saved === true;
       paintNowSaved(state);
     } catch {
-      if (active === state) {
+      if (active === state && !state.savePending && request === state.saveStatusRequest) {
         state.saved = false;
         paintNowSaved(state);
       }
@@ -647,6 +648,7 @@ window.NoraProfileTrack = (() => {
     const state = active;
     if (!state || state.savePending || state.saved === true) return;
     state.savePending = true;
+    state.saveStatusRequest = (state.saveStatusRequest || 0) + 1;
     paintNowSaved(state);
     try {
       const result = await api('music-library/current', trackReference(state));
