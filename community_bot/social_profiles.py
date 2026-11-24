@@ -11,11 +11,17 @@ from aiohttp import ClientError, web
 
 from community_bot.friends_api import _recipient, accepted
 from community_bot.helpers import can_view_profile, effective_role, role_title
+from community_bot.music_library import (
+    can_read_library,
+    change_collection,
+    get_collection,
+    is_public,
+    public_track,
+    saved_track_summary,
+    set_public,
+)
 from community_bot.profile_fields import profile_age
 from community_bot.profile_track import download_track, get_track
-from community_bot.music_library import (
-    can_read_library, change_collection, get_collection, is_public, public_track, saved_track_summary, set_public,
-)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -257,7 +263,8 @@ async def save_profile_track(request):
     )):
         raise web.HTTPNotFound()
     payload = await request.json()
-    if not isinstance(payload, dict) or type(payload.get("saved")) is not bool or not isinstance(payload.get("revision"), str):
+    if (not isinstance(payload, dict) or type(payload.get("saved")) is not bool
+            or not isinstance(payload.get("revision"), str)):
         raise web.HTTPBadRequest()
     try:
         result = await change_collection(
