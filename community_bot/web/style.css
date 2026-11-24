@@ -4725,3 +4725,51 @@ body.nora-profile-music #app[data-screen="lk"] .profile-track[data-playing="true
 @media(prefers-reduced-motion:reduce){
   .nora-profile-waves canvas {opacity:.57}
 }
+
+/* Persistent profile music dock: shared audio, no new media source. */
+#nora-mini-player {
+  position:fixed; z-index:5; isolation:isolate;
+  left:calc(10px + var(--safe-left)); right:calc(10px + var(--safe-right));
+  bottom:calc(82px + var(--safe-bottom)); max-width:656px; margin-inline:auto;
+  display:flex; align-items:center; gap:4px; min-height:58px; padding:5px 7px 7px;
+  border-radius:20px; overflow:hidden; color:#f5f3f5; background:rgb(35 35 41 / 87%);
+  -webkit-backdrop-filter:blur(24px) saturate(150%); backdrop-filter:blur(24px) saturate(150%);
+  box-shadow:0 8px 24px #0005,inset 0 1px 1px #ffffff29,inset 0 0 0 1px #ffffff15;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  animation:nora-mini-enter .24s cubic-bezier(.2,.8,.2,1) both;
+}
+#nora-mini-player[hidden],body.intro-playing #nora-mini-player,
+body:has(#nav[inert]) #nora-mini-player,
+body:has(#app[data-screen="staffchat"]) #nora-mini-player,
+body:has(#app:is([data-screen="durak"],[data-screen="barricade"],[data-screen="sea"],[data-screen="mafia"],[data-screen="rocket"])) #nora-mini-player,
+body:has(dialog[open]) #nora-mini-player {display:none!important}
+#nora-mini-player button {border:0;background:transparent;color:inherit;margin:0;min-width:0}
+#nora-mini-player .nora-mini-open {display:flex;align-items:center;gap:10px;flex:1;min-height:44px;text-align:left;padding:0 4px}
+.nora-mini-art {display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:10px;background:linear-gradient(145deg,#55535e,#35333c);color:#f5f3f5}
+.nora-mini-art svg {width:23px;height:23px}
+.nora-mini-copy {display:grid;gap:2px;min-width:0;flex:1}
+.nora-mini-copy strong,.nora-mini-copy small {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}
+.nora-mini-copy strong {font-size:14px;font-weight:650}
+.nora-mini-copy small {font-size:12px;color:#b5b2bc}
+#nora-mini-player .nora-mini-toggle {width:46px;height:44px;display:grid;place-items:center;flex:none;padding:0;border-radius:14px}
+.nora-mini-toggle svg {width:25px;height:25px}
+#nora-mini-player .nora-mini-pause,#nora-mini-player[data-playing="true"] .nora-mini-play {display:none}
+#nora-mini-player[data-playing="true"] .nora-mini-pause {display:block}
+#nora-mini-player progress {position:absolute;bottom:0;left:12px;width:calc(100% - 24px);height:2px;appearance:none;-webkit-appearance:none;border:0;background:#ffffff20}
+#nora-mini-player progress::-webkit-progress-bar {background:#ffffff20}
+#nora-mini-player progress::-webkit-progress-value {background:#e7e4eb}
+#nora-mini-player progress::-moz-progress-bar {background:#e7e4eb}
+body.nora-mini-player-active #app:not([data-screen="staffchat"]) {padding-bottom:calc(224px + var(--safe-bottom))}
+body.nora-mini-player-active #scroll-jump {bottom:calc(168px + var(--safe-bottom))}
+body.nora-mini-player-active #toast {bottom:calc(172px + var(--safe-bottom))}
+@keyframes nora-mini-enter {from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+#sheet:has(#nora-now-playing) {position:fixed;inset:0;width:100%;max-width:none;height:100dvh;max-height:none;margin:0;border:0;border-radius:0;padding:calc(var(--safe-top) + 16px) calc(22px + var(--safe-right)) calc(18px + var(--safe-bottom)) calc(22px + var(--safe-left));background:var(--nora-background,#111013);overflow-y:auto}
+#nora-now-playing {width:100%;max-width:420px;margin:0 auto;outline:none;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.nora-now-playing-label {font-size:14px;color:var(--nora-secondary,#b5b2bc);margin:0 0 26px}
+.nora-now-playing-art {width:min(70vw,300px);aspect-ratio:1;margin:0 auto 28px;display:grid;place-items:center;border-radius:24px;color:#eeedf2;background:linear-gradient(145deg,#55535e,#27262d)}
+.nora-now-playing-art svg {width:30%;height:30%}
+#nora-now-playing .profile-track {text-align:left}
+#nora-now-playing .profile-track-timeline {display:flex}
+#nora-now-playing .nora-now-playing-stop {font-size:13px;background:transparent;color:var(--nora-secondary,#b5b2bc);margin-top:18px}
+#sheet:has(#nora-now-playing)>#dismiss {display:block;max-width:420px;margin:12px auto}
+@media(prefers-reduced-motion:reduce){#nora-mini-player{animation:none}}
