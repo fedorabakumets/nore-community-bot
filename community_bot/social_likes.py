@@ -79,5 +79,8 @@ async def give(
             # The message outbox is committed with the like, so Telegram failures
             # never lose the announcement or credit a second like on retry.
             await conn.execute("INSERT INTO bot_state(key,value) VALUES (?,?)", notice)
+        from community_bot.pet_progress import record
+
+        await record(conn, actor_id, "like")
         await conn.commit()
     return None
