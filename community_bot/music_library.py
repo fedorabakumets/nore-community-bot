@@ -72,11 +72,15 @@ async def change_collection(db, uid, *, target_id=None, revision=None, key=None,
 
 
 def save_button(track, target_id):
-    from aiogram.types import InputRichBlockButtons, RichMessageButton
+    from aiogram.types import RichMessageButton
 
-    return InputRichBlockButtons(align="center", buttons=[
-        RichMessageButton(text="+", callback_data=f"{PREFIX}{target_id}:{track['revision']}"),
-    ])
+    return RichMessageButton(text="➕🎵", callback_data=f"{PREFIX}{target_id}:{track['revision']}")
+
+
+def profile_music_button(track, target_id, requester_id):
+    if target_id == requester_id:
+        return open_button(target_id)
+    return save_button(track, target_id) if track else None
 
 
 LIBRARY_PREFIX = "mlib:"
