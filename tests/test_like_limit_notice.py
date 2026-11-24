@@ -27,32 +27,60 @@ def test_notice_cooldown_is_per_ordered_pair(clock):
     assert len(group._like_limit_notices) == 1
 
 
-async def test_notice_contains_direct_game_links_and_is_throttled(clock):
-    bot = SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")))
+async def test_notice_contains_colored_rich_game_buttons_and_is_throttled(clock):
+    bot = SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")),
+        send_rich_message=AsyncMock(),
+    )
     actor = User(id=1, is_bot=False, first_name="Test", username="testuser")
-    send = AsyncMock()
-    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, send)
-    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, send)
-    send.assert_awaited_once()
-    text = send.call_args.args[0]
-    assert "лайк этому человеку уже поставлен" in text
-    assert 'https://t.me/nora_test_bot?startapp=nora_to_durak">Дурака</a>' in text
-    assert 'https://t.me/nora_test_bot?startapp=nora_to_barricade">Баррикаду</a>' in text
-    assert send.call_args.kwargs["link_preview_options"].is_disabled
+    for _ in range(2):
+        await group._send_like_limit_notice(bot, actor, {"user_id": 2}, -100123, 44, 7)
+    bot.send_rich_message.assert_awaited_once()
+    kwargs = bot.send_rich_message.call_args.kwargs
+    blocks = kwargs["rich_message"].blocks
+    assert len(blocks) == 2
+    assert blocks[0].text.startswith("💔 Лайк этому участнику уже поставлен.")
+    assert [(b.text, b.style, b.url) for b in blocks[1].buttons] == [
+        ("🃏 Дурак", "primary", "https://t.me/nora_test_bot?startapp=nora_to_durak"),
+        ("🪵 Баррикада", "success", "https://t.me/nora_test_bot?startapp=nora_to_barricade"),
+    ]
+    assert kwargs["reply_parameters"].message_id == 44
+    assert kwargs["message_thread_id"] == 7
     clock[0] += 300
-    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, send)
-    assert send.await_count == 2
+    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, -100123, 44, 7)
+    assert bot.send_rich_message.await_count == 2
 
 
 async def test_failed_notice_can_retry(clock):
-    bot = SimpleNamespace(me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")))
+    bot = SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")),
+        send_rich_message=AsyncMock(side_effect=RuntimeError("offline")),
+    )
     actor = User(id=1, is_bot=False, first_name="Test")
-    send = AsyncMock(side_effect=RuntimeError("offline"))
     with pytest.raises(RuntimeError):
-        await group._send_like_limit_notice(bot, actor, {"user_id": 2}, send)
-    send.side_effect = None
-    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, send)
-    assert send.await_count == 2
+        await group._send_like_limit_notice(bot, actor, {"user_id": 2}, -100123, 44)
+    bot.send_rich_message.side_effect = None
+    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, -100123, 44)
+    assert bot.send_rich_message.await_count == 2
+
+
+async def test_rich_rejection_falls_back_to_colored_buttons(clock):
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SendMessage
+
+    bot = SimpleNamespace(
+        me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")),
+        send_rich_message=AsyncMock(side_effect=TelegramBadRequest(
+            method=SendMessage(chat_id=-100123, text="test"), message="unsupported",
+        )),
+        send_message=AsyncMock(),
+    )
+    actor = User(id=1, is_bot=False, first_name="Test")
+    await group._send_like_limit_notice(bot, actor, {"user_id": 2}, -100123, 44, 7)
+    kwargs = bot.send_message.call_args.kwargs
+    assert [b.style for b in kwargs["reply_markup"].inline_keyboard[0]] == ["primary", "success"]
+    assert kwargs["reply_parameters"].message_id == 44
+    assert kwargs["message_thread_id"] == 7
 
 
 async def test_reaction_duplicate_replies_to_original_message(clock, monkeypatch):
@@ -69,17 +97,17 @@ async def test_reaction_duplicate_replies_to_original_message(clock, monkeypatch
     )
     bot = SimpleNamespace(
         me=AsyncMock(return_value=SimpleNamespace(username="nora_test_bot")),
-        send_message=AsyncMock(),
+        send_rich_message=AsyncMock(),
     )
     monkeypatch.setattr(group, "needs_reapplication", AsyncMock(return_value=False))
     monkeypatch.setattr(group, "_give_like", AsyncMock(return_value=social_likes.ALREADY_PROFILE_LIKED))
     settings = SimpleNamespace(community_chat_id=-100123)
     await group.group_reaction(event, SimpleNamespace(update_id=1), None, settings, bot, authors)
     await group.group_reaction(event, SimpleNamespace(update_id=2), None, settings, bot, authors)
-    bot.send_message.assert_awaited_once()
-    kwargs = bot.send_message.call_args.kwargs
+    bot.send_rich_message.assert_awaited_once()
+    kwargs = bot.send_rich_message.call_args.kwargs
     assert kwargs["reply_parameters"].message_id == 44
     assert kwargs["message_thread_id"] == 7
     clock[0] += 300
     await group.group_reaction(event, SimpleNamespace(update_id=3), None, settings, bot, authors)
-    assert bot.send_message.await_count == 2
+    assert bot.send_rich_message.await_count == 2

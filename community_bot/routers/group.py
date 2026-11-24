@@ -17,7 +17,7 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import (
     TelegramAPIError, TelegramBadRequest, TelegramForbiddenError,
-    TelegramNetworkError, TelegramRetryAfter, TelegramServerError,
+    TelegramNetworkError, TelegramNotFound, TelegramRetryAfter, TelegramServerError,
 )
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
@@ -31,10 +31,14 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputRichBlockButtons,
+    InputRichBlockParagraph,
+    InputRichMessage,
     LinkPreviewOptions,
     Message,
     MessageReactionUpdated,
     ReplyParameters,
+    RichMessageButton,
     Update,
     User,
 )
@@ -68,6 +72,7 @@ from community_bot.domain import (
     transfer_commission_percent,
 )
 from community_bot.ephemeral import delete_user_command, keep_in_chat
+from community_bot.group_message_close import without_group_close
 from community_bot.group_profile import LIKE_PREFIX, refresh_group_profile
 from community_bot.helpers import (
     BOT_REPLY_TTL,
@@ -519,24 +524,40 @@ def _claim_like_limit_notice(actor_id: int, target_id: int) -> float | None:
     return now
 
 
-async def _send_like_limit_notice(bot: Bot, actor: User, target, send) -> None:
+async def _send_like_limit_notice(
+    bot: Bot, actor: User, target, chat_id: int, message_id: int, thread_id: int | None = None,
+) -> None:
     pair = (actor.id, int(target["user_id"]))
     claimed = _claim_like_limit_notice(*pair)
     if claimed is None:
         return
     try:
         username = (await bot.me()).username
-        sender = user_link(actor.id, "@" + (actor.username or actor.full_name))
-        games = "Дурака / Баррикаду"
+        text = "💔 Лайк этому участнику уже поставлен. Можно восстановить лимиты в магазине или сыграв в игры:"
+        buttons = []
         if username:
             base = f"https://t.me/{username}?startapp=nora_to_"
-            games = f'<a href="{base}durak">Дурака</a> / <a href="{base}barricade">Баррикаду</a>'
-        text = (
-            f"❤️ {sender}, лайк этому человеку уже поставлен. "
-            f"Можешь восстановить лимиты или сыграть в {games}."
-        )
-        with bot_publication():
-            await send(text, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+            buttons = [
+                RichMessageButton(text="🃏 Дурак", url=f"{base}durak", style="primary"),
+                RichMessageButton(text="🪵 Баррикада", url=f"{base}barricade", style="success"),
+            ]
+        blocks = [InputRichBlockParagraph(text=text)]
+        if buttons:
+            blocks.append(InputRichBlockButtons(align="center", buttons=buttons))
+        reply = ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
+        with bot_publication(), without_group_close():
+            try:
+                await bot.send_rich_message(
+                    chat_id, rich_message=InputRichMessage(blocks=blocks, skip_entity_detection=True),
+                    reply_parameters=reply, message_thread_id=thread_id,
+                )
+            except (TelegramBadRequest, TelegramNotFound):
+                markup = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text=b.text, url=b.url, style=b.style) for b in buttons
+                ]]) if buttons else None
+                await bot.send_message(
+                    chat_id, text, reply_markup=markup, reply_parameters=reply, message_thread_id=thread_id,
+                )
     except BaseException:
         if _like_limit_notices.get(pair) == claimed:
             _like_limit_notices.pop(pair, None)
@@ -2141,7 +2162,10 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
             return
         error = await _give_like(db, bot, message.from_user, target)
         if error == social_likes.ALREADY_PROFILE_LIKED:
-            await _send_like_limit_notice(bot, message.from_user, target, message.reply)
+            await _send_like_limit_notice(
+                bot, message.from_user, target, message.chat.id, message.message_id,
+                message.message_thread_id if message.is_topic_message else None,
+            )
         elif error:
             await message.reply(error)
         else:
@@ -2224,7 +2248,7 @@ async def group_reaction(
         if error is None:
             await send(_like_notice(user, target), parse_mode="HTML")
         elif error == social_likes.ALREADY_PROFILE_LIKED:
-            await _send_like_limit_notice(bot, user, target, send)
+            await _send_like_limit_notice(bot, user, target, chat_id, event.message_id, thread)
     votes = added & {"plus", "minus"}
     if len(votes) == 1:
         vote = votes.pop()
