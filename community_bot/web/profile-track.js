@@ -121,9 +121,20 @@ const NoraProfileWaves = (() => {
       };
     } catch(error) {destroy();return null;}
   }
+  // Keep the WebView's native canvas (including iOS rubber-band areas) in sync.
+  function paintMusicShell(enabled) {
+    document.documentElement.classList.toggle('nora-music-shell',enabled);
+    const webApp=window.Telegram?.WebApp;
+    const color=enabled?'#354451':(getComputedStyle(document.documentElement).getPropertyValue('--poster-bg').trim()||'#111013');
+    if(!webApp)return;
+    for(const [method,version] of [['setBackgroundColor','6.1'],['setHeaderColor','6.9'],['setBottomBarColor','7.10']]){
+      try{if(webApp.isVersionAtLeast?.(version))webApp[method]?.(color);}catch{}
+    }
+  }
   function stopScene(s,immediate=false) {
     if(!s)return;
     s.host.classList.remove('nora-profile-music');
+    if(scene===s)paintMusicShell(false);
     s.running=false;cancelAnimationFrame(s.raf);s.raf=0;
     s.layer.classList.remove('is-playing');
     clearTimeout(s.removeTimer);
@@ -168,6 +179,7 @@ const NoraProfileWaves = (() => {
     }
     if(scene.running)return;
     clearTimeout(scene.removeTimer);scene.running=true;host.classList.add('nora-profile-music');
+    paintMusicShell(true);
     const s=scene;requestAnimationFrame(()=>{if(s.running)s.layer.classList.add('is-playing');});
     wake(s);
   }
