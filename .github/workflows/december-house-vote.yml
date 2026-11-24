@@ -1,0 +1,23 @@
+name: December house vote checks
+on:
+  pull_request:
+    branches: [cursor/nora-2-update-d133]
+    paths:
+      - "community_bot/december_house_vote.py"
+      - "community_bot/main.py"
+      - "assets/events/house-vote/**"
+      - "tests/test_december_house_vote.py"
+      - ".github/workflows/december-house-vote.yml"
+  workflow_dispatch:
+jobs:
+  rich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m py_compile community_bot/main.py community_bot/december_house_vote.py
+      - run: python -m pytest -q tests/test_december_house_vote.py
