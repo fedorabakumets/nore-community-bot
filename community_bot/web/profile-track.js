@@ -7,11 +7,11 @@ window.NoraProfileTrack = (() => {
     return Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
   }
 
-  function html(track, endpoint, library = false) {
+  function html(track, endpoint, library = false, readonly = false) {
     if (!track) return '';
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     const saved = library || Boolean(track.saved);
-    const save = track.id ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
+    const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
     return `<section class="profile-track" data-track-src="${esc(src)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
         <span class="profile-track-copy">
@@ -27,23 +27,42 @@ window.NoraProfileTrack = (() => {
     </section>`;
   }
 
-  function libraryButton() {
-    return '<button type="button" class="profile-library-open" data-music-library>Мои треки <span aria-hidden="true">›</span></button>';
+  function libraryButton(owner = '') {
+    return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? 'Треки' : 'Мои треки'} <span aria-hidden="true">›</span></button>`;
   }
 
-  async function showLibrary() {
-    sheet('<div data-music-library-panel><h2>Мои треки</h2><p class="sub">Загрузка…</p></div>');
+  async function showLibrary(owner = '') {
+    const path = owner ? 'people/' + encodeURIComponent(owner) + '/music-library' : 'music-library';
+    const title = owner ? 'Треки' : 'Мои треки';
+    sheet('<div data-music-library-panel><h2>' + title + '</h2><p class="sub">Загрузка…</p></div>');
     const panel = document.querySelector('[data-music-library-panel]');
     try {
-      const result = await api('music-library');
+      const result = await api(path);
       if (!panel.isConnected) return;
-      panel.innerHTML = '<h2>Мои треки</h2>' + (result.tracks.length
-        ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>'
-        : '<p class="sub">Здесь появятся треки, которые ты сохранишь из профилей.</p>');
+      const visibility = owner ? '' : '<label class="profile-library-visibility"><input type="checkbox" data-library-visibility ' + (result.public ? 'checked' : '') + '> Показывать мои треки другим участникам</label>';
+      panel.innerHTML = '<h2>' + title + '</h2>' + visibility + (result.tracks.length
+        ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/' + path + '/' + track.id, true, Boolean(owner))).join('') + '</div>'
+        : '<p class="sub">Пока нет сохранённых треков.</p>');
     } catch (error) {
-      if (panel.isConnected) panel.innerHTML = '<h2>Мои треки</h2><p class="sub">' + esc(error.message) + '</p>';
+      if (panel.isConnected) panel.innerHTML = '<h2>' + title + '</h2><p class="sub">' + esc(error.message) + '</p>';
     }
   }
+
+  document.addEventListener('change', async event => {
+    const input = event.target;
+    if (!input.matches('[data-library-visibility]')) return;
+    const value = input.checked;
+    input.disabled = true;
+    try {
+      await api('music-library/visibility', { public: value });
+      toast(value ? 'Коллекция открыта' : 'Коллекция приватная');
+    } catch (error) {
+      input.checked = !value;
+      toast(error.message);
+    } finally {
+      input.disabled = false;
+    }
+  });
 
   function paintSaved(button, saved) {
     button.dataset.saved = String(saved);
@@ -54,7 +73,7 @@ window.NoraProfileTrack = (() => {
 
   document.addEventListener('click', async event => {
     const open = event.target.closest('[data-music-library]');
-    if (open) { await showLibrary(); return; }
+    if (open) { await showLibrary(open.dataset.musicLibrary); return; }
     const button = event.target.closest('[data-track-save]');
     if (!button || button.disabled) return;
     const { trackId, savePath, trackRevision, saved } = button.dataset;
@@ -74,7 +93,8 @@ window.NoraProfileTrack = (() => {
         const panel = row.closest('[data-music-library-panel]');
         row.remove();
         if (panel && !panel.querySelector('[data-track-src]')) {
-          panel.innerHTML = '<h2>Мои треки</h2><p class="sub">Пока нет сохранённых треков.</p>';
+          panel.querySelector('.profile-library-list')?.remove();
+          panel.insertAdjacentHTML('beforeend', '<p class="sub">Пока нет сохранённых треков.</p>');
         }
       }
       toast(result.saved ? 'Добавлено в Мои треки' : 'Удалено из Моих треков');
