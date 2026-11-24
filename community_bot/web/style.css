@@ -4777,7 +4777,7 @@ body.nora-mini-player-active #toast {bottom:calc(172px + var(--safe-bottom))}
   color:var(--nora-text,#f5f3f5);
 }
 #sheet[open]:has(#nora-now-playing) {display:flex;flex-direction:column;align-items:stretch}
-#sheet:has(#nora-now-playing) #sheet-content {width:100%;max-width:420px;margin:0 auto;flex:0 0 auto}
+#sheet:has(#nora-now-playing) #sheet-content {width:100%;max-width:420px;margin:auto;flex:0 0 auto}
 #nora-now-playing {width:100%;min-width:0;margin:0 auto;outline:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .nora-now-playing-label {font-size:13px;font-weight:500;color:var(--nora-secondary,#a6a4ae);text-align:center;margin:0 0 clamp(20px,4vh,32px)}
 .nora-now-playing-art {width:min(100%,34vh,320px);aspect-ratio:1;margin:0 auto clamp(22px,4vh,34px);display:grid;place-items:center;border-radius:22px;color:#e8e7ed;background:linear-gradient(145deg,#4a4954,#25242b);box-shadow:0 12px 32px #0003}
@@ -4790,10 +4790,12 @@ body.nora-mini-player-active #toast {bottom:calc(172px + var(--safe-bottom))}
 #nora-now-playing button:active:not(:disabled) {transform:scale(.88)}
 #nora-now-playing .nora-now-save,#nora-now-playing .nora-now-secondary {width:46px;height:46px;border-radius:50%;background:var(--nora-control,#24232a);color:var(--nora-text,#f5f3f5)}
 .nora-now-save svg,.nora-now-secondary svg {width:22px;height:22px;grid-area:1/1}
-.nora-now-save svg,.nora-now-play svg {transition:opacity .18s ease,transform .26s cubic-bezier(.2,.8,.2,1);grid-area:1/1}
-.nora-now-save .nora-now-check {opacity:0;transform:scale(.6) rotate(-18deg)}
-.nora-now-save[data-saved="true"] .nora-now-plus {opacity:0;transform:scale(.6) rotate(35deg)}
-.nora-now-save[data-saved="true"] .nora-now-check {opacity:1;transform:scale(1) rotate(0)}
+.nora-now-save svg,.nora-now-profile svg,.nora-now-play svg {transition:opacity .20s ease,transform .32s cubic-bezier(.2,.85,.25,1.25);grid-area:1/1}
+.nora-now-save .nora-now-check,.nora-now-profile .nora-now-profile-check {opacity:0;transform:scale(.55) rotate(-20deg)}
+.nora-now-save .nora-now-heart {opacity:1;transform:scale(1) rotate(0)}
+.nora-now-save[data-saved="true"] .nora-now-heart,.nora-now-profile[data-saved="true"] .nora-now-profile-plus {opacity:0;transform:scale(.55) rotate(24deg)}
+.nora-now-save[data-saved="true"] .nora-now-check,.nora-now-profile[data-saved="true"] .nora-now-profile-check {opacity:1;transform:scale(1) rotate(0)}
+#nora-now-playing .nora-now-profile[data-saved="true"] {opacity:1}
 #nora-now-playing .nora-now-save[data-saved="true"] {opacity:1}
 .nora-now-timeline {width:100%;min-width:0;margin:0 0 23px}
 #nora-now-playing input[data-track-seek] {

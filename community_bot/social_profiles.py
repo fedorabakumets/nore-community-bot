@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import html
+import json
 import math
 import re
 import time
+from uuid import uuid4
 from io import BytesIO
 
 from aiogram.enums import ChatMemberStatus
@@ -26,7 +28,7 @@ from community_bot.music_library import (
     track_id,
 )
 from community_bot.profile_fields import profile_age
-from community_bot.profile_track import download_track, get_track
+from community_bot.profile_track import download_track, get_track, track_key
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -370,19 +372,73 @@ async def _share_track_source(db, settings, uid, source, revision):
     return track if track and track["revision"] == revision else None
 
 
+# Only the caller's recently unliked library audio can remain actionable in
+# the in-memory player. It is never returned by the library or audio routes.
+_PLAYER_UNDO = {}
+_PLAYER_UNDO_TTL = 7200
+_PLAYER_UNDO_LIMIT = 1024
+
+
+async def _player_track_source(db, settings, uid, source, revision):
+    track = await _share_track_source(db, settings, uid, source, revision)
+    if track:
+        return track
+    if isinstance(source, str) and re.fullmatch(r"/api/music-library/[a-f0-9]{64}", source):
+        cached = _PLAYER_UNDO.get((uid, source, revision))
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+    return None
+
+
+def _remember_unliked(uid, source, revision, track):
+    if source != "/api/music-library/" + track_id(track):
+        return
+    now = time.monotonic()
+    for key, entry in list(_PLAYER_UNDO.items()):
+        if entry[0] <= now:
+            _PLAYER_UNDO.pop(key, None)
+    key = (uid, source, revision)
+    _PLAYER_UNDO.pop(key, None)
+    _PLAYER_UNDO[key] = (now + _PLAYER_UNDO_TTL, track)
+    while len(_PLAYER_UNDO) > _PLAYER_UNDO_LIMIT:
+        _PLAYER_UNDO.pop(next(iter(_PLAYER_UNDO)))
+
+
 async def current_track_collection(request):
-    """Check or add the current playable track, including public library entries."""
+    """Check, like/unlike, or independently pin an authorized playable track."""
     db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
     payload = await request.json() if request.method == "POST" else request.query
     if request.method == "POST" and not isinstance(payload, dict):
         raise web.HTTPBadRequest()
-    track = await _share_track_source(db, settings, uid, payload.get("source"), payload.get("revision"))
+    source, revision = payload.get("source"), payload.get("revision")
+    track = await _player_track_source(db, settings, uid, source, revision)
     if not track:
         return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
-    if request.method == "POST":
-        return web.json_response(await add_resolved_track(db, uid, track))
     key = track_id(track)
-    return web.json_response({"id": key, "saved": key in await get_collection(db, uid)})
+    profile = await get_track(db, uid)
+    result = {"id": key, "in_profile": bool(profile and track_id(profile) == key)}
+    if request.method == "POST":
+        action = payload.get("action", "like")
+        if action == "profile":
+            if not result["in_profile"]:
+                profile = {**track, "revision": uuid4().hex}
+                await db.set_bot_state(track_key(uid), json.dumps(profile, ensure_ascii=False))
+            result["in_profile"] = True
+            result["profile_track"] = await saved_track_summary(db, uid, profile)
+        elif action == "like":
+            saved = payload.get("saved", True)
+            if type(saved) is not bool:
+                raise web.HTTPBadRequest()
+            if saved:
+                await add_resolved_track(db, uid, track)
+                _PLAYER_UNDO.pop((uid, source, revision), None)
+            else:
+                await change_collection(db, uid, key=key, saved=False)
+                _remember_unliked(uid, source, revision, track)
+        else:
+            raise web.HTTPBadRequest()
+    result["saved"] = key in await get_collection(db, uid)
+    return web.json_response(result)
 
 
 async def share_track(request):
@@ -403,7 +459,7 @@ async def share_track(request):
     if not isinstance(payload, dict):
         raise web.HTTPBadRequest()
     source, revision = payload.get("source"), payload.get("revision")
-    track = await _share_track_source(db, settings, uid, source, revision)
+    track = await _player_track_source(db, settings, uid, source, revision)
     if not track:
         return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
     try:
@@ -423,7 +479,7 @@ async def share_track(request):
     except TelegramAPIError:
         return web.json_response({"error": "Не удалось проверить доступ к чату"}, status=503)
     # Recheck privacy/revision after the Telegram membership request.
-    track = await _share_track_source(db, settings, uid, source, revision)
+    track = await _player_track_source(db, settings, uid, source, revision)
     if not track:
         return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
     # Use the existing music-send limits, shared with the seasonal music feature.

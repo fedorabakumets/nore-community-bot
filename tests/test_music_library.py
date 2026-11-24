@@ -266,3 +266,44 @@ async def test_now_playing_collection_status_add_and_private_source(tmp_path):
     assert (await current_track_collection(req)).status == 404
     req.query = {"source": "/api/profile/track", "revision": "b" * 32}
     assert (await current_track_collection(req)).status == 404
+
+
+async def test_player_profile_and_likes_independent(tmp_path):
+    from types import SimpleNamespace
+
+    from community_bot.social_profiles import current_track_collection
+
+    db = Database(tmp_path / "player-profile.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Первый")
+    track = sample()
+    await db.set_bot_state(track_key(1), json.dumps(track))
+
+    class Request(dict):
+        method = "POST"
+
+        async def json(self):
+            return self.query
+
+    req = Request(actor={"id": 1})
+    req.app = {"db": db, "settings": SimpleNamespace()}
+    req.query = {"source": "/api/profile/track", "revision": track["revision"], "saved": True}
+    liked = json.loads((await current_track_collection(req)).body)
+    key = liked["id"]
+    other = sample("audio-2", "b" * 32)
+    await db.set_bot_state(track_key(1), json.dumps(other))
+    req.query = {"source": "/api/music-library/" + key, "revision": track["revision"], "saved": False}
+    removed = json.loads((await current_track_collection(req)).body)
+    assert not removed["saved"]
+    assert await get_collection(db, 1) == {}
+    assert await get_track(db, 1) == other
+    req.query["action"] = "profile"
+    pinned = json.loads((await current_track_collection(req)).body)
+    assert pinned["in_profile"] and not pinned["saved"]
+    assert (await get_track(db, 1))["file_id"] == track["file_id"]
+    assert (await get_track(db, 1))["revision"] != track["revision"]
+    assert await get_collection(db, 1) == {}
+    req.query.update(action="like", saved=True)
+    restored = json.loads((await current_track_collection(req)).body)
+    assert restored["saved"] and restored["in_profile"]
+    assert await get_collection(db, 1) == {key: track}
