@@ -694,7 +694,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/profile/track/save', social_profiles.save_profile_track)
     app.router.add_get('/api/music-library', social_profiles.music_library)
     app.router.add_post('/api/music-library', social_profiles.music_library)
+    app.router.add_post('/api/music-library/visibility', social_profiles.library_visibility)
     app.router.add_get('/api/music-library/{track_id}', social_profiles.library_audio)
+    app.router.add_get('/api/people/{user_id}/music-library', social_profiles.public_music_library)
+    app.router.add_get('/api/people/{user_id}/music-library/{track_id}', social_profiles.library_audio)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
     from community_bot import lobby_widget, music_api, nora_burrows, nora_cinema, nora_game_api, nora_game_chat
