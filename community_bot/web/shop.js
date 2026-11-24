@@ -200,7 +200,7 @@ window.NoraShop=(()=>{
   const profileDialog=$('#sheet');
   const nativeProfileBack=Boolean(tg?.isVersionAtLeast?.('6.1')&&
     typeof tg.BackButton?.show==='function'&&typeof tg.BackButton?.onClick==='function');
-  function profileOpen(){return profileDialog.open&&Boolean(profileDialog.querySelector('#person-profile, #music-library-profile'))}
+  function profileOpen(){return profileDialog.open&&Boolean(profileDialog.querySelector('#person-profile, #music-library-profile, #nora-now-playing'))}
   function syncBack(){
     const profileBack=nativeProfileBack&&profileOpen();
     profileDialog.classList.toggle('native-profile-back',profileBack);
