@@ -4,7 +4,7 @@ import json
 import pytest
 
 from community_bot.database import Database
-from community_bot.music_library import change_collection, get_collection, save_button, saved_track_summary
+from community_bot.music_library import change_collection, get_collection, profile_music_button, saved_track_summary
 from community_bot.profile_track import get_track, track_key
 
 
@@ -50,9 +50,12 @@ async def test_rich_toggle_shared_audio_reference(tmp_path):
     await db.ensure_user(2, telegram_name="Второй")
     track = sample()
     await db.set_bot_state(track_key(2), json.dumps(track))
-    block = save_button(track, 2)
-    assert block.buttons[0].text == "+"
-    assert len(block.buttons[0].callback_data.encode()) <= 64
+    button = profile_music_button(track, 2, 1)
+    assert button.text == "➕🎵"
+    assert len(button.callback_data.encode()) <= 64
+    assert profile_music_button(track, 2, 2).text == "🎧"
+    assert profile_music_button(None, 2, 1) is None
+    assert profile_music_button(None, 2, 2).text == "🎧"
     assert (await change_collection(db, 1, target_id=2, revision=track["revision"]))["saved"]
     assert not (await change_collection(db, 1, target_id=2, revision=track["revision"]))["saved"]
     await change_collection(db, 1, target_id=2, revision=track["revision"], saved=True)
@@ -114,3 +117,26 @@ async def test_legacy_music_requests_only_explain_new_commands():
         result = await reply_for("Нора " + text, SimpleNamespace(), datetime.now(UTC))
         assert "Нора песня" in result
         assert "Нора треки" in result
+
+
+async def test_in_profile_library_never_leaks_private_audio(tmp_path):
+    from community_bot.library_rich import library_card
+    from community_bot.music_library import set_public
+
+    db = Database(tmp_path / "profile-music.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Владелец")
+    track = sample()
+    await db.set_bot_state(track_key(1), json.dumps(track))
+    await change_collection(db, 1, target_id=1, revision=track["revision"], saved=True)
+    hidden = await library_card(db, 1, 1, profile=True, shared=True)
+    assert not any(block.type == "audio" for block in hidden.blocks)
+    assert hidden.blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    private = await library_card(db, 1, 1, profile=True)
+    assert any(block.type == "audio" for block in private.blocks)
+    assert private.blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    await set_public(db, 1, True)
+    public = await library_card(db, 1, 1, profile=True, shared=True)
+    assert any(block.type == "audio" for block in public.blocks)
+    assert not any(button.callback_data.startswith(("mlib:p_del:", "mlib:p_public:"))
+                   for block in public.blocks if block.type == "buttons" for button in block.buttons)
