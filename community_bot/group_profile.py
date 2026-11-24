@@ -39,6 +39,7 @@ from community_bot.private_rich import _reusable
 from community_bot.profile_fields import profile_age
 from community_bot.profile_limits import profile_limits
 from community_bot.profile_track import audio_block, get_track
+from community_bot.music_library import save_button
 from community_bot.reply_rich import bot_publication
 from community_bot.ui_owner import bind_ui_owner
 
@@ -204,7 +205,7 @@ async def send_group_profile(
     sent = None
     attempts = []
     for variant in (body, _fallback_limits_body(body)):
-        profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+        profile_blocks = [*variant[:3], audio_block(track), save_button(track, int(user['user_id'])), *variant[3:]] if track else variant
         attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
         if track:
             attempts.extend([[avatar, *variant], variant] if avatar else [variant])
@@ -263,7 +264,7 @@ async def restore_group_profile_card(
     with keep_in_chat(), bot_publication():
         attempts = []
         for variant in (body, _fallback_limits_body(body)):
-            profile_blocks = [*variant[:3], audio_block(track), *variant[3:]] if track else variant
+            profile_blocks = [*variant[:3], audio_block(track), save_button(track, int(user['user_id'])), *variant[3:]] if track else variant
             attempts.extend([[avatar, *profile_blocks], profile_blocks] if avatar else [profile_blocks])
             if track:
                 attempts.extend([[avatar, *variant], variant] if avatar else [variant])
