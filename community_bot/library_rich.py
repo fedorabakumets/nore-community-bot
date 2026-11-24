@@ -223,7 +223,8 @@ async def library_callback(callback: CallbackQuery, db: Database, settings: Sett
         else:
             raise ValueError
         with standalone_rich_message(), bot_publication(), reply_ttl(None):
-            await message.edit_text(rich_message=await library_card(db, uid, owner, page, profile=profile), parse_mode=None)
+            rich = await library_card(db, uid, owner, page, profile=profile)
+            await message.edit_text(rich_message=rich, parse_mode=None)
         await callback.answer("Удалено" if action == "del" else None)
     except ValueError:
         await callback.answer("Карточка недоступна.", show_alert=True)
