@@ -7,16 +7,18 @@ window.NoraProfileTrack = (() => {
     return Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
   }
 
-  function html(track, endpoint) {
+  function html(track, endpoint, library = false) {
     if (!track) return '';
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
-    return `<section class="profile-track" data-track-src="${esc(src)}" aria-label="Трек профиля">
+    const saved = library || Boolean(track.saved);
+    const save = track.id ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
+    return `<section class="profile-track" data-track-src="${esc(src)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
         <span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
           <small>– ${esc(track.artist || 'Неизвестен')}</small>
         </span>
-      </button>
+      </button>${save}</div>
       <div class="profile-track-timeline">
         <span data-track-time>0:00</span>
         <input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled>
@@ -24,6 +26,64 @@ window.NoraProfileTrack = (() => {
       </div>
     </section>`;
   }
+
+  function libraryButton() {
+    return '<button type="button" class="profile-library-open" data-music-library>Мои треки <span aria-hidden="true">›</span></button>';
+  }
+
+  async function showLibrary() {
+    sheet('<div data-music-library-panel><h2>Мои треки</h2><p class="sub">Загрузка…</p></div>');
+    const panel = document.querySelector('[data-music-library-panel]');
+    try {
+      const result = await api('music-library');
+      if (!panel.isConnected) return;
+      panel.innerHTML = '<h2>Мои треки</h2>' + (result.tracks.length
+        ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>'
+        : '<p class="sub">Здесь появятся треки, которые ты сохранишь из профилей.</p>');
+    } catch (error) {
+      if (panel.isConnected) panel.innerHTML = '<h2>Мои треки</h2><p class="sub">' + esc(error.message) + '</p>';
+    }
+  }
+
+  function paintSaved(button, saved) {
+    button.dataset.saved = String(saved);
+    button.setAttribute('aria-pressed', String(saved));
+    button.setAttribute('aria-label', saved ? 'Удалить из моих треков' : 'Добавить в мои треки');
+    button.textContent = saved ? '✓' : '+';
+  }
+
+  document.addEventListener('click', async event => {
+    const open = event.target.closest('[data-music-library]');
+    if (open) { await showLibrary(); return; }
+    const button = event.target.closest('[data-track-save]');
+    if (!button || button.disabled) return;
+    const { trackId, savePath, trackRevision, saved } = button.dataset;
+    button.disabled = true;
+    try {
+      const result = await api(savePath, savePath === 'music-library'
+        ? { id: trackId } : { revision: trackRevision, saved: saved !== 'true' });
+      for (const item of document.querySelectorAll('[data-track-save]')) {
+        if (item.dataset.trackId === result.id) paintSaved(item, result.saved);
+      }
+      if (typeof data !== 'undefined' && data?.profile_track?.id === result.id) {
+        data.profile_track.saved = result.saved;
+      }
+      if (savePath === 'music-library') {
+        const row = button.closest('[data-track-src]');
+        if (active?.element === row) stop();
+        const panel = row.closest('[data-music-library-panel]');
+        row.remove();
+        if (panel && !panel.querySelector('[data-track-src]')) {
+          panel.innerHTML = '<h2>Мои треки</h2><p class="sub">Пока нет сохранённых треков.</p>';
+        }
+      }
+      toast(result.saved ? 'Добавлено в Мои треки' : 'Удалено из Моих треков');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   function paint(state) {
     const { audio, element, loading } = state;
@@ -142,5 +202,5 @@ window.NoraProfileTrack = (() => {
     if (active && event.target.contains(active.element)) stop();
   }, true);
   window.addEventListener('pagehide', stop);
-  return { html };
+  return { html, libraryButton };
 })();
