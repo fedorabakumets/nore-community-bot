@@ -190,7 +190,7 @@ window.NoraShop=(()=>{
     });
   }
   function parent(){return tab==='pet'?(history.state?.petFrom||'community'):
-    (['durak','barricade'].includes(tab)&&'games')||(tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
+    (['durak','barricade','dot'].includes(tab)&&'games')||(tab==='commands'&&'home')||window.NoraInteractive?.parent(tab)||(tab==='sea'&&window.NoraSea?.parent?.())||window.NoraCabinet?.parent(tab)}
   function confirmUnload(event){event.preventDefault();event.returnValue=true}
   function pushGameGuard(game){
     if(game==='world')history.pushState(history.state,'',location.href);
@@ -304,7 +304,7 @@ window.NoraShop=(()=>{
     backPending=false;
     if(!data)return;
     const next=route();
-    tab=['home','commands','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea','durak','barricade'].includes(next.view)?next.view:'home';
+    tab=['home','commands','shop','pet','lk','wallet','history','notices','admin','interactive','games','friends','community','events','mafia','rocket','sea','durak','barricade','dot'].includes(next.view)?next.view:'home';
     category=tab==='shop'?next.category:null;
     if($('#sheet').open)$('#sheet').close();
     render();

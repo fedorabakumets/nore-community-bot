@@ -97,8 +97,8 @@ window.NoraInteractive = (() => {
   function interactiveScreen() {
     return `${mafiaInvites()}<p class="eyebrow">У каждого свой способ</p><h1>Побудем<br><em>вместе</em></h1><p class="sub play-intro">Заботься, играй, собирай своих.</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">Твой маленький спутник</span><strong><em>Питомец</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + " ждёт тебя. Забота, походы и маленькие находки." : "Заведи питомца. Заботься о нём и отправляй за приключениями."}</span><span class="play-hero-cta">${data.pet ? "К питомцу" : "Знакомиться"} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">Один или всей компанией</span><strong><em>Игры</em></strong><span class="play-hero-description">У города есть тайны.<br>У ракеты — свой предел.</span><span class="play-hero-cta">Выбрать игру ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>Свои всегда рядом<small>Добавляй друзей и зови играть</small></span>${icon("arrow")}</button>`;
   }
-  const games = { durak: "Дурак", barricade: "Баррикада", sea: "Морской бой", mafia: "Мафия", rocket: "Ракетка" };
-  const gameChoices = ["durak", "barricade", "mafia", "rocket"];
+  const games = { durak: "Дурак", barricade: "Баррикада", sea: "Морской бой", mafia: "Мафия", dot: "DOT", rocket: "Ракетка" };
+  const gameChoices = ["durak", "barricade", "dot", "rocket"];
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
 
@@ -198,7 +198,7 @@ window.NoraInteractive = (() => {
     refresh?.setAttribute("aria-busy", "true");
     const previous = lobbyList();
     try {
-      lobbyRooms = (await api("community/lobbies")).rooms.filter(room => room.game !== "sea");
+      lobbyRooms = (await api("community/lobbies")).rooms.filter(room => room.game !== "sea" && room.game !== "mafia");
       lobbyError = "";
     } catch (error) {
       lobbyError = error.message || "Связь прервалась";
@@ -225,7 +225,7 @@ window.NoraInteractive = (() => {
   }
 
   function chooseMatch() {
-    sheet(`<div class="game-create-menu"><h2>Новый матч</h2>${gameChoices.map(game => gameShortcut(game, true)).join("")}</div>`);
+    sheet(`<div class="game-create-menu"><h2>Новый матч</h2>${gameChoices.filter(game => game !== "dot").map(game => gameShortcut(game, true)).join("")}</div>`);
     $("#sheet-content button")?.focus();
   }
   function friendRow(person, section) {

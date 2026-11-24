@@ -27,7 +27,7 @@ function profileTabLocked(target) {
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
-const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket']);
+const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
 const gameWrites = new Map();
 function api(path, body, signal, keepalive = false) {
   const request = (async () => {
@@ -62,6 +62,7 @@ function requestGameExit(onExit) {
   error.textContent = '';
   $('#game-exit-details').textContent = {
     world: 'Ты покинешь мир Норы.',
+    dot: 'Текущий полёт завершится.',
     rocket: 'Текущий полёт завершится. Ставка будет проиграна.',
     mafia: 'Ты выйдешь из лобби или сдашься в начавшейся партии.',
   }[game] || 'Поиск отменится. Если партия уже началась, тебе засчитается поражение.';
@@ -72,7 +73,7 @@ function requestGameExit(onExit) {
     exit.textContent = 'Выходим…';
     error.textContent = '';
     try {
-      if (game !== 'world') {
+      if (game !== 'world' && game !== 'dot') {
         await Promise.allSettled(gameWrites.get(game) || []);
         await api('games/exit/' + game, {});
         if (game === 'durak') window.NoraDurak?.clearRoom?.();
@@ -93,7 +94,7 @@ function requestGameExit(onExit) {
 window.addEventListener('pagehide', () => {
   const game = currentGame();
   if (game === 'world') window.NoraGame.close();
-  else if (game && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
+  else if (game && game !== 'dot' && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
 });
 let applicationScreen = null;
 
@@ -342,6 +343,7 @@ if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем ад
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
 if(tab==='barricade')content='<section id="barricade-root"><p class="sub">Открываем Баррикаду…</p></section>';
+if(tab==='dot')content=window.NoraDot?.screen()||'<p>DOT не загрузилась. Открой Нору заново.</p>';
 if(tab==='durak')content='<section id="durak-root"><p class="sub">Открываем карточный стол…</p></section>';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
@@ -353,18 +355,20 @@ const expanded=app.dataset.screen===tab
 app.dataset.screen=tab;
 if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
 else if (!(tab === 'durak' && app.querySelector('#durak-root')) &&
-         !(tab === 'barricade' && app.querySelector('#barricade-root'))) app.innerHTML=html;
+         !(tab === 'barricade' && app.querySelector('#barricade-root')) &&
+         !(tab === 'dot' && app.querySelector('#dot-root'))) app.innerHTML=html;
 mountDurak();
 mountBarricade();
+if(tab==='dot')window.NoraDot?.mount(app.querySelector('#dot-root'));else window.NoraDot?.unmount();
 if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open]')){
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
 
 
 // Animate route changes only. Refreshes and game-internal renders should remain still.
-const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket']);
+const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
 const routeMotionOrder = ['home', 'shop', 'community', 'events', 'lk'];
 let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
 function animateRouteChange(app, selected) {
@@ -657,7 +661,7 @@ async function openApp(result) {
   if (linked?.invite || linked?.code || linked?.quickRoom) window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
-  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','friends','community','events'].includes(view)) tab = view;
+  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','community','events'].includes(view)) tab = view;
   else if (view === 'shop' && data.profile.fill_percent === 100) {
     tab = 'shop';
     window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
@@ -787,7 +791,7 @@ document.addEventListener('change', async e => {
     busy = false;
   }
 });
-async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||tab==='staffchat'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
+async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||tab==='staffchat'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade'||tab==='dot')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.

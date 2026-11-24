@@ -4819,3 +4819,19 @@ body.nora-mini-player-active #toast {bottom:calc(172px + var(--safe-bottom))}
 #sheet.native-profile-back:has(#nora-now-playing)>#dismiss {display:none}
 @media(prefers-reduced-motion:reduce){#nora-now-playing *{animation:none!important;transition:none!important}}
 @media(prefers-reduced-motion:reduce){#nora-mini-player,#nora-mini-player *{animation:none!important;transition:none!important}}
+
+/* DOT: standalone local arcade, no wallet integration. */
+.game-dot { --game-surface:#171219; --game-art:radial-gradient(circle at 50% 38%,#171219 0 8%,#f34c62 9% 15%,transparent 16%),linear-gradient(90deg,transparent 12%,#45434c 13% 24%,transparent 25% 74%,#45434c 75% 86%,transparent 87%),radial-gradient(ellipse at 50% 35%,#4a202d,#131218 70%); }
+.dot-game {max-width:440px;margin:0 auto;color:#f7f5f8;}
+.dot-header {display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;margin:0 0 8px;}
+.dot-header b{text-align:center;letter-spacing:.28em;font-size:18px;}
+.dot-header .play-back{margin:0;justify-self:start;}
+.dot-hud{text-align:center;font:600 15px/1.4 system-ui,sans-serif;font-variant-numeric:tabular-nums;margin:8px 0 12px;color:#dedbe2;}
+.dot-stage{position:relative;width:min(100%,calc(clamp(220px,100dvh - 220px,560px)*.72));margin:auto;overflow:hidden;border:1px solid #ffffff20;border-radius:24px;background:#101014;}
+.dot-stage canvas{display:block;width:100%;height:auto;touch-action:none;outline-offset:-3px;}
+.dot-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0a0ed0;text-align:center;padding:16px;}
+.dot-overlay[hidden]{display:none;}
+.dot-overlay strong{font:700 28px/1.15 system-ui,sans-serif;}
+.dot-overlay small{color:#bab7c0;font:14px/1.4 system-ui,sans-serif;}
+.dot-start{border:1px solid #ffffff28;border-radius:999px;padding:11px 28px;background:#f34c62;color:#fff;font:600 15px system-ui,sans-serif;min-height:44px;}
+.dot-note{text-align:center;margin:12px 0 0;font-size:12px;}
