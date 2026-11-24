@@ -591,7 +591,7 @@ form label{font-size:14px;color:var(--poster-muted)}
 .home-welcome{background:var(--poster-panel);padding:16px;border-color:var(--poster-rule)}
 .home-welcome b{font-size:14px}
 .home-welcome small{color:var(--poster-muted);font-size:12px}
-/* Floating glass capsule above the page; preserve the travelling NORA drop. */
+/* NORA icon-only glass dock. One compositor-friendly sliding selection. */
 #nav{
   isolation:isolate;
   left:calc(10px + var(--safe-left));
@@ -601,71 +601,92 @@ form label{font-size:14px;color:var(--poster-muted)}
   max-width:656px;
   margin-inline:auto;
   border:0;
-  outline:0;
-  border-radius:30px;
-  background:linear-gradient(145deg,rgb(75 66 79 / 35%),rgb(30 26 34 / 39%) 53%,rgb(19 17 23 / 51%));
-  -webkit-backdrop-filter:blur(18px) saturate(170%);
-  backdrop-filter:blur(18px) saturate(170%);
-  box-shadow:0 14px 34px rgb(0 0 0 / 37%),0 2px 9px rgb(0 0 0 / 18%),inset 0 1px 0 rgb(255 255 255 / 13%),inset 0 -1px 0 rgb(255 255 255 / 3%);
-  gap:0;
-  padding:8px 5px 9px;
+  border-radius:999px;
+  background:rgb(27 27 32 / 70%);
+  -webkit-backdrop-filter:blur(24px) saturate(150%);
+  backdrop-filter:blur(24px) saturate(150%);
+  box-shadow:0 12px 28px #0006,0 3px 9px #0004,inset 0 1px 2px #ffffff35,inset 0 -1px 2px #ffffff0d,inset 0 0 0 1px #ffffff16;
+  gap:4px;
+  padding:5px;
 }
-#nav::before{
+#nav::before,#nav::after{
   content:"";
   position:absolute;
-  inset:0;
-  z-index:0;
-  border-radius:inherit;
   pointer-events:none;
-  background:linear-gradient(160deg,rgb(255 255 255 / 8%),transparent 32%,transparent 74%,rgb(255 255 255 / 2%));
+  z-index:2;
 }
+#nav::before{
+  inset:1px 1px auto;
+  height:46%;
+  border-radius:999px 999px 20px 20px;
+  background:linear-gradient(180deg,#ffffff10,transparent);
+}
+#nav::after{
+  inset:0;
+  border-radius:inherit;
+  background:radial-gradient(ellipse 85px 52px at var(--nav-glare-x,50%) var(--nav-glare-y,50%),#ffffff20,transparent);
+  opacity:0;
+  transition:opacity .18s ease-out;
+}
+@media(hover:hover){#nav:hover::after{opacity:1}}
+#nav:active::after{opacity:1}
 #nav button{
   position:relative;
-  z-index:1;
-  isolation:isolate;
+  z-index:3;
+  display:grid;
+  place-items:center;
+  flex:1 1 0;
   min-width:0;
   max-width:none;
-  min-height:60px;
-  padding:4px 0;
-  color:rgb(242 236 244 / 79%);
-  font-size:clamp(9px,2.55vw,12px);
-  white-space:nowrap;
-  font-weight:600;
-  line-height:1.3;
-  border-radius:18px;
-  transition:color .55s cubic-bezier(.22,1,.36,1);
+  height:46px;
+  min-height:46px;
+  margin:0;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:var(--nora-muted,#b0abb5);
+  border-radius:999px;
+  -webkit-tap-highlight-color:transparent;
+  transition:color .18s ease-out;
 }
 #nav .nav-drop{
   position:absolute;
-  left:0;
-  top:0;
-  z-index:0;
+  inset:0 auto auto 0;
+  z-index:1;
   display:block;
   margin:0;
-  background:linear-gradient(140deg,rgb(255 91 123 / 77%),rgb(239 43 82 / 69%) 55%,rgb(194 29 60 / 60%));
-  -webkit-backdrop-filter:blur(4px) saturate(140%);
-  backdrop-filter:blur(4px) saturate(140%);
-  box-shadow:inset 0 1px 0 rgb(255 230 237 / 26%),inset 0 -1px 0 rgb(130 9 39 / 16%),0 5px 17px rgb(232 36 77 / 20%);
-  border-radius:18px;
+  border-radius:999px;
   pointer-events:none;
-  transform-origin:center;
-  will-change:transform,opacity;
+  opacity:0;
+  background:linear-gradient(165deg,rgb(108 101 114 / 73%),rgb(59 55 64 / 85%));
+  box-shadow:0 4px 10px #0004,inset 0 1px 2px #ffffff2b,inset 0 0 0 1px #ffffff15;
+  transition:transform .42s cubic-bezier(.28,1.16,.62,1),width .42s cubic-bezier(.28,1.16,.62,1),height .2s ease,opacity .16s ease;
+  will-change:transform;
 }
 #nav button[aria-disabled="true"]{opacity:.58}
-#nav button.active{color:#fff5e9}
-#nav button.active[data-tab="lk"]{color:#ff819b}
-#nav button>svg{height:26px;width:26px;margin:0 auto 8px;stroke-width:4;transition:color .55s cubic-bezier(.22,1,.36,1)}
-#nav button.active>svg{color:#fff5e9}
-#nav button .nav-profile-photo{height:28px;width:28px;margin-bottom:6px;border:1px solid rgb(255 255 255 / 19%);background:rgb(56 53 64 / 52%);color:var(--poster-ink);transition:border-color .7s cubic-bezier(.22,1,.36,1)}
-#nav button.active .nav-profile-photo{border-color:rgb(255 120 146 / 75%)}
-#nav .nav-profile-wrap{margin-bottom:0}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
-  #nav{background:rgb(35 30 39 / 94%)}
-  #nav .nav-drop{background:rgb(235 46 81 / 85%)}
+#nav button.active,#nav button.active[data-tab="lk"],#nav button.active>svg{color:var(--nora-text,#f5f1ed)}
+#nav button>svg{
+  width:26px;height:26px;margin:0;stroke-width:4;
+  transition:transform .16s cubic-bezier(.2,.8,.3,1),color .18s ease-out;
 }
-@media(prefers-reduced-transparency:reduce) {
-  #nav{background:rgb(35 30 39 / 96%);backdrop-filter:none;-webkit-backdrop-filter:none}
-  #nav .nav-drop{backdrop-filter:none;-webkit-backdrop-filter:none}
+#nav button .nav-profile-photo{
+  width:28px;height:28px;margin:0;
+  border:1px solid #ffffff25;background:var(--nora-control,#1b1b20);
+  color:var(--nora-text,#f5f1ed);
+}
+#nav .nav-profile-wrap{width:28px;height:28px;margin:0;transition:transform .16s cubic-bezier(.2,.8,.3,1)}
+#nav button:active>svg,#nav button:active>.nav-profile-wrap{transform:scale(.89)}
+#nav button:focus-visible{outline:2px solid var(--nora-text,#f5f1ed);outline-offset:-3px}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  #nav{background:#222126}
+}
+@media(prefers-reduced-transparency:reduce){
+  #nav{background:#222126;backdrop-filter:none;-webkit-backdrop-filter:none}
+  #nav .nav-drop{background:#514d56}
+}
+@media(prefers-reduced-motion:reduce){
+  #nav .nav-drop,#nav button,#nav button>svg,#nav .nav-profile-wrap,#nav::after{transition:none!important}
+  #nav button:active>svg,#nav button:active>.nav-profile-wrap{transform:none}
 }
 #scroll-jump{bottom:calc(108px + var(--safe-bottom));background:var(--poster-panel);border:var(--poster-edge);color:var(--poster-ink);box-shadow:2px 3px 0 var(--poster-blue)}
 /* Shop: proper shelves, distinct price and a single purchase action. */

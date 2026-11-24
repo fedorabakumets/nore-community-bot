@@ -401,29 +401,26 @@ function animateRouteChange(app, selected) {
 
 
 // Keep the dock mounted: polling must not restart the travelling selection.
-let navSelection='', navMotion=null;
+let navSelection='';
 const navReducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
 function positionNavDrop(animate=false){
   const nav=$('#nav'),drop=nav.querySelector('.nav-drop'),target=nav.querySelector('.active');
-  if(!drop||!target)return;
-  const before=getComputedStyle(drop),from=before.transform,opacity=before.opacity;
-  navMotion?.cancel();
-  const x=target.offsetLeft,y=target.offsetTop,profile=target.dataset.tab==='lk';
-  drop.style.width=target.offsetWidth+'px';drop.style.height=target.offsetHeight+'px';
-  const end=`translate(${x}px,${profile?y-14:y}px) scale(${profile?'.08': '1'})`;
-  drop.style.transform=end;drop.style.opacity=profile?'0':'1';
-  if(!animate||navReducedMotion.matches)return;
-  const oldX=from==='none'?x:new DOMMatrixReadOnly(from).m41;
-  navMotion=drop.animate([
-    {transform:from,opacity,borderRadius:'18px',offset:0},
-    {transform:`translate(${oldX+(x-oldX)*.65}px,${y}px) scale(1.14,.82)`,opacity:1,borderRadius:'45% 55% 55% 45% / 55% 45% 55% 45%',offset:.55},
-    {transform:end,opacity:profile?0:1,borderRadius:'18px',offset:1}
-  ],{duration:profile?760:640,easing:'cubic-bezier(.22,1,.36,1)'});
+  if(!drop)return;
+  if(!target){drop.style.opacity='0';return;}
+  if(!target.offsetWidth||!target.offsetHeight)return;
+  const width=target.offsetWidth+'px',height=target.offsetHeight+'px';
+  const transform=`translate3d(${target.offsetLeft}px,${target.offsetTop}px,0)`;
+  // ResizeObserver and repeated renders must not interrupt an in-flight transition.
+  if(drop.style.width===width&&drop.style.height===height&&drop.style.transform===transform&&drop.style.opacity==='1')return;
+  if(animate&&!navReducedMotion.matches)drop.style.removeProperty('transition');
+  else drop.style.transition='none';
+  drop.style.width=width;drop.style.height=height;
+  drop.style.transform=transform;drop.style.opacity='1';
 }
 function renderNav(selected,name){
   const nav=$('#nav');
   if(!nav.querySelector('.nav-drop')){
-    nav.innerHTML='<i class="nav-drop" aria-hidden="true"></i>'+[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button data-tab="${id}" aria-current="false">${id==='lk'?'<span class="nav-profile-wrap"><span class="nav-profile-photo" data-own-avatar></span><i class="nav-unread-dot" aria-hidden="true"></i></span>':navTabIcon(id)}${label}</button>`).join('');
+    nav.innerHTML='<i class="nav-drop" aria-hidden="true"></i>'+[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button type="button" data-tab="${id}" aria-label="${label}" aria-current="false">${id==='lk'?'<span class="nav-profile-wrap"><span class="nav-profile-photo" data-own-avatar></span><i class="nav-unread-dot" aria-hidden="true"></i></span>':navTabIcon(id)}</button>`).join('');
     navSelection='';
   }
   const photo=nav.querySelector('[data-own-avatar]');
@@ -438,6 +435,15 @@ function renderNav(selected,name){
 }
 new ResizeObserver(()=>positionNavDrop()).observe($('#nav'));
 navReducedMotion.addEventListener('change',()=>positionNavDrop());
+function updateNavGlare(event){
+  const nav=event.currentTarget,rect=nav.getBoundingClientRect();
+  nav.style.setProperty('--nav-glare-x',`${event.clientX-rect.left}px`);
+  nav.style.setProperty('--nav-glare-y',`${event.clientY-rect.top}px`);
+}
+$('#nav').addEventListener('pointerdown',updateNavGlare,{passive:true});
+$('#nav').addEventListener('pointermove',event=>{
+  if(event.pointerType==='mouse')updateNavGlare(event);
+},{passive:true});
 
 let sheetContentMotion = null;
 function sheet(html) {
