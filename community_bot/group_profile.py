@@ -39,7 +39,7 @@ from community_bot.private_rich import _reusable
 from community_bot.profile_fields import profile_age
 from community_bot.profile_limits import profile_limits
 from community_bot.profile_track import audio_block, get_track
-from community_bot.music_library import save_button
+from community_bot.music_library import is_public, open_button, save_button
 from community_bot.reply_rich import bot_publication
 from community_bot.ui_owner import bind_ui_owner
 
@@ -155,12 +155,13 @@ async def group_profile_body(
         if user.get("tg_channel_url")
         else RichMessageButton(text="ТГК", style="link", callback_data=f"gprofile:tgk:{uid}")
     )
+    library = [RichTextButton(button=open_button(uid))] if requester_id == uid or (not user.get("profile_private") and await is_public(db, uid)) else []
     body = [
         reputation,
         InputRichBlockParagraph(text=[
             RichTextBold(text=name), "  ",
             RichTextButton(button=RichMessageButton(text=like, style="link", callback_data=f"{LIKE_PREFIX}{uid}")),
-            "  ", RichTextButton(button=tgk),
+            "  ", RichTextButton(button=tgk), *(["  ", *library] if library else []),
         ]),
         InputRichBlockParagraph(text=subtitle),
         *details,
