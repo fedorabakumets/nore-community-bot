@@ -370,7 +370,7 @@ const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','
 // Animate route changes only. Refreshes and game-internal renders should remain still.
 const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
 const routeMotionOrder = ['home', 'shop', 'community', 'events', 'lk'];
-let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
+let previousRouteKey = null, previousRouteSection = null, routeMotion = null, swipeRouteDirection = 0;
 function animateRouteChange(app, selected) {
   const category = tab === 'shop' ? (window.NoraShop?.route()?.category || '') : '';
   const key = tab + ':' + category;
@@ -382,7 +382,7 @@ function animateRouteChange(app, selected) {
   routeMotion = null;
   if (!oldKey || routeMotionExcluded.has(tab) || navReducedMotion.matches || typeof app.animate !== 'function') return;
   const from = routeMotionOrder.indexOf(oldSection), to = routeMotionOrder.indexOf(selected);
-  const distance = from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
+  const distance = swipeRouteDirection ? swipeRouteDirection * Math.min(innerWidth, app.clientWidth || innerWidth) : from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
   const rise = distance ? 2 : 10;
   // Six steps create a smooth acceleration/deceleration profile on fast displays.
   const frame = (offset, remaining, opacity) => ({
@@ -848,3 +848,160 @@ window.NoraPrefix = p => {
   if (!p || !['red','orange','gold','green','blue','purple','pink'].includes(p.color)) return '';
   return `<span class="role-prefix role-prefix--${p.color}">${NoraPrefixSymbol(p.emoji)}${esc(p.text)}</span>`;
 };
+
+/* Touch navigation and the shared music drawer. Never intercept game controls. */
+(() => {
+  const app = $('#app'), player = $('#sheet'), mini = $('#nora-mini-player');
+  const excluded = 'input,textarea,select,video,audio,canvas,[contenteditable="true"],[data-no-swipe]';
+  const curve = 'cubic-bezier(.18,.82,.24,1)';
+  let touch = null, settling = false, suppressUntil = 0;
+  const full = () => player.open && !!player.querySelector('#nora-now-playing');
+  const blocked = () => !data?.profile || app.inert || $('#nav').inert ||
+    currentGame() || document.body.classList.contains('intro-playing');
+  const pageReady = () => !blocked() && !document.querySelector('dialog[open]') &&
+    routeMotionOrder.includes(tab);
+  const neighbor = (dx) => {
+    const index = routeMotionOrder.indexOf(tab) + (dx < 0 ? 1 : -1);
+    const next = routeMotionOrder[index];
+    return next && !profileTabLocked(next) ? next : null;
+  };
+  const horizontalScroller = (target) => {
+    for (let el = target; el && el !== app; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 4 &&
+          /auto|scroll/.test(getComputedStyle(el).overflowX)) return true;
+    }
+    return false;
+  };
+  const point = (list, id) => Array.from(list).find(t => t.identifier === id);
+  const shift = (el, x, y) => {
+    if (!navReducedMotion.matches) el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
+  };
+  const shade = (y, height) => {
+    player.style.setProperty('--nora-drag-shade', String(.5 * (1 - Math.min(1, y / height))));
+  };
+  const resetPlayer = () => {
+    player.style.removeProperty('transform');
+    player.style.removeProperty('--nora-drag-shade');
+    player.classList.remove('nora-player-dragging');
+  };
+  function animate(el, x, y, endX, endY, duration, done) {
+    if (navReducedMotion.matches || typeof el.animate !== 'function') { done(); return; }
+    const transform = (a,b) => 'translate3d(' + a + 'px,' + b + 'px,0)';
+    let animation;
+    try {
+      animation = el.animate([{transform:transform(x,y)}, {transform:transform(endX,endY)}],
+        {duration, easing:curve, fill:'forwards'});
+    } catch { done(); return; }
+    animation.finished.then(() => {
+      try { done(); } finally { animation.cancel(); }
+    }, () => { done(); });
+  }
+  function movePlayer(t, dy) {
+    t.offset = Math.max(0, Math.min(t.height, t.kind === 'open' ? t.origin + dy : dy));
+    shift(player, 0, t.offset);
+    shade(t.offset, t.height);
+  }
+  function start(event) {
+    if (settling || touch || event.touches.length !== 1) return;
+    suppressUntil = 0;
+    const p = event.touches[0], target = event.target;
+    if (!(target instanceof Element) || target.closest(excluded)) return;
+    let kind;
+    if (full() && player.contains(target)) kind = 'close';
+    else if (!blocked() && !mini.hidden && mini.contains(target) && !document.querySelector('dialog[open]')) kind = 'open';
+    else if (pageReady() && app.contains(target) && !horizontalScroller(target) &&
+      p.clientX > 22 && p.clientX < innerWidth - 22) kind = 'page';
+    else return;
+    touch = {kind, id:p.identifier, x:p.clientX, y:p.clientY, start:performance.now(),
+      from:tab, locked:false, offset:0, dy:0, dx:0};
+  }
+  function move(event) {
+    const t = touch;
+    if (!t) return;
+    if (event.touches.length !== 1) { finish(null, true); return; }
+    const p = point(event.touches, t.id);
+    if (!p) return;
+    const dx = p.clientX - t.x, dy = p.clientY - t.y;
+    t.dx = dx; t.dy = dy;
+    if (!t.locked) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 9) return;
+      const horizontal = Math.abs(dx) > Math.abs(dy) * 1.25;
+      const vertical = Math.abs(dy) > Math.abs(dx) * 1.25;
+      if (!horizontal && !vertical) return;
+      if ((t.kind === 'page' && (!horizontal || !pageReady())) ||
+          (t.kind === 'close' && (!vertical || dy <= 0 || player.scrollTop > 1 || !full())) ||
+          (t.kind === 'open' && (!vertical || dy >= 0 || blocked()))) { touch = null; return; }
+      if (!event.cancelable) { touch = null; return; }
+      event.preventDefault();
+      t.locked = true;
+      if (t.kind === 'page') {
+        routeMotion?.cancel(); routeMotion = null;
+      } else {
+        player.classList.add('nora-player-dragging');
+        if (t.kind === 'open') {
+          const miniTop = mini.getBoundingClientRect().top;
+          // The existing click handler creates the same drawer and preserves Audio.
+          mini.querySelector('[data-mini-open]').click();
+          if (!full()) { resetPlayer(); touch = null; return; }
+          t.height = Math.max(1, player.offsetHeight);
+          t.origin = Math.max(0, Math.min(t.height, miniTop - player.offsetTop));
+        } else t.height = Math.max(1, player.offsetHeight);
+      }
+    }
+    if (event.cancelable) event.preventDefault();
+    if (t.kind === 'page') {
+      t.offset = Math.sign(dx) * Math.min(innerWidth * .9, Math.abs(dx) * (neighbor(dx) ? .85 : .16));
+      shift(app, t.offset, 0);
+    } else if (full()) movePlayer(t, dy);
+  }
+  function finish(event, cancelled = false) {
+    const t = touch;
+    if (!t) return;
+    if (event && !point(event.changedTouches, t.id)) return;
+    touch = null;
+    if (!t.locked) return;
+    suppressUntil = performance.now() + 450;
+    if (event?.cancelable) event.preventDefault();
+    settling = true;
+    const elapsed = Math.max(1, performance.now() - t.start);
+    const passed = (distance, limit) => !cancelled &&
+      (distance >= limit || (distance > 30 && distance / elapsed > .5));
+    const done = () => { settling = false; };
+    if (t.kind === 'page') {
+      const next = pageReady() && t.from === tab && passed(Math.abs(t.dx), Math.min(105, innerWidth * .25))
+        ? neighbor(t.dx) : null;
+      animate(app, t.offset, 0, next ? Math.sign(t.dx) * innerWidth : 0, 0, next ? 200 : 240, () => {
+        app.style.removeProperty('transform');
+        if (next && pageReady() && t.from === tab) {
+          swipeRouteDirection = t.dx < 0 ? 1 : -1;
+          goToTab(next, undefined, true);
+          swipeRouteDirection = 0;
+        }
+        done();
+      });
+    } else {
+      const close = t.kind === 'close'
+        ? passed(t.dy, Math.min(130,t.height * .22))
+        : !passed(-t.dy, Math.min(105,t.height * .18));
+      if (!full()) { resetPlayer(); done(); return; }
+      const end = close ? t.height + 12 : 0;
+      shade(end, t.height);
+      // Vertical movement settles from the exact dragged position.
+      animate(player, 0, t.offset, 0, end, 300, () => {
+        if (close && full()) player.close();
+        resetPlayer();
+        done();
+      });
+    }
+  }
+  document.addEventListener('touchstart', start, {capture:true, passive:true});
+  document.addEventListener('touchmove', move, {capture:true, passive:false});
+  document.addEventListener('touchend', event => finish(event), {capture:true, passive:false});
+  document.addEventListener('touchcancel', event => finish(event, true), {capture:true, passive:false});
+  document.addEventListener('click', event => {
+    if (event.isTrusted && performance.now() < suppressUntil) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+})();
