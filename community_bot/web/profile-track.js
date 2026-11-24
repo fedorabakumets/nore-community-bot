@@ -97,7 +97,7 @@ const NoraProfileWaves = (() => {
       }
       let oldCols=0,oldRows=0;
       return {
-        draw(time, energy=0, taps=[], beat=0) {
+        draw(time, energy=0, rings=[], beat=0) {
           const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||gl.isContextLost())return;
           const dpr=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(1000000/(w*h)));
           const cw=Math.max(1,Math.round(w*dpr)),ch=Math.max(1,Math.round(h*dpr));
@@ -110,7 +110,7 @@ const NoraProfileWaves = (() => {
             oldCols=cols;oldRows=rows;
           }
           const angle=20*Math.PI/180;
-          const tapAt=i=>taps[i]?[taps[i].x,h-taps[i].y,taps[i].age,taps[i].strength]:[0,0,0,0];
+          const tapAt=i=>rings[i]?[w*rings[i].x,h*(1-rings[i].y),rings[i].age,rings[i].strength]:[0,0,0,0];
           gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.viewport(0,0,cols,rows);
           uniforms(fp,{uSize:[w,h],uDpr:ratio,uOrigin:origin,uPitch:[pitch,pitch],uWave:0,uTime:time*.35,uUnit:520,uHeading:[Math.cos(angle),Math.sin(angle)],uAmp:1+energy*.16+beat*.42,uDepth:.95+energy*.08+beat*.16,uLight:[-Math.cos(angle)*.78,-Math.sin(angle)*.78,.62],uShine:.8+energy*.20+beat*.65,uContrast:1.2,uInk:0,uOpacity:.76+beat*.24,uFade:0,uFadeSize:.5,uAppear:1,tRipple:1,uRipple:0,uBeat:beat,uTap0:tapAt(0),uTap1:tapAt(1),uTap2:tapAt(2)});
           gl.drawArrays(gl.TRIANGLES,0,3);
@@ -136,7 +136,7 @@ const NoraProfileWaves = (() => {
     if(!s)return;
     s.host.classList.remove('nora-profile-music');
     s.element?.style.removeProperty('--music-energy');
-    s.energy=0;s.beat=0;s.taps=[];
+    s.energy=0;s.beat=0;
     s.layer.style.removeProperty('--music-beat');
     if(scene===s)paintMusicShell(false);
     s.running=false;cancelAnimationFrame(s.raf);s.raf=0;
@@ -148,6 +148,19 @@ const NoraProfileWaves = (() => {
     };
     if(immediate)dispose();else s.removeTimer=setTimeout(dispose,520);
   }
+  // Reuse the original touch ripple shader, but emit rings only at measured
+  // musical onsets. Audio-clock ages keep rings aligned through seeks and pauses.
+  function musicRings(track, seconds) {
+    if(!track?.hits||!Number.isFinite(seconds))return [];
+    const rings=[],index=Math.floor(Math.max(0,seconds)*40);
+    for(let i=Math.min(index,track.hits.length-1);i>=Math.max(0,index-64)&&rings.length<3;i--){
+      const strength=track.hits[i];
+      const age=seconds-i/40;
+      if(!strength||age<0||age>=1.6)continue;
+      rings.push({x:.5,y:.43,age,strength});
+    }
+    return rings;
+  }
   function tick(s,now) {
     s.raf=0;
     if(!s.running||document.hidden)return;
@@ -155,15 +168,15 @@ const NoraProfileWaves = (() => {
       const dt=s.last?Math.min(.1,(now-s.last)/1000):.033;
       s.last=now;
       const quiet=reduced.matches;
-      const index=Math.floor((s.track?.audio.currentTime||0)*40);
+      const seconds=s.track?.audio.currentTime||0;
+      const index=Math.floor(seconds*40);
       const target=quiet?0:(s.track?.envelope?.[index]||0);
       // Fast attack and a short tail give individual kicks a clear visual impact.
       const beat=quiet?0:Math.max(s.track?.beats?.[index]||0,s.track?.beats?.[index+1]||0);
       s.energy+=(target-s.energy)*(1-Math.exp(-dt/(target>s.energy?.05:.16)));
       s.beat=quiet?0:Math.max(beat,s.beat*Math.exp(-dt/.105));
       if(!quiet)s.time+=dt*(1+s.energy*.32+s.beat*.65);
-      s.taps=s.taps.filter(t=>s.time-t.time<1.6);
-      s.renderer?.draw(s.time,quiet?0:s.energy,quiet?[]:s.taps.map(t=>({...t,age:s.time-t.time})),s.beat);
+      s.renderer?.draw(s.time,quiet?0:s.energy,quiet?[]:musicRings(s.track,seconds),s.beat);
       s.element?.style.setProperty('--music-energy',Math.max(s.energy*.45,s.beat).toFixed(3));
       s.layer.style.setProperty('--music-beat',s.beat.toFixed(3));
     }
@@ -189,7 +202,7 @@ const NoraProfileWaves = (() => {
       let engine=null;
       try{engine=renderer(canvas);}catch{}
       if(!engine)canvas.hidden=true;
-      scene={host,layer,renderer:engine,raf:0,last:0,time:0,running:false,energy:0,beat:0,taps:[],element:null,track:null};
+      scene={host,layer,renderer:engine,raf:0,last:0,time:0,running:false,energy:0,beat:0,element:null,track:null};
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(scene?.layer===layer){cancelAnimationFrame(scene.raf);scene.raf=0;scene.renderer=null;canvas.hidden=true;}});
       canvas.addEventListener('webglcontextrestored',()=>{if(scene?.layer===layer){scene.renderer=renderer(canvas);canvas.hidden=!scene.renderer;wake(scene);}});
     }
@@ -202,25 +215,6 @@ const NoraProfileWaves = (() => {
     const s=scene;requestAnimationFrame(()=>{if(s.running)s.layer.classList.add('is-playing');});
     wake(s);
   }
-  // Passive pointer effects only: no interference with scrolling, links or sliders.
-  function ripple(event,strength) {
-    const s=scene;
-    if(!s?.running||!s.renderer||document.hidden||reduced.matches)return;
-    if(event.target.closest('input,textarea,select,#nav,#scroll-jump'))return;
-    if(s.host===document.body){
-      if(document.querySelector('dialog[open]')||!event.target.closest('#app[data-screen="lk"]'))return;
-    }else if(!event.target.closest('#person-profile'))return;
-    const rect=s.layer.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
-    if(x<0||y<0||x>rect.width||y>rect.height)return;
-    s.taps=[{x,y,time:s.time,strength},...s.taps].slice(0,3);
-  }
-  document.addEventListener('pointerdown',event=>ripple(event,1),{passive:true});
-  let lastHover=0,lastX=0,lastY=0;
-  document.addEventListener('pointermove',event=>{
-    if(event.pointerType!=='mouse'||event.timeStamp-lastHover<170||Math.hypot(event.clientX-lastX,event.clientY-lastY)<36)return;
-    lastHover=event.timeStamp;lastX=event.clientX;lastY=event.clientY;
-    ripple(event,.4);
-  },{passive:true});
   document.addEventListener('visibilitychange',()=>{
     if(!scene)return;
     if(document.hidden){cancelAnimationFrame(scene.raf);scene.raf=0;}else wake(scene);
@@ -296,7 +290,7 @@ window.NoraProfileTrack = (() => {
           if(active!==state)return;
         }
       }
-      const levels=new Float32Array(count),beats=new Float32Array(count);
+      const levels=new Float32Array(count),beats=new Float32Array(count),hits=new Float32Array(count);
       let floor=.002,peak=.008,prev=0,baseline=.002,fluxBase=.001,lastHit=-20,pulse=0;
       for(let frame=0;frame<count;frame++){
         // Adaptive bass envelope and positive spectral-energy flux, not a fake BPM.
@@ -310,6 +304,7 @@ window.NoraProfileTrack = (() => {
         if(v>.003&&frame-lastHit>=5&&flux>threshold&&rise>Math.max(.002,peak*.07)){
           pulse=Math.min(1,.70+.30*flux/(threshold*2));
           lastHit=frame;
+          hits[frame]=pulse;
         }
         // A short pulse tail remains visible even on a 30 fps WebView.
         beats[frame]=pulse;
@@ -318,7 +313,7 @@ window.NoraProfileTrack = (() => {
         baseline+=(v-baseline)*.085;
         fluxBase+=(flux-fluxBase)*.06;
       }
-      if(active===state){state.envelope=levels;state.beats=beats;state.analysisStatus='ready';}
+      if(active===state){state.envelope=levels;state.beats=beats;state.hits=hits;state.analysisStatus='ready';}
     }catch{
       if(active===state)state.analysisStatus='unavailable';
     }
@@ -502,7 +497,7 @@ window.NoraProfileTrack = (() => {
     if (!state) return;
     active = null;
     state.controller.abort();
-    state.blob=null;state.envelope=null;state.beats=null;
+    state.blob=null;state.envelope=null;state.beats=null;state.hits=null;
     state.audio.pause();
     state.audio.removeAttribute('src');
     state.audio.load();
