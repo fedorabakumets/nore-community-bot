@@ -74,6 +74,6 @@ async def change_collection(db, uid, *, target_id=None, revision=None, key=None,
 def save_button(track, target_id):
     from aiogram.types import InputRichBlockButtons, RichMessageButton
 
-    return InputRichBlockButtons(align="right", buttons=[
+    return InputRichBlockButtons(align="center", buttons=[
         RichMessageButton(text="+", callback_data=f"{PREFIX}{target_id}:{track['revision']}"),
     ])
