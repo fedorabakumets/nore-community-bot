@@ -63,8 +63,8 @@ async def test_rich_toggle_shared_audio_reference(tmp_path):
 async def test_library_visibility_and_rich_pages(tmp_path):
     from types import SimpleNamespace
 
-    from community_bot.command_registry import restore_defaults
     from community_bot.aliases import parse_trigger
+    from community_bot.command_registry import restore_defaults
     from community_bot.library_rich import library_card
     from community_bot.music_library import can_read_library, is_public, page_entries, set_public
 
@@ -101,3 +101,16 @@ async def test_library_visibility_and_rich_pages(tmp_path):
     assert not await can_read_library(db, settings, 2, 1)
     await db.reset_banned_user(1, None)
     assert not await is_public(db, 1)
+
+
+async def test_legacy_music_requests_only_explain_new_commands():
+    from types import SimpleNamespace
+    from datetime import UTC, datetime
+
+    from community_bot.nora import reply_for, rule_intent
+
+    for text in ("топ чартов", "найди песню Queen", "музыка", "треки"):
+        assert rule_intent(text) == {"tool": "music_help"}
+        result = await reply_for("Нора " + text, SimpleNamespace(), datetime.now(UTC))
+        assert "Нора песня" in result
+        assert "Нора треки" in result
