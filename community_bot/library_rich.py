@@ -5,8 +5,12 @@ from aiogram import F
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import StateFilter
 from aiogram.types import (
-    CallbackQuery, InputRichBlockButtons, InputRichBlockParagraph, InputRichMessage,
-    Message, RichMessageButton,
+    CallbackQuery,
+    InputRichBlockButtons,
+    InputRichBlockParagraph,
+    InputRichMessage,
+    Message,
+    RichMessageButton,
 )
 
 from community_bot.access import private_allowed
@@ -16,8 +20,13 @@ from community_bot.database import Database
 from community_bot.ephemeral import reply_ttl
 from community_bot.helpers import resolve_command_target
 from community_bot.music_library import (
-    LIBRARY_PREFIX, can_read_library, change_collection, get_collection, is_public,
-    page_entries, set_public,
+    LIBRARY_PREFIX,
+    can_read_library,
+    change_collection,
+    get_collection,
+    is_public,
+    page_entries,
+    set_public,
 )
 from community_bot.private_rich import standalone_rich_message
 from community_bot.profile_track import audio_block
