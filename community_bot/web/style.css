@@ -4209,3 +4209,181 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
   #home-story-viewer .home-story-action,
   #home-story-viewer .home-story-action span { transition: none; }
 }
+
+
+/* Telegram-style full-screen profiles. Only the LK route and person dialog are affected. */
+#app[data-screen="lk"], #sheet:has(#person-profile) {
+  --profile-surface: #19181d;
+  --profile-button: #202026;
+  --profile-ink: #f5f1ed;
+  --profile-muted: #a8a4ae;
+}
+#app[data-screen="lk"] { max-width: 552px; }
+#app[data-screen="lk"] .lk-title { display: none; }
+#app[data-screen="lk"] .lk-identity {
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  padding: 0 0 12px; margin: 0 0 16px; border: 0;
+  background: transparent; box-shadow: none; border-radius: 24px;
+}
+#app[data-screen="lk"] .lk-identity.profile-fire-card {
+  padding: 0 8px 12px; background: #22151a;
+  box-shadow: inset 0 0 0 1px #ed743a72;
+}
+#app[data-screen="lk"] .lk-photo-wrap {
+  position: relative; align-self: center; width: 100%; max-width: 480px;
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo,
+#sheet #person-profile .person-photo {
+  position: relative; display: grid; place-items: center;
+  width: min(100%, 480px); height: auto; aspect-ratio: 1;
+  padding: 0; margin: 0 auto; border: 0; border-radius: 0;
+  background: radial-gradient(circle at 50% 35%, #32313a, #17161b 65%, transparent 100%);
+  color: var(--profile-ink); font-size: clamp(52px, 18vw, 100px);
+  font-weight: 600; overflow: hidden; box-shadow: none;
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo:not(:has(img)),
+#sheet #person-profile .person-photo:not(:has(img)) {
+  width: min(56%, 220px); border-radius: 50%; margin-block: 18px 8px;
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo img,
+#sheet #person-profile .person-photo img {
+  display: block; width: 100%; height: 100%; object-fit: cover;
+  border-radius: 0; -webkit-mask-image: linear-gradient(#000 0 72%, transparent 100%);
+  mask-image: linear-gradient(#000 0 72%, transparent 100%);
+}
+#app[data-screen="lk"] .lk-photo-wrap #change-avatar {
+  position: absolute; top: 10px; right: 8px; bottom: auto; margin: 0;
+  width: 46px; height: 46px; border: 1px solid #ffffff24; border-radius: 50%;
+  background: #1e1d23d9; color: var(--profile-ink); z-index: 2;
+}
+#app[data-screen="lk"] .lk-identity-copy {
+  position: relative; width: 100%; text-align: center; z-index: 1;
+}
+#app[data-screen="lk"] .lk-photo-wrap:has(img) + .lk-identity-copy,
+#sheet #person-profile .person-photo:has(img) + div { margin-top: -36px; position: relative; }
+#app[data-screen="lk"] .lk-identity-heading, #sheet #person-profile .person-name-line {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 8px; margin: 0;
+}
+#app[data-screen="lk"] .lk-identity-heading h2, #sheet #person-profile .person-name-line h2 {
+  flex: 0 1 auto; font-family: var(--body-font, system-ui); font-weight: 750;
+  color: var(--profile-ink); font-size: clamp(25px, 7vw, 34px);
+  line-height: 1.18; letter-spacing: -.025em; margin: 0; overflow-wrap: anywhere;
+}
+#app[data-screen="lk"] .lk-identity-heading > button {
+  width: 44px; height: 44px; margin: 0; border-radius: 50%;
+  border: 1px solid #ffffff12; background: var(--profile-button); color: var(--profile-ink);
+}
+#app[data-screen="lk"] .lk-person-meta { justify-content: center; gap: 6px 10px; font-size: 13px; }
+#app[data-screen="lk"] .lk-about {
+  display: flex; flex-direction: column; border: 0; padding: 0; gap: 8px;
+}
+#app[data-screen="lk"] .lk-bio {
+  display: block; max-height: none; overflow: visible; overflow-wrap: anywhere;
+  padding: 14px 15px; margin: 0; border-radius: 20px; background: var(--profile-surface);
+  color: var(--profile-ink); font-size: 15px;
+}
+#app[data-screen="lk"] .lk-hobbies { margin: 0; padding: 0 4px; }
+#app[data-screen="lk"] .lk-identity-actions {
+  order: -1; display: flex; justify-content: center; align-items: start;
+  flex-wrap: wrap; gap: 18px; margin: 3px 0 10px;
+}
+#app[data-screen="lk"] .lk-identity-actions :is(.lk-edit,.lk-privacy-pill) {
+  display: flex; flex-direction: column; justify-content: start; align-items: center;
+  gap: 7px; width: min(42%, 145px); min-height: 82px; padding: 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--profile-ink); font: 500 12px/1.35 var(--body-font, system-ui);
+  text-align: center;
+}
+#app[data-screen="lk"] .lk-identity-actions :is(.lk-edit,.lk-privacy-pill) svg {
+  box-sizing: border-box; width: 52px; height: 52px; padding: 15px;
+  border: 1px solid #ffffff16; border-radius: 50%; background: var(--profile-button);
+  color: var(--profile-ink);
+}
+#app[data-screen="lk"] :is(.lk-account,.lk-group,.lk-completion) {
+  background: var(--profile-surface); border: 0; box-shadow: none; border-radius: 20px;
+}
+#app[data-screen="lk"] .lk-group { padding-inline: 15px; }
+#app[data-screen="lk"] .lk-row { min-height: 58px; }
+#app[data-screen="lk"] .lk-account { padding-inline: 15px; }
+
+/* Retain the shared dialog and its existing handlers; only profiles use the full viewport. */
+#sheet:has(#person-profile) {
+  position: fixed; inset: 0; margin: 0; width: 100%; max-width: none;
+  height: 100%; height: 100dvh; max-height: none;
+  padding: max(var(--safe-top, 0px), calc(var(--device-top, 0px) + 48px))
+    max(0px, var(--safe-right, 0px)) max(24px, var(--safe-bottom, 0px))
+    max(0px, var(--safe-left, 0px));
+  border: 0; border-radius: 0; box-shadow: none;
+  background: var(--poster-bg, #111013); color: var(--profile-ink);
+  overflow-y: auto; overscroll-behavior: contain;
+}
+#sheet[open]:has(#person-profile) { display: flex; flex-direction: column; align-items: stretch; }
+#sheet:has(#person-profile) #sheet-content { width: 100%; max-width: 520px; margin: 0 auto; flex: 0 0 auto; }
+#sheet:has(#person-profile) > #dismiss {
+  order: -1; position: sticky; top: 0; z-index: 5; flex: 0 0 auto;
+  align-self: flex-start; display: grid; place-items: center;
+  width: 46px; height: 46px; min-height: 46px; padding: 0;
+  margin: 0 0 -46px max(14px, calc((100% - 520px) / 2 + 14px));
+  border: 1px solid #ffffff24; border-radius: 50%; box-shadow: none;
+  background: #1e1d23e8; color: var(--profile-ink); font-size: 0; line-height: 1;
+}
+#sheet:has(#person-profile) > #dismiss::before {
+  content: ""; display: block; width: 11px; height: 11px;
+  border-left: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(2px,-2px);
+}
+#sheet #person-profile { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px; }
+#sheet #person-profile .profile-heading {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 8px; margin: 0 -16px; order: 0;
+}
+#sheet #person-profile .profile-heading > div { width: 100%; padding: 0 18px; }
+#sheet #person-profile .profile-heading .sub { color: var(--profile-muted); margin: 6px 0 0; font-size: 14px; }
+#sheet #person-profile .social-like-count { display: inline-block; margin-top: 6px; }
+#sheet #person-profile > .eyebrow { order: 2; align-self: center; margin: 0; color: var(--profile-muted); }
+#sheet #person-profile > .person-role { order: 1; margin: 0; text-align: center; }
+#sheet #person-profile > .person-presence { order: 1; text-align: center; font-size: 15px; margin: 0; }
+#sheet #person-profile > .profile-track { order: 3; align-self: center; width: min(100%, 380px); margin: 5px 0; }
+#sheet #person-profile > .person-actions {
+  order: 4; display: flex; flex-wrap: wrap; align-items: start; justify-content: center;
+  gap: 16px; margin: 12px 0 8px;
+}
+#sheet #person-profile .person-actions button {
+  display: flex; flex-direction: column; align-items: center; justify-content: start;
+  width: min(44%, 155px); min-height: 84px; gap: 8px; margin: 0; padding: 0;
+  border: 0; border-radius: 0; box-shadow: none; background: transparent;
+  color: var(--profile-ink); font: 500 12px/1.35 var(--body-font, system-ui);
+  text-align: center; white-space: normal;
+}
+#sheet #person-profile .person-actions button::before {
+  content: ""; display: block; flex-shrink: 0; width: 54px; height: 54px;
+  border: 1px solid #ffffff16; border-radius: 50%; background-color: var(--profile-button);
+  background-position: center; background-repeat: no-repeat; background-size: 25px;
+}
+#sheet #person-profile [data-person-add]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5f1ed' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M2 21v-2a7 7 0 0 1 14 0v2M19 8v6m-3-3h6'/%3E%3C/svg%3E");
+}
+#sheet #person-profile [data-friend-transfer]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5f1ed' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 11 18-8-8 18-2-8-8-2Zm8 2L21 3'/%3E%3C/svg%3E");
+}
+#sheet #person-profile [data-friend-play]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5f1ed' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 7h8a5 5 0 0 1 5 4l1 5a3 3 0 0 1-5 3l-3-3h-4l-3 3a3 3 0 0 1-5-3l1-5a5 5 0 0 1 5-4ZM8 10v4m-2-2h4m6 0h.01m2 2h.01'/%3E%3C/svg%3E");
+}
+#sheet #person-profile > .stats { order: 5; margin: 5px 0; gap: 8px; }
+#sheet #person-profile > .stats .stat {
+  background: var(--profile-surface); border: 0; border-radius: 20px; box-shadow: none;
+}
+#sheet #person-profile > :is(.bio,.sub:not(.person-role),.person-locked) {
+  order: 6; padding: 13px 15px; margin: 0;
+  background: var(--profile-surface); border: 0; border-radius: 18px;
+  color: var(--profile-ink); font-size: 15px; overflow-wrap: anywhere; box-shadow: none;
+}
+#sheet #person-profile > .person-locked { order: 2; margin: 8px 0; }
+#sheet:has(#person-profile.profile-fire-card) { border: 0; }
+#sheet:has(#person-profile.profile-fire-card)::before,
+#sheet:has(#person-profile.profile-fire-card)::after { position: fixed; }
+@media (prefers-reduced-motion: no-preference) {
+  #sheet[open]:has(#person-profile) { animation: nora-person-enter 290ms cubic-bezier(.2,.75,.25,1) both; }
+  @keyframes nora-person-enter { from { opacity: .4; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+}
