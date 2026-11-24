@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from aiogram.types import Chat, Message, User
 
-from community_bot import pet_progress, social_likes
+from community_bot import durak_rooms, pet_progress, social_likes
 from community_bot.database import Database
 
 
@@ -160,3 +160,29 @@ async def test_successful_likes_advance_sender_only(tmp_path):
     row = await db.fetchone("SELECT progress,xp FROM pet_quests WHERE user_id=1 AND slot=1")
     assert (row["progress"], row["xp"]) == (5, 50)
     assert not await db.fetchone("SELECT 1 FROM pet_development WHERE user_id=2")
+
+
+@pytest.mark.parametrize("game,reason,expected", [
+    ("durak", "played", 1), ("durak", "draw", 1), ("barricade", "goal", 1),
+    ("durak", "surrender", 0), ("barricade", "timeout", 0),
+])
+async def test_room_settlement_counts_natural_games_only(tmp_path, game, reason, expected, monkeypatch):
+    db = Database(tmp_path / "rooms.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    await pet_progress.dashboard(db, 1)
+    await db.execute("UPDATE pet_quests SET events=?,target=3 WHERE user_id=1 AND slot=1", (game,))
+
+    async def members(conn, rid):
+        return [{"uid": 1, "seat": 0, "reserved": 0}, {"uid": 2, "seat": 1, "reserved": 0}]
+
+    monkeypatch.setattr(durak_rooms, "_members", members)
+    room = {"id": "test", "kind": game, "game": {
+        "result": {"reason": reason, "loser": 1, "forfeit": []}, "out": [],
+    }}
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        await durak_rooms._finish(conn, room, datetime.now(UTC).timestamp())
+        await conn.commit()
+    row = await db.fetchone("SELECT progress,xp FROM pet_quests WHERE user_id=1 AND slot=1")
+    assert (row["progress"], row["xp"]) == (expected, 0)
