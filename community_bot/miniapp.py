@@ -84,11 +84,11 @@ async def protection(request, handler):
             profile_optional = path in {
                 '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
-                '/api/profile/privacy', '/api/profile/track', '/api/notices', '/api/admin',
+                '/api/profile/privacy', '/api/profile/track', '/api/music-library', '/api/notices', '/api/admin',
                 '/api/story/dedzytwo/like',
                 '/api/story/dedzytwo/status',
                 '/api/community/chat',
-            } or path.startswith(('/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
+            } or path.startswith(('/api/music-library/', '/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
             if not profile_optional:
                 from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
@@ -259,7 +259,8 @@ async def overview(request):
     today = datetime.now(ZoneInfo(getattr(settings, 'timezone', 'Europe/Moscow'))).date()
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
-    from community_bot.profile_track import get_track, track_summary
+    from community_bot.profile_track import get_track
+    from community_bot.music_library import saved_track_summary
     from community_bot.role_prefixes import prefix_for
     from community_bot.social_likes import count
 
@@ -311,7 +312,7 @@ async def overview(request):
         ),
         'levels': levels,
         'profile': stats, 'revision': profile_revision(user),
-        'profile_track': track_summary(await get_track(db, user['user_id'])),
+        'profile_track': await saved_track_summary(db, user['user_id'], await get_track(db, user['user_id'])),
         'privacy_owned': await db.owns_profile_privacy(user['user_id']),
         'has_avatar': bool(user.get('avatar_file_id')), 'avatar_video': user.get('avatar_media_type') == 'video',
         **shop, 'pet': pet, 'wallet': await wallet_data(db, settings, user),
@@ -689,6 +690,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/avatar', social_profiles.avatar)
     app.router.add_get('/api/people/{user_id}/track', social_profiles.track_audio)
     app.router.add_get('/api/profile/track', social_profiles.track_audio)
+    app.router.add_post('/api/people/{user_id}/track/save', social_profiles.save_profile_track)
+    app.router.add_get('/api/music-library', social_profiles.music_library)
+    app.router.add_post('/api/music-library', social_profiles.music_library)
+    app.router.add_get('/api/music-library/{track_id}', social_profiles.library_audio)
     app.router.add_get('/api/friends', friends_api.status)
     app.router.add_post('/api/friends/action', friends_api.action)
     from community_bot import lobby_widget, music_api, nora_burrows, nora_cinema, nora_game_api, nora_game_chat
