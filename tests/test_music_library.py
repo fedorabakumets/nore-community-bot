@@ -228,3 +228,41 @@ async def test_share_track_checks_access_and_sends_native_audio(tmp_path):
     assert bot.send_audio.call_args.kwargs["chat_id"] == -100123
     assert (await share_track(req)).status == 429
     bot.send_audio.assert_awaited_once()
+
+
+async def test_now_playing_collection_status_add_and_private_source(tmp_path):
+    from types import SimpleNamespace
+
+    from community_bot.social_profiles import current_track_collection
+
+    db = Database(tmp_path / "now-playing.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Первый")
+    await db.ensure_user(2, telegram_name="Второй")
+    track = sample()
+    await db.set_bot_state(track_key(1), json.dumps(track))
+    await db.set_bot_state(track_key(2), json.dumps(track))
+    await db.update_profile(2, "profile_private", 1)
+
+    class Request(dict):
+        async def json(self):
+            return self.query
+
+    req = Request(actor={"id": 1})
+    req.app = {"db": db, "settings": SimpleNamespace()}
+    req.query = {"source": "/api/profile/track", "revision": track["revision"]}
+    req.method = "GET"
+    assert not json.loads((await current_track_collection(req)).body)["saved"]
+    req.method = "POST"
+    first, second = await asyncio.gather(current_track_collection(req), current_track_collection(req))
+    assert json.loads(first.body) == json.loads(second.body)
+    assert json.loads(first.body)["saved"]
+    key = json.loads(first.body)["id"]
+    assert await get_collection(db, 1) == {key: track}
+    req.method = "GET"
+    req.query["source"] = "/api/music-library/" + key
+    assert json.loads((await current_track_collection(req)).body)["saved"]
+    req.query["source"] = "/api/people/2/track"
+    assert (await current_track_collection(req)).status == 404
+    req.query = {"source": "/api/profile/track", "revision": "b" * 32}
+    assert (await current_track_collection(req)).status == 404
