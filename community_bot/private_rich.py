@@ -446,7 +446,12 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                     and source.message_id > 0):
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
                 is_panel = saved and json.loads(saved)["message_id"] == source.message_id
-                standalone = (not is_panel and (event.data or "").startswith(_NOTICE_ACTIONS)
+                library_action = (event.data or "").startswith("mlib:") and any(
+                    button.callback_data == event.data
+                    for block in (source.rich_message.blocks if source.rich_message else [])
+                    if block.type == "buttons" for button in block.buttons
+                )
+                standalone = library_action or (not is_panel and (event.data or "").startswith(_NOTICE_ACTIONS)
                               and any(button.callback_data == event.data
                                       for row in (source.reply_markup.inline_keyboard if source.reply_markup else [])
                                       for button in row))
