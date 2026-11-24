@@ -25,13 +25,16 @@ REWARDS = (
     ("unlock", 3, "Загрузка видео"),
 )
 CONSUMABLES = {"meal": "hunger", "drink": "thirst", "mood": "mood"}
-MEDIA_LABELS = {
-    "voice": "Отправь голосовое", "circle": "Отправь кружок", "photo": "Отправь фото",
-    "video": "Отправь видео", "media": "Отправь аудио, GIF или документ",
-}
 ACTIVITY_MILESTONES = (50, 100)
 TEXT_TARGET = 10
 STROKE_QUEST = "Зайти в Нору и погладить питомца"
+TEXT_STAGES = (1, 4, 7)
+ACTIVITY_QUESTS = (
+    ("Сыграй в Дурака 3 раза", "durak", 3),
+    ("Сыграй в Баррикаду 3 раза", "barricade", 3),
+    ("Поставь 5 лайков участникам", "like", 5),
+)
+TEXT_QUEST = (f"Напиши {TEXT_TARGET} сообщений в основном чате", "text", TEXT_TARGET)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pet_development (
     user_id INTEGER PRIMARY KEY REFERENCES pets(user_id) ON DELETE CASCADE,
@@ -113,67 +116,42 @@ async def ensure_pet(db, user_id, stamp):
 
 async def ensure_day(db, user_id, now):
     day = now.date().isoformat()
-    inserted = await db.execute("INSERT OR IGNORE INTO pet_quest_days VALUES (?,?,0)", (user_id, day))
-    if not inserted.rowcount:
-        await db.execute(
-            "UPDATE pet_quests SET label=?,events='stroke' WHERE user_id=? AND day=? AND slot=2 "
-            "AND progress=0 AND events IN ('stroke,expedition','food,stroke','stroke,expedition,food,water') "
-            "AND EXISTS (SELECT 1 FROM pets WHERE user_id=? AND expedition_until IS NULL AND mood<100)",
-            (STROKE_QUEST, user_id, day, user_id),
-        )
+    await db.execute("INSERT OR IGNORE INTO pet_quest_days VALUES (?,?,0)", (user_id, day))
+    pet = await one(db, "SELECT created_at FROM pets WHERE user_id=?", (user_id,))
+    stage = (await one(db, "SELECT stage FROM pet_development WHERE user_id=?", (user_id,)))["stage"]
+    plan_key = f"pet_quest_plan_v2:{user_id}"
+    plan = await one(db, "SELECT value FROM bot_state WHERE key=?", (plan_key,))
+    marker = f"{day}:{pet['created_at']}"
+    if plan and plan["value"] == marker:
         return day
 
-    # Telegram retry windows are shorter than this retention window. Reject stale deliveries too.
+    # Preserve completed legacy quests and earned XP when rolling out the new plan.
     await db.execute("DELETE FROM pet_quest_events WHERE day < ?", ((now.date() - timedelta(days=2)).isoformat(),))
-    flags = dict(await (await db.execute(
-        "SELECT key,enabled FROM feature_flags WHERE key IN ('media_filter')"
-    )).fetchall())
-    cycle = now.date().toordinal() + user_id
-    activity = (f"Общайся в основном чате · {TEXT_TARGET} сообщений", "text", TEXT_TARGET)
-    if not flags.get("media_filter") and cycle % 3:
-        media = list(MEDIA_LABELS)[(cycle - cycle // 3) % len(MEDIA_LABELS)]
-        activity = (f"{MEDIA_LABELS[media]} в основном чате", media, 1)
-
-    # Either action in a pair can complete it. A single event counts only once.
-    pet = await one(db, "SELECT hunger,thirst,mood,food_units,water_units,expedition_until FROM pets WHERE user_id=?",
-                    (user_id,))
-    away = bool(pet["expedition_until"] and pet["expedition_until"] > now.astimezone(UTC).isoformat())
-    preferred = (
-        (STROKE_QUEST, "stroke"),
-        ("Покорми или напои питомца", "food,water"),
-        ("Отправь питомца в поход или напои его", "expedition,water"),
-        (STROKE_QUEST, "stroke"),
-    )[cycle % 4]
-    wallet = await one(db, "SELECT cookies FROM users WHERE user_id=?", (user_id,))
-    rewards = await (await db.execute(
-        "SELECT kind FROM pet_stage_rewards WHERE user_id=? AND used_at IS NULL", (user_id,),
-    )).fetchall()
-    available = {row["kind"] for row in rewards}
-    actions = {
-        "food": pet["food_units"] or wallet["cookies"] or "meal" in available,
-        "water": pet["water_units"] or wallet["cookies"] or "drink" in available,
-        "stroke": not away and pet["mood"] < 100,
-        "expedition": not away and min(pet["hunger"], pet["thirst"]) >= 50,
-    }
-    if any(actions[key] for key in preferred[1].split(",")):
-        care = preferred
-    elif actions["stroke"]:
-        care = (STROKE_QUEST, "stroke")
-    else:
-        care = ("Покорми, напои или отправь питомца в поход", "expedition,food,water")
-    if activity[1] != "text":
-        extra = (f"Поддержи участника или напиши {TEXT_TARGET} сообщений", "text,plus,minus,transfer", TEXT_TARGET)
-    else:
-        media = ("voice,circle,photo,video,media" if not flags.get("media_filter") else "")
-        extra = (
-            "Поддержи участника, переведи печеньку или отправь медиа"
-            if media else "Поддержи участника, переведи печеньку или позаботься о питомце",
-            f"plus,minus,transfer,{media or 'food,water,expedition'}", 1,
+    cycle = (now.date().toordinal() + user_id) % len(ACTIVITY_QUESTS)
+    first, second = ACTIVITY_QUESTS[cycle], ACTIVITY_QUESTS[(cycle + 1) % len(ACTIVITY_QUESTS)]
+    text_key = f"pet_text_quest_v2:{user_id}:{pet['created_at']}:{stage}"
+    text_seen = await one(db, "SELECT 1 FROM bot_state WHERE key=?", (text_key,))
+    completed_text = await one(
+        db, "SELECT 1 FROM pet_quests WHERE user_id=? AND day=? AND events='text' AND progress>=target",
+        (user_id, day),
+    )
+    if stage in TEXT_STAGES and not text_seen and not completed_text:
+        second = TEXT_QUEST
+    quests = (first, (STROKE_QUEST, "stroke", 1), second)
+    for slot, (label, events, target) in enumerate(quests, 1):
+        changed = await db.execute(
+            "INSERT INTO pet_quests(user_id,day,slot,label,events,target) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(user_id,day,slot) DO UPDATE SET label=excluded.label,events=excluded.events,"
+            "target=excluded.target,progress=CASE WHEN pet_quests.events=excluded.events "
+            "AND pet_quests.target=excluded.target THEN pet_quests.progress ELSE 0 END,xp=0 "
+            "WHERE pet_quests.progress<pet_quests.target",
+            (user_id, day, slot, label, events, target),
         )
-    rows = (activity, (*care, 1), extra)
-    await db.executemany(
-        "INSERT INTO pet_quests(user_id,day,slot,label,events,target) VALUES (?,?,?,?,?,?)",
-        ((user_id, day, slot, label, events, target) for slot, (label, events, target) in enumerate(rows, 1)),
+        if events == "text" and changed.rowcount:
+            await db.execute("INSERT OR IGNORE INTO bot_state(key,value) VALUES (?,?)", (text_key, day))
+    await db.execute(
+        "INSERT INTO bot_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (plan_key, marker),
     )
     return day
 
@@ -228,7 +206,7 @@ async def record(db, user_id, event, *, now=None, message=None, alternatives=())
         quest = next((q for q in quests if candidate in q["events"].split(",")), None)
         if quest is None:
             continue
-        progress = quest["progress"] + 1 if candidate == "text" else quest["target"]
+        progress = min(quest["target"], quest["progress"] + 1)
         xp = min(QUEST_XP, DAILY_XP - daily["xp"]) if progress == quest["target"] else 0
         await db.execute(
             "UPDATE pet_quests SET progress=?,xp=? WHERE user_id=? AND day=? AND slot=?",
@@ -251,40 +229,16 @@ async def record(db, user_id, event, *, now=None, message=None, alternatives=())
 
 
 async def record_message(database, message):
-    from community_bot.bot_identity import is_bot
-    from community_bot.helpers import reputation_interaction, resolve_member_mention
+    from community_bot.helpers import reputation_interaction
 
     user = message.from_user
-    if not user or user.is_bot or message.sender_chat:
+    text = (message.text or "").strip()
+    if not user or user.is_bot or message.sender_chat or not text:
         return
-    media = next((kind for kind, value in (
-        ("voice", message.voice), ("circle", message.video_note), ("photo", message.photo),
-        ("video", message.video), ("media", message.document or message.audio or message.animation),
-    ) if value), None)
-    if not (media or (message.text or "").strip() or message.sticker or message.poll
-            or message.contact or message.location or message.venue or message.dice
-            or message.game or message.paid_media or message.story):
+    if text.startswith("/") or text.casefold().startswith(("нора ", "нора,")) or reputation_interaction(message):
         return
-
-    reply = message.reply_to_message
-    target = reply.from_user if reply and not reply.sender_chat else None
-    events = []
-    interaction = reputation_interaction(message)
-    if interaction:
-        delta, mention = interaction
-        if mention is None:
-            eligible = target and not target.is_bot and target.id != user.id
-        else:
-            member = await resolve_member_mention(database, mention)
-            eligible = member and member["user_id"] != user.id and not await is_bot(database, member)
-        if eligible:
-            events.append("plus" if delta > 0 else "minus")
-    if media:
-        events.append(media)
-    events.append("text")
     await record_telegram_event(
-        database, user.id, events[0], (message.chat.id, message.message_id, message.date),
-        alternatives=events[1:],
+        database, user.id, "text", (message.chat.id, message.message_id, message.date),
     )
 
 
