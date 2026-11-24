@@ -6,7 +6,7 @@ window.NoraDot = (() => {
   let raf=0,last=0,acc=0,run,mode="ready",muted=false,audio,master;
   let results,resultsBody,restart,queuedTicket=null,ticketRequest=null,flightTicket=null,flaps=[],flightId=0,viewId=0,resultRequest=null,connectTimer=0,initialStartPending=false;
   let intro=null,introTimer=0,introKey="",introActive=false,introStarted=false;
-  let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,flapAt=-10;
+  let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,flapAt=-10,gravityPulse=0;
   let reduced=false,scaleX=1,scaleY=1,paceNode,meterNode,pauseButton,lastPace=-1,lastSpeed="",renderAt=0,bank=0,cameraY=0,noiseBuffer=null,nearFlash=0,nearIds=new Set(),stageNode,stageBanner,stageTitle,stageDescription,stageTimer=0,theme=STAGES[0].color.slice();
   const motion=()=>window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches||false;
   const rgb=(r,g,b,a)=>"rgba("+r+","+g+","+b+","+clamp(a,0,1)+")";
@@ -14,7 +14,7 @@ window.NoraDot = (() => {
   function rounded(x,y,w,h,r){ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);}
   function gradient(x,y,r,stops){const g=ctx.createRadialGradient(x,y,0,x,y,r);for(const [a,c] of stops)g.addColorStop(a,c);return g;}
   function line(x1,y1,x2,y2,color,w=1){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.strokeStyle=color;ctx.lineWidth=w;ctx.stroke();}
-  function haptic(kind){try{const h=window.Telegram?.WebApp?.HapticFeedback;if(kind==="cookie")h?.impactOccurred("light");else if(kind==="crash")h?.notificationOccurred("error");}catch{}}
+  function haptic(kind){try{const h=window.Telegram?.WebApp?.HapticFeedback;if(kind==="cookie")h?.impactOccurred("heavy");else if(kind==="flap")h?.impactOccurred("light");else if(kind==="crash")h?.notificationOccurred("error");}catch{}}
   function wakeAudio(){
     if(muted)return;
     try{
@@ -45,6 +45,7 @@ window.NoraDot = (() => {
   }
   function sfx(kind){
     if(kind==="flap"){tone(210,430,.085,.095);tone(570,890,.05,.045);noise(.075,.045,1800);}
+    if(kind==="flip"){const up=run.gravity<0;tone(up?220:540,up?560:185,.14,.12,0,"sine");tone(up?470:320,up?820:150,.10,.045,.02);}
     if(kind==="cookie"){tone(784,1047,.13,.23);tone(1175,1568,.17,.16,.047);tone(2093,1960,.20,.07,.09);}
     if(kind==="pass")tone(370,415,.065,.045);
     if(kind==="stage"){const hz=220+run.stage*35;tone(hz,hz*1.5,.22,.17);tone(hz*1.5,hz*2,.25,.13,.10);tone(hz*2,hz*3,.30,.08,.20);noise(.24,.065,900+run.stage*200);}
@@ -61,10 +62,10 @@ window.NoraDot = (() => {
   function reset(ticket=null){
     flightId++;flightTicket=ticket;flaps=[];resultRequest=null;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;
     run=createRun(ticket?seededRandom(ticket.seed):Math.random);particles=[];trail=[];rings=[];labels=[];crashTime=impact=stretch=coinPulse=shake=trailClock=0;
-    zoom=1;bank=cameraY=nearFlash=0;nearIds.clear();lastPace=-1;lastSpeed="";flapAt=-10;acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
+    zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";flapAt=-10;acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
   function updateStage(announce){
-    const s=STAGES[run.stage];stageNode.textContent=s.name;root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
+    const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",run.stage===6?"Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию.":"Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.");root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
     if(announce){stageTitle.textContent=s.name;stageDescription.textContent=s.description;stageBanner.getAnimations?.().forEach(a=>a.cancel());if(!reduced)stageBanner.animate?.([{opacity:0,transform:"translateY(-8px) scale(.96)"},{opacity:1,transform:"none",offset:.15},{opacity:1,offset:.78},{opacity:0}],{duration:1850,easing:"ease-out"});}
   }
   function updateHud(){
@@ -100,9 +101,13 @@ window.NoraDot = (() => {
       startFlight();return;
     }
     if(mode==="ready"||mode==="paused"){mode="play";last=0;acc=0;run.py=run.y;run.previousDistance=run.distance;run.previousTime=run.time;flapAt=-10;showOverlay();canvas.focus?.({preventScroll:true});}
-    if(run.time-flapAt<.045)return;
+    if(run.time-flapAt<.045||flaps.at(-1)===run.ticks)return;
     run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);flapAt=run.time;stretch=1;
-    burst(X-7,run.y+4,7,[255,75,103],48);rings.push({x:X,y:run.y,life:.19,max:.19,color:[255,85,117],size:12});sfx("flap");
+    if(run.stage===6){
+      gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
+      burst(X-7,run.y,12,color,60);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
+    }else{burst(X-7,run.y+4,7,[255,75,103],48);rings.push({x:X,y:run.y,life:.19,max:.19,color:[255,85,117],size:12});sfx("flap");}
+    haptic("flap");
   }
   const INTRO_FRAMES=[
     ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
@@ -161,7 +166,7 @@ window.NoraDot = (() => {
     if(!root?.isConnected||document.hidden||document.querySelector("dialog[open]")){initialStartPending=false;showOverlay();return;}
     const ticket=queuedTicket;queuedTicket=null;
     reset(ticket);mode="play";showOverlay();canvas.focus?.({preventScroll:true});primeTicket();
-    run.flap();flaps.push(0);flapAt=0;stretch=1;burst(X-7,run.y+4,7,[255,75,103],48);sfx("flap");
+    run.flap();flaps.push(0);flapAt=0;stretch=1;burst(X-7,run.y+4,7,[255,75,103],48);sfx("flap");haptic("flap");
   }
   function avatarHTML(person){
     const id=Number(person.id),name=String(person.name||"Участник"),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
@@ -206,7 +211,7 @@ window.NoraDot = (() => {
       labels.push({x:X+15,y:run.y-18,life:.65,max:.65});
     }
     if(kind==="pass")updateHud();
-    if(kind==="stage"){updateStage(true);const c=STAGES[run.stage].color;burst(X,run.y,18,c,95);rings.push({x:X,y:run.y,life:.55,max:.55,color:c,size:55});}
+    if(kind==="stage"){if(run.stage===6)gravityPulse=1;updateStage(true);const c=STAGES[run.stage].color;burst(X,run.y,18,c,95);rings.push({x:X,y:run.y,life:.55,max:.55,color:c,size:55});}
     if(kind==="crash"){
       mode="crash";crashTime=0;impact=1;shake=reduced?0:1;
       burst(X,run.y,55,[255,70,96],245);burst(X,run.y,19,[255,222,228],160);
@@ -230,7 +235,7 @@ window.NoraDot = (() => {
   }
   function visual(dt){
     visualTime+=dt;if(stageTimer>0){stageTimer=Math.max(0,stageTimer-dt);if(stageTimer===0)stageBanner.hidden=true;}theme=theme.map((v,i)=>lerp(v,STAGES[run.stage].color[i],1-Math.exp(-dt*2.3)));stretch*=Math.exp(-dt*10);coinPulse*=Math.exp(-dt*5);impact*=Math.exp(-dt*8);shake*=Math.exp(-dt*10);
-    nearFlash*=Math.exp(-dt*6);const target=mode==="ready"?1:1+Math.min(.045,(speedAt(run.time,run.passed)-125)*.00019);
+    gravityPulse*=Math.exp(-dt*6);nearFlash*=Math.exp(-dt*6);const target=mode==="ready"?1:1+Math.min(.045,(speedAt(run.time,run.passed)-125)*.00019);
     zoom=lerp(zoom,reduced?1:target,1-Math.exp(-dt*2.6));bank=lerp(bank,reduced?0:clamp(run.vy/500,-.55,.55),1-Math.exp(-dt*13));cameraY=lerp(cameraY,reduced?0:clamp((run.y-H/2)*.055,-10,10),1-Math.exp(-dt*4));
     if(mode==="crash"){crashTime+=dt;if(crashTime>=(reduced?.12:.34)){mode="over";showOverlay();finishFlight();}}
     for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=85*dt;p.vx*=Math.exp(-dt*2);p.angle+=p.spin*dt;p.life-=dt;}
@@ -288,6 +293,27 @@ window.NoraDot = (() => {
     for(const [dx,dy,r] of [[-4,-5,1.8],[4,-4,1.6],[-1,1,1.7],[-5,4,1.5],[5,5,1.8]]){disk(dx,dy+.5,r+.3,"#8d582d");disk(dx,dy,r,"#633721");}
     ctx.beginPath();ctx.arc(0,-1,9.2,3.5,5.1);ctx.strokeStyle="#fff0c68a";ctx.lineWidth=.8;ctx.stroke();
     ctx.restore();
+  }
+  function drawGravity(){
+    if(run.stage!==6)return;
+    const up=run.gravity<0,color=up?[102,224,239]:[187,148,255],edge=up?0:H;
+    const g=ctx.createLinearGradient(0,edge,0,edge+(up?90:-90));
+    g.addColorStop(0,rgb(...color,.23));g.addColorStop(1,rgb(...color,0));
+    ctx.fillStyle=g;ctx.fillRect(0,up?0:H-90,W,90);
+    line(0,up?2:H-2,W,up?2:H-2,rgb(...color,.82),1.8);
+    const cy=up?25:H-25,dir=up?-1:1;
+    for(let x=24;x<W;x+=52){
+      line(x-4,cy-dir*3,x,cy+dir*3,rgb(...color,.55),1.1);
+      line(x+4,cy-dir*3,x,cy+dir*3,rgb(...color,.55),1.1);
+    }
+    if(gravityPulse>.015&&!reduced){
+      const y=up?H*gravityPulse:H*(1-gravityPulse);
+      const wave=ctx.createLinearGradient(0,y-24,0,y+24);
+      wave.addColorStop(0,rgb(...color,0));wave.addColorStop(.5,rgb(...color,.14*gravityPulse));wave.addColorStop(1,rgb(...color,0));
+      ctx.fillStyle=wave;ctx.fillRect(0,y-24,W,48);
+    }
+    ctx.save();ctx.font="600 10px system-ui";ctx.textAlign="center";
+    ctx.fillStyle=rgb(...color,.95);ctx.fillText(up?"↑  GRAVITY":"↓  GRAVITY",W/2,up?45:H-39);ctx.restore();
   }
   function drawPlayer(y,distance){
     if(mode==="over"||(mode==="crash"&&crashTime>.12))return;
@@ -349,7 +375,7 @@ window.NoraDot = (() => {
     const edges=ctx.createLinearGradient(0,0,0,H);
     edges.addColorStop(0,"#08080dbb");edges.addColorStop(.075,"#08080d00");edges.addColorStop(.925,"#08080d00");edges.addColorStop(1,"#08080dbb");
     ctx.fillStyle=edges;ctx.fillRect(0,0,W,H);
-    line(0,1,W,1,"#ffffff19");line(0,H-1,W,H-1,"#ffffff19");
+    line(0,1,W,1,"#ffffff19");line(0,H-1,W,H-1,"#ffffff19");drawGravity();
     if(impact>.01&&!reduced){ctx.fillStyle=rgb(255,35,71,impact*.10);ctx.fillRect(0,0,W,H);}
     if(nearFlash>.01&&!reduced){ctx.strokeStyle=rgb(255,133,163,nearFlash*.30);ctx.lineWidth=2;ctx.strokeRect(1,1,W-2,H-2); }
     if(moving||mode==="ready"){
