@@ -207,7 +207,7 @@ async def send_profile_card(
     sent: Message | None = None
     if db and message.chat.type == "private" and (editable or not user.get("profile_private")):
         track = await get_track(db, user_id)
-        if track or editable or await is_public(db, user_id):
+        if track or (message.from_user and (editable or await is_public(db, user_id))):
             name, closing_tag, details = text.partition("</b>")
             if not closing_tag:
                 name, details = "", text
