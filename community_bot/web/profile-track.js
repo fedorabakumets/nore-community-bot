@@ -233,6 +233,12 @@ const NoraProfileWaves = (() => {
 
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
+  const mini = document.getElementById('nora-mini-player');
+  const miniOpen = mini.querySelector('[data-mini-open]');
+  const miniToggle = mini.querySelector('[data-mini-toggle]');
+  const miniTitle = mini.querySelector('[data-mini-title]');
+  const miniArtist = mini.querySelector('[data-mini-artist]');
+  const miniProgress = mini.querySelector('progress');
 
   // Analyse the already downloaded track separately. Never route playback through
   // AudioContext: a suspended Web Audio graph must not mute iOS playback.
@@ -258,7 +264,7 @@ window.NoraProfileTrack = (() => {
     }finally{try{await context?.close();}catch{}}
   }
   async function prepareMusicEnvelope(state) {
-    if(state.analysisStarted||!state.blob||!state.element.closest('#app[data-screen="lk"] .lk-screen,#person-profile')||
+    if(state.analysisStarted||!state.blob||!state.element?.closest('#app[data-screen="lk"] .lk-screen,#person-profile')||
        matchMedia('(prefers-reduced-motion: reduce)').matches)return;
     const duration=state.audio.duration;
     if(!Number.isFinite(duration)||duration<=0)return;
@@ -352,7 +358,7 @@ window.NoraProfileTrack = (() => {
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     const saved = library || Boolean(track.saved);
     const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
-    return `<section class="profile-track" data-track-src="${esc(src)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
+    return `<section class="profile-track" data-track-src="${esc(src)}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || 'Неизвестен')}" data-track-length="${esc(track.duration || 0)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
         <span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
@@ -405,7 +411,6 @@ window.NoraProfileTrack = (() => {
     const title = owner ? 'Треки' : 'Мои треки';
     const person = $('#person-profile');
     libraryReturn = person ? Number(person.dataset.personId) : null;
-    if (active) stop();
     sheet(libraryScreen(title, 'Загрузка…', '<div class="profile-library-empty" role="status">Загрузка…</div>'));
     const panel = $('#music-library-profile');
     panel.focus({preventScroll:true});
@@ -475,7 +480,7 @@ window.NoraProfileTrack = (() => {
       }
       if (savePath === 'music-library') {
         const row = button.closest('[data-track-src]');
-        if (active?.element === row) stop();
+        if (active?.src === row.dataset.trackSrc) stop();
         const panel = row.closest('[data-music-library-panel]');
         row.remove();
         if (panel) {
@@ -493,26 +498,61 @@ window.NoraProfileTrack = (() => {
     }
   });
 
-  function paint(state) {
-    const { audio, element, loading } = state;
+  // Playback is owned by this module, not by a profile DOM node.
+  function matchingRows(state) {
+    return Array.from(document.querySelectorAll('[data-track-src]')).filter(element =>
+      element.dataset.trackSrc === state.src && !element.closest('dialog:not([open])'));
+  }
+
+  function currentRow(state) {
+    const rows = matchingRows(state);
+    return rows.find(element => element.closest('dialog[open]')) || rows[0] || null;
+  }
+
+  function paintMini() {
+    const state = active;
+    const visible = Boolean(state && document.querySelector('#nav .nav-drop'));
+    mini.hidden = !visible;
+    document.body.classList.toggle('nora-mini-player-active', visible);
+    if (!visible) return;
+    const { audio, loading, track } = state;
     const playing = !audio.paused && !audio.ended;
+    miniTitle.textContent = track.title;
+    miniArtist.textContent = loading ? 'Загрузка…' : track.artist;
+    mini.dataset.playing = String(playing);
+    miniToggle.disabled = loading;
+    miniToggle.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Пауза' : 'Воспроизвести');
+    miniOpen.setAttribute('aria-label', 'Открыть плеер: ' + track.title);
+    miniProgress.value = Number.isFinite(audio.duration) && audio.duration > 0
+      ? Math.min(1, Math.max(0, audio.currentTime / audio.duration)) : 0;
+  }
+
+  function paint(state) {
+    const { audio, loading } = state;
+    const playing = active === state && !audio.paused && !audio.ended;
     const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    const seek = element.querySelector('[data-track-seek]');
     const current = audio.currentTime || 0;
-    seek.value = duration ? current / duration : 0;
-    seek.disabled = !duration;
-    seek.style.setProperty('--track-progress', (Number(seek.value) * 100) + '%');
-    seek.setAttribute('aria-valuetext', clock(current));
-    element.querySelector('[data-track-time]').textContent = clock(current);
-    if (duration) element.querySelector('[data-track-duration]').textContent = clock(duration);
-    element.dataset.ready = String(Boolean(duration && !loading));
-    element.dataset.playing = String(playing);
-    NoraProfileWaves.sync(element, playing && !loading,state);
-    if(!loading) void prepareMusicEnvelope(state);
-    element.dataset.loading = String(loading);
-    const play = element.querySelector('[data-track-toggle]');
-    play.disabled = loading;
-    play.setAttribute('aria-label', (loading ? 'Загружаем трек' : playing ? 'Поставить на паузу' : 'Включить трек') + ': ' + element.querySelector('.profile-track-copy strong').textContent);
+    for (const element of matchingRows(state)) {
+      const seek = element.querySelector('[data-track-seek]');
+      seek.value = duration ? current / duration : 0;
+      seek.disabled = !duration;
+      seek.style.setProperty('--track-progress', (Number(seek.value) * 100) + '%');
+      seek.setAttribute('aria-valuetext', clock(current));
+      const time = element.querySelector('[data-track-time]');
+      if (time.textContent !== clock(current)) time.textContent = clock(current);
+      const total = element.querySelector('[data-track-duration]');
+      if (duration && total.textContent !== clock(duration)) total.textContent = clock(duration);
+      element.dataset.ready = String(Boolean(duration && !loading && active === state));
+      element.dataset.playing = String(playing);
+      element.dataset.loading = String(loading);
+      const play = element.querySelector('[data-track-toggle]');
+      play.disabled = loading;
+      play.setAttribute('aria-label', (loading ? 'Загружаем трек' : playing ? 'Поставить на паузу' : 'Включить трек') + ': ' + state.track.title);
+    }
+    state.element = currentRow(state);
+    NoraProfileWaves.sync(state.element, playing && !loading, state);
+    if (active === state && !loading) void prepareMusicEnvelope(state);
+    paintMini();
   }
 
   function stop() {
@@ -529,14 +569,59 @@ window.NoraProfileTrack = (() => {
     if (state.url) URL.revokeObjectURL(state.url);
   }
 
+  async function toggleActive(state) {
+    if (!state || active !== state || state.loading) return;
+    if (!state.audio.paused) {
+      state.audio.pause();
+      return;
+    }
+    try {
+      await state.audio.play();
+    } catch (error) {
+      if (active !== state) return;
+      if (error.name === 'NotAllowedError') toast('Нажми «Включить трек» ещё раз');
+      else {
+        stop();
+        toast('Не удалось воспроизвести трек');
+      }
+    }
+  }
+
+  function openNowPlaying() {
+    const state = active;
+    if (!state) return;
+    const [endpoint, revision] = state.src.split('?v=');
+    const track = { ...state.track, revision: decodeURIComponent(revision || '') };
+    libraryReturn = null;
+    sheet('<section id="nora-now-playing" aria-label="Музыкальный плеер" tabindex="-1">' +
+      '<p class="nora-now-playing-label">Сейчас играет</p>' +
+      '<div class="nora-now-playing-art" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/></svg></div>' +
+      html(track, endpoint, false, true) +
+      '<button class="secondary nora-now-playing-stop" type="button" data-mini-stop>Остановить воспроизведение</button></section>');
+    $('#sheet').scrollTop = 0;
+    $('#nora-now-playing')?.focus({preventScroll:true});
+    paint(state);
+  }
+
+  miniOpen.addEventListener('click', openNowPlaying);
+  miniToggle.addEventListener('click', () => void toggleActive(active));
+  document.addEventListener('click', event => {
+    if (event.target.closest('[data-mini-stop]')) {
+      stop();
+      if ($('#nora-now-playing')) $('#sheet').close();
+    }
+  });
+
   document.addEventListener('click', async event => {
     const button = event.target.closest('[data-track-toggle]');
     if (!button) return;
     const element = button.closest('[data-track-src]');
-    if (active?.element !== element) {
+    if (!element) return;
+    if (active?.src !== element.dataset.trackSrc) {
       stop();
       const audio = new Audio();
-      active = { audio, element, src: element.dataset.trackSrc, controller: new AbortController(), loading: true };
+      active = { audio, element, src: element.dataset.trackSrc, controller: new AbortController(), loading: true,
+        track: { title: element.dataset.trackTitle, artist: element.dataset.trackArtist, duration: Number(element.dataset.trackLength) || 0 } };
       const state = active;
       for (const name of ['loadedmetadata', 'timeupdate', 'play', 'playing', 'pause', 'ended']) {
         audio.addEventListener(name, () => { if (active === state) paint(state); });
@@ -568,27 +653,12 @@ window.NoraProfileTrack = (() => {
       state.loading = false;
       paint(state);
     }
-    const state = active;
-    if (!state || state.loading) return;
-    if (!state.audio.paused) {
-      state.audio.pause();
-      return;
-    }
-    try {
-      await state.audio.play();
-    } catch (error) {
-      if (active !== state) return;
-      if (error.name === 'NotAllowedError') toast('Нажми «Включить трек» ещё раз');
-      else {
-        stop();
-        toast('Не удалось воспроизвести трек');
-      }
-    }
+    await toggleActive(active);
   });
 
   document.addEventListener('input', event => {
     const seek = event.target;
-    if (!seek.matches('[data-track-seek]') || active?.element !== seek.closest('[data-track-src]')) return;
+    if (!seek.matches('[data-track-seek]') || !active || active.src !== seek.closest('[data-track-src]')?.dataset.trackSrc) return;
     const { audio } = active;
     if (Number.isFinite(audio.duration)) {
       audio.currentTime = Number(seek.value) * audio.duration;
@@ -596,23 +666,23 @@ window.NoraProfileTrack = (() => {
     }
   });
 
-  // The cabinet refreshes its markup periodically. Keep playback if the same track is still on screen.
-  const observer = new MutationObserver(() => {
-    if (!active || active.element.isConnected) return;
-    const replacement = Array.from(document.querySelectorAll('[data-track-src]'))
-      .find(element => element.dataset.trackSrc === active.src && !element.closest('dialog:not([open])'));
-    if (!replacement) stop();
-    else {
+  // Reattach only the UI after route changes, refreshes and dialog dismissal.
+  // In-memory audio is cleared when the authenticated navigation is removed.
+  function rebind() {
+    if (!active) return;
+    if (!document.querySelector('#nav .nav-drop')) { stop(); return; }
+    const replacement = currentRow(active);
+    if (active.element !== replacement) {
       active.element = replacement;
       paint(active);
     }
-  });
-  for (const id of ['app', 'sheet-content']) {
+  }
+  const observer = new MutationObserver(rebind);
+  for (const id of ['app', 'sheet-content', 'nav']) {
     observer.observe(document.getElementById(id), { childList: true, subtree: true });
   }
-  document.addEventListener('close', event => {
-    if (active && event.target.contains(active.element)) stop();
-  }, true);
+  observer.observe($('#sheet'), { attributes: true, attributeFilter: ['open'] });
+  document.addEventListener('close', rebind, true);
   window.addEventListener('pagehide', stop);
   return { html, libraryButton, back };
 })();
