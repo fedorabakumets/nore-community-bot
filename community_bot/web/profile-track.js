@@ -1,4 +1,186 @@
 'use strict';
+
+// Pattern Waves (Silk/dot preset), adapted from React Bits to native WebGL2.
+// https://github.com/DavidHDev/react-bits
+/*
+MIT + Commons Clause License Condition v1.0
+
+Copyright (c) 2026 David Haz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, and distribute the Software **as part of an application, website, or product**, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+## Commons Clause Restriction
+
+You may use this Software, including for any commercial purpose, **so long as you do not sell, sublicense, or redistribute the components themselves-whether alone, in a bundle, or as a ported version.**
+
+The same restriction covers the React Bits tools (Background Studio, Texture Lab, Shape Magic, Center Stage, Sound Lab and any tools added later) and the sounds in the sound library. **You may not sell, sublicense, or redistribute the tools or the sounds themselves, or offer the tools or a substantially similar copy of them as a hosted service-whether alone, in a bundle, or as a ported version.**
+
+What you make with the tools is yours to use. You can use exported code, images, videos, and audio files in any personal or commercial application, website, or product, including paid ones. **You may not sell or redistribute the exports on their own, either individually or as the product itself, such as a sound, texture, background, or template pack.**
+
+## No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+const NoraProfileWaves = (() => {
+  const vertex = "#version 300 es\nin vec2 position;\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n}\n";
+  const field = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform vec2 uSize;\nuniform float uDpr;\nuniform vec2 uOrigin;\nuniform vec2 uPitch;\nuniform int uWave;\nuniform float uTime;\nuniform float uUnit;\nuniform vec2 uHeading;\nuniform float uAmp;\nuniform float uDepth;\nuniform vec3 uLight;\nuniform float uShine;\nuniform float uContrast;\nuniform float uInk;\nuniform float uOpacity;\nuniform int uFade;\nuniform float uFadeSize;\nuniform float uAppear;\nuniform sampler2D tRipple;\nuniform float uRipple;\nout vec4 fragColor;\n\nconst float FOLDS = 5.5;\n\nuvec3 scramble(uvec3 v) {\n  v = v * 1664525u + 1013904223u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  v ^= v >> 16u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  return v;\n}\n\nvec3 lattice(vec3 corner) {\n  uvec3 h = scramble(uvec3(ivec3(corner) + 4096));\n  return vec3(h & 65535u) / 32767.5 - 1.0;\n}\n\nfloat gradientNoise(vec3 p) {\n  vec3 i = floor(p);\n  vec3 f = p - i;\n  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n  float n000 = dot(lattice(i), f);\n  float n100 = dot(lattice(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));\n  float n010 = dot(lattice(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));\n  float n110 = dot(lattice(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));\n  float n001 = dot(lattice(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));\n  float n101 = dot(lattice(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));\n  float n011 = dot(lattice(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));\n  float n111 = dot(lattice(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));\n  return mix(\n    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),\n    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),\n    u.z\n  );\n}\n\nvec2 turn(vec2 v, float angle) {\n  float c = cos(angle);\n  float s = sin(angle);\n  return vec2(c * v.x - s * v.y, s * v.x + c * v.y);\n}\n\nfloat surface(vec2 p, float t) {\n  if (uWave == 0) {\n    vec2 side = vec2(-uHeading.y, uHeading.x);\n    float u = dot(p, uHeading);\n    float v = dot(p, side);\n    float bend = gradientNoise(vec3(v * 0.85, u * 0.3, t * 0.05)) * 1.7 + 0.4 * sin(v * 1.6 + t * 0.2);\n    float phase = u * FOLDS + bend - t * 0.45;\n    float swell = 0.6 + 0.4 * gradientNoise(vec3(u * 0.55 + 3.0, v * 0.45, t * 0.04));\n    float fold = sin(phase) + 0.32 * sin(2.0 * phase + 1.3);\n    float ripple = 0.16 * sin(u * FOLDS * 2.5 + bend * 1.9 - t * 0.9 + 2.1);\n    return (fold + ripple) * swell;\n  }\n  if (uWave == 1) {\n    float bend = gradientNoise(vec3(p * 0.6, t * 0.05)) * 0.6;\n    float phase = dot(p, uHeading) * 15.0 + bend * 2.2 - t * 1.4;\n    float swell = sin(phase) + 0.3 * sin(2.0 * phase - 0.8);\n    float roll = 0.75 + 0.25 * gradientNoise(vec3(p * 0.9 + 11.0, t * 0.05));\n    return 0.8 * swell * roll;\n  }\n  float r = length(p + uHeading * 1.2);\n  float bend = gradientNoise(vec3(p * 1.2, t * 0.05)) * 0.1;\n  return sin((r + bend) * 9.0 - t * 1.8) * (0.45 + 0.55 * exp(-(r - 0.6) * 0.8));\n}\n\nfloat heightAt(vec2 css) {\n  float h = surface((css - 0.5 * uSize) / uUnit, uTime) * uAmp;\n  if (uRipple > 0.0) h += texture(tRipple, css / uSize).r * uRipple;\n  return h;\n}\n\nvoid main() {\n  vec2 cell = floor(gl_FragCoord.xy);\n  vec2 center = uOrigin + (cell + 0.5) * uPitch;\n  vec2 css = center / uDpr;\n  vec2 uv = css / uSize;\n  float e = max(uPitch.y / uDpr, 4.0);\n  float h = heightAt(css);\n  float hx = (heightAt(css + vec2(e, 0.0)) - heightAt(css - vec2(e, 0.0))) / (2.0 * e);\n  float hy = (heightAt(css + vec2(0.0, e)) - heightAt(css - vec2(0.0, e))) / (2.0 * e);\n  vec2 grad = vec2(hx, hy) * uUnit * uDepth * 0.4;\n  vec3 n = normalize(vec3(-grad, 1.0));\n\n  float diffuse = clamp(dot(n, uLight), 0.0, 1.0);\n  vec3 halfway = normalize(uLight + vec3(0.0, 0.0, 1.0));\n  float spec = pow(clamp(dot(n, halfway), 0.0, 1.0), 160.0) * uShine * 1.15;\n  float hollow = 0.7 + 0.3 * clamp(h * 0.5 + 0.5, 0.0, 1.0);\n  float tone = clamp(diffuse * hollow * 0.78 + spec, 0.0, 1.0);\n  tone = clamp((tone - 0.42) * uContrast + 0.42, 0.0, 1.0);\n\n  float level = uInk > 0.5 ? pow(clamp(1.0 - tone / 0.46, 0.0, 1.0), 2.4) * 0.72 : pow(tone, 2.2);\n  float emphasis = uInk > 0.5 ? smoothstep(0.55, 0.95, level) : clamp(spec * 1.6, 0.0, 1.0);\n\n  float fade = 1.0;\n  vec2 c = uv * 2.0 - 1.0;\n  if (uFade == 1) {\n    fade = 1.0 - smoothstep(1.0 - uFadeSize, 1.18, length(c));\n  } else if (uFade == 2) {\n    fade = mix(0.05, 1.0, smoothstep(0.08, 0.08 + uFadeSize, length(c * vec2(1.0, 1.35))));\n  } else if (uFade == 3) {\n    fade = smoothstep(0.0, uFadeSize, uv.y);\n  } else if (uFade == 4) {\n    fade = smoothstep(0.0, uFadeSize, 1.0 - uv.y);\n  }\n\n  float reach = length(css - 0.5 * uSize) / max(0.5 * length(uSize), 1.0);\n  float appear = smoothstep(reach - 0.05, reach + 0.3, uAppear * 1.35);\n\n  float alpha = uOpacity * fade * appear * (0.22 + 0.78 * level);\n  float lift = clamp(h * uDepth * 0.42, -0.48, 0.48);\n  fragColor = vec4(level, alpha, emphasis, lift + 0.5);\n}\n";
+  const marks = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform sampler2D tField;\nuniform sampler2D tAtlas;\nuniform vec2 uOrigin;\nuniform vec2 uPitch;\nuniform vec2 uGrid;\nuniform int uPattern;\nuniform float uMarkSize;\nuniform float uStroke;\nuniform vec3 uColor;\nuniform vec3 uAccent;\nuniform vec4 uBackground;\nuniform vec3 uAtlas;\nout vec4 fragColor;\n\nfloat box(vec2 p, vec2 b, float r) {\n  vec2 q = abs(p) - b + r;\n  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;\n}\n\nfloat coverage(vec2 local, float level) {\n  float span = uPitch.y * uMarkSize;\n  float area = max(sqrt(level), 0.14);\n  if (uPattern == 0) {\n    return clamp(0.5 - (length(local) - 0.5 * span * area), 0.0, 1.0);\n  }\n  if (uPattern == 1) {\n    float extent = 0.5 * span * area;\n    return clamp(0.5 - box(local, vec2(extent), extent * 0.3), 0.0, 1.0);\n  }\n  if (uPattern == 2) {\n    float arm = 0.5 * span * mix(0.3, 1.0, level);\n    float width = 0.5 * uStroke;\n    return clamp(0.5 - min(box(local, vec2(arm, width), width), box(local, vec2(width, arm), width)), 0.0, 1.0);\n  }\n  if (uAtlas.z < 1.0) return 0.0;\n  vec2 g = local / span + 0.5;\n  if (g.x < 0.0 || g.y < 0.0 || g.x > 1.0 || g.y > 1.0) return 0.0;\n  float index = min(floor(level * uAtlas.z), uAtlas.z - 1.0);\n  vec2 tile = vec2(mod(index, uAtlas.x), floor(index / uAtlas.x));\n  vec2 atlasUv = (tile + vec2(g.x, 1.0 - g.y)) / uAtlas.xy;\n  vec2 texel = 1.0 / (span * uAtlas.xy);\n  return textureGrad(tAtlas, atlasUv, vec2(texel.x, 0.0), vec2(0.0, texel.y)).a;\n}\n\nvec4 lineInk(vec2 rel) {\n  float fx = rel.x / uPitch.x - 0.5;\n  float c0 = clamp(floor(fx), 0.0, uGrid.x - 1.0);\n  float c1 = min(c0 + 1.0, uGrid.x - 1.0);\n  float t = clamp(fx - c0, 0.0, 1.0);\n  float row = floor(rel.y / uPitch.y);\n  vec4 ink = vec4(0.0);\n  for (int k = -1; k <= 1; k++) {\n    float cy = row + float(k);\n    if (cy < 0.0 || cy >= uGrid.y) continue;\n    vec4 a = texelFetch(tField, ivec2(int(c0), int(cy)), 0);\n    vec4 b = texelFetch(tField, ivec2(int(c1), int(cy)), 0);\n    vec4 f = mix(a, b, t);\n    if (f.g < 0.002) continue;\n    float y = (cy + 0.5 + f.a - 0.5) * uPitch.y;\n    float slope = (b.a - a.a) * uPitch.y / uPitch.x;\n    float thickness = max(uStroke, uPitch.y * uMarkSize * f.r);\n    float d = abs(rel.y - y) / sqrt(1.0 + slope * slope) - 0.5 * thickness;\n    float alpha = clamp(0.5 - d, 0.0, 1.0) * f.g;\n    if (alpha > ink.a) ink = vec4(mix(uColor, uAccent, f.b) * alpha, alpha);\n  }\n  return ink;\n}\n\nvoid main() {\n  vec2 rel = gl_FragCoord.xy - uOrigin;\n  vec4 background = vec4(uBackground.rgb * uBackground.a, uBackground.a);\n  vec4 ink = vec4(0.0);\n  if (uPattern == 3) {\n    ink = lineInk(rel);\n  } else {\n    float cx = floor(rel.x / uPitch.x);\n    float row = floor(rel.y / uPitch.y);\n    if (cx >= 0.0 && cx < uGrid.x) {\n      for (int k = -1; k <= 1; k++) {\n        float cy = row + float(k);\n        if (cy < 0.0 || cy >= uGrid.y) continue;\n        vec4 f = texelFetch(tField, ivec2(int(cx), int(cy)), 0);\n        if (f.g < 0.002) continue;\n        vec2 center = (vec2(cx, cy) + 0.5) * uPitch + vec2(0.0, (f.a - 0.5) * uPitch.y);\n        float alpha = coverage(rel - center, f.r) * f.g;\n        if (alpha > ink.a) ink = vec4(mix(uColor, uAccent, f.b) * alpha, alpha);\n      }\n    }\n  }\n  fragColor = ink + background * (1.0 - ink.a);\n}\n";
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  let scene = null;
+  function renderer(canvas) {
+    const gl = canvas.getContext('webgl2', {alpha:true,premultipliedAlpha:true,antialias:false,depth:false,stencil:false});
+    if (!gl) return null;
+    let programs=[], shaders=[], textures=[], framebuffer=null, buffer=null;
+    function destroy() {
+      for(const p of programs) gl.deleteProgram(p);
+      for(const s of shaders) gl.deleteShader(s);
+      for(const t of textures) gl.deleteTexture(t);
+      if(framebuffer)gl.deleteFramebuffer(framebuffer);
+      if(buffer)gl.deleteBuffer(buffer);
+    }
+    try {
+      function compile(kind,code) {
+        const s=gl.createShader(kind);shaders.push(s);
+        gl.shaderSource(s,code);gl.compileShader(s);
+        if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));
+        return s;
+      }
+      const vs=compile(gl.VERTEX_SHADER,vertex);
+      function program(code) {
+        const p=gl.createProgram();programs.push(p);
+        gl.attachShader(p,vs);gl.attachShader(p,compile(gl.FRAGMENT_SHADER,code));
+        gl.bindAttribLocation(p,0,'position');gl.linkProgram(p);
+        if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));
+        return p;
+      }
+      const fp=program(field),mp=program(marks);
+      buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+      function texture(unit) {
+        const t=gl.createTexture();textures.push(t);gl.activeTexture(gl.TEXTURE0+unit);
+        gl.bindTexture(gl.TEXTURE_2D,t);
+        for(const key of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,key,gl.NEAREST);
+        for(const key of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T])gl.texParameteri(gl.TEXTURE_2D,key,gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4));
+        return t;
+      }
+      const grid=texture(0);texture(1);
+      framebuffer=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,grid,0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+      const locations=new Map();
+      function uniforms(p,values) {
+        gl.useProgram(p);
+        if(!locations.has(p))locations.set(p,new Map());
+        const cache=locations.get(p);
+        for(const [key,value] of Object.entries(values)){
+          if(!cache.has(key))cache.set(key,gl.getUniformLocation(p,key));
+          const loc=cache.get(key);if(loc===null)continue;
+          if(Array.isArray(value))gl['uniform'+value.length+'fv'](loc,value);
+          else if(['uWave','uFade','uPattern','tRipple','tField','tAtlas'].includes(key))gl.uniform1i(loc,value);
+          else gl.uniform1f(loc,value);
+        }
+      }
+      let oldCols=0,oldRows=0;
+      return {
+        draw(time) {
+          const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||gl.isContextLost())return;
+          const dpr=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(1000000/(w*h)));
+          const cw=Math.max(1,Math.round(w*dpr)),ch=Math.max(1,Math.round(h*dpr));
+          if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
+          const ratio=cw/w,pitch=Math.max(4,Math.round(9*ratio)),cols=Math.ceil(cw/pitch)+1,rows=Math.ceil(ch/pitch)+2;
+          const origin=[Math.floor((cw-cols*pitch)/2),Math.floor((ch-rows*pitch)/2)];
+          gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,grid);
+          if(cols!==oldCols||rows!==oldRows){
+            gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,cols,rows,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+            oldCols=cols;oldRows=rows;
+          }
+          const angle=20*Math.PI/180;
+          gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.viewport(0,0,cols,rows);
+          uniforms(fp,{uSize:[w,h],uDpr:ratio,uOrigin:origin,uPitch:[pitch,pitch],uWave:0,uTime:time*.35,uUnit:520,uHeading:[Math.cos(angle),Math.sin(angle)],uAmp:1,uDepth:.95,uLight:[-Math.cos(angle)*.78,-Math.sin(angle)*.78,.62],uShine:.8,uContrast:1.2,uInk:0,uOpacity:.9,uFade:0,uFadeSize:.5,uAppear:1,tRipple:1,uRipple:0});
+          gl.drawArrays(gl.TRIANGLES,0,3);
+          gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cw,ch);
+          uniforms(mp,{tField:0,tAtlas:1,uOrigin:origin,uPitch:[pitch,pitch],uGrid:[cols,rows],uPattern:0,uMarkSize:.95,uStroke:1,uColor:[.57,.72,.86],uAccent:[.84,.91,1],uBackground:[0,0,0,0],uAtlas:[1,1,0]});
+          gl.drawArrays(gl.TRIANGLES,0,3);
+        },
+        destroy
+      };
+    } catch(error) {destroy();return null;}
+  }
+  function stopScene(s,immediate=false) {
+    if(!s)return;
+    s.host.classList.remove('nora-profile-music');
+    s.running=false;cancelAnimationFrame(s.raf);s.raf=0;
+    s.layer.classList.remove('is-playing');
+    clearTimeout(s.removeTimer);
+    const dispose=()=>{
+      s.renderer?.destroy();s.layer.remove();
+      if(scene===s)scene=null;
+    };
+    if(immediate)dispose();else s.removeTimer=setTimeout(dispose,520);
+  }
+  function tick(s,now) {
+    s.raf=0;
+    if(!s.running||document.hidden||!s.renderer)return;
+    if(!s.last||now-s.last>=32){
+      if(s.last)s.time+=Math.min(.1,(now-s.last)/1000);
+      s.last=now;s.renderer.draw(s.time);
+    }
+    if(!reduced.matches)s.raf=requestAnimationFrame(t=>tick(s,t));
+  }
+  function wake(s) {
+    if(!s||!s.running||!s.renderer||document.hidden||s.raf)return;
+    s.last=0;s.raf=requestAnimationFrame(t=>tick(s,t));
+  }
+  function sync(element,playing) {
+    const person=element?.closest('#person-profile');
+    const own=element?.closest('#app[data-screen="lk"] .lk-screen');
+    const host=person&&person.closest('dialog')?.open?person.closest('dialog'):own?document.body:null;
+    if(!playing||!host||!element.isConnected){
+      if(scene?.running)stopScene(scene,!host||!element?.isConnected);
+      return;
+    }
+    if(scene?.host!==host&&scene)stopScene(scene,true);
+    if(!scene){
+      const layer=document.createElement('div');layer.className='nora-profile-waves';layer.setAttribute('aria-hidden','true');
+      const canvas=document.createElement('canvas');layer.append(canvas);
+      host.prepend(layer);
+      let engine=null;
+      try{engine=renderer(canvas);}catch{}
+      if(!engine)canvas.hidden=true;
+      scene={host,layer,renderer:engine,raf:0,last:0,time:0,running:false};
+      canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(scene?.layer===layer){cancelAnimationFrame(scene.raf);scene.raf=0;scene.renderer=null;canvas.hidden=true;}});
+      canvas.addEventListener('webglcontextrestored',()=>{if(scene?.layer===layer){scene.renderer=renderer(canvas);canvas.hidden=!scene.renderer;wake(scene);}});
+    }
+    if(scene.running)return;
+    clearTimeout(scene.removeTimer);scene.running=true;host.classList.add('nora-profile-music');
+    const s=scene;requestAnimationFrame(()=>{if(s.running)s.layer.classList.add('is-playing');});
+    wake(s);
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(!scene)return;
+    if(document.hidden){cancelAnimationFrame(scene.raf);scene.raf=0;}else wake(scene);
+  });
+  reduced.addEventListener('change',()=>{if(scene){cancelAnimationFrame(scene.raf);scene.raf=0;wake(scene);}});
+  window.addEventListener('resize',()=>wake(scene),{passive:true});
+  window.addEventListener('pagehide',()=>stopScene(scene,true));
+  return {sync};
+})();
+
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
 
@@ -167,6 +349,7 @@ window.NoraProfileTrack = (() => {
     if (duration) element.querySelector('[data-track-duration]').textContent = clock(duration);
     element.dataset.ready = String(Boolean(duration && !loading));
     element.dataset.playing = String(playing);
+    NoraProfileWaves.sync(element, playing && !loading);
     element.dataset.loading = String(loading);
     const play = element.querySelector('[data-track-toggle]');
     play.disabled = loading;
@@ -195,7 +378,7 @@ window.NoraProfileTrack = (() => {
       const audio = new Audio();
       active = { audio, element, src: element.dataset.trackSrc, controller: new AbortController(), loading: true };
       const state = active;
-      for (const name of ['loadedmetadata', 'timeupdate', 'play', 'pause', 'ended']) {
+      for (const name of ['loadedmetadata', 'timeupdate', 'play', 'playing', 'pause', 'ended']) {
         audio.addEventListener(name, () => { if (active === state) paint(state); });
       }
       audio.addEventListener('error', () => {
