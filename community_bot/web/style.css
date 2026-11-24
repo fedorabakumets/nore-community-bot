@@ -5081,3 +5081,77 @@ body:has(#app[data-screen="dot"])::after{background:var(--nora-background,#11101
   .game-shortcut.game-shortcut-mono,.game-shortcut-mono .game-shortcut-art svg { transition:none; }
   .game-shortcut.game-shortcut-mono:active,.game-shortcut-mono:active .game-shortcut-art svg { transform:none; }
 }
+
+
+/* Games are a single-screen catalog. Only the room list can scroll. */
+html:has(#app[data-screen="games"]),body:has(#app[data-screen="games"]){
+  overflow:hidden!important;overscroll-behavior:none;
+}
+body:has(#app[data-screen="games"]){height:100dvh;min-height:0}
+body:has(#app[data-screen="games"]) #scroll-jump{display:none!important;pointer-events:none!important}
+#app[data-screen="games"],body.nora-mini-player-active #app[data-screen="games"]{
+  position:fixed!important;
+  inset:max(var(--safe-top,0px),calc(var(--device-top,0px) + 56px)) 0 calc(78px + var(--safe-bottom,0px)) 0;
+  width:100%;max-width:680px;height:auto;min-height:0;max-height:none;margin:0 auto!important;
+  padding:4px calc(20px + var(--safe-right,0px)) 4px calc(20px + var(--safe-left,0px))!important;
+  display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;
+}
+body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-screen="games"]{
+  bottom:calc(152px + var(--safe-bottom,0px));
+}
+#app[data-screen="games"] > .demo{flex:none;margin-bottom:4px}
+#app[data-screen="games"] .games-screen-fit{
+  flex:1 1 0;min-height:0;display:grid;
+  grid-template-rows:auto minmax(0,1fr) clamp(102px,24%,158px);
+  gap:8px;
+}
+#app[data-screen="games"] .games-heading{
+  margin:0;gap:0 8px;align-items:center;flex-wrap:nowrap;
+}
+#app[data-screen="games"] .games-heading h1{font-size:clamp(26px,7vw,34px);line-height:1.12}
+#app[data-screen="games"] .games-heading .play-back{min-height:40px;white-space:nowrap}
+#app[data-screen="games"] .games-catalog{
+  --game-gap:8px;--nora-card-height:124px;
+  min-height:0;margin:0;display:grid;
+  grid-template-rows:minmax(0,1fr) clamp(76px,29%,144px);
+}
+#app[data-screen="games"] .game-shortcuts{
+  max-width:none;min-height:0;margin:0;
+  grid-template-rows:repeat(2,minmax(0,1fr));
+}
+#app[data-screen="games"] .game-shortcut{
+  aspect-ratio:auto;min-height:0;height:100%;width:100%;border-radius:14px;
+}
+#app[data-screen="games"] .game-shortcut-art{padding:3% 12% 0}
+#app[data-screen="games"] .game-shortcut-art svg{max-width:104px;max-height:96px}
+#app[data-screen="games"] .game-shortcut-name{padding:2px 4px 9px;font-size:clamp(11px,3.2vw,15px)}
+#app[data-screen="games"] .nora-game-card{
+  min-height:0;height:100%;padding-block:7px;gap:5px;
+}
+#app[data-screen="games"] .nora-game-card .nora-game-logo{font-size:clamp(30px,9vw,48px)}
+#app[data-screen="games"] .nora-game-card-bottom{padding:3px 7px;font-size:10px;gap:7px}
+#app[data-screen="games"] .game-lobbies{
+  min-height:0;margin:0;display:flex;flex-direction:column;padding:4px 9px 5px;overflow:hidden;
+}
+#app[data-screen="games"] .game-lobbies-head{flex:none;padding-bottom:3px}
+#app[data-screen="games"] #games-lobbies{
+  min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;scrollbar-width:thin;
+}
+#app[data-screen="games"] .lobby-status{padding:8px 6px 6px}
+#app[data-screen="games"] .lobby-entry{min-height:44px}
+@media (min-width:580px){
+  #app[data-screen="games"] .game-shortcuts{grid-template-rows:minmax(0,1fr)}
+}
+@media (max-height:570px){
+  #app[data-screen="games"] .games-screen-fit{grid-template-rows:auto minmax(0,1fr) 94px;gap:5px}
+  #app[data-screen="games"] .games-catalog{--game-gap:5px;grid-template-rows:minmax(0,1fr) clamp(62px,27%,90px)}
+  #app[data-screen="games"] .games-heading h1{font-size:24px}
+  #app[data-screen="games"] .games-heading .play-back{min-height:34px}
+  #app[data-screen="games"] .game-shortcut-name{padding:1px 3px 5px;font-size:11px}
+  #app[data-screen="games"] .nora-game-card .nora-game-logo{font-size:30px}
+  #app[data-screen="games"] .nora-game-card{gap:3px;padding-block:4px}
+}
+@media (max-height:570px) and (min-width:460px){
+  #app[data-screen="games"] .game-shortcuts{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:minmax(0,1fr)}
+}
