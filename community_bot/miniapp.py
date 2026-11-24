@@ -84,11 +84,14 @@ async def protection(request, handler):
             profile_optional = path in {
                 '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
-                '/api/profile/privacy', '/api/profile/track', '/api/profile/track/save', '/api/music-library', '/api/notices', '/api/admin',
+                '/api/profile/privacy', '/api/profile/track', '/api/profile/track/save',
+                '/api/music-library', '/api/notices', '/api/admin',
                 '/api/story/dedzytwo/like',
                 '/api/story/dedzytwo/status',
                 '/api/community/chat',
-            } or path.startswith(('/api/music-library/', '/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/'))
+            } or path.startswith((
+                '/api/music-library/', '/api/notices/', '/api/admin/', '/api/games/exit/', '/api/community/chat/',
+            ))
             if not profile_optional:
                 from community_bot.events_api import allowed
                 from community_bot.profile_fill import profile_is_complete
@@ -259,8 +262,8 @@ async def overview(request):
     today = datetime.now(ZoneInfo(getattr(settings, 'timezone', 'Europe/Moscow'))).date()
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
-    from community_bot.profile_track import get_track
     from community_bot.music_library import saved_track_summary
+    from community_bot.profile_track import get_track
     from community_bot.role_prefixes import prefix_for
     from community_bot.social_likes import count
 
