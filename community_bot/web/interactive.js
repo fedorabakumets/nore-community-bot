@@ -102,9 +102,19 @@ window.NoraInteractive = (() => {
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
 
+  const gameGlyphs = {
+    durak: `<g transform="rotate(13 65 47)"><rect x="51" y="19" width="37" height="56" rx="6" fill="#303035" stroke="currentColor"/><path d="M69.5 39c-3.8 5-9 7-9 12a4.8 4.8 0 0 0 9 2.1 4.8 4.8 0 0 0 9-2.1c0-5-5.2-7-9-12Z" fill="currentColor" stroke="none"/><path d="m67 58 2.5-5 2.5 5" fill="currentColor" stroke="none"/></g>
+      <g transform="rotate(-12 44 48)"><rect x="25" y="20" width="38" height="57" rx="6" fill="#47474d" stroke="currentColor"/><path d="M44 57c-3-2.5-10-7-10-12.2a5.7 5.7 0 0 1 10-3.9 5.7 5.7 0 0 1 10 3.9C54 50 47 54.5 44 57Z" fill="var(--game-accent)" stroke="none"/><path d="M32 29h5m14 40h5" opacity=".55"/></g>`,
+    barricade: `<rect x="22" y="19" width="60" height="60" rx="7" fill="#343439" stroke="currentColor"/><path d="M34 20v58m12-58v58m12-58v58m12-58v58M23 31h58M23 43h58M23 55h58M23 67h58" stroke="#77777f" stroke-width="1.2"/><path d="M34 43h24M70 55v24" stroke="#c3c3c9" stroke-width="3.8"/><path d="M46 67V43" stroke="var(--game-accent)" stroke-width="4.4"/><circle cx="64" cy="25" r="3.6" fill="#d2d2d6" stroke="none"/><circle cx="40" cy="73" r="3.6" fill="#d2d2d6" stroke="none"/>`,
+    dot: `<g fill="#343439" stroke="currentColor"><rect x="20" y="16" width="13" height="20" rx="3"/><rect x="20" y="60" width="13" height="22" rx="3"/><rect x="71" y="16" width="13" height="31" rx="3"/><rect x="71" y="71" width="13" height="11" rx="3"/></g><path d="M12 51c15 13 26 14 39-1s22-1 34 7" stroke="#7b7b83" stroke-dasharray="2 5" stroke-width="1.8"/><circle cx="52" cy="49" r="8" fill="var(--game-accent)" stroke="none"/>`,
+    rocket: `<g transform="rotate(35 52 48)"><path d="M43 51c-10 3-13 11-12 20l12-6m18-14c10 3 13 11 12 20l-12-6" fill="#414147" stroke="currentColor"/><path d="M52 12c-12 9-17 24-13 45l4 9h18l4-9c4-21-1-36-13-45Z" fill="#4b4b51" stroke="currentColor"/><circle cx="52" cy="36" r="7" fill="#202024" stroke="currentColor"/><path d="M43 58h18" stroke="#c0c0c6"/><path d="M47 71c-2 5 0 10 5 15 5-5 7-10 5-15Z" fill="var(--game-accent)" stroke="none"/></g>`
+  };
+
   function gameShortcut(game, create = false) {
     const action = create ? "data-create-match" : "data-tab";
-    return `<button type="button" class="game-shortcut game-${game}" ${action}="${game}">
+    const glyph = gameGlyphs[game];
+    return `<button type="button" class="game-shortcut game-${game}${glyph ? " game-shortcut-mono" : ""}" ${action}="${game}">
+      ${glyph ? `<span class="game-shortcut-art" aria-hidden="true"><svg viewBox="0 0 104 96" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" focusable="false">${glyph}</svg></span>` : ""}
       <span class="game-shortcut-name">${games[game]}</span>
     </button>`;
   }
