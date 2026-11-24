@@ -4717,3 +4717,11 @@ body.nora-profile-music #app[data-screen="lk"] .profile-track[data-playing="true
   body.nora-profile-music #app[data-screen="lk"] .profile-track .profile-track-toggle::after,
   #sheet.nora-profile-music #person-profile .profile-track .profile-track-toggle::after {opacity:0;transition:none}
 }
+
+/* Accent the individual bass hits without flashing the page or shifting controls. */
+.nora-profile-waves canvas {
+  opacity:calc(.49 + var(--music-beat,0) * .39);
+}
+@media(prefers-reduced-motion:reduce){
+  .nora-profile-waves canvas {opacity:.57}
+}
