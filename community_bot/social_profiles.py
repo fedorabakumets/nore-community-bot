@@ -13,7 +13,9 @@ from community_bot.friends_api import _recipient, accepted
 from community_bot.helpers import can_view_profile, effective_role, role_title
 from community_bot.profile_fields import profile_age
 from community_bot.profile_track import download_track, get_track
-from community_bot.music_library import change_collection, get_collection, public_track, saved_track_summary
+from community_bot.music_library import (
+    can_read_library, change_collection, get_collection, is_public, public_track, saved_track_summary, set_public,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -183,7 +185,8 @@ async def profile(request):
         result.update(bio=target["profile_bio"], hobbies=target["hobbies"],
                       reputation=target["reputation"], tier=tier.label, cookies=target["cookies"],
                       likes=await count(db, target["user_id"]),
-                      track=await saved_track_summary(db, uid, await get_track(db, target["user_id"])))
+                      track=await saved_track_summary(db, uid, await get_track(db, target["user_id"])),
+                      music_library_public=await can_read_library(db, settings, uid, target["user_id"]))
     return web.json_response(result)
 
 
@@ -277,19 +280,48 @@ async def music_library(request):
             return web.json_response({"error": str(error)}, status=400)
         return web.json_response(result)
     entries = await get_collection(db, uid)
-    return web.json_response({"tracks": [public_track(key, track) for key, track in reversed(list(entries.items()))]})
+    return web.json_response({"public": await is_public(db, uid), "tracks": [
+        public_track(key, track) for key, track in reversed(list(entries.items()))
+    ]})
 
 
 async def library_audio(request):
     db, bot, uid = request.app["db"], request.app.get("bot"), request["actor"]["id"]
     key = request.match_info["track_id"]
-    track = (await get_collection(db, uid)).get(key)
+    owner = uid
+    if "user_id" in request.match_info:
+        owner = (await target_for(request))["user_id"]
+        if not await can_read_library(db, request.app["settings"], uid, owner):
+            raise web.HTTPNotFound()
+    track = (await get_collection(db, owner)).get(key)
     if not bot or not track or track["revision"] != request.query.get("v"):
         raise web.HTTPNotFound()
     try:
         audio = await download_track(bot, track["file_id"])
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
-    if not audio or key not in await get_collection(db, uid):
+    if (not audio or key not in await get_collection(db, owner)
+            or not await can_read_library(db, request.app["settings"], uid, owner)):
         raise web.HTTPNotFound()
     return web.Response(body=audio, content_type=track["mime"])
+
+
+async def library_visibility(request):
+    db, uid = request.app["db"], request["actor"]["id"]
+    payload = await request.json()
+    if not isinstance(payload, dict) or type(payload.get("public")) is not bool:
+        raise web.HTTPBadRequest()
+    await set_public(db, uid, payload["public"])
+    return web.json_response({"public": payload["public"]})
+
+
+async def public_music_library(request):
+    db, uid = request.app["db"], request["actor"]["id"]
+    target = await target_for(request)
+    owner = target["user_id"]
+    if not await can_read_library(db, request.app["settings"], uid, owner):
+        raise web.HTTPNotFound()
+    entries = await get_collection(db, owner)
+    return web.json_response({"tracks": [
+        public_track(key, track) for key, track in reversed(list(entries.items()))
+    ]})
