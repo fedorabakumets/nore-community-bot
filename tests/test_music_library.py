@@ -4,7 +4,7 @@ import json
 import pytest
 
 from community_bot.database import Database
-from community_bot.music_library import change_collection, get_collection, save_button, saved_track_summary
+from community_bot.music_library import change_collection, get_collection, profile_music_button, saved_track_summary
 from community_bot.profile_track import get_track, track_key
 
 
@@ -50,9 +50,12 @@ async def test_rich_toggle_shared_audio_reference(tmp_path):
     await db.ensure_user(2, telegram_name="Второй")
     track = sample()
     await db.set_bot_state(track_key(2), json.dumps(track))
-    block = save_button(track, 2)
-    assert block.buttons[0].text == "+"
-    assert len(block.buttons[0].callback_data.encode()) <= 64
+    button = profile_music_button(track, 2, 1)
+    assert button.text == "➕🎵"
+    assert len(button.callback_data.encode()) <= 64
+    assert profile_music_button(track, 2, 2).text == "🎧"
+    assert profile_music_button(None, 2, 1) is None
+    assert profile_music_button(None, 2, 2).text == "🎧"
     assert (await change_collection(db, 1, target_id=2, revision=track["revision"]))["saved"]
     assert not (await change_collection(db, 1, target_id=2, revision=track["revision"]))["saved"]
     await change_collection(db, 1, target_id=2, revision=track["revision"], saved=True)
@@ -114,3 +117,62 @@ async def test_legacy_music_requests_only_explain_new_commands():
         result = await reply_for("Нора " + text, SimpleNamespace(), datetime.now(UTC))
         assert "Нора песня" in result
         assert "Нора треки" in result
+
+
+async def test_in_profile_library_never_leaks_private_audio(tmp_path):
+    from community_bot.library_rich import library_card
+    from community_bot.music_library import set_public
+
+    db = Database(tmp_path / "profile-music.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Владелец")
+    track = sample()
+    await db.set_bot_state(track_key(1), json.dumps(track))
+    await change_collection(db, 1, target_id=1, revision=track["revision"], saved=True)
+    hidden = await library_card(db, 1, 1, profile=True, shared=True)
+    assert not any(block.type == "audio" for block in hidden.blocks)
+    assert hidden.blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    private = await library_card(db, 1, 1, profile=True)
+    assert any(block.type == "audio" for block in private.blocks)
+    assert private.blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    await set_public(db, 1, True)
+    public = await library_card(db, 1, 1, profile=True, shared=True)
+    assert any(block.type == "audio" for block in public.blocks)
+    assert not any(button.callback_data.startswith(("mlib:p_del:", "mlib:p_public:"))
+                   for block in public.blocks if block.type == "buttons" for button in block.buttons)
+
+
+async def test_owner_profile_opens_in_place_and_duplicates_only_from_group(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from aiogram.types import Chat, Message, User
+
+    from community_bot import library_rich
+
+    db = Database(tmp_path / "profile-open.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Владелец")
+    await db.ensure_user(2, telegram_name="Гость")
+    await db.bind_ui_owner(-100123, 10, 1, "profile")
+    monkeypatch.setattr(library_rich, "allowed_actor", AsyncMock(return_value=True))
+    edit = AsyncMock()
+    deliver = AsyncMock()
+    monkeypatch.setattr(Message, "edit_text", edit)
+    monkeypatch.setattr(library_rich, "deliver", deliver)
+    settings = SimpleNamespace(community_chat_id=-100123)
+    callback = SimpleNamespace(
+        data="mlib:open:1", from_user=User(id=1, first_name="Владелец", is_bot=False),
+        message=Message(message_id=10, date=1725000000, chat=Chat(id=-100123, type="supergroup")),
+        bot=SimpleNamespace(), answer=AsyncMock(),
+    )
+    await library_rich.library_callback(callback, db, settings)
+    edit.assert_awaited_once()
+    deliver.assert_awaited_once_with(callback.bot, db, 1, 1)
+    assert edit.await_args.kwargs["rich_message"].blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    edit.reset_mock()
+    deliver.reset_mock()
+    callback.message = Message(message_id=11, date=1725000000, chat=Chat(id=1, type="private"))
+    await library_rich.library_callback(callback, db, settings)
+    edit.assert_awaited_once()
+    deliver.assert_not_awaited()

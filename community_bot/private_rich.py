@@ -446,10 +446,13 @@ class PrivateRichContextMiddleware(BaseMiddleware):
                     and source.message_id > 0):
                 saved = await data["db"].get_bot_state(f"private_rich_panel:{uid}")
                 is_panel = saved and json.loads(saved)["message_id"] == source.message_id
-                library_action = (event.data or "").startswith("mlib:") and any(
-                    button.callback_data == event.data
-                    for block in (source.rich_message.blocks if source.rich_message else [])
-                    if block.type == "buttons" for button in block.buttons
+                rich_blocks = source.rich_message.blocks if source.rich_message else []
+                library_action = (event.data or "").startswith(("mlib:", "gprofile:save:")) and (
+                    any(button.callback_data == event.data for block in rich_blocks
+                        if block.type == "buttons" for button in block.buttons)
+                    or any(getattr(getattr(part, "button", None), "callback_data", None) == event.data
+                           for block in rich_blocks if block.type == "paragraph" and isinstance(block.text, list)
+                           for part in block.text)
                 )
                 standalone = library_action or (not is_panel and (event.data or "").startswith(_NOTICE_ACTIONS)
                               and any(button.callback_data == event.data
