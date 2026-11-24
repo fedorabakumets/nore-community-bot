@@ -4351,7 +4351,7 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
   --profile-radius:25px; --profile-ink:#f5f1ed; --profile-muted:#96939e;
 }
 #app[data-screen="lk"] .lk-screen { --lk-surface:var(--profile-surface); }
-#app[data-screen="lk"] .lk-identity { background:transparent; gap:12px; margin:0; padding-bottom:0; }
+#app[data-screen="lk"] .lk-screen > .lk-identity { background:transparent; border:0; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; gap:12px; margin:0; padding-bottom:0; }
 #app[data-screen="lk"] .lk-identity-heading h2, #sheet #person-profile .person-name-line h2 { font-size:25px; font-weight:650; line-height:1.2; }
 #app[data-screen="lk"] .lk-identity-heading > button { width:44px; height:44px; background:transparent; border:0; }
 #app[data-screen="lk"] .lk-identity-heading > button svg { width:21px; height:21px; }
@@ -4391,3 +4391,9 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 #sheet #person-profile > .person-stats { order:6; }
 #sheet #person-profile > .person-locked { border-radius:var(--profile-radius); }
 @media (max-width:340px) { #app[data-screen="lk"] .tg-profile-action-icon, #sheet #person-profile .tg-profile-actions button::before { width:46px; height:46px; } #app[data-screen="lk"] .tg-profile-action { font-size:11px; } }
+
+/* Icon-only actions on the own Telegram-style profile. */
+#app[data-screen="lk"] .lk-identity > .tg-profile-actions { margin:5px 0 4px; }
+#app[data-screen="lk"] .tg-profile-actions > .tg-profile-action { min-height:50px; gap:6px; }
+#app[data-screen="lk"] .tg-profile-action-icon { color:#fff; }
+#app[data-screen="lk"] .tg-profile-action small { font-size:12px; font-variant-numeric:tabular-nums; color:var(--profile-muted); }
