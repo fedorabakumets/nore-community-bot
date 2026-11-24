@@ -4596,3 +4596,69 @@ body { background:var(--nora-background); color:var(--nora-text); }
 }
 #nav button .nav-profile-photo:not(:has(img)) { background:var(--nora-control); border-color:var(--nora-divider); }
 #nav button.active:not([data-tab="lk"]), #nav button.active:not([data-tab="lk"])>svg { color:var(--nora-text); }
+
+/* Profile music scene — local palette only, no global theme changes. */
+@property --music-profile-base {
+  syntax: '<color>'; inherits: true; initial-value: #111013;
+}
+body, #sheet { --music-profile-base:#111013; }
+body.nora-profile-music:has(#app[data-screen="lk"]) {
+  --music-profile-base:#354451;
+  background-color:var(--music-profile-base);
+}
+body:has(#app[data-screen="lk"]) { transition:background-color .48s ease,--music-profile-base .48s ease; }
+#sheet:has(#person-profile) { transition:background-color .48s ease,--music-profile-base .48s ease; }
+#sheet.nora-profile-music:has(#person-profile) {
+  --music-profile-base:#354451; background-color:var(--music-profile-base);
+}
+.nora-profile-waves {
+  position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; opacity:0;
+  background:radial-gradient(ellipse at 50% 15%,#52657588,transparent 72%);
+  transition:opacity .48s ease;
+}
+.nora-profile-waves.is-playing { opacity:1; }
+.nora-profile-waves canvas {
+  width:100%; height:100%; display:block; opacity:.57;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 60%,transparent 100%);
+  mask-image:linear-gradient(to bottom,#000 0%,#000 60%,transparent 100%);
+}
+body:has(> .nora-profile-waves) { isolation:isolate; }
+body:has(> .nora-profile-waves) #app { position:relative; z-index:1; }
+body:not(:has(#app[data-screen="lk"])) > .nora-profile-waves,
+#sheet:not(:has(#person-profile)) > .nora-profile-waves { display:none; }
+#sheet:has(> .nora-profile-waves) #sheet-content { position:relative;z-index:1; }
+body.nora-profile-music #app[data-screen="lk"],
+#sheet.nora-profile-music:has(#person-profile) {
+  --nora-surface:#3c4957; --nora-control:#2e3b49; --nora-secondary:#c0cbd7; --nora-divider:#ffffff25;
+  --profile-surface:#3c4957eb; --profile-button:#2e3b49e8; --profile-muted:#c0cbd7; --profile-rule:#ffffff25;
+  --poster-bg:var(--music-profile-base); --poster-panel:var(--profile-surface);
+  --poster-raised:var(--profile-button); --poster-muted:var(--profile-muted); --poster-rule:var(--profile-rule);
+  --glass-panel:var(--profile-surface); --glass-raised:var(--profile-button); --glass-muted:var(--profile-muted);
+  --panel:var(--profile-surface); --muted:var(--profile-muted); --line:var(--profile-rule);
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo:has(img)::after,
+#sheet #person-profile .person-photo:has(img)::after {
+  background:linear-gradient(to bottom,transparent 48%,color-mix(in srgb,var(--music-profile-base) 18%,transparent) 60%,color-mix(in srgb,var(--music-profile-base) 52%,transparent) 75%,color-mix(in srgb,var(--music-profile-base) 85%,transparent) 87%,var(--music-profile-base) 98%);
+}
+#app[data-screen="lk"] :is(.tg-profile-fields,.lk-group,.tg-profile-economy,.lk-account,.lk-completion,.tg-profile-action-icon,.profile-track,.profile-track-toggle,.profile-track-save,.profile-library-open,#change-avatar),
+#sheet #person-profile :is(.tg-profile-fields,.stat,.person-locked,.profile-track,.profile-track-toggle,.profile-track-save,.profile-library-open),
+#sheet #person-profile .person-actions button::before,
+#sheet:has(#person-profile) > #dismiss {
+  transition:background-color .48s ease,border-color .48s ease,color .48s ease,box-shadow .48s ease;
+}
+body.nora-profile-music #app[data-screen="lk"] :is(.profile-track,.profile-track-toggle,.profile-track-save,#change-avatar),
+#sheet.nora-profile-music #person-profile :is(.profile-track,.profile-track-toggle,.profile-track-save),
+#sheet.nora-profile-music:has(#person-profile) > #dismiss { background-color:var(--profile-button); border-color:var(--profile-rule); }
+body.nora-profile-music:has(#app[data-screen="lk"]) #nav {
+  background-color:#2e3b49c9;
+}
+body.nora-profile-music:has(#app[data-screen="lk"]) #nav .nav-drop {
+  background:linear-gradient(165deg,#657789b8,#405366d9);
+}
+body:has(#app[data-screen="lk"]) #nav { transition:background-color .48s ease; }
+body.nora-profile-music:has(#app[data-screen="lk"])::after { background:var(--music-profile-base); }
+@media(prefers-reduced-motion:reduce) {
+  .nora-profile-waves,body:has(#app[data-screen="lk"]),#sheet:has(#person-profile) {transition:none}
+  #app[data-screen="lk"] :is(.tg-profile-fields,.lk-group,.tg-profile-economy,.tg-profile-action-icon,.profile-track,.profile-track-toggle),
+  #sheet #person-profile :is(.tg-profile-fields,.stat,.profile-track,.profile-track-toggle),#sheet #person-profile .person-actions button::before {transition:none}
+}
