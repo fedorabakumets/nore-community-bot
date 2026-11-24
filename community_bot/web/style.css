@@ -5155,3 +5155,56 @@ body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-scre
 @media (max-height:570px) and (min-width:460px){
   #app[data-screen="games"] .game-shortcuts{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:minmax(0,1fr)}
 }
+
+
+/* Community launchers: shared graphite geometry, individual restrained accent colors. */
+#app[data-screen="community"] .community-tiles {gap:10px;margin:8px 0 14px}
+#app[data-screen="community"] .community-launch-tile {
+  --launch-accent:#f32843;
+  --launch-glow:243,40,67;
+  position:relative;isolation:isolate;display:grid;
+  grid-template-columns:clamp(62px,20%,88px) minmax(0,1fr) 32px;
+  align-items:center;justify-items:stretch;gap:14px;
+  width:100%;height:clamp(78px,10.2dvh,96px);min-height:0;max-height:none;aspect-ratio:auto;
+  margin:0;padding:0 16px 0 12px;border:1px solid #ffffff1b;border-radius:24px;
+  background:linear-gradient(155deg,#242427 0%,#1c1c20 48%,#18181b 100%);
+  box-shadow:inset 0 1px 0 #ffffff08;overflow:hidden;clip-path:none;
+  text-align:left;transition:transform .18s ease,border-color .18s ease;
+}
+#app[data-screen="community"] .community-pet-tile.community-launch-tile {
+  --launch-accent:#b6df87;--launch-glow:182,223,135;
+}
+.community-launch-tile::after {
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 85px 75% at 98% 50%,rgba(var(--launch-glow),.18),transparent 100%);
+  opacity:.55;animation:nora-launch-glow 2.8s ease-in-out infinite;
+}
+.community-pet-tile.community-launch-tile::after{animation-delay:-1.4s}
+.community-launch-icon {
+  position:relative;z-index:1;display:grid;place-items:center;
+  height:48px;min-width:0;border-right:1px solid #ffffff15;color:var(--launch-accent);
+}
+.community-launch-icon svg {display:block;width:44px;height:44px;max-width:85%;overflow:visible}
+#app[data-screen="community"] .community-launch-tile .community-tile-title {
+  z-index:1;display:block;color:var(--nora-text,#f7f5f1);
+  font:750 clamp(18px,5.1vw,23px)/1.15 var(--body-font,system-ui);letter-spacing:-.025em;text-shadow:none;
+}
+.community-launch-arrow {
+  position:relative;z-index:1;display:grid;place-items:center;
+  width:32px;height:40px;color:var(--launch-accent);
+}
+.community-launch-arrow svg {
+  width:25px;height:25px;filter:drop-shadow(0 0 5px rgba(var(--launch-glow),.40));
+  animation:nora-launch-chevron 2.8s ease-in-out infinite;
+}
+.community-pet-tile .community-launch-arrow svg{animation-delay:-1.4s}
+@keyframes nora-launch-glow {0%,100%{opacity:.38}50%{opacity:.95}}
+@keyframes nora-launch-chevron {0%,100%{opacity:.85;transform:translateX(0)}50%{opacity:1;transform:translateX(2px)}}
+#app[data-screen="community"] .community-launch-tile:active{transform:scale(.985);border-color:rgba(var(--launch-glow),.36)}
+#app[data-screen="community"] .community-launch-tile:focus-visible{outline:2px solid var(--launch-accent);outline-offset:2px}
+@media(hover:hover){#app[data-screen="community"] .community-launch-tile:hover{border-color:rgba(var(--launch-glow),.32)}}
+@media(prefers-reduced-motion:reduce){
+  .community-launch-tile::after,.community-launch-arrow svg{animation:none}
+  #app[data-screen="community"] .community-launch-tile{transition:none}
+  #app[data-screen="community"] .community-launch-tile:active{transform:none}
+}
