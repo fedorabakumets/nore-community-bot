@@ -634,11 +634,13 @@ async def main() -> None:
     from community_bot.december_cabin import run as publish_december_meetup
     from community_bot.pet_video import PetVideoQueue
     from community_bot.rsvp import event_counters_job
-    from community_bot.telegram_like_tags import like_tags_job
+    from community_bot.telegram_like_tags import LikeTagMembershipMiddleware, like_tags_job
     from community_bot.widget_notifications import widget_notification_job
 
     widget_notification_task = asyncio.create_task(widget_notification_job(bot, db))
-    like_tags_task = asyncio.create_task(like_tags_job(db, bot, settings.community_chat_id))
+    like_tags_checked: dict[int, tuple[int, float]] = {}
+    dispatcher.update.outer_middleware(LikeTagMembershipMiddleware(settings.community_chat_id, like_tags_checked))
+    like_tags_task = asyncio.create_task(like_tags_job(db, bot, settings.community_chat_id, like_tags_checked))
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
     december_meetup_task = asyncio.create_task(publish_december_meetup(db, settings, bot))
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
@@ -660,7 +662,7 @@ async def main() -> None:
                 bot,
                 allowed_updates=sorted({
                     *dispatcher.resolve_used_update_types(),
-                    "my_chat_member", "widget_query", "message", "edited_message",
+                    "my_chat_member", "chat_member", "widget_query", "message", "edited_message",
                 }),
                 db=db,
                 settings=settings,
