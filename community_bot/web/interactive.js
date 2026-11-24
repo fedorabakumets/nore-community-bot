@@ -220,7 +220,7 @@ window.NoraInteractive = (() => {
   }
 
   function gamesScreen() {
-    return `<div class="games-heading nora-page-heading">${back(parent("games"), "Коммьюнити")}<h1>Игры</h1></div>
+    return `<section class="games-screen-fit"><div class="games-heading nora-page-heading">${back(parent("games"), "Коммьюнити")}<h1>Игры</h1></div>
       <div class="games-catalog">
         <div class="game-shortcuts" role="group" aria-label="Выбор игры">${gameChoices.map(game => gameShortcut(game)).join("")}</div>
         ${noraGameCard()}
@@ -231,7 +231,7 @@ window.NoraInteractive = (() => {
           <button type="button" id="games-create" class="lobby-tool" aria-label="Создать матч" aria-haspopup="dialog">${icon("plus")}</button>
         </div>
         <div id="games-lobbies">${lobbyList()}</div>
-      </section>`;
+      </section></section>`;
   }
 
   function chooseMatch() {
