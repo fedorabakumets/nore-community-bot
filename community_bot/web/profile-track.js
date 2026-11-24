@@ -240,7 +240,7 @@ window.NoraProfileTrack = (() => {
   const miniArtist = mini.querySelector('[data-mini-artist]');
   const miniProgress = mini.querySelector('progress');
   const miniShare = mini.querySelector('[data-mini-share]');
-  let sharePending = false, miniSource = '', shareUntil = 0, shareTimer = 0;
+  let sharePending = false, miniSource = '', sharedSource = '', shareUntil = 0, shareTimer = 0;
   const miniMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   // Analyse the already downloaded track separately. Never route playback through
@@ -531,8 +531,8 @@ window.NoraProfileTrack = (() => {
     }
     miniShare.disabled = loading || sharePending || Date.now() < shareUntil;
     miniShare.dataset.sending = String(sharePending);
-    miniShare.dataset.sent = String(!sharePending && Date.now() < shareUntil);
-    miniShare.setAttribute('aria-label', sharePending ? 'Отправляем трек' : 'Поделиться треком в чате');
+    miniShare.dataset.sent = String(!sharePending && sharedSource === state.src && Date.now() < shareUntil);
+    miniShare.setAttribute('aria-label', sharePending ? 'Отправляем трек' : Date.now() < shareUntil ? 'Повторная отправка доступна через 5 минут' : 'Поделиться треком в чате');
     mini.dataset.playing = String(playing);
     miniToggle.disabled = loading;
     miniToggle.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Пауза' : 'Воспроизвести');
@@ -628,6 +628,7 @@ window.NoraProfileTrack = (() => {
       const [source, revision] = state.src.split('?v=');
       const result = await api('community/music/share', {source, revision: decodeURIComponent(revision || '')});
       if (!result.sent) throw Error(result.message || 'Не удалось отправить трек');
+      sharedSource = state.src;
       shareUntil = Date.now() + Math.max(1, Number(result.retry_after) || 300) * 1000;
       clearTimeout(shareTimer);
       shareTimer = setTimeout(paintMini, Math.max(0, shareUntil - Date.now()));
