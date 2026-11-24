@@ -200,7 +200,7 @@ window.NoraPet = (() => {
   }
 
   function sheetHead(title) {
-    return '<div class="pet2-heading"><h2>' + esc(title) + '</h2></div>';
+    return '<div class="pet2-heading"><h2 tabindex="-1" autofocus style="outline:none">' + esc(title) + '</h2></div>';
   }
 
   function showHelp(p, key) {
