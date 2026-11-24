@@ -84,7 +84,7 @@ async def protection(request, handler):
             profile_optional = path in {
                 '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
-                '/api/profile/privacy', '/api/profile/track', '/api/music-library', '/api/notices', '/api/admin',
+                '/api/profile/privacy', '/api/profile/track', '/api/profile/track/save', '/api/music-library', '/api/notices', '/api/admin',
                 '/api/story/dedzytwo/like',
                 '/api/story/dedzytwo/status',
                 '/api/community/chat',
@@ -691,6 +691,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/people/{user_id}/track', social_profiles.track_audio)
     app.router.add_get('/api/profile/track', social_profiles.track_audio)
     app.router.add_post('/api/people/{user_id}/track/save', social_profiles.save_profile_track)
+    app.router.add_post('/api/profile/track/save', social_profiles.save_profile_track)
     app.router.add_get('/api/music-library', social_profiles.music_library)
     app.router.add_post('/api/music-library', social_profiles.music_library)
     app.router.add_get('/api/music-library/{track_id}', social_profiles.library_audio)
