@@ -35,12 +35,14 @@ class TagState:
         return cls(applied=applied, pending=pending if separator else None)
 
     def base_for(self, current: str, administrator: bool) -> str:
-        if self.administrator != administrator:
+        # A demotion can leave a blank or manually edited regular tag. Never
+        # resurrect the old admin title, but strip a carried-over like suffix.
+        if self.administrator != administrator and not current:
             return current
         if current in (self.applied, self.pending):
             return self.base
         # An admin can edit the role text while leaving our previous suffix in place.
-        display_base = self.base or (DEFAULT_ADMIN_TITLE if administrator else "")
+        display_base = self.base or (DEFAULT_ADMIN_TITLE if self.administrator else "")
         for tag in (self.applied, self.pending):
             if tag and tag.startswith(display_base):
                 suffix = tag.removeprefix(display_base)
@@ -142,10 +144,26 @@ async def sync_like_tags(db, bot, chat_id: int, checked: dict[int, tuple[int, fl
         checked[uid] = (row["likes"], now)
 
 
-async def like_tags_job(db, bot, chat_id: int) -> None:
+class LikeTagMembershipMiddleware:
+    """Recheck member tags after Telegram membership or bot-rights changes."""
+
+    def __init__(self, chat_id: int, checked: dict[int, tuple[int, float]]):
+        self.chat_id = chat_id
+        self.checked = checked
+
+    async def __call__(self, handler, event, data):
+        if event.my_chat_member and event.my_chat_member.chat.id == self.chat_id:
+            self.checked.clear()
+        elif event.chat_member and event.chat_member.chat.id == self.chat_id:
+            self.checked.pop(event.chat_member.new_chat_member.user.id, None)
+        return await handler(event, data)
+
+
+async def like_tags_job(db, bot, chat_id: int, checked: dict[int, tuple[int, float]] | None = None) -> None:
     if not chat_id:
         return
-    checked: dict[int, tuple[int, float]] = {}
+    if checked is None:
+        checked = {}
     while True:
         delay = INTERVAL
         try:
