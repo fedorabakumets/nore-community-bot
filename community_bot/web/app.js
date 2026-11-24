@@ -544,7 +544,7 @@ function botReplyRoute() {
   if (/^nora_(?:d_[A-Za-z0-9_-]{22}|i_[a-f0-9]{16})$/.test(param)) return {view: 'durak'};
   const event = /^nora_event_([A-Za-z0-9_-]{1,64})$/.exec(param);
   if (event) return {view: 'events', eventId: event[1]};
-  const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community)$/.exec(param);
+  const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community|durak|barricade)$/.exec(param);
   if (screen?.[1] === 'cookies') return {view: 'shop', category: '__cookies'};
   if (screen) return {view: screen[1]};
   const shop = /^nora_(cat|item)_([a-zA-Z0-9_-]{1,64})$/.exec(param);

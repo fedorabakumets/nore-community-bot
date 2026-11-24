@@ -136,6 +136,8 @@ from community_bot.ui_owner import bind_ui_owner
 router = Router(name="community")
 moderation_router = Router(name="community_moderation")
 _bulk_unmute_lock = asyncio.Lock()
+_like_limit_notices: dict[tuple[int, int], float] = {}
+_LIKE_NOTICE_COOLDOWN = 300
 
 
 @router.chat_join_request()
@@ -500,6 +502,45 @@ def _like_notice(actor: User, target) -> str:
 async def _announce_like(message: Message, actor: User, target) -> None:
     with bot_publication(), keep_in_chat():
         await message.answer(_like_notice(actor, target), parse_mode="HTML")
+
+
+def _claim_like_limit_notice(actor_id: int, target_id: int) -> float | None:
+    now = time.monotonic()
+    # Insertion order lets us discard expired pairs without scanning all active ones.
+    while _like_limit_notices:
+        oldest = next(iter(_like_limit_notices))
+        if now - _like_limit_notices[oldest] < _LIKE_NOTICE_COOLDOWN:
+            break
+        del _like_limit_notices[oldest]
+    pair = (actor_id, target_id)
+    if pair in _like_limit_notices:
+        return None
+    _like_limit_notices[pair] = now
+    return now
+
+
+async def _send_like_limit_notice(bot: Bot, actor: User, target, send) -> None:
+    pair = (actor.id, int(target["user_id"]))
+    claimed = _claim_like_limit_notice(*pair)
+    if claimed is None:
+        return
+    try:
+        username = (await bot.me()).username
+        sender = user_link(actor.id, "@" + (actor.username or actor.full_name))
+        games = "Дурака / Баррикаду"
+        if username:
+            base = f"https://t.me/{username}?startapp=nora_to_"
+            games = f'<a href="{base}durak">Дурака</a> / <a href="{base}barricade">Баррикаду</a>'
+        text = (
+            f"❤️ {sender}, лайк этому человеку уже поставлен. "
+            f"Можешь восстановить лимиты или сыграть в {games}."
+        )
+        with bot_publication():
+            await send(text, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+    except BaseException:
+        if _like_limit_notices.get(pair) == claimed:
+            _like_limit_notices.pop(pair, None)
+        raise
 
 
 async def _can_manage_target(
@@ -2099,7 +2140,9 @@ async def group_reply_actions(message: Message, db: Database, settings: Settings
         if settings.community_chat_id and message.chat.id != settings.community_chat_id:
             return
         error = await _give_like(db, bot, message.from_user, target)
-        if error:
+        if error == social_likes.ALREADY_PROFILE_LIKED:
+            await _send_like_limit_notice(bot, message.from_user, target, message.reply)
+        elif error:
             await message.reply(error)
         else:
             await _announce_like(message, message.from_user, target)
@@ -2176,8 +2219,12 @@ async def group_reaction(
         )
 
     reaction_message = (chat_id, event.message_id)
-    if "like" in added and await _give_like(db, bot, user, target, reaction_message=reaction_message) is None:
-        await send(_like_notice(user, target), parse_mode="HTML")
+    if "like" in added:
+        error = await _give_like(db, bot, user, target, reaction_message=reaction_message)
+        if error is None:
+            await send(_like_notice(user, target), parse_mode="HTML")
+        elif error == social_likes.ALREADY_PROFILE_LIKED:
+            await _send_like_limit_notice(bot, user, target, send)
     votes = added & {"plus", "minus"}
     if len(votes) == 1:
         vote = votes.pop()
