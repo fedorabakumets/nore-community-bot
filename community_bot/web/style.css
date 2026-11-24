@@ -4820,21 +4820,44 @@ body.nora-mini-player-active #toast {bottom:calc(172px + var(--safe-bottom))}
 @media(prefers-reduced-motion:reduce){#nora-now-playing *{animation:none!important;transition:none!important}}
 @media(prefers-reduced-motion:reduce){#nora-mini-player,#nora-mini-player *{animation:none!important;transition:none!important}}
 
-/* DOT: standalone local arcade, no wallet integration. */
 .game-dot { --game-surface:#171219; --game-art:radial-gradient(circle at 50% 38%,#171219 0 8%,#f34c62 9% 15%,transparent 16%),linear-gradient(90deg,transparent 12%,#45434c 13% 24%,transparent 25% 74%,#45434c 75% 86%,transparent 87%),radial-gradient(ellipse at 50% 35%,#4a202d,#131218 70%); }
-.dot-game {max-width:440px;margin:0 auto;color:#f7f5f8;}
-.dot-header {display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;margin:0 0 8px;}
-.dot-header b{text-align:center;letter-spacing:.28em;font-size:18px;}
-.dot-header .play-back{margin:0;justify-self:start;}
-.dot-hud{text-align:center;font:600 15px/1.4 system-ui,sans-serif;font-variant-numeric:tabular-nums;margin:8px 0 12px;color:#dedbe2;}
-.dot-stage{position:relative;width:min(100%,calc(clamp(220px,100dvh - 220px,560px)*.72));margin:auto;overflow:hidden;border:1px solid #ffffff20;border-radius:24px;background:#101014;}
-.dot-stage canvas{display:block;width:100%;height:auto;touch-action:none;outline-offset:-3px;}
-.dot-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0a0ed0;text-align:center;padding:16px;}
+
+/* DOT motion pass: scoped to the game, keeps the rest of NORA unchanged. */
+.dot-game{max-width:440px;margin:0 auto;color:#f5f2f6;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none;}
+.dot-header{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;margin:0 0 10px;}
+.dot-header b{text-align:center;letter-spacing:.35em;font:800 25px/1 system-ui,sans-serif;padding-left:.35em;}
+.dot-header b span{color:#ff657e;}
+.dot-tools{display:flex;justify-content:flex-end;}
+.dot-game :is(.dot-back,.dot-sound){width:42px;height:42px;min-height:42px;display:grid;place-items:center;padding:0;background:#ffffff09;border:1px solid #ffffff15;border-radius:50%;color:#e7e3eb;box-shadow:none;touch-action:manipulation;}
+.dot-game :is(.dot-back,.dot-sound) svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+.dot-sound .dot-sound-off,.dot-sound.muted .dot-sound-waves{display:none;}
+.dot-sound.muted .dot-sound-off{display:block;}
+.dot-hud{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;text-align:center;align-items:center;margin:0 0 12px;padding:11px 2px 10px;background:#ffffff06;border:1px solid #ffffff11;border-radius:17px;}
+.dot-stat{display:grid;gap:4px;justify-items:center;min-width:0;position:relative;}
+.dot-stat:not(:last-child){border-right:1px solid #ffffff10;}
+.dot-stat>span{font:600 9px/1.2 system-ui,sans-serif;letter-spacing:.09em;color:#a9a2b0;white-space:nowrap;}
+.dot-stat>strong{font:700 19px/1.2 system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-.035em;color:#f5f2f6;white-space:nowrap;}
+.dot-stat>strong i{display:inline-block;font-style:normal;}
+.dot-stat>strong i.pop{animation:dot-score-pop .32s cubic-bezier(.16,1,.35,1);}
+@keyframes dot-score-pop{0%{transform:scale(.82);color:#ffd39c}55%{transform:scale(1.2);color:#ffd39c}100%{transform:scale(1)}}
+.dot-pace strong{color:#ff8196;}
+.dot-meter{position:absolute;bottom:-9px;width:32px;height:2px;border-radius:3px;background:#ffffff17;overflow:hidden;}
+.dot-meter::after{content:"";display:block;width:100%;height:100%;background:#ff657e;transform:scaleX(var(--dot-pace,0));transform-origin:left;border-radius:3px;}
+.dot-stage{position:relative;width:min(100%,calc(clamp(200px,100dvh - 270px,590px)*.72));max-width:410px;aspect-ratio:18/25;margin:auto;overflow:hidden;isolation:isolate;border:1px solid #ffffff1c;border-radius:23px;background:#0b0b10;box-shadow:0 16px 45px #0005,inset 0 1px 0 #ffffff0c;}
+.dot-stage canvas{display:block;width:100%;height:100%;touch-action:none;outline-offset:-3px;}
+.dot-overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:linear-gradient(#100b135e,#100b13ba);text-align:center;touch-action:manipulation;}
 .dot-overlay[hidden]{display:none;}
-.dot-overlay strong{font:700 28px/1.15 system-ui,sans-serif;}
-.dot-overlay small{color:#bab7c0;font:14px/1.4 system-ui,sans-serif;}
-.dot-start{border:1px solid #ffffff28;border-radius:999px;padding:11px 28px;background:#f34c62;color:#fff;font:600 15px system-ui,sans-serif;min-height:44px;}
-.dot-note{text-align:center;margin:12px 0 0;font-size:12px;}
+.dot-overlay-card{width:min(100%,230px);box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 12px 16px;border:1px solid #ffffff1a;border-radius:24px;background:linear-gradient(145deg,#29212ddc,#16121bd9);box-shadow:0 12px 44px #0005;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);animation:dot-card-in .30s cubic-bezier(.2,.8,.2,1) both;}
+@keyframes dot-card-in{from{opacity:0;transform:translateY(9px) scale(.96)}to{opacity:1;transform:none}}
+.dot-emblem{width:32px;height:32px;border-radius:50%;background:radial-gradient(circle,#17101b 0 25%,transparent 27%),linear-gradient(135deg,#ffabb9,#ff5375 45%,#b71740);box-shadow:0 0 24px #ff446c55;}
+.dot-overlay[data-state=over] .dot-emblem{width:22px;height:22px;opacity:.75;}
+.dot-overlay strong{font:750 clamp(18px,5vw,26px)/1.1 system-ui,sans-serif;letter-spacing:-.03em;}
+.dot-overlay small{color:#bdb4c3;font:13px/1.45 system-ui,sans-serif;}
+.dot-game .dot-start{width:100%;min-height:45px;border:1px solid #ff9dad55;border-radius:15px;margin:3px 0 0;padding:10px 12px;background:linear-gradient(155deg,#f95d79,#c92e52);color:white;font:700 15px/1.2 system-ui,sans-serif;box-shadow:0 5px 18px #a5274845;touch-action:manipulation;transition:transform .15s ease;}
+.dot-game .dot-start:active{transform:scale(.96);}
+.dot-note{text-align:center;margin:10px 0 0;color:#8e8697;font:11px/1.4 system-ui,sans-serif;}
+@media(max-height:600px){.dot-header{margin-bottom:5px}.dot-hud{margin-bottom:7px;padding:7px 2px}.dot-overlay-card{padding:12px;gap:6px}.dot-note{margin-top:6px}}
+@media(prefers-reduced-motion:reduce){.dot-game *{animation:none!important;transition:none!important}}
 
 
 /* Music drawer has a small exposed top edge, like a native media sheet. */
