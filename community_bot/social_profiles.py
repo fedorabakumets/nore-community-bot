@@ -248,10 +248,10 @@ async def track_audio(request):
 
 async def save_profile_track(request):
     db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
-    target = await target_for(request)
-    if uid != target["user_id"] and (
+    target = await db.get_user(uid) if request.path == "/api/profile/track/save" else await target_for(request)
+    if not target or (uid != target["user_id"] and (
         target["profile_private"] or not await can_view_profile(db, settings, uid, target)
-    ):
+    )):
         raise web.HTTPNotFound()
     payload = await request.json()
     if not isinstance(payload, dict) or type(payload.get("saved")) is not bool or not isinstance(payload.get("revision"), str):
