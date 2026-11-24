@@ -502,6 +502,9 @@ def create_dispatcher() -> Dispatcher:
     from community_bot.referral_campaign import router as referral_campaign_router
 
     dispatcher.include_router(referral_campaign_router)
+    from community_bot.december_house_vote import router as house_vote_router
+
+    dispatcher.include_router(house_vote_router)
     dispatcher.include_router(contest_router)
     dispatcher.include_router(shop_admin_router)
     dispatcher.include_router(commands_router)
@@ -632,6 +635,7 @@ async def main() -> None:
     birthday_task = asyncio.create_task(birthday_job(bot, db, settings))
     memory_task = asyncio.create_task(memory_cleanup_job(db))
     from community_bot.december_cabin import run as publish_december_meetup
+    from community_bot.december_house_vote import run as publish_house_vote
     from community_bot.pet_video import PetVideoQueue
     from community_bot.rsvp import event_counters_job
     from community_bot.telegram_like_tags import LikeTagMembershipMiddleware, like_tags_job
@@ -643,6 +647,7 @@ async def main() -> None:
     like_tags_task = asyncio.create_task(like_tags_job(db, bot, settings.community_chat_id, like_tags_checked))
     event_counters_task = asyncio.create_task(event_counters_job(bot, db))
     december_meetup_task = asyncio.create_task(publish_december_meetup(db, settings, bot))
+    house_vote_task = asyncio.create_task(publish_house_vote(db, settings, bot))
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
     from community_bot.onboarding_invites import run_entry_release
 
@@ -691,6 +696,7 @@ async def main() -> None:
             like_tags_task,
             event_counters_task,
             december_meetup_task,
+            house_vote_task,
             sticker_delivery_task,
             entry_release_task,
             referral_reward_task,
@@ -717,6 +723,7 @@ async def main() -> None:
                 like_tags_task,
                 event_counters_task,
                 december_meetup_task,
+                house_vote_task,
                 sticker_delivery_task,
                 entry_release_task,
             referral_reward_task,
