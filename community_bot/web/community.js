@@ -34,16 +34,13 @@ window.NoraCommunity = (() => {
   async function sendMusic(){if(musicSending||musicUntil>Date.now())return;musicSending=true;musicClock();try{const result=await api('community/music',{});musicUntil=Date.now()+result.retry_after*1000;sheet(`<div class="community-music-sent"><span aria-hidden="true">🎧</span><h2>${esc(result.message)}</h2></div>`)}catch(error){toast(error.message)}finally{musicSending=false;musicClock()}}
   setInterval(musicClock,1000);
   function gameTiles() {
-    return `<div class="community-tiles">
-      <button type="button" class="community-tile community-games-tile" data-tab="games" aria-label="Игры">
-        <span class="community-tile-title" aria-hidden="true"><span class="community-pixel-title">Иг</span><span>ры</span></span>
-      </button>
-      <button type="button" class="community-tile community-pet-tile" data-tab="pet">
-        <span class="community-pet-surface" aria-hidden="true"></span>
-        <span class="community-tile-title">Питомец</span>
-        <img class="community-gecko" src="/home-art/community-gecko.webp" width="420" height="154" alt="" draggable="false">
-      </button>
-    </div>`;
+    const pad='<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 11c-5 0-8 4-10 11L3.7 29c-1.6 6 1.8 11 6.7 10 4.3-.8 6.5-5.2 10-5.2h7.2c3.5 0 5.7 4.4 10 5.2 4.9 1 8.3-4 6.7-10L43 22c-2-7-5-11-10-11-4 0-5.5 2.5-9 2.5S19 11 15 11Z"/><path d="M14 19v10m-5-5h10" stroke-width="2.7"/><g fill="currentColor" stroke="none"><circle cx="33" cy="18.5" r="1.8"/><circle cx="38" cy="23.5" r="1.8"/><circle cx="33" cy="28.5" r="1.8"/><circle cx="28" cy="23.5" r="1.8"/></g></svg>';
+    const paw='<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="10.8" cy="20.3" rx="4.3" ry="6" transform="rotate(-24 10.8 20.3)"/><ellipse cx="19.1" cy="11.6" rx="4.5" ry="6.2" transform="rotate(-9 19.1 11.6)"/><ellipse cx="29.4" cy="11.6" rx="4.5" ry="6.2" transform="rotate(9 29.4 11.6)"/><ellipse cx="37.2" cy="20.3" rx="4.3" ry="6" transform="rotate(24 37.2 20.3)"/><path d="M24 23c-5.5 0-7.6 4.8-11.5 9.4-4.2 5.2-1.5 10 3.7 10 3 0 5-2 7.8-2s4.8 2 7.8 2c5.2 0 7.9-4.8 3.7-10C31.6 27.8 29.5 23 24 23Z"/></svg>';
+    const arrow='<span class="community-launch-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg></span>';
+    const tile=(route,label,glyph)=>`<button type="button" class="community-tile community-${route}-tile community-launch-tile" data-tab="${route}">
+        <span class="community-launch-icon" aria-hidden="true">${glyph}</span><span class="community-tile-title">${label}</span>${arrow}
+      </button>`;
+    return `<div class="community-tiles">${tile('games','Игры',pad)}${tile('pet','Питомец',paw)}</div>`;
   }
   function staffChatLaunch(){return data?.staff_chat_available?`<button type="button" class="community-chat-launch" data-tab="staffchat"><span class="community-chat-launch-icon" aria-hidden="true">◉</span><span>Чат Норы <small>Тест · для команды</small></span><span aria-hidden="true">›</span></button>`:"";}
   function screen(){return `<div class="community-heading nora-page-heading"><h1>Коммьюнити</h1></div>${gameTiles()}${staffChatLaunch()}<section id="community-leaders" aria-labelledby="community-top-title">${leaders()}</section><div class="community-actions">${window.NoraInteractive?.screen('friends')||''}<section id="community-staff">${staff()}</section></div><p class="footer-note" id="community-updated">${updatedLabel()}</p>${musicCard()}`}
