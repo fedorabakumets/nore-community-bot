@@ -4909,3 +4909,18 @@ body:has(#app[data-screen="dot"]) #nora-mini-player {display:none!important}
 .dot-game .dot-start{background:linear-gradient(145deg,#ff7c94,#f34c71 48%,#b9274d);box-shadow:0 7px 20px #a5274855,inset 0 1px 0 #ffffff36}
 @media(max-width:350px){.dot-game :is(.dot-back,.dot-pause,.dot-sound){width:34px;height:34px;min-height:34px}.dot-tools{gap:3px}}
 @media(prefers-reduced-motion:reduce){.dot-emblem{animation:none!important}}
+
+/* DOT EVOLUTION: phase identity, compact non-blocking announcements. */
+.dot-game{--dot-phase:rgb(174,164,194)}
+.dot-wordmark{display:grid;justify-items:center;gap:4px;min-width:0}
+.dot-wordmark b{display:block}
+.dot-wordmark small{font:650 9px/1 system-ui,sans-serif;letter-spacing:.17em;color:var(--dot-phase);transition:color .6s ease}
+.dot-pace strong{color:var(--dot-phase);transition:color .6s ease}
+.dot-meter::after{background:var(--dot-phase);transition:background .6s ease}
+.dot-stage-banner{position:absolute;top:17px;left:50%;translate:-50% 0;width:max-content;max-width:calc(100% - 20px);display:grid;justify-items:center;gap:4px;pointer-events:none;z-index:3;padding:10px 16px 11px;border:1px solid #ffffff24;background:#11101bdc;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:15px;box-shadow:0 8px 25px #0004;color:var(--dot-phase);text-align:center}
+.dot-stage-banner[hidden]{display:none}
+.dot-stage-banner small{font:600 8px/1.1 system-ui,sans-serif;letter-spacing:.17em;color:#bbb4c6}
+.dot-stage-banner strong{font:800 17px/1.15 system-ui,sans-serif;letter-spacing:.12em}
+.dot-stage-banner span{font:500 10px/1.3 system-ui,sans-serif;color:#e2dbe8}
+.dot-game:not([data-dot-state=play]) .dot-stage-banner{visibility:hidden}
+@media(prefers-reduced-motion:reduce){.dot-wordmark small,.dot-pace strong,.dot-meter::after{transition:none}}
