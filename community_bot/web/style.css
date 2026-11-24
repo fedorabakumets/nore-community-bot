@@ -4175,11 +4175,28 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 #sheet #person-profile .person-photo:not(:has(img)) {
   width: min(56%, 220px); border-radius: 50%; margin-block: 18px 8px;
 }
+/* Use the exact page background, not the initials' radial placeholder, under photos.
+   An absolute image and overlay keep the fade at the bottom of the square cover
+   regardless of the source image's intrinsic aspect ratio or WebView mask support. */
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo:has(img),
+#sheet #person-profile .person-photo:has(img) {
+  background: var(--poster-bg, #111013);
+  isolation: isolate;
+}
 #app[data-screen="lk"] .lk-photo-wrap .profile-photo img,
 #sheet #person-profile .person-photo img {
-  display: block; width: 100%; height: 100%; object-fit: cover;
-  border-radius: 0; -webkit-mask-image: linear-gradient(#000 0 72%, transparent 100%);
-  mask-image: linear-gradient(#000 0 72%, transparent 100%);
+  position: absolute; inset: 0; display: block;
+  width: 100%; height: 100%; object-fit: cover; border-radius: 0;
+}
+#app[data-screen="lk"] .lk-photo-wrap .profile-photo:has(img)::after,
+#sheet #person-profile .person-photo:has(img)::after {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    transparent 0%, transparent 48%,
+    rgb(17 16 19 / 18%) 60%, rgb(17 16 19 / 52%) 75%,
+    rgb(17 16 19 / 85%) 87%, var(--poster-bg, #111013) 98%,
+    var(--poster-bg, #111013) 100%);
 }
 #app[data-screen="lk"] .lk-photo-wrap #change-avatar {
   position: absolute; top: 10px; right: 8px; bottom: auto; margin: 0;
