@@ -255,6 +255,13 @@ async def _finish(conn, r, now, *, cancel=None):
             await _money(conn, m["uid"], amount, "refund" if refund else "win", r, now)
         await conn.execute("UPDATE durak_members SET active=0,reserved=0,payout=? WHERE room=? AND uid=?",
                            (amount, r["id"], m["uid"]))
+    if not cancel and result["reason"] in ("played", "draw", "goal"):
+        from community_bot.pet_progress import record
+
+        # Only completed games count; forfeiting players receive no quest credit.
+        for m in members:
+            if m["seat"] not in result["forfeit"]:
+                await record(conn, m["uid"], r.get("kind", "durak"), now=datetime.fromtimestamp(now, UTC))
     await conn.execute("DELETE FROM durak_invites WHERE room=?", (r["id"],))
     r.update(status="cancelled" if cancel else "finished", result=result, deadline=0)
 
