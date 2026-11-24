@@ -521,7 +521,7 @@ $('#sheet').addEventListener('close',()=>{
   const notice=$('#toast');
   if(notice.parentElement===dialog)document.body.append(notice);
 });
-$('#dismiss').onclick=()=>$('#sheet').close();$('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet')){const r=e.target.getBoundingClientRect();if(e.clientY<r.top||e.clientY>r.bottom||e.clientX<r.left||e.clientX>r.right)e.target.close()}});
+$('#dismiss').onclick=()=>{if(!window.NoraProfileTrack?.back?.())$('#sheet').close()};$('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet')){const r=e.target.getBoundingClientRect();if(e.clientY<r.top||e.clientY>r.bottom||e.clientX<r.left||e.clientX>r.right)e.target.close()}});
 function telegramStartParam() {
   return tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam') || '';
 }
