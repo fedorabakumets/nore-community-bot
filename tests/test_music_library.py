@@ -140,3 +140,39 @@ async def test_in_profile_library_never_leaks_private_audio(tmp_path):
     assert any(block.type == "audio" for block in public.blocks)
     assert not any(button.callback_data.startswith(("mlib:p_del:", "mlib:p_public:"))
                    for block in public.blocks if block.type == "buttons" for button in block.buttons)
+
+
+async def test_owner_profile_opens_in_place_and_duplicates_only_from_group(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from aiogram.types import Chat, Message, User
+
+    from community_bot import library_rich
+
+    db = Database(tmp_path / "profile-open.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Владелец")
+    await db.ensure_user(2, telegram_name="Гость")
+    await db.bind_ui_owner(-100123, 10, 1, "profile")
+    monkeypatch.setattr(library_rich, "allowed_actor", AsyncMock(return_value=True))
+    edit = AsyncMock()
+    deliver = AsyncMock()
+    monkeypatch.setattr(Message, "edit_text", edit)
+    monkeypatch.setattr(library_rich, "deliver", deliver)
+    settings = SimpleNamespace(community_chat_id=-100123)
+    callback = SimpleNamespace(
+        data="mlib:open:1", from_user=User(id=1, first_name="Владелец", is_bot=False),
+        message=Message(message_id=10, date=1725000000, chat=Chat(id=-100123, type="supergroup")),
+        bot=SimpleNamespace(), answer=AsyncMock(),
+    )
+    await library_rich.library_callback(callback, db, settings)
+    edit.assert_awaited_once()
+    deliver.assert_awaited_once_with(callback.bot, db, 1, 1)
+    assert edit.await_args.kwargs["rich_message"].blocks[-1].buttons[0].callback_data == "mlib:back:1"
+    edit.reset_mock()
+    deliver.reset_mock()
+    callback.message = Message(message_id=11, date=1725000000, chat=Chat(id=1, type="private"))
+    await library_rich.library_callback(callback, db, settings)
+    edit.assert_awaited_once()
+    deliver.assert_not_awaited()
