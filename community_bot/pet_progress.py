@@ -131,7 +131,11 @@ async def ensure_day(db, user_id, now):
     first, second = ACTIVITY_QUESTS[cycle], ACTIVITY_QUESTS[(cycle + 1) % len(ACTIVITY_QUESTS)]
     text_key = f"pet_text_quest_v2:{user_id}:{pet['created_at']}:{stage}"
     text_seen = await one(db, "SELECT 1 FROM bot_state WHERE key=?", (text_key,))
-    if stage in TEXT_STAGES and not text_seen:
+    completed_text = await one(
+        db, "SELECT 1 FROM pet_quests WHERE user_id=? AND day=? AND events='text' AND progress>=target",
+        (user_id, day),
+    )
+    if stage in TEXT_STAGES and not text_seen and not completed_text:
         second = TEXT_QUEST
     quests = (first, (STROKE_QUEST, "stroke", 1), second)
     for slot, (label, events, target) in enumerate(quests, 1):
