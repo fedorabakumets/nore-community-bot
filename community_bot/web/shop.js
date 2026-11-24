@@ -200,7 +200,7 @@ window.NoraShop=(()=>{
   const profileDialog=$('#sheet');
   const nativeProfileBack=Boolean(tg?.isVersionAtLeast?.('6.1')&&
     typeof tg.BackButton?.show==='function'&&typeof tg.BackButton?.onClick==='function');
-  function profileOpen(){return profileDialog.open&&Boolean(profileDialog.querySelector('#person-profile'))}
+  function profileOpen(){return profileDialog.open&&Boolean(profileDialog.querySelector('#person-profile, #music-library-profile'))}
   function syncBack(){
     const profileBack=nativeProfileBack&&profileOpen();
     profileDialog.classList.toggle('native-profile-back',profileBack);
@@ -328,6 +328,7 @@ window.NoraShop=(()=>{
   function goBack(){
     if(!data||backPending||afterGameBack||$('#game-exit').open)return;
     if(profileOpen()&&$('.avatar-viewer[open]')){$('.avatar-viewer[open]').close();return}
+    if(window.NoraProfileTrack?.back?.())return;
     if($('#sheet').open){$('#sheet').close();return}
     if(window.NoraGame?.isOpen?.()){exitGameView(window.NoraGame.close);return}
     if(tab==='durak'&&window.NoraDurak?.back())return;
