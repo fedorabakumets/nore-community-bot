@@ -74,7 +74,7 @@ async def change_collection(db, uid, *, target_id=None, revision=None, key=None,
 def save_button(track, target_id):
     from aiogram.types import RichMessageButton
 
-    return RichMessageButton(text="➕🎵", callback_data=f"{PREFIX}{target_id}:{track['revision']}")
+    return RichMessageButton(text="➕🎵", style="link", callback_data=f"{PREFIX}{target_id}:{track['revision']}")
 
 
 def profile_music_button(track, target_id, requester_id):
@@ -117,7 +117,7 @@ async def can_read_library(db, settings, viewer, owner):
 def open_button(uid):
     from aiogram.types import RichMessageButton
 
-    return RichMessageButton(text="🎧", callback_data=f"{LIBRARY_PREFIX}open:{uid}")
+    return RichMessageButton(text="🎧", style="link", callback_data=f"{LIBRARY_PREFIX}open:{uid}")
 
 
 def page_entries(entries, page):
