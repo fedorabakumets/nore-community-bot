@@ -162,7 +162,7 @@ async def group_profile_body(
         InputRichBlockParagraph(text=[
             RichTextBold(text=name), "  ",
             RichTextButton(button=RichMessageButton(text=like, style="link", callback_data=f"{LIKE_PREFIX}{uid}")),
-            "  ", RichTextButton(button=tgk), *(["  ", *library] if library else []),
+            *(["  ", *library] if library else []), "  ", RichTextButton(button=tgk),
         ]),
         InputRichBlockParagraph(text=subtitle),
         *details,
