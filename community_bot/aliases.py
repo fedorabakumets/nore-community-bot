@@ -17,6 +17,7 @@ COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "question": ("вопрос",),
     "close": ("закрыть",),
     "profile": ("профиль",),
+    "tracks": ("треки", "мои треки"),
     "stats": ("стата",),
     "top": ("топ",),
     "shop": ("магазин",),
@@ -81,7 +82,7 @@ MULTIWORD_ALIASES: dict[str, str] = {
 
 _PUNCT = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
 _SLASH_PREFIXES = "/!.／"
-_TARGET_ONLY = {"profile", "stats", "card", "roulette"}
+_TARGET_ONLY = {"tracks", "profile", "stats", "card", "roulette"}
 _USERNAME = re.compile(r"@([A-Za-z0-9_]{1,32})")
 TOP_PERIODS = {"", "сегодня", "неделя", "месяц"}
 
@@ -130,6 +131,7 @@ _EXACT_TEXT_COMMANDS = {
     "participants",
     "stickers",
     "profile",
+    "tracks",
     "stats",
     "question",
     "reputation",
