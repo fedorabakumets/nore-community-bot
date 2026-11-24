@@ -631,6 +631,7 @@ class Database:
             await connection.close()
 
     async def initialize(self) -> None:
+        from community_bot.dot_api import SCHEMA as dot_schema
         from community_bot.durak_rooms import SCHEMA as durak_schema
         from community_bot.friends_api import SCHEMA as friends_schema
         from community_bot.mafia_api import SCHEMA as mafia_schema
@@ -651,7 +652,7 @@ class Database:
             await db.executescript(
                 friends_schema + mafia_schema + rocket_schema + sea_schema + durak_schema
                 + seasonal_schema + presence_schema + nora_game_schema + pet_schema + pet_video_schema
-                + referral_schema + staff_chat_schema
+                + referral_schema + staff_chat_schema + dot_schema
             )
             staff_chat_columns = {
                 str(row[1]) for row in await (await db.execute(

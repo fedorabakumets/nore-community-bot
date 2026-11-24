@@ -126,7 +126,7 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/barricade', '/api/games/', '/api/seasonal',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/', '/api/games/', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community', '/api/story/')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -739,10 +739,11 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
     app.router.add_get('/api/mafia', mafia_api.status)
     app.router.add_post('/api/mafia/action', mafia_api.action)
-    from community_bot import barricade_api, durak_api
+    from community_bot import barricade_api, dot_api, durak_api
 
     durak_api.register(app)
     barricade_api.register(app)
+    dot_api.register(app)
     app.router.add_get('/api/rocket', rocket_api.status)
     app.router.add_post('/api/rocket/prepare', rocket_api.prepare)
     app.router.add_post('/api/rocket/launch', rocket_api.launch)
@@ -794,7 +795,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js', 'profile-track.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'staff-chat-delivery.js', 'staff-chat.js', 'avatars.js', 'commands.js',
-                 'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot.js',
+                 'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot-core.js', 'dot.js',
                  'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):
