@@ -361,7 +361,7 @@ window.NoraProfileTrack = (() => {
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     const saved = library || Boolean(track.saved);
     const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
-    return `<section class="profile-track" data-track-src="${esc(src)}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || 'Неизвестен')}" data-track-length="${esc(track.duration || 0)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
+    return `<section class="profile-track" data-track-src="${esc(src)}" data-track-id="${esc(track.id || '')}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || 'Неизвестен')}" data-track-length="${esc(track.duration || 0)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
         <span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
@@ -398,7 +398,9 @@ window.NoraProfileTrack = (() => {
 
   function back() {
     const dialog = $('#sheet');
-    if (!dialog.open || !$('#music-library-profile')) return false;
+    if (!dialog.open) return false;
+    if ($('#nora-now-playing')) { dialog.close(); return true; }
+    if (!$('#music-library-profile')) return false;
     const origin = libraryReturn;
     libraryReturn = null;
     if (origin) {
@@ -481,6 +483,7 @@ window.NoraProfileTrack = (() => {
       if (typeof data !== 'undefined' && data?.profile_track?.id === result.id) {
         data.profile_track.saved = result.saved;
       }
+      if (active?.track.id === result.id) { active.saved = result.saved; paintNowSaved(active); }
       if (savePath === 'music-library') {
         const row = button.closest('[data-track-src]');
         if (active?.src === row.dataset.trackSrc) stop();
@@ -533,6 +536,13 @@ window.NoraProfileTrack = (() => {
     miniShare.dataset.sending = String(sharePending);
     miniShare.dataset.sent = String(!sharePending && sharedSource === state.src && Date.now() < shareUntil);
     miniShare.setAttribute('aria-label', sharePending ? 'Отправляем трек' : Date.now() < shareUntil ? 'Повторная отправка доступна через 5 минут' : 'Поделиться треком в чате');
+    const fullShare = $('#nora-now-playing [data-now-share]');
+    if (fullShare) {
+      fullShare.disabled = miniShare.disabled;
+      fullShare.dataset.sending = miniShare.dataset.sending;
+      fullShare.dataset.sent = miniShare.dataset.sent;
+      fullShare.setAttribute('aria-label', miniShare.getAttribute('aria-label'));
+    }
     mini.dataset.playing = String(playing);
     miniToggle.disabled = loading;
     miniToggle.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Пауза' : 'Воспроизвести');
@@ -603,20 +613,79 @@ window.NoraProfileTrack = (() => {
     }
   }
 
+  function trackReference(state) {
+    const [source, revision] = state.src.split('?v=');
+    return {source, revision: decodeURIComponent(revision || '')};
+  }
+
+  function paintNowSaved(state) {
+    const panel = $('#nora-now-playing');
+    if (!panel || panel.dataset.trackSrc !== state.src) return;
+    const button = panel.querySelector('[data-now-save]');
+    button.dataset.saved = String(state.saved === true);
+    button.disabled = state.saved === true || state.savePending || state.saved == null;
+    button.setAttribute('aria-pressed', String(state.saved === true));
+    button.setAttribute('aria-label', state.saved ? 'В моих треках' : 'Добавить в мои треки');
+  }
+
+  async function loadNowSaved(state) {
+    try {
+      const ref = trackReference(state);
+      const result = await api('music-library/current?' + new URLSearchParams(ref));
+      if (active !== state || state.savePending) return;
+      state.saved = result.saved === true;
+      paintNowSaved(state);
+    } catch {
+      if (active === state) {
+        state.saved = false;
+        paintNowSaved(state);
+      }
+    }
+  }
+
+  async function addNowTrack() {
+    const state = active;
+    if (!state || state.savePending || state.saved === true) return;
+    state.savePending = true;
+    paintNowSaved(state);
+    try {
+      const result = await api('music-library/current', trackReference(state));
+      if (active === state) state.saved = result.saved === true;
+      for (const item of document.querySelectorAll('[data-track-save]')) {
+        if (item.dataset.trackId === result.id) paintSaved(item, result.saved);
+      }
+      if (typeof data !== 'undefined' && data?.profile_track?.id === result.id) data.profile_track.saved = result.saved;
+      toast('Добавлено в Мои треки');
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      state.savePending = false;
+      if (active === state) paintNowSaved(state);
+    }
+  }
+
   function openNowPlaying() {
     const state = active;
     if (!state) return;
-    const [endpoint, revision] = state.src.split('?v=');
-    const track = { ...state.track, revision: decodeURIComponent(revision || '') };
     libraryReturn = null;
-    sheet('<section id="nora-now-playing" aria-label="Музыкальный плеер" tabindex="-1">' +
+    const svg = (path, cls='') => '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
+    sheet('<section id="nora-now-playing" aria-label="Музыкальный плеер" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
       '<p class="nora-now-playing-label">Сейчас играет</p>' +
       '<div class="nora-now-playing-art" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/></svg></div>' +
-      html(track, endpoint, false, true) +
-      '<button class="secondary nora-now-playing-stop" type="button" data-mini-stop>Остановить воспроизведение</button></section>');
+      '<div class="nora-now-meta"><div class="nora-now-copy"><h2>' + esc(state.track.title) + '</h2><p>' + esc(state.track.artist) + '</p></div>' +
+      '<button type="button" class="nora-now-save" data-now-save data-saved="false" aria-label="Добавить в мои треки" aria-pressed="false" disabled>' +
+      svg('M12 5v14M5 12h14','nora-now-plus') + svg('m5 12 4 4L19 6','nora-now-check') + '</button></div>' +
+      '<div class="nora-now-timeline"><input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled><div class="nora-now-times"><span data-track-time>0:00</span><span data-track-duration>' + clock(state.track.duration) + '</span></div></div>' +
+      '<div class="nora-now-controls"><button type="button" class="nora-now-secondary" data-mini-stop aria-label="Остановить воспроизведение">' + svg('M7 7h10v10H7z') + '</button>' +
+      '<button type="button" class="nora-now-play" data-track-toggle aria-label="Воспроизвести"><svg class="nora-now-play-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 4.5v15l12-7.5z"/></svg><svg class="nora-now-pause-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg></button>' +
+      '<button type="button" class="nora-now-secondary nora-mini-share" data-now-share aria-label="Поделиться треком в чате">' + svg('m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13','nora-mini-send') + svg('m5 12 4 4L19 6','nora-mini-sent') + '</button></div></section>');
     $('#sheet').scrollTop = 0;
     $('#nora-now-playing')?.focus({preventScroll:true});
+    window.NoraShop?.syncBack();
     paint(state);
+    paintNowSaved(state);
+    void loadNowSaved(state);
   }
 
   async function shareCurrent() {
@@ -646,6 +715,8 @@ window.NoraProfileTrack = (() => {
   miniOpen.addEventListener('click', openNowPlaying);
   miniToggle.addEventListener('click', () => void toggleActive(active));
   document.addEventListener('click', event => {
+    if (event.target.closest('[data-now-save]')) { void addNowTrack(); return; }
+    if (event.target.closest('[data-now-share]')) { void shareCurrent(); return; }
     if (event.target.closest('[data-mini-stop]')) {
       stop();
       if ($('#nora-now-playing')) $('#sheet').close();
@@ -661,7 +732,7 @@ window.NoraProfileTrack = (() => {
       stop();
       const audio = new Audio();
       active = { audio, element, src: element.dataset.trackSrc, controller: new AbortController(), loading: true,
-        track: { title: element.dataset.trackTitle, artist: element.dataset.trackArtist, duration: Number(element.dataset.trackLength) || 0 } };
+        track: { id: element.dataset.trackId, title: element.dataset.trackTitle, artist: element.dataset.trackArtist, duration: Number(element.dataset.trackLength) || 0 } };
       const state = active;
       for (const name of ['loadedmetadata', 'timeupdate', 'play', 'playing', 'pause', 'ended']) {
         audio.addEventListener(name, () => { if (active === state) paint(state); });
