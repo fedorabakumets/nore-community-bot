@@ -11,11 +11,12 @@ window.NoraProfileTrack = (() => {
     if (!track) return '';
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     return `<section class="profile-track" data-track-src="${esc(src)}" aria-label="Трек профиля">
-      <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек"></button>
-      <div class="profile-track-copy">
-        <strong title="${esc(track.title)}">${esc(track.title)}</strong>
-        ${track.artist ? `<small>${esc(track.artist)}</small>` : ''}
-      </div>
+      <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
+        <span class="profile-track-copy">
+          <strong title="${esc(track.title)}">${esc(track.title)}</strong>
+          <small>– ${esc(track.artist || 'Неизвестен')}</small>
+        </span>
+      </button>
       <div class="profile-track-timeline">
         <span data-track-time>0:00</span>
         <input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled>
@@ -36,11 +37,12 @@ window.NoraProfileTrack = (() => {
     seek.setAttribute('aria-valuetext', clock(current));
     element.querySelector('[data-track-time]').textContent = clock(current);
     if (duration) element.querySelector('[data-track-duration]').textContent = clock(duration);
+    element.dataset.ready = String(Boolean(duration && !loading));
     element.dataset.playing = String(playing);
     element.dataset.loading = String(loading);
     const play = element.querySelector('[data-track-toggle]');
     play.disabled = loading;
-    play.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Поставить на паузу' : 'Включить трек');
+    play.setAttribute('aria-label', (loading ? 'Загружаем трек' : playing ? 'Поставить на паузу' : 'Включить трек') + ': ' + element.querySelector('.profile-track-copy strong').textContent);
   }
 
   function stop() {
