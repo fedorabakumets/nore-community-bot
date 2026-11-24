@@ -1862,13 +1862,14 @@ class Database:
                              (user_id,))
             await db.execute("UPDATE tickets SET status='closed', updated_at=? WHERE user_id=? AND status='open'",
                              (now, user_id))
-            from community_bot.profile_track import track_key
             from community_bot.music_library import collection_key, visibility_key
+            from community_bot.profile_track import track_key
 
             await db.execute(
                 "DELETE FROM bot_state WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?) OR key GLOB ?",
                 (f"birthday_date:{user_id}", f"nora_records:{user_id}", f"nora_lobby_cooldown:{user_id}",
-                 f"durak_night:{user_id}", f"nora_game_seen:{user_id}", track_key(user_id), collection_key(user_id), visibility_key(user_id),
+                 f"durak_night:{user_id}", f"nora_game_seen:{user_id}", track_key(user_id),
+                 collection_key(user_id), visibility_key(user_id),
                  f"birthday_gift:{user_id}:*"),
             )
             await db.execute(
