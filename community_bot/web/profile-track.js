@@ -1,6 +1,6 @@
 'use strict';
 window.NoraProfileTrack = (() => {
-  let active = null;
+  let active = null, libraryReturn = null;
 
   function clock(seconds) {
     const total = Math.floor(Number(seconds) || 0);
@@ -16,9 +16,9 @@ window.NoraProfileTrack = (() => {
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
         <span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
-          <small>– ${esc(track.artist || 'Неизвестен')}</small>
+          <small>${library ? '' : '– '}${esc(track.artist || 'Неизвестен')}</small>
         </span>
-      </button>${save}</div>
+      </button>${library ? `<span class="profile-library-duration">${clock(track.duration)}</span>` : ''}${save}</div>
       <div class="profile-track-timeline">
         <span data-track-time>0:00</span>
         <input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled>
@@ -31,22 +31,68 @@ window.NoraProfileTrack = (() => {
     return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? 'Треки' : 'Мои треки'} <span aria-hidden="true">›</span></button>`;
   }
 
+  function libraryScreen(title, subtitle, content) {
+    return '<section id="music-library-profile" tabindex="-1" autofocus data-music-library-panel>' +
+      '<header class="profile-library-header"><div class="profile-library-symbol" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h2a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1v-7Zm18 0h-2a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h1a1 1 0 0 0 1-1v-7Z"/></svg></div>' +
+      '<h2>' + esc(title) + '</h2><p data-library-count>' + esc(subtitle) + '</p></header>' +
+      '<div class="profile-library-content">' + content + '</div></section>';
+  }
+
+  function libraryCount(count) {
+    return number(count) + ' ' + plural(count, 'трек', 'трека', 'треков');
+  }
+
+  function libraryEmpty() {
+    return '<div class="profile-library-empty"><strong>Пока нет треков</strong><p>Сохранённая музыка появится здесь.</p></div>';
+  }
+
+  function back() {
+    const dialog = $('#sheet');
+    if (!dialog.open || !$('#music-library-profile')) return false;
+    const origin = libraryReturn;
+    libraryReturn = null;
+    if (origin) {
+      void window.NoraPeople.visit(origin);
+    } else {
+      dialog.close();
+    }
+    return true;
+  }
+
   async function showLibrary(owner = '') {
     const path = owner ? 'people/' + encodeURIComponent(owner) + '/music-library' : 'music-library';
     const title = owner ? 'Треки' : 'Мои треки';
-    sheet('<div data-music-library-panel><h2>' + title + '</h2><p class="sub">Загрузка…</p></div>');
-    const panel = document.querySelector('[data-music-library-panel]');
+    const person = $('#person-profile');
+    libraryReturn = person ? Number(person.dataset.personId) : null;
+    if (active) stop();
+    sheet(libraryScreen(title, 'Загрузка…', '<div class="profile-library-empty" role="status">Загрузка…</div>'));
+    const panel = $('#music-library-profile');
+    panel.focus({preventScroll:true});
+    $('#sheet').scrollTop = 0;
     try {
       const result = await api(path);
-      if (!panel.isConnected) return;
-      const visibility = owner ? '' : '<label class="profile-library-visibility"><input type="checkbox" data-library-visibility ' + (result.public ? 'checked' : '') + '> Показывать мои треки другим участникам</label>';
-      panel.innerHTML = '<h2>' + title + '</h2>' + visibility + (result.tracks.length
+      if (!panel.isConnected || !$('#sheet').open) return;
+      const visibility = owner ? '' : '<label class="profile-library-visibility"><span><strong>Публичная коллекция</strong><small>Другие участники смогут слушать твои треки</small></span><input type="checkbox" role="switch" data-library-visibility ' + (result.public ? 'checked' : '') + '></label>';
+      panel.querySelector('[data-library-count]').textContent = libraryCount(result.tracks.length);
+      panel.querySelector('.profile-library-content').innerHTML = (result.tracks.length
         ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/' + path + '/' + track.id, true, Boolean(owner))).join('') + '</div>'
-        : '<p class="sub">Пока нет сохранённых треков.</p>');
+        : libraryEmpty()) + visibility;
     } catch (error) {
-      if (panel.isConnected) panel.innerHTML = '<h2>' + title + '</h2><p class="sub">' + esc(error.message) + '</p>';
+      if (panel.isConnected) {
+        panel.querySelector('[data-library-count]').textContent = 'Коллекция недоступна';
+        panel.querySelector('.profile-library-content').innerHTML = '<div class="profile-library-empty">' + esc(error.message) + '</div>';
+      }
     }
   }
+
+  document.addEventListener('close', event => {
+    if (event.target === $('#sheet')) libraryReturn = null;
+  }, true);
+
+  document.addEventListener('cancel', event => {
+    if (event.target === $('#sheet') && back()) event.preventDefault();
+  }, true);
 
   document.addEventListener('change', async event => {
     const input = event.target;
@@ -92,9 +138,11 @@ window.NoraProfileTrack = (() => {
         if (active?.element === row) stop();
         const panel = row.closest('[data-music-library-panel]');
         row.remove();
-        if (panel && !panel.querySelector('[data-track-src]')) {
-          panel.querySelector('.profile-library-list')?.remove();
-          panel.insertAdjacentHTML('beforeend', '<p class="sub">Пока нет сохранённых треков.</p>');
+        if (panel) {
+          const count = panel.querySelectorAll('[data-track-src]').length;
+          panel.querySelector('[data-library-count]').textContent = libraryCount(count);
+          if (!count) panel.querySelector('.profile-library-list')?.insertAdjacentHTML('afterend', libraryEmpty());
+          if (!count) panel.querySelector('.profile-library-list')?.remove();
         }
       }
       toast(result.saved ? 'Добавлено в Мои треки' : 'Удалено из Моих треков');
@@ -222,5 +270,5 @@ window.NoraProfileTrack = (() => {
     if (active && event.target.contains(active.element)) stop();
   }, true);
   window.addEventListener('pagehide', stop);
-  return { html, libraryButton };
+  return { html, libraryButton, back };
 })();
