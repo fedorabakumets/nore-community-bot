@@ -4434,3 +4434,6 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 }
 .profile-library-list { display:grid; gap:8px; margin-top:12px; }
 .profile-library-list .profile-track { width:100%; margin:0; }
+
+.profile-library-visibility{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:13px;color:var(--profile-ink,#f5f1ed)}
+#sheet #person-profile > .profile-library-open{order:3;align-self:center}
