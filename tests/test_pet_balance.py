@@ -92,6 +92,8 @@ async def test_stroking_is_private_hourly_and_mood_is_not_overwritten(tmp_path):
     await db.execute(
         "UPDATE pet_quests SET events='food,stroke',progress=0 WHERE user_id=1 AND day=? AND slot=2", (day,),
     )
+    # Simulate an unfinished quest persisted by the previous daily plan.
+    await db.execute("DELETE FROM bot_state WHERE key='pet_quest_plan_v2:1'")
     care = (await pet_progress.dashboard(db, 1))['quests'][1]
     assert care['label'] == pet_progress.STROKE_QUEST and care['play_with_pet']
     with pytest.raises(ValueError):
