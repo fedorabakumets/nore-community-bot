@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery, InlineKeyboardMarkup, InputRichBlockButtons, InputRichBlockParagraph,
-    InputRichMessage, Message, RichMessageButton, RichTextBold,
+    InputRichMessage, Message, RichMessageButton, RichTextBold, RichTextButton,
 )
 
 from community_bot.aliases import command_or_alias
@@ -40,7 +40,7 @@ from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import text_blocks
 from community_bot.profile_fields import normalize_tg_channel_url, parse_birth_date
 from community_bot.profile_track import audio_block, get_track
-from community_bot.music_library import PREFIX, change_collection, is_public, open_button, save_button
+from community_bot.music_library import PREFIX, change_collection, profile_music_button
 from community_bot.library_rich import register_library_handlers
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
@@ -83,11 +83,11 @@ async def save_profile_music(callback: CallbackQuery, db: Database, settings: Se
         await callback.answer("Трек недоступен.", show_alert=True)
         return
     try:
-        result = await change_collection(db, uid, target_id=target_id, revision=revision)
+        await change_collection(db, uid, target_id=target_id, revision=revision, saved=True)
     except ValueError as error:
         await callback.answer(str(error), show_alert=True)
         return
-    await callback.answer("✓ Добавлено в Мои треки" if result["saved"] else "Удалено из Моих треков")
+    await callback.answer("✓ Трек в Моих треках")
 
 
 
@@ -207,17 +207,25 @@ async def send_profile_card(
     sent: Message | None = None
     if db and message.chat.type == "private" and (editable or not user.get("profile_private")):
         track = await get_track(db, user_id)
-        if track or (message.from_user and (editable or await is_public(db, user_id))):
+        if track or (message.from_user and editable):
             name, closing_tag, details = text.partition("</b>")
             if not closing_tag:
                 name, details = "", text
             lines = details.split("\n", 2)
             avatar = await _avatar(db, user)
+            header = text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML")
+            music = profile_music_button(track, user_id, user_id if editable else -1)
+            if music:
+                part = RichTextButton(button=music).model_dump(exclude_none=True)
+                paragraph = next((block for block in header if block.get("type") == "paragraph"), None)
+                if paragraph is not None:
+                    value = paragraph["text"]
+                    paragraph["text"] = [*(value if isinstance(value, list) else [value]), "  ", part]
+                else:
+                    header.append({"type": "paragraph", "text": [part]})
             blocks = [
-                *([avatar] if avatar else []), *text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML"),
-                *([audio_block(track), save_button(track, user_id)] if track else []),
-                *([InputRichBlockButtons(buttons=[open_button(user_id)])]
-                  if editable or await is_public(db, user_id) else []),
+                *([avatar] if avatar else []), *header,
+                *([audio_block(track)] if track else []),
                 *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
             ]
             rich = InputRichMessage(blocks=blocks)
