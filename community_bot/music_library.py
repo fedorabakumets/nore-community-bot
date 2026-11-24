@@ -77,3 +77,47 @@ def save_button(track, target_id):
     return InputRichBlockButtons(align="center", buttons=[
         RichMessageButton(text="+", callback_data=f"{PREFIX}{target_id}:{track['revision']}"),
     ])
+
+
+LIBRARY_PREFIX = "mlib:"
+PAGE_SIZE = 5
+
+
+def visibility_key(uid):
+    return f"music_library_public:{uid}"
+
+
+async def is_public(db, uid):
+    return await db.get_bot_state(visibility_key(uid)) == "1"
+
+
+async def set_public(db, uid, public):
+    await db.set_bot_state(visibility_key(uid), "1" if public else "0")
+
+
+async def can_read_library(db, settings, viewer, owner):
+    if viewer == owner:
+        return bool(await db.get_user(owner))
+    from community_bot.helpers import can_view_profile
+
+    target = await db.get_user(owner)
+    if not target or target.get("profile_private") or not await is_public(db, owner):
+        return False
+    blocked = await db.fetchone(
+        "SELECT 1 FROM mini_friend_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+        (viewer, owner, owner, viewer),
+    )
+    return not blocked and await can_view_profile(db, settings, viewer, target)
+
+
+def open_button(uid):
+    from aiogram.types import RichMessageButton
+
+    return RichMessageButton(text="🎧", callback_data=f"{LIBRARY_PREFIX}open:{uid}")
+
+
+def page_entries(entries, page):
+    ordered = list(reversed(list(entries.items())))
+    pages = max(1, (len(ordered) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    return ordered[page * PAGE_SIZE:(page + 1) * PAGE_SIZE], page, pages
