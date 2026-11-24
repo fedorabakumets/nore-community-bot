@@ -698,6 +698,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/music-library', social_profiles.music_library)
     app.router.add_post('/api/music-library', social_profiles.music_library)
     app.router.add_post('/api/music-library/visibility', social_profiles.library_visibility)
+    app.router.add_get('/api/music-library/current', social_profiles.current_track_collection)
+    app.router.add_post('/api/music-library/current', social_profiles.current_track_collection)
     app.router.add_get('/api/music-library/{track_id}', social_profiles.library_audio)
     app.router.add_get('/api/people/{user_id}/music-library', social_profiles.public_music_library)
     app.router.add_get('/api/people/{user_id}/music-library/{track_id}', social_profiles.library_audio)

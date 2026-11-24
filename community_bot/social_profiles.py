@@ -15,6 +15,7 @@ from aiohttp import ClientError, web
 from community_bot.friends_api import _recipient, accepted
 from community_bot.helpers import can_view_profile, effective_role, role_title
 from community_bot.music_library import (
+    add_resolved_track,
     can_read_library,
     change_collection,
     get_collection,
@@ -22,6 +23,7 @@ from community_bot.music_library import (
     public_track,
     saved_track_summary,
     set_public,
+    track_id,
 )
 from community_bot.profile_fields import profile_age
 from community_bot.profile_track import download_track, get_track
@@ -366,6 +368,21 @@ async def _share_track_source(db, settings, uid, source, revision):
     else:
         track = await get_track(db, owner)
     return track if track and track["revision"] == revision else None
+
+
+async def current_track_collection(request):
+    """Check or add the current playable track, including public library entries."""
+    db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
+    payload = await request.json() if request.method == "POST" else request.query
+    if request.method == "POST" and not isinstance(payload, dict):
+        raise web.HTTPBadRequest()
+    track = await _share_track_source(db, settings, uid, payload.get("source"), payload.get("revision"))
+    if not track:
+        return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
+    if request.method == "POST":
+        return web.json_response(await add_resolved_track(db, uid, track))
+    key = track_id(track)
+    return web.json_response({"id": key, "saved": key in await get_collection(db, uid)})
 
 
 async def share_track(request):

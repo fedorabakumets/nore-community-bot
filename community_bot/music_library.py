@@ -71,6 +71,25 @@ async def change_collection(db, uid, *, target_id=None, revision=None, key=None,
     return {"id": key, "saved": should_save}
 
 
+async def add_resolved_track(db, uid, track):
+    """Idempotently add an already authorized audio reference without uploading it."""
+    key = track_id(track)
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        row = await (await conn.execute(
+            "SELECT value FROM bot_state WHERE key=?", (collection_key(uid),),
+        )).fetchone()
+        entries = json.loads(row["value"]) if row else {}
+        if key not in entries:
+            entries[key] = track
+            await conn.execute(
+                "INSERT INTO bot_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (collection_key(uid), json.dumps(entries, ensure_ascii=False)),
+            )
+        await conn.commit()
+    return {"id": key, "saved": True}
+
+
 def save_button(track, target_id):
     from aiogram.types import RichMessageButton
 
