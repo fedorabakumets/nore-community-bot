@@ -40,12 +40,14 @@ from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import text_blocks
 from community_bot.profile_fields import normalize_tg_channel_url, parse_birth_date
 from community_bot.profile_track import audio_block, get_track
-from community_bot.music_library import PREFIX, change_collection, save_button
+from community_bot.music_library import PREFIX, change_collection, is_public, open_button, save_button
+from community_bot.library_rich import register_library_handlers
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="profile")
+register_library_handlers(router)
 
 TGK_CALLBACK = "gprofile:tgk:"
 TGK_PROMPT = "🔗 ТГК:"
@@ -205,7 +207,7 @@ async def send_profile_card(
     sent: Message | None = None
     if db and message.chat.type == "private" and (editable or not user.get("profile_private")):
         track = await get_track(db, user_id)
-        if track:
+        if track or editable or await is_public(db, user_id):
             name, closing_tag, details = text.partition("</b>")
             if not closing_tag:
                 name, details = "", text
@@ -213,7 +215,9 @@ async def send_profile_card(
             avatar = await _avatar(db, user)
             blocks = [
                 *([avatar] if avatar else []), *text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML"),
-                audio_block(track), save_button(track, user_id), *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
+                *([audio_block(track), save_button(track, user_id)] if track else []),
+                *([InputRichBlockButtons(buttons=[open_button(user_id)])] if editable or await is_public(db, user_id) else []),
+                *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
             ]
             rich = InputRichMessage(blocks=blocks)
             try:
