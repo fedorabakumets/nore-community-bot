@@ -157,7 +157,13 @@ const NoraProfileWaves = (() => {
       const strength=track.hits[i];
       const age=seconds-i/40;
       if(!strength||age<0||age>=1.6)continue;
-      rings.push({x:.5,y:.43,age,strength});
+      // A stable low-discrepancy sequence spreads consecutive hits across the
+      // viewport. Rewinding reproduces the same locations, without frame jitter.
+      const ordinal=track.hitOrdinals?.[i]||i+1;
+      const fract=v=>v-Math.floor(v);
+      const x=.14+.72*fract(ordinal*.61803398875+.17);
+      const y=.16+.70*fract(ordinal*.41421356237+.31);
+      rings.push({x,y,age,strength});
     }
     return rings;
   }
@@ -291,6 +297,7 @@ window.NoraProfileTrack = (() => {
         }
       }
       const levels=new Float32Array(count),beats=new Float32Array(count),hits=new Float32Array(count);
+      const hitOrdinals=new Uint16Array(count),hitFrames=[];
       let floor=.002,peak=.008,prev=0,baseline=.002,fluxBase=.001,lastHit=-20,pulse=0;
       for(let frame=0;frame<count;frame++){
         // Adaptive bass envelope and positive spectral-energy flux, not a fake BPM.
@@ -304,7 +311,15 @@ window.NoraProfileTrack = (() => {
         if(v>.003&&frame-lastHit>=5&&flux>threshold&&rise>Math.max(.002,peak*.07)){
           pulse=Math.min(1,.70+.30*flux/(threshold*2));
           lastHit=frame;
-          hits[frame]=pulse;
+          // Measure actual loudness of this transient over its first 75 ms.
+          // Keep the separate global beat pulse unchanged.
+          let loudness=0;
+          for(let j=frame;j<Math.min(count,frame+3);j++){
+            loudness=Math.max(loudness,.72*raw[j]+.28*wide[j]);
+          }
+          hits[frame]=loudness;
+          hitFrames.push(frame);
+          hitOrdinals[frame]=hitFrames.length;
         }
         // A short pulse tail remains visible even on a 30 fps WebView.
         beats[frame]=pulse;
@@ -313,7 +328,15 @@ window.NoraProfileTrack = (() => {
         baseline+=(v-baseline)*.085;
         fluxBase+=(flux-fluxBase)*.06;
       }
-      if(active===state){state.envelope=levels;state.beats=beats;state.hits=hits;state.analysisStatus='ready';}
+      // Normalize to a robust loud-hit reference for this track, not the
+      // detection threshold (which previously saturated most hits to 1).
+      const loudnesses=hitFrames.map(frame=>hits[frame]).sort((a,b)=>a-b);
+      const reference=Math.max(.008,loudnesses[Math.floor(.9*Math.max(0,loudnesses.length-1))]||0);
+      for(const frame of hitFrames){
+        const ratio=hits[frame]/reference;
+        hits[frame]=Math.min(1.45,.10+1.15*Math.pow(ratio,1.35));
+      }
+      if(active===state){state.envelope=levels;state.beats=beats;state.hits=hits;state.hitOrdinals=hitOrdinals;state.analysisStatus='ready';}
     }catch{
       if(active===state)state.analysisStatus='unavailable';
     }
@@ -497,7 +520,7 @@ window.NoraProfileTrack = (() => {
     if (!state) return;
     active = null;
     state.controller.abort();
-    state.blob=null;state.envelope=null;state.beats=null;state.hits=null;
+    state.blob=null;state.envelope=null;state.beats=null;state.hits=null;state.hitOrdinals=null;
     state.audio.pause();
     state.audio.removeAttribute('src');
     state.audio.load();
