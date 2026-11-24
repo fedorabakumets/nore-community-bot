@@ -40,14 +40,55 @@ from community_bot.media_cache import profile_photo_input
 from community_bot.private_rich import text_blocks
 from community_bot.profile_fields import normalize_tg_channel_url, parse_birth_date
 from community_bot.profile_track import audio_block, get_track
+from community_bot.music_library import PREFIX, change_collection, is_public, open_button, save_button
+from community_bot.library_rich import register_library_handlers
 from community_bot.routers.flows import restore_private_menu
 from community_bot.states import ProfileEdit
 from community_bot.ui_owner import bind_ui_owner
 
 router = Router(name="profile")
+register_library_handlers(router)
 
 TGK_CALLBACK = "gprofile:tgk:"
 TGK_PROMPT = "🔗 ТГК:"
+
+
+@router.callback_query(F.data.startswith(PREFIX))
+async def save_profile_music(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    from community_bot.access import private_allowed
+
+    uid = callback.from_user.id
+    if not isinstance(callback.message, Message) or (
+        callback.message.chat.type != "private" and callback.message.chat.id != settings.community_chat_id
+    ):
+        await callback.answer("Карточка недоступна.", show_alert=True)
+        return
+    try:
+        raw_target, revision = callback.data[len(PREFIX):].split(":")
+        target_id = int(raw_target)
+    except (AttributeError, TypeError, ValueError):
+        await callback.answer("Карточка недоступна.", show_alert=True)
+        return
+    actor = await db.get_user(uid)
+    target = await db.get_user(target_id)
+    if not actor or not actor.get("city") or not await private_allowed(db, settings, uid) or not target:
+        await callback.answer("Трек недоступен.", show_alert=True)
+        return
+    blocked = await db.fetchone(
+        "SELECT 1 FROM mini_friend_blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",
+        (uid, target_id, target_id, uid),
+    )
+    if uid != target_id and (blocked or target.get("profile_private")
+                             or not await can_view_profile(db, settings, uid, target)):
+        await callback.answer("Трек недоступен.", show_alert=True)
+        return
+    try:
+        result = await change_collection(db, uid, target_id=target_id, revision=revision)
+    except ValueError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+    await callback.answer("✓ Добавлено в Мои треки" if result["saved"] else "Удалено из Моих треков")
+
 
 
 async def _send_tgk_prompt(message: Message, db: Database, owner_id: int) -> None:
@@ -166,7 +207,7 @@ async def send_profile_card(
     sent: Message | None = None
     if db and message.chat.type == "private" and (editable or not user.get("profile_private")):
         track = await get_track(db, user_id)
-        if track:
+        if track or (message.from_user and (editable or await is_public(db, user_id))):
             name, closing_tag, details = text.partition("</b>")
             if not closing_tag:
                 name, details = "", text
@@ -174,7 +215,10 @@ async def send_profile_card(
             avatar = await _avatar(db, user)
             blocks = [
                 *([avatar] if avatar else []), *text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML"),
-                audio_block(track), *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
+                *([audio_block(track), save_button(track, user_id)] if track else []),
+                *([InputRichBlockButtons(buttons=[open_button(user_id)])]
+                  if editable or await is_public(db, user_id) else []),
+                *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
             ]
             rich = InputRichMessage(blocks=blocks)
             try:

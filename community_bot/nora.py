@@ -37,7 +37,7 @@ COMMANDS_BRIEF = """Коротко, что я умею.
 
 «погода» или «Нора, какая погода» — Петербург сейчас и на ближайшие часы.
 «Нора, новости» — город за сутки.
-«Нора, топ чартов» — что сейчас слушают. «Нора, найди песню …» — конкретный трек.
+«Нора треки» — личная коллекция. «Нора песня название» — поиск и скачивание песни.
 «Нора, какой фильм посмотреть» и «Нора, где сериал …» — что включить и где.
 «магазин», «профиль», «баланс», «игры», «питомец» — как и раньше.
 
@@ -45,7 +45,7 @@ COMMANDS_BRIEF = """Коротко, что я умею.
 
 _SPEAK_PROMPT = """Ты Нора, бот сообщества в Петербурге. Человек обратился к тебе по имени.
 Ответь коротко, на «ты», по-русски, своими словами. Пойми, о чём речь, и попробуй подсказать.
-Не выдумывай кинотеатры, чарты, цены и площадки.
+Не выдумывай кинотеатры, цены и площадки.
 Не говори, что ты модель, и не упоминай технические источники.
 Если вопрос про команды, опирайся только на список ниже.
 
@@ -65,12 +65,11 @@ _HELP_PROMPT = """Ты Нора, бот сообщества. Ответь на 
 """
 
 _ROUTE_PROMPT = """Ты диспетчер бота Нора. Верни один JSON без пояснений:
-{{"tool":"weather|news|music_chart|music_search|suggest_title|find_title|help|none","query":"","kind":"movie|tv|any","genre":"","avoid":""}}
+{{"tool":"weather|news|music_help|suggest_title|find_title|help|none","query":"","kind":"movie|tv|any","genre":"","avoid":""}}
 
 weather — погода.
 news — новости.
-music_chart — что послушать, музыкальный чарт, топ треков без названия.
-music_search — названы песня или исполнитель, query — строка поиска.
+music_help — музыкальный запрос: подскажи актуальную команду для поиска или коллекции.
 suggest_title — посоветовать фильм или сериал без названия. kind movie, tv или any.
 find_title — назван конкретный фильм или сериал. query — название как сказал человек.
 help — вопрос про бота и команды.
@@ -114,10 +113,7 @@ def rule_intent(text: str) -> dict[str, str] | None:
     music = any(word in raw for word in ("чарт", "музык", "песн", "трек", "послуша"))
     cinema = any(word in raw for word in ("фильм", "кино", "сериал", "посмотреть", "глянуть"))
     if music and not cinema:
-        named = any(word in raw for word in ("песн", "трек", "найди", "найти", "исполнител"))
-        if named and "чарт" not in raw and "топ" not in raw:
-            return {"tool": "music_search", "query": _query_after(raw)}
-        return {"tool": "music_chart"}
+        return {"tool": "music_help"}
     if cinema:
         kind = "tv" if "сериал" in raw else "movie" if any(word in raw for word in ("фильм", "кино")) else "any"
         suggest = any(word in raw for word in ("какой", "какая", "какое", "посовет", "подскаж", "что "))
@@ -135,19 +131,6 @@ def rule_intent(text: str) -> dict[str, str] | None:
         if titled:
             return {"tool": "find_title", "kind": "any", "query": titled}
     return None
-
-
-def render_tracks(heading: str, tracks: list[tuple[str, str, str]]) -> str:
-    if not tracks:
-        return "Сейчас ничего не нашлось. Назови исполнителя или трек точнее."
-    lines = [heading, ""]
-    for index, (artist, title, _link) in enumerate(tracks[:5], start=1):
-        lines.append(f"{index}. {html.escape(artist)} — {html.escape(title)}")
-    link = next((item[2] for item in tracks if item[2]), "")
-    if link:
-        url = html.escape(link, quote=True)
-        lines.extend(["", f"<a href=\"{url}\">Открыть</a>"])
-    return "\n".join(lines)
 
 
 def render_watch(name: str, year: str, overview: str, providers: list[str], link: str, *, series: bool) -> str:
@@ -346,55 +329,6 @@ def looks_factual(text: str) -> bool:
     return bool(re.search(r"\b(кто|что такое|когда|почему|зачем|сколько|расскажи|объясни)\b", raw))
 
 
-def _tracks_from_itunes_chart(payload: dict[str, object]) -> list[tuple[str, str, str]]:
-    feed = payload.get("feed")
-    if not isinstance(feed, dict):
-        return []
-    entries = feed.get("entry")
-    if isinstance(entries, dict):
-        entries = [entries]
-    if not isinstance(entries, list):
-        return []
-    tracks: list[tuple[str, str, str]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("im:name")
-        artist = entry.get("im:artist")
-        title = str(name.get("label") if isinstance(name, dict) else name or "").strip()
-        who = str(artist.get("label") if isinstance(artist, dict) else artist or "").strip()
-        link = ""
-        links = entry.get("link")
-        if isinstance(links, dict):
-            links = [links]
-        if isinstance(links, list):
-            for item in links:
-                if isinstance(item, dict) and str((item.get("attributes") or {}).get("rel")) in {"", "alternate"}:
-                    href = str((item.get("attributes") or {}).get("href") or "")
-                    if href:
-                        link = href
-                        break
-        if title:
-            tracks.append((who or "—", title, link))
-    return tracks
-
-
-def _tracks_from_itunes_search(payload: dict[str, object]) -> list[tuple[str, str, str]]:
-    results = payload.get("results")
-    if not isinstance(results, list):
-        return []
-    tracks: list[tuple[str, str, str]] = []
-    for item in results:
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("trackName") or "").strip()
-        artist = str(item.get("artistName") or "").strip()
-        link = str(item.get("trackViewUrl") or "")
-        if title:
-            tracks.append((artist or "—", title, link))
-    return tracks
-
-
 def _providers(payload: dict[str, object]) -> tuple[list[str], str]:
     results = payload.get("results")
     if not isinstance(results, dict):
@@ -426,37 +360,6 @@ async def _get_json(
         response.raise_for_status()
         payload = await response.json(content_type=None)
     return payload if isinstance(payload, dict) else {}
-
-
-async def music_chart(limit: int) -> str:
-    url = f"https://itunes.apple.com/ru/rss/topsongs/limit={max(1, min(limit, 10))}/json"
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
-            payload = await _get_json(session, url)
-    except (aiohttp.ClientError, TimeoutError):
-        logger.warning("Чарт музыки не ответил")
-        return "Чарт сейчас не открылся. Попробуй через минуту."
-    return render_tracks("🎵 <b>Сейчас в топе</b>", _tracks_from_itunes_chart(payload))
-
-
-async def music_search(query: str) -> str:
-    if not query:
-        return "Назови песню или исполнителя."
-    url = "https://itunes.apple.com/search"
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
-            async with session.get(
-                url,
-                params={"term": query, "country": "ru", "media": "music", "entity": "song", "limit": "5"},
-            ) as response:
-                response.raise_for_status()
-                payload = await response.json(content_type=None)
-    except (aiohttp.ClientError, TimeoutError):
-        logger.warning("Поиск музыки не ответил")
-        return "Поиск песни сейчас не открылся. Попробуй через минуту."
-    if not isinstance(payload, dict):
-        payload = {}
-    return render_tracks("🎵 <b>Нашла</b>", _tracks_from_itunes_search(payload))
 
 
 def _ai_ready(settings: object) -> str:
@@ -538,7 +441,7 @@ def _parse_route(raw: str) -> dict[str, str] | None:
     if not isinstance(data, dict):
         return None
     tool = str(data.get("tool") or "")
-    if tool not in {"weather", "news", "music_chart", "music_search", "suggest_title", "find_title", "help", "none"}:
+    if tool not in {"weather", "news", "music_help", "suggest_title", "find_title", "help", "none"}:
         return None
     return {
         "tool": tool,
@@ -828,11 +731,8 @@ async def reply_for(text: str, settings: object, now: datetime) -> str:
 
         limit = int(option_value("nora", "news_limit", "2") or "2")
         return await news_digest(now, max(1, min(limit, 3)))
-    if tool == "music_chart":
-        limit = int(option_value("nora", "music_limit", "5") or "5")
-        return await music_chart(max(1, min(limit, 10)))
-    if tool == "music_search":
-        return await music_search(intent.get("query") or _query_after(body))
+    if tool == "music_help":
+        return "🎧 Нора треки — твоя коллекция. Нора песня название — поиск и скачивание песни."
     if tool == "suggest_title":
         return await suggest_title(
             settings,

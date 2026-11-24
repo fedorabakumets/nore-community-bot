@@ -4415,3 +4415,25 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 
 /* The profile itself receives initial dialog focus; real controls retain keyboard focus rings. */
 #sheet #person-profile:focus { outline:none; }
+
+
+/* A separate compact save action, without changing the profile audio player. */
+.profile-track-actions { display:flex; align-items:center; gap:5px; min-width:0; }
+.profile-track-actions .profile-track-toggle { flex:1 1 auto; min-width:0; }
+.profile-track .profile-track-save {
+  display:grid; place-items:center; flex:0 0 28px; width:28px; height:28px; min-height:28px;
+  padding:0; margin:0; border:1px solid #ffffff20; border-radius:50%;
+  background:var(--profile-button,#1b1b20); color:var(--profile-ink,#f5f1ed);
+  box-shadow:none; font:500 18px/1 system-ui; cursor:pointer;
+}
+.profile-track-save[data-saved="true"] { color:#71c995; }
+.profile-library-open {
+  align-self:center; width:fit-content; border:0; padding:5px 10px;
+  background:transparent; color:var(--profile-ink,#f5f1ed); box-shadow:none;
+  font:500 13px/1.3 var(--body-font,system-ui);
+}
+.profile-library-list { display:grid; gap:8px; margin-top:12px; }
+.profile-library-list .profile-track { width:100%; margin:0; }
+
+.profile-library-visibility{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:13px;color:var(--profile-ink,#f5f1ed)}
+#sheet #person-profile > .profile-library-open{order:3;align-self:center}
