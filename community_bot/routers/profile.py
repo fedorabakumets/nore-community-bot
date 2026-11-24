@@ -216,7 +216,8 @@ async def send_profile_card(
             blocks = [
                 *([avatar] if avatar else []), *text_blocks(name + closing_tag + "\n".join(lines[:2]), "HTML"),
                 *([audio_block(track), save_button(track, user_id)] if track else []),
-                *([InputRichBlockButtons(buttons=[open_button(user_id)])] if editable or await is_public(db, user_id) else []),
+                *([InputRichBlockButtons(buttons=[open_button(user_id)])]
+                  if editable or await is_public(db, user_id) else []),
                 *(text_blocks(lines[2], "HTML") if len(lines) > 2 else []),
             ]
             rich = InputRichMessage(blocks=blocks)
