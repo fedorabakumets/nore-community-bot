@@ -17,7 +17,7 @@ from community_bot.access import private_allowed
 from community_bot.aliases import command_or_alias
 from community_bot.config import Settings
 from community_bot.database import Database
-from community_bot.ephemeral import reply_ttl
+from community_bot.ephemeral import keep_in_chat, reply_ttl
 from community_bot.helpers import resolve_command_target
 from community_bot.music_library import (
     LIBRARY_PREFIX,
@@ -37,9 +37,15 @@ def button(text, action):
     return RichMessageButton(text=text, callback_data=LIBRARY_PREFIX + action)
 
 
-async def library_card(db, viewer, owner, page=0):
+async def library_card(db, viewer, owner, page=0, *, profile=False, shared=False):
     target = await db.get_user(owner)
+    if shared and (target.get("profile_private") or not await is_public(db, owner)):
+        return InputRichMessage(blocks=[
+            InputRichBlockParagraph(text="🔒 Мои треки · приватная коллекция. Открой личку с Норой."),
+            InputRichBlockButtons(buttons=[button("← Назад", f"back:{owner}")]),
+        ], skip_entity_detection=True)
     entries, page, pages = page_entries(await get_collection(db, owner), page)
+    mode = "p_" if profile else ""
     title = "🎧 Мои треки" if viewer == owner else "🎧 Треки · " + str(
         target.get("profile_name") or target.get("telegram_name") or "Участник"
     )
@@ -48,22 +54,23 @@ async def library_card(db, viewer, owner, page=0):
         blocks.append(InputRichBlockParagraph(text="Пока нет сохранённых треков."))
     for key, track in entries:
         blocks.append(audio_block(track))
-        if viewer == owner:
-            blocks.append(InputRichBlockButtons(buttons=[button("−", f"del:{key[:32]}:{page}")]))
+        if viewer == owner and not shared:
+            blocks.append(InputRichBlockButtons(buttons=[button("−", f"{mode}del:{key[:32]}:{page}")]))
     nav = []
     if page:
-        nav.append(button("‹", f"page:{owner}:{page - 1}"))
+        nav.append(button("‹", f"{mode}page:{owner}:{page - 1}"))
     if page + 1 < pages:
-        nav.append(button("›", f"page:{owner}:{page + 1}"))
+        nav.append(button("›", f"{mode}page:{owner}:{page + 1}"))
     blocks.append(InputRichBlockParagraph(text=f"Страница {page + 1} / {pages}"))
     if nav:
         blocks.append(InputRichBlockButtons(buttons=nav))
-    if viewer == owner:
+    if viewer == owner and not shared:
         public = await is_public(db, owner)
         blocks.append(InputRichBlockButtons(buttons=[
-            button("🔓 Публичная" if public else "🔒 Только я", f"public:{int(not public)}:{page}"),
+            button("🔓 Публичная" if public else "🔒 Только я", f"{mode}public:{int(not public)}:{page}"),
         ]))
-    blocks.append(InputRichBlockButtons(buttons=[button("❌", "close")]))
+    end = button("← Назад", f"back:{owner}") if profile else button("❌", "close")
+    blocks.append(InputRichBlockButtons(buttons=[end]))
     return InputRichMessage(blocks=blocks, skip_entity_detection=True)
 
 
@@ -107,6 +114,28 @@ async def show_tracks(message: Message, db: Database, settings: Settings):
         await message.answer("🎧 Отправила треки тебе в личку.")
 
 
+async def edit_profile_library(message, db, uid, page=0):
+    shared = message.chat.type != "private"
+    rich = await library_card(db, uid, uid, page, profile=True, shared=shared)
+    with standalone_rich_message(), keep_in_chat(), bot_publication(), reply_ttl(None):
+        await message.edit_text(rich_message=rich, parse_mode=None, reply_markup=None)
+
+
+async def back_to_profile(message, db, settings, uid):
+    user = await db.get_user(uid)
+    if message.chat.type != "private":
+        from community_bot.group_profile import restore_group_profile_card
+
+        return await restore_group_profile_card(message, db, settings, user, uid)
+    from community_bot.helpers import render_profile
+    from community_bot.routers.profile import send_profile_card
+
+    text = await render_profile(db, settings, user, compact=True)
+    # Let the normal private navigation middleware rebuild the profile actions.
+    await send_profile_card(message, user, settings, editable=True, text=text, replace=True, db=db)
+    return True
+
+
 async def library_callback(callback: CallbackQuery, db: Database, settings: Settings):
     message = callback.message
     uid = callback.from_user.id
@@ -123,11 +152,54 @@ async def library_callback(callback: CallbackQuery, db: Database, settings: Sett
             if not await can_read_library(db, settings, uid, owner):
                 await callback.answer("🔒 Коллекция закрыта или недоступна.", show_alert=True)
                 return
-            await deliver(callback.bot, db, uid, owner)
-            await callback.answer("Отправила треки в личку")
+            if owner != uid:
+                # Legacy public collection buttons remain readable in DMs.
+                await deliver(callback.bot, db, uid, owner)
+                await callback.answer("Отправила треки в личку")
+                return
+            shared = message.chat.type != "private"
+            if shared and await db.get_ui_owner(message.chat.id, message.message_id) != uid:
+                raise ValueError
+            await edit_profile_library(message, db, uid)
+            if shared:
+                try:
+                    await deliver(callback.bot, db, uid, uid)
+                except TelegramAPIError:
+                    await callback.answer("Открой личку с Норой для копии треков.", show_alert=True)
+                    return
+            await callback.answer("Треки открыты")
+            return
+        if action == "back" and len(parts) == 2:
+            if int(parts[1]) != uid:
+                raise ValueError
+            if message.chat.type != "private" and (
+                message.chat.id != settings.community_chat_id
+                or await db.get_ui_owner(message.chat.id, message.message_id) != uid
+            ):
+                raise ValueError
+            if not await back_to_profile(message, db, settings, uid):
+                await callback.answer("Не удалось вернуть профиль.", show_alert=True)
+                return
+            await callback.answer()
+            return
+        if action == "p_page" and len(parts) == 3:
+            if int(parts[1]) != uid:
+                raise ValueError
+            if message.chat.type != "private" and (
+                message.chat.id != settings.community_chat_id
+                or await db.get_ui_owner(message.chat.id, message.message_id) != uid
+            ):
+                raise ValueError
+            await edit_profile_library(message, db, uid, int(parts[2]))
+            await callback.answer()
             return
         if message.chat.type != "private" or message.chat.id != uid:
             raise ValueError
+        profile = action.startswith("p_")
+        if profile:
+            action = action[2:]
+            if action not in {"del", "public"}:
+                raise ValueError
         if action == "close" and len(parts) == 1:
             await message.delete()
             await callback.answer()
@@ -151,7 +223,7 @@ async def library_callback(callback: CallbackQuery, db: Database, settings: Sett
         else:
             raise ValueError
         with standalone_rich_message(), bot_publication(), reply_ttl(None):
-            await message.edit_text(rich_message=await library_card(db, uid, owner, page), parse_mode=None)
+            await message.edit_text(rich_message=await library_card(db, uid, owner, page, profile=profile), parse_mode=None)
         await callback.answer("Удалено" if action == "del" else None)
     except ValueError:
         await callback.answer("Карточка недоступна.", show_alert=True)
