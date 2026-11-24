@@ -707,6 +707,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
 
     app.router.add_get('/api/community/music', music_api.delivery_status)
     app.router.add_post('/api/community/music', music_api.send_track)
+    app.router.add_post('/api/community/music/share', social_profiles.share_track)
     app.router.add_get('/api/nora-game/records', music_api.collection)
     app.router.add_post('/api/nora-game/records', music_api.record_action)
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-02.mp3', 'dedzytwo-03.mp3', 'dedzytwo-04.mp3',

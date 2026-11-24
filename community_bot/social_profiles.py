@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import html
+import math
 import re
 import time
 from io import BytesIO
 
+from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError
 from aiohttp import ClientError, web
 
@@ -332,3 +335,107 @@ async def public_music_library(request):
     return web.json_response({"tracks": [
         public_track(key, track) for key, track in reversed(list(entries.items()))
     ]})
+
+
+async def _share_track_source(db, settings, uid, source, revision):
+    """Resolve only an authorized, current audio reference; never accept a file ID from the client."""
+    match = re.fullmatch(
+        r"/api/(?:(?:people/([1-9][0-9]{0,15})/)?(track|music-library/[a-f0-9]{64})|profile/track)",
+        source,
+    ) if isinstance(source, str) else None
+    if not match or not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{32}", revision):
+        raise web.HTTPBadRequest()
+    owner = int(match.group(1)) if match.group(1) else uid
+    target = await db.get_user(owner)
+    if not target:
+        return None
+    library = (match.group(2) or "").startswith("music-library/")
+    if owner != uid:
+        if target["profile_private"] or not await can_view_profile(db, settings, uid, target):
+            return None
+        if await db.fetchone(
+            "SELECT 1 FROM mini_friend_blocks WHERE (blocker_id=? AND blocked_id=?) "
+            "OR (blocker_id=? AND blocked_id=?)",
+            (uid, owner, owner, uid),
+        ):
+            return None
+    if library:
+        if not await can_read_library(db, settings, uid, owner):
+            return None
+        track = (await get_collection(db, owner)).get(match.group(2).split("/")[1])
+    else:
+        track = await get_track(db, owner)
+    return track if track and track["revision"] == revision else None
+
+
+async def share_track(request):
+    """Send the selected track as a native Telegram audio in the configured community."""
+    from community_bot.group_message_close import without_group_close
+    from community_bot.music_api import CHAT_COOLDOWN, COOLDOWN, save
+    from community_bot.reply_rich import bot_publication
+
+    db, settings, uid = request.app["db"], request.app["settings"], request["actor"]["id"]
+    bot = request.app.get("bot")
+    chat = getattr(settings, "community_chat_id", 0)
+    user = await db.get_user(uid)
+    if not bot or not chat:
+        return web.json_response({"error": "Чат Норы пока недоступен"}, status=503)
+    if not user or int(user["reputation"]) < getattr(settings, "restricted_reputation_threshold", 50):
+        return web.json_response({"error": "Репутация ниже бронзы: писать в чат нельзя"}, status=403)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise web.HTTPBadRequest()
+    source, revision = payload.get("source"), payload.get("revision")
+    track = await _share_track_source(db, settings, uid, source, revision)
+    if not track:
+        return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
+    try:
+        member = await bot.get_chat_member(chat, uid)
+        if member.status not in {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR,
+                                 ChatMemberStatus.CREATOR, ChatMemberStatus.RESTRICTED} or (
+            member.status == ChatMemberStatus.RESTRICTED and not (
+                member.is_member and member.can_send_messages and member.can_send_audios
+            )
+        ):
+            return web.json_response({"error": "Сейчас отправлять музыку в чат нельзя"}, status=403)
+        if member.status == ChatMemberStatus.MEMBER:
+            group = await bot.get_chat(chat)
+            permissions = getattr(group, "permissions", None)
+            if permissions and (permissions.can_send_audios is False or permissions.can_send_messages is False):
+                return web.json_response({"error": "В чате отключена отправка музыки"}, status=403)
+    except TelegramAPIError:
+        return web.json_response({"error": "Не удалось проверить доступ к чату"}, status=503)
+    # Recheck privacy/revision after the Telegram membership request.
+    track = await _share_track_source(db, settings, uid, source, revision)
+    if not track:
+        return web.json_response({"error": "Трек изменился или больше недоступен"}, status=404)
+    # Use the existing music-send limits, shared with the seasonal music feature.
+    now = time.time()
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        for key, cooldown in ((f"nora_music_send:{uid}", COOLDOWN), ("nora_music_chat", CHAT_COOLDOWN)):
+            row = await (await conn.execute("SELECT value FROM bot_state WHERE key=?", (key,))).fetchone()
+            remaining = math.ceil(float(row["value"]) + cooldown - now) if row else 0
+            if remaining > 0:
+                return web.json_response(
+                    {"error": f"Подожди {remaining} сек. перед отправкой музыки", "retry_after": remaining},
+                    status=429,
+                )
+        await save(conn, f"nora_music_send:{uid}", now)
+        await save(conn, "nora_music_chat", now)
+        await conn.commit()
+    name = html.escape(str(user.get("profile_name") or user.get("telegram_name") or "Участник")[:80])
+    try:
+        with bot_publication(), without_group_close():
+            await bot.send_audio(
+                chat_id=chat, audio=track["file_id"], title=track["title"],
+                performer=track["artist"] or None, duration=track["duration"],
+                caption=f'🎧 <b><a href="tg://user?id={uid}">{name}</a></b> поделился треком',
+                parse_mode="HTML",
+            )
+    except (TelegramAPIError, OSError, TimeoutError):
+        # Keep the reservation: Telegram may have accepted a timed-out request.
+        return web.json_response(
+            {"error": "Отправка не подтверждена. Проверь чат перед повтором"}, status=502,
+        )
+    return web.json_response({"sent": True, "message": "Трек отправлен в чат 🎧", "retry_after": COOLDOWN})
