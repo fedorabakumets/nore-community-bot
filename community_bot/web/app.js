@@ -25,8 +25,7 @@ function profileTabLocked(target) {
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
-const hasProfileFire=likes=>likes>=50;
-const profileLikeText=likes=>`${hasProfileFire(likes)?'💜':'❤️'} ${number(likes)}`;
+const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket']);
 const gameWrites = new Map();
