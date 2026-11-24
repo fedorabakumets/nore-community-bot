@@ -239,6 +239,9 @@ window.NoraProfileTrack = (() => {
   const miniTitle = mini.querySelector('[data-mini-title]');
   const miniArtist = mini.querySelector('[data-mini-artist]');
   const miniProgress = mini.querySelector('progress');
+  const miniShare = mini.querySelector('[data-mini-share]');
+  let sharePending = false, miniSource = '', shareUntil = 0, shareTimer = 0;
+  const miniMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   // Analyse the already downloaded track separately. Never route playback through
   // AudioContext: a suspended Web Audio graph must not mute iOS playback.
@@ -517,14 +520,27 @@ window.NoraProfileTrack = (() => {
     if (!visible) return;
     const { audio, loading, track } = state;
     const playing = !audio.paused && !audio.ended;
-    miniTitle.textContent = track.title;
-    miniArtist.textContent = loading ? 'Загрузка…' : track.artist;
+    const artist = loading ? 'Загрузка…' : track.artist;
+    if (miniTitle.textContent !== track.title) miniTitle.textContent = track.title;
+    if (miniArtist.textContent !== artist) miniArtist.textContent = artist;
+    if (miniSource !== state.src) {
+      miniSource = state.src;
+      if (!miniMotion.matches) mini.querySelector('.nora-mini-copy').animate?.([
+        {opacity: .25, transform: 'translateY(5px)'}, {opacity: 1, transform: 'translateY(0)'}
+      ], {duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)'});
+    }
+    miniShare.disabled = loading || sharePending || Date.now() < shareUntil;
+    miniShare.dataset.sending = String(sharePending);
+    miniShare.dataset.sent = String(!sharePending && Date.now() < shareUntil);
+    miniShare.setAttribute('aria-label', sharePending ? 'Отправляем трек' : 'Поделиться треком в чате');
     mini.dataset.playing = String(playing);
     miniToggle.disabled = loading;
     miniToggle.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Пауза' : 'Воспроизвести');
     miniOpen.setAttribute('aria-label', 'Открыть плеер: ' + track.title);
-    miniProgress.value = Number.isFinite(audio.duration) && audio.duration > 0
+    const progress = Number.isFinite(audio.duration) && audio.duration > 0
       ? Math.min(1, Math.max(0, audio.currentTime / audio.duration)) : 0;
+    miniProgress.value = progress;
+    mini.style.setProperty('--mini-progress', String(progress));
   }
 
   function paint(state) {
@@ -603,6 +619,29 @@ window.NoraProfileTrack = (() => {
     paint(state);
   }
 
+  async function shareCurrent() {
+    const state = active;
+    if (!state || state.loading || sharePending || Date.now() < shareUntil) return;
+    sharePending = true;
+    paintMini();
+    try {
+      const [source, revision] = state.src.split('?v=');
+      const result = await api('community/music/share', {source, revision: decodeURIComponent(revision || '')});
+      if (!result.sent) throw Error(result.message || 'Не удалось отправить трек');
+      shareUntil = Date.now() + Math.max(1, Number(result.retry_after) || 300) * 1000;
+      clearTimeout(shareTimer);
+      shareTimer = setTimeout(paintMini, Math.max(0, shareUntil - Date.now()));
+      toast(result.message || 'Трек отправлен в чат 🎧');
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      sharePending = false;
+      paintMini();
+    }
+  }
+
+  miniShare.addEventListener('click', () => void shareCurrent());
   miniOpen.addEventListener('click', openNowPlaying);
   miniToggle.addEventListener('click', () => void toggleActive(active));
   document.addEventListener('click', event => {
