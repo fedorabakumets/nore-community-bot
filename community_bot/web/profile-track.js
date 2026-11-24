@@ -36,7 +36,7 @@ SOFTWARE.
 */
 const NoraProfileWaves = (() => {
   const vertex = "#version 300 es\nin vec2 position;\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n}\n";
-  const field = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform vec2 uSize;\nuniform float uDpr;\nuniform vec2 uOrigin;\nuniform vec2 uPitch;\nuniform int uWave;\nuniform float uTime;\nuniform float uUnit;\nuniform vec2 uHeading;\nuniform float uAmp;\nuniform float uDepth;\nuniform vec3 uLight;\nuniform float uShine;\nuniform float uContrast;\nuniform float uInk;\nuniform float uOpacity;\nuniform int uFade;\nuniform float uFadeSize;\nuniform float uAppear;\nuniform sampler2D tRipple;\nuniform float uRipple;\nout vec4 fragColor;\n\nconst float FOLDS = 5.5;\n\nuvec3 scramble(uvec3 v) {\n  v = v * 1664525u + 1013904223u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  v ^= v >> 16u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  return v;\n}\n\nvec3 lattice(vec3 corner) {\n  uvec3 h = scramble(uvec3(ivec3(corner) + 4096));\n  return vec3(h & 65535u) / 32767.5 - 1.0;\n}\n\nfloat gradientNoise(vec3 p) {\n  vec3 i = floor(p);\n  vec3 f = p - i;\n  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n  float n000 = dot(lattice(i), f);\n  float n100 = dot(lattice(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));\n  float n010 = dot(lattice(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));\n  float n110 = dot(lattice(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));\n  float n001 = dot(lattice(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));\n  float n101 = dot(lattice(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));\n  float n011 = dot(lattice(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));\n  float n111 = dot(lattice(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));\n  return mix(\n    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),\n    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),\n    u.z\n  );\n}\n\nvec2 turn(vec2 v, float angle) {\n  float c = cos(angle);\n  float s = sin(angle);\n  return vec2(c * v.x - s * v.y, s * v.x + c * v.y);\n}\n\nfloat surface(vec2 p, float t) {\n  if (uWave == 0) {\n    vec2 side = vec2(-uHeading.y, uHeading.x);\n    float u = dot(p, uHeading);\n    float v = dot(p, side);\n    float bend = gradientNoise(vec3(v * 0.85, u * 0.3, t * 0.05)) * 1.7 + 0.4 * sin(v * 1.6 + t * 0.2);\n    float phase = u * FOLDS + bend - t * 0.45;\n    float swell = 0.6 + 0.4 * gradientNoise(vec3(u * 0.55 + 3.0, v * 0.45, t * 0.04));\n    float fold = sin(phase) + 0.32 * sin(2.0 * phase + 1.3);\n    float ripple = 0.16 * sin(u * FOLDS * 2.5 + bend * 1.9 - t * 0.9 + 2.1);\n    return (fold + ripple) * swell;\n  }\n  if (uWave == 1) {\n    float bend = gradientNoise(vec3(p * 0.6, t * 0.05)) * 0.6;\n    float phase = dot(p, uHeading) * 15.0 + bend * 2.2 - t * 1.4;\n    float swell = sin(phase) + 0.3 * sin(2.0 * phase - 0.8);\n    float roll = 0.75 + 0.25 * gradientNoise(vec3(p * 0.9 + 11.0, t * 0.05));\n    return 0.8 * swell * roll;\n  }\n  float r = length(p + uHeading * 1.2);\n  float bend = gradientNoise(vec3(p * 1.2, t * 0.05)) * 0.1;\n  return sin((r + bend) * 9.0 - t * 1.8) * (0.45 + 0.55 * exp(-(r - 0.6) * 0.8));\n}\n\nfloat heightAt(vec2 css) {\n  float h = surface((css - 0.5 * uSize) / uUnit, uTime) * uAmp;\n  if (uRipple > 0.0) h += texture(tRipple, css / uSize).r * uRipple;\n  return h;\n}\n\nvoid main() {\n  vec2 cell = floor(gl_FragCoord.xy);\n  vec2 center = uOrigin + (cell + 0.5) * uPitch;\n  vec2 css = center / uDpr;\n  vec2 uv = css / uSize;\n  float e = max(uPitch.y / uDpr, 4.0);\n  float h = heightAt(css);\n  float hx = (heightAt(css + vec2(e, 0.0)) - heightAt(css - vec2(e, 0.0))) / (2.0 * e);\n  float hy = (heightAt(css + vec2(0.0, e)) - heightAt(css - vec2(0.0, e))) / (2.0 * e);\n  vec2 grad = vec2(hx, hy) * uUnit * uDepth * 0.4;\n  vec3 n = normalize(vec3(-grad, 1.0));\n\n  float diffuse = clamp(dot(n, uLight), 0.0, 1.0);\n  vec3 halfway = normalize(uLight + vec3(0.0, 0.0, 1.0));\n  float spec = pow(clamp(dot(n, halfway), 0.0, 1.0), 160.0) * uShine * 1.15;\n  float hollow = 0.7 + 0.3 * clamp(h * 0.5 + 0.5, 0.0, 1.0);\n  float tone = clamp(diffuse * hollow * 0.78 + spec, 0.0, 1.0);\n  tone = clamp((tone - 0.42) * uContrast + 0.42, 0.0, 1.0);\n\n  float level = uInk > 0.5 ? pow(clamp(1.0 - tone / 0.46, 0.0, 1.0), 2.4) * 0.72 : pow(tone, 2.2);\n  float emphasis = uInk > 0.5 ? smoothstep(0.55, 0.95, level) : clamp(spec * 1.6, 0.0, 1.0);\n\n  float fade = 1.0;\n  vec2 c = uv * 2.0 - 1.0;\n  if (uFade == 1) {\n    fade = 1.0 - smoothstep(1.0 - uFadeSize, 1.18, length(c));\n  } else if (uFade == 2) {\n    fade = mix(0.05, 1.0, smoothstep(0.08, 0.08 + uFadeSize, length(c * vec2(1.0, 1.35))));\n  } else if (uFade == 3) {\n    fade = smoothstep(0.0, uFadeSize, uv.y);\n  } else if (uFade == 4) {\n    fade = smoothstep(0.0, uFadeSize, 1.0 - uv.y);\n  }\n\n  float reach = length(css - 0.5 * uSize) / max(0.5 * length(uSize), 1.0);\n  float appear = smoothstep(reach - 0.05, reach + 0.3, uAppear * 1.35);\n\n  float alpha = uOpacity * fade * appear * (0.22 + 0.78 * level);\n  float lift = clamp(h * uDepth * 0.42, -0.48, 0.48);\n  fragColor = vec4(level, alpha, emphasis, lift + 0.5);\n}\n";
+  const field = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform vec2 uSize;\nuniform float uDpr;\nuniform vec2 uOrigin;\nuniform vec2 uPitch;\nuniform int uWave;\nuniform float uTime;\nuniform float uUnit;\nuniform vec2 uHeading;\nuniform float uAmp;\nuniform float uDepth;\nuniform vec3 uLight;\nuniform float uShine;\nuniform float uContrast;\nuniform float uInk;\nuniform float uOpacity;\nuniform int uFade;\nuniform float uFadeSize;\nuniform float uAppear;\nuniform sampler2D tRipple;\nuniform float uRipple;\nuniform vec4 uTap0;\nuniform vec4 uTap1;\nuniform vec4 uTap2;\nout vec4 fragColor;\n\nconst float FOLDS = 5.5;\n\nuvec3 scramble(uvec3 v) {\n  v = v * 1664525u + 1013904223u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  v ^= v >> 16u;\n  v.x += v.y * v.z;\n  v.y += v.z * v.x;\n  v.z += v.x * v.y;\n  return v;\n}\n\nvec3 lattice(vec3 corner) {\n  uvec3 h = scramble(uvec3(ivec3(corner) + 4096));\n  return vec3(h & 65535u) / 32767.5 - 1.0;\n}\n\nfloat gradientNoise(vec3 p) {\n  vec3 i = floor(p);\n  vec3 f = p - i;\n  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n  float n000 = dot(lattice(i), f);\n  float n100 = dot(lattice(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));\n  float n010 = dot(lattice(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));\n  float n110 = dot(lattice(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));\n  float n001 = dot(lattice(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));\n  float n101 = dot(lattice(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));\n  float n011 = dot(lattice(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));\n  float n111 = dot(lattice(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));\n  return mix(\n    mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),\n    mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),\n    u.z\n  );\n}\n\nvec2 turn(vec2 v, float angle) {\n  float c = cos(angle);\n  float s = sin(angle);\n  return vec2(c * v.x - s * v.y, s * v.x + c * v.y);\n}\n\nfloat surface(vec2 p, float t) {\n  if (uWave == 0) {\n    vec2 side = vec2(-uHeading.y, uHeading.x);\n    float u = dot(p, uHeading);\n    float v = dot(p, side);\n    float bend = gradientNoise(vec3(v * 0.85, u * 0.3, t * 0.05)) * 1.7 + 0.4 * sin(v * 1.6 + t * 0.2);\n    float phase = u * FOLDS + bend - t * 0.45;\n    float swell = 0.6 + 0.4 * gradientNoise(vec3(u * 0.55 + 3.0, v * 0.45, t * 0.04));\n    float fold = sin(phase) + 0.32 * sin(2.0 * phase + 1.3);\n    float ripple = 0.16 * sin(u * FOLDS * 2.5 + bend * 1.9 - t * 0.9 + 2.1);\n    return (fold + ripple) * swell;\n  }\n  if (uWave == 1) {\n    float bend = gradientNoise(vec3(p * 0.6, t * 0.05)) * 0.6;\n    float phase = dot(p, uHeading) * 15.0 + bend * 2.2 - t * 1.4;\n    float swell = sin(phase) + 0.3 * sin(2.0 * phase - 0.8);\n    float roll = 0.75 + 0.25 * gradientNoise(vec3(p * 0.9 + 11.0, t * 0.05));\n    return 0.8 * swell * roll;\n  }\n  float r = length(p + uHeading * 1.2);\n  float bend = gradientNoise(vec3(p * 1.2, t * 0.05)) * 0.1;\n  return sin((r + bend) * 9.0 - t * 1.8) * (0.45 + 0.55 * exp(-(r - 0.6) * 0.8));\n}\n\nfloat touchWave(vec2 css, vec4 tap) {\n  if (tap.w <= 0.0 || tap.z > 1.6) return 0.0;\n  float distanceToTap = length(css - tap.xy);\n  float front = distanceToTap - tap.z * 270.0;\n  float envelope = exp(-front * front / 5200.0) * exp(-tap.z * 2.7);\n  return sin(front * 0.065) * envelope * tap.w * 0.30;\n}\nfloat heightAt(vec2 css) {\n  float h = surface((css - 0.5 * uSize) / uUnit, uTime) * uAmp;\n  if (uRipple > 0.0) h += texture(tRipple, css / uSize).r * uRipple;\n  h += touchWave(css,uTap0) + touchWave(css,uTap1) + touchWave(css,uTap2);\n  return h;\n}\n\nvoid main() {\n  vec2 cell = floor(gl_FragCoord.xy);\n  vec2 center = uOrigin + (cell + 0.5) * uPitch;\n  vec2 css = center / uDpr;\n  vec2 uv = css / uSize;\n  float e = max(uPitch.y / uDpr, 4.0);\n  float h = heightAt(css);\n  float hx = (heightAt(css + vec2(e, 0.0)) - heightAt(css - vec2(e, 0.0))) / (2.0 * e);\n  float hy = (heightAt(css + vec2(0.0, e)) - heightAt(css - vec2(0.0, e))) / (2.0 * e);\n  vec2 grad = vec2(hx, hy) * uUnit * uDepth * 0.4;\n  vec3 n = normalize(vec3(-grad, 1.0));\n\n  float diffuse = clamp(dot(n, uLight), 0.0, 1.0);\n  vec3 halfway = normalize(uLight + vec3(0.0, 0.0, 1.0));\n  float spec = pow(clamp(dot(n, halfway), 0.0, 1.0), 160.0) * uShine * 1.15;\n  float hollow = 0.7 + 0.3 * clamp(h * 0.5 + 0.5, 0.0, 1.0);\n  float tone = clamp(diffuse * hollow * 0.78 + spec, 0.0, 1.0);\n  tone = clamp((tone - 0.42) * uContrast + 0.42, 0.0, 1.0);\n\n  float level = uInk > 0.5 ? pow(clamp(1.0 - tone / 0.46, 0.0, 1.0), 2.4) * 0.72 : pow(tone, 2.2);\n  float emphasis = uInk > 0.5 ? smoothstep(0.55, 0.95, level) : clamp(spec * 1.6, 0.0, 1.0);\n\n  float fade = 1.0;\n  vec2 c = uv * 2.0 - 1.0;\n  if (uFade == 1) {\n    fade = 1.0 - smoothstep(1.0 - uFadeSize, 1.18, length(c));\n  } else if (uFade == 2) {\n    fade = mix(0.05, 1.0, smoothstep(0.08, 0.08 + uFadeSize, length(c * vec2(1.0, 1.35))));\n  } else if (uFade == 3) {\n    fade = smoothstep(0.0, uFadeSize, uv.y);\n  } else if (uFade == 4) {\n    fade = smoothstep(0.0, uFadeSize, 1.0 - uv.y);\n  }\n\n  float reach = length(css - 0.5 * uSize) / max(0.5 * length(uSize), 1.0);\n  float appear = smoothstep(reach - 0.05, reach + 0.3, uAppear * 1.35);\n\n  float alpha = uOpacity * fade * appear * (0.22 + 0.78 * level);\n  float lift = clamp(h * uDepth * 0.42, -0.48, 0.48);\n  fragColor = vec4(level, alpha, emphasis, lift + 0.5);\n}\n";
   const marks = "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform sampler2D tField;\nuniform sampler2D tAtlas;\nuniform vec2 uOrigin;\nuniform vec2 uPitch;\nuniform vec2 uGrid;\nuniform int uPattern;\nuniform float uMarkSize;\nuniform float uStroke;\nuniform vec3 uColor;\nuniform vec3 uAccent;\nuniform vec4 uBackground;\nuniform vec3 uAtlas;\nout vec4 fragColor;\n\nfloat box(vec2 p, vec2 b, float r) {\n  vec2 q = abs(p) - b + r;\n  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;\n}\n\nfloat coverage(vec2 local, float level) {\n  float span = uPitch.y * uMarkSize;\n  float area = max(sqrt(level), 0.14);\n  if (uPattern == 0) {\n    return clamp(0.5 - (length(local) - 0.5 * span * area), 0.0, 1.0);\n  }\n  if (uPattern == 1) {\n    float extent = 0.5 * span * area;\n    return clamp(0.5 - box(local, vec2(extent), extent * 0.3), 0.0, 1.0);\n  }\n  if (uPattern == 2) {\n    float arm = 0.5 * span * mix(0.3, 1.0, level);\n    float width = 0.5 * uStroke;\n    return clamp(0.5 - min(box(local, vec2(arm, width), width), box(local, vec2(width, arm), width)), 0.0, 1.0);\n  }\n  if (uAtlas.z < 1.0) return 0.0;\n  vec2 g = local / span + 0.5;\n  if (g.x < 0.0 || g.y < 0.0 || g.x > 1.0 || g.y > 1.0) return 0.0;\n  float index = min(floor(level * uAtlas.z), uAtlas.z - 1.0);\n  vec2 tile = vec2(mod(index, uAtlas.x), floor(index / uAtlas.x));\n  vec2 atlasUv = (tile + vec2(g.x, 1.0 - g.y)) / uAtlas.xy;\n  vec2 texel = 1.0 / (span * uAtlas.xy);\n  return textureGrad(tAtlas, atlasUv, vec2(texel.x, 0.0), vec2(0.0, texel.y)).a;\n}\n\nvec4 lineInk(vec2 rel) {\n  float fx = rel.x / uPitch.x - 0.5;\n  float c0 = clamp(floor(fx), 0.0, uGrid.x - 1.0);\n  float c1 = min(c0 + 1.0, uGrid.x - 1.0);\n  float t = clamp(fx - c0, 0.0, 1.0);\n  float row = floor(rel.y / uPitch.y);\n  vec4 ink = vec4(0.0);\n  for (int k = -1; k <= 1; k++) {\n    float cy = row + float(k);\n    if (cy < 0.0 || cy >= uGrid.y) continue;\n    vec4 a = texelFetch(tField, ivec2(int(c0), int(cy)), 0);\n    vec4 b = texelFetch(tField, ivec2(int(c1), int(cy)), 0);\n    vec4 f = mix(a, b, t);\n    if (f.g < 0.002) continue;\n    float y = (cy + 0.5 + f.a - 0.5) * uPitch.y;\n    float slope = (b.a - a.a) * uPitch.y / uPitch.x;\n    float thickness = max(uStroke, uPitch.y * uMarkSize * f.r);\n    float d = abs(rel.y - y) / sqrt(1.0 + slope * slope) - 0.5 * thickness;\n    float alpha = clamp(0.5 - d, 0.0, 1.0) * f.g;\n    if (alpha > ink.a) ink = vec4(mix(uColor, uAccent, f.b) * alpha, alpha);\n  }\n  return ink;\n}\n\nvoid main() {\n  vec2 rel = gl_FragCoord.xy - uOrigin;\n  vec4 background = vec4(uBackground.rgb * uBackground.a, uBackground.a);\n  vec4 ink = vec4(0.0);\n  if (uPattern == 3) {\n    ink = lineInk(rel);\n  } else {\n    float cx = floor(rel.x / uPitch.x);\n    float row = floor(rel.y / uPitch.y);\n    if (cx >= 0.0 && cx < uGrid.x) {\n      for (int k = -1; k <= 1; k++) {\n        float cy = row + float(k);\n        if (cy < 0.0 || cy >= uGrid.y) continue;\n        vec4 f = texelFetch(tField, ivec2(int(cx), int(cy)), 0);\n        if (f.g < 0.002) continue;\n        vec2 center = (vec2(cx, cy) + 0.5) * uPitch + vec2(0.0, (f.a - 0.5) * uPitch.y);\n        float alpha = coverage(rel - center, f.r) * f.g;\n        if (alpha > ink.a) ink = vec4(mix(uColor, uAccent, f.b) * alpha, alpha);\n      }\n    }\n  }\n  fragColor = ink + background * (1.0 - ink.a);\n}\n";
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let scene = null;
@@ -97,7 +97,7 @@ const NoraProfileWaves = (() => {
       }
       let oldCols=0,oldRows=0;
       return {
-        draw(time) {
+        draw(time, energy=0, taps=[]) {
           const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h||gl.isContextLost())return;
           const dpr=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(1000000/(w*h)));
           const cw=Math.max(1,Math.round(w*dpr)),ch=Math.max(1,Math.round(h*dpr));
@@ -110,11 +110,12 @@ const NoraProfileWaves = (() => {
             oldCols=cols;oldRows=rows;
           }
           const angle=20*Math.PI/180;
+          const tapAt=i=>taps[i]?[taps[i].x,h-taps[i].y,taps[i].age,taps[i].strength]:[0,0,0,0];
           gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);gl.viewport(0,0,cols,rows);
-          uniforms(fp,{uSize:[w,h],uDpr:ratio,uOrigin:origin,uPitch:[pitch,pitch],uWave:0,uTime:time*.35,uUnit:520,uHeading:[Math.cos(angle),Math.sin(angle)],uAmp:1,uDepth:.95,uLight:[-Math.cos(angle)*.78,-Math.sin(angle)*.78,.62],uShine:.8,uContrast:1.2,uInk:0,uOpacity:.9,uFade:0,uFadeSize:.5,uAppear:1,tRipple:1,uRipple:0});
+          uniforms(fp,{uSize:[w,h],uDpr:ratio,uOrigin:origin,uPitch:[pitch,pitch],uWave:0,uTime:time*.35,uUnit:520,uHeading:[Math.cos(angle),Math.sin(angle)],uAmp:1+energy*.13,uDepth:.95+energy*.09,uLight:[-Math.cos(angle)*.78,-Math.sin(angle)*.78,.62],uShine:.8+energy*.28,uContrast:1.2,uInk:0,uOpacity:.9,uFade:0,uFadeSize:.5,uAppear:1,tRipple:1,uRipple:0,uTap0:tapAt(0),uTap1:tapAt(1),uTap2:tapAt(2)});
           gl.drawArrays(gl.TRIANGLES,0,3);
           gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cw,ch);
-          uniforms(mp,{tField:0,tAtlas:1,uOrigin:origin,uPitch:[pitch,pitch],uGrid:[cols,rows],uPattern:0,uMarkSize:.95,uStroke:1,uColor:[.57,.72,.86],uAccent:[.84,.91,1],uBackground:[0,0,0,0],uAtlas:[1,1,0]});
+          uniforms(mp,{tField:0,tAtlas:1,uOrigin:origin,uPitch:[pitch,pitch],uGrid:[cols,rows],uPattern:0,uMarkSize:.95,uStroke:1,uColor:[.57,.72,.86],uAccent:[.84+energy*.07,.91+energy*.04,1],uBackground:[0,0,0,0],uAtlas:[1,1,0]});
           gl.drawArrays(gl.TRIANGLES,0,3);
         },
         destroy
@@ -134,6 +135,8 @@ const NoraProfileWaves = (() => {
   function stopScene(s,immediate=false) {
     if(!s)return;
     s.host.classList.remove('nora-profile-music');
+    s.element?.style.removeProperty('--music-energy');
+    s.energy=0;s.taps=[];
     if(scene===s)paintMusicShell(false);
     s.running=false;cancelAnimationFrame(s.raf);s.raf=0;
     s.layer.classList.remove('is-playing');
@@ -146,18 +149,26 @@ const NoraProfileWaves = (() => {
   }
   function tick(s,now) {
     s.raf=0;
-    if(!s.running||document.hidden||!s.renderer)return;
+    if(!s.running||document.hidden)return;
     if(!s.last||now-s.last>=32){
-      if(s.last)s.time+=Math.min(.1,(now-s.last)/1000);
-      s.last=now;s.renderer.draw(s.time);
+      const dt=s.last?Math.min(.1,(now-s.last)/1000):.033;
+      s.last=now;
+      const quiet=reduced.matches;
+      const target=quiet?0:(s.track?.envelope?.[Math.floor((s.track.audio.currentTime||0)*20)]||0);
+      // Smooth the measured bass envelope; do not flash on individual samples.
+      s.energy+=(target-s.energy)*(1-Math.exp(-dt/(target>s.energy?.085:.24)));
+      if(!quiet)s.time+=dt*(1+s.energy*.42);
+      s.taps=s.taps.filter(t=>s.time-t.time<1.6);
+      s.renderer?.draw(s.time,quiet?0:s.energy,quiet?[]:s.taps.map(t=>({...t,age:s.time-t.time})));
+      s.element?.style.setProperty('--music-energy',s.energy.toFixed(3));
     }
     if(!reduced.matches)s.raf=requestAnimationFrame(t=>tick(s,t));
   }
   function wake(s) {
-    if(!s||!s.running||!s.renderer||document.hidden||s.raf)return;
+    if(!s||!s.running||document.hidden||s.raf)return;
     s.last=0;s.raf=requestAnimationFrame(t=>tick(s,t));
   }
-  function sync(element,playing) {
+  function sync(element,playing,track=null) {
     const person=element?.closest('#person-profile');
     const own=element?.closest('#app[data-screen="lk"] .lk-screen');
     const host=person&&person.closest('dialog')?.open?person.closest('dialog'):own?document.body:null;
@@ -173,16 +184,37 @@ const NoraProfileWaves = (() => {
       let engine=null;
       try{engine=renderer(canvas);}catch{}
       if(!engine)canvas.hidden=true;
-      scene={host,layer,renderer:engine,raf:0,last:0,time:0,running:false};
+      scene={host,layer,renderer:engine,raf:0,last:0,time:0,running:false,energy:0,taps:[],element:null,track:null};
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(scene?.layer===layer){cancelAnimationFrame(scene.raf);scene.raf=0;scene.renderer=null;canvas.hidden=true;}});
       canvas.addEventListener('webglcontextrestored',()=>{if(scene?.layer===layer){scene.renderer=renderer(canvas);canvas.hidden=!scene.renderer;wake(scene);}});
     }
+    if(scene.element!==element)scene.element?.style.removeProperty('--music-energy');
+    scene.element=element;scene.track=track;
     if(scene.running)return;
     clearTimeout(scene.removeTimer);scene.running=true;host.classList.add('nora-profile-music');
     paintMusicShell(true);
     const s=scene;requestAnimationFrame(()=>{if(s.running)s.layer.classList.add('is-playing');});
     wake(s);
   }
+  // Passive pointer effects only: no interference with scrolling, links or sliders.
+  function ripple(event,strength) {
+    const s=scene;
+    if(!s?.running||!s.renderer||document.hidden||reduced.matches)return;
+    if(event.target.closest('input,textarea,select,#nav,#scroll-jump'))return;
+    if(s.host===document.body){
+      if(document.querySelector('dialog[open]')||!event.target.closest('#app[data-screen="lk"]'))return;
+    }else if(!event.target.closest('#person-profile'))return;
+    const rect=s.layer.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
+    if(x<0||y<0||x>rect.width||y>rect.height)return;
+    s.taps=[{x,y,time:s.time,strength},...s.taps].slice(0,3);
+  }
+  document.addEventListener('pointerdown',event=>ripple(event,1),{passive:true});
+  let lastHover=0,lastX=0,lastY=0;
+  document.addEventListener('pointermove',event=>{
+    if(event.pointerType!=='mouse'||event.timeStamp-lastHover<170||Math.hypot(event.clientX-lastX,event.clientY-lastY)<36)return;
+    lastHover=event.timeStamp;lastX=event.clientX;lastY=event.clientY;
+    ripple(event,.4);
+  },{passive:true});
   document.addEventListener('visibilitychange',()=>{
     if(!scene)return;
     if(document.hidden){cancelAnimationFrame(scene.raf);scene.raf=0;}else wake(scene);
@@ -195,6 +227,56 @@ const NoraProfileWaves = (() => {
 
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
+
+  // Analyse the already downloaded track separately. Never route playback through
+  // AudioContext: a suspended Web Audio graph must not mute iOS playback.
+  async function prepareMusicEnvelope(state) {
+    if(state.analysisStarted||!state.blob||!state.element.closest('#app[data-screen="lk"] .lk-screen,#person-profile')||
+       matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    const duration=state.audio.duration;
+    if(!Number.isFinite(duration)||duration<=0)return;
+    state.analysisStarted=true;
+    const blob=state.blob;state.blob=null;
+    const Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+    if(!Offline||duration>600||blob.size>16*1024*1024)return;
+    try{
+      const decoder=new Offline(1,1,22050);
+      const encoded=await blob.arrayBuffer();
+      if(active!==state)return;
+      const decoded=await decoder.decodeAudioData(encoded);
+      if(active!==state||decoded.duration>600)return;
+      const samples=decoded.getChannelData(0);
+      const second=decoded.numberOfChannels>1?decoded.getChannelData(1):null;
+      const stride=Math.max(1,Math.floor(decoded.sampleRate/5500));
+      const rate=decoded.sampleRate/stride, alpha=1-Math.exp(-2*Math.PI*145/rate);
+      const count=Math.ceil(decoded.duration*20),levels=new Float32Array(count);
+      let low=0,dc=0,baseline=.012,peak=.035;
+      for(let frame=0;frame<count;frame++){
+        const start=Math.floor(frame*decoded.sampleRate/20);
+        const end=Math.min(samples.length,Math.floor((frame+1)*decoded.sampleRate/20));
+        let bass=0,wide=0,n=0;
+        for(let i=start;i<end;i+=stride){
+          const a=samples[i],b=second?second[i]:a;
+          const value=Math.abs(a)>=Math.abs(b)?a:b;
+          dc+=(value-dc)*.003;low+=(value-dc-low)*alpha;
+          bass+=low*low;wide+=value*value;n++;
+        }
+        const level=.78*Math.sqrt(bass/Math.max(1,n))+.22*Math.sqrt(wide/Math.max(1,n));
+        baseline+=(level-baseline)*.045;
+        peak=Math.max(level,peak*.994,.035);
+        const intensity=Math.min(1,level/(peak+.025));
+        const accent=Math.min(1,Math.max(0,(level-baseline)/(baseline+.035)));
+        levels[frame]=Math.min(1,.55*intensity+.45*accent);
+        if(frame%300===299){
+          await new Promise(resolve=>setTimeout(resolve,0));
+          if(active!==state)return;
+        }
+      }
+      if(active===state)state.envelope=levels;
+    }catch{
+      // Unsupported codecs, memory limits or browsers keep the ordinary waves.
+    }
+  }
 
   function clock(seconds) {
     const total = Math.floor(Number(seconds) || 0);
@@ -361,7 +443,8 @@ window.NoraProfileTrack = (() => {
     if (duration) element.querySelector('[data-track-duration]').textContent = clock(duration);
     element.dataset.ready = String(Boolean(duration && !loading));
     element.dataset.playing = String(playing);
-    NoraProfileWaves.sync(element, playing && !loading);
+    NoraProfileWaves.sync(element, playing && !loading,state);
+    if(playing && !loading) void prepareMusicEnvelope(state);
     element.dataset.loading = String(loading);
     const play = element.querySelector('[data-track-toggle]');
     play.disabled = loading;
@@ -373,6 +456,7 @@ window.NoraProfileTrack = (() => {
     if (!state) return;
     active = null;
     state.controller.abort();
+    state.blob=null;state.envelope=null;
     state.audio.pause();
     state.audio.removeAttribute('src');
     state.audio.load();
@@ -407,6 +491,7 @@ window.NoraProfileTrack = (() => {
         if (!response.ok) throw new Error();
         const blob = await response.blob();
         if (active !== state) return;
+        state.blob = blob;
         state.url = URL.createObjectURL(blob);
         audio.src = state.url;
       } catch {
