@@ -183,3 +183,45 @@ async def test_new_role_inserted_before_a_count_has_one_separator(db):
     await db.set_bot_state(f'{tags.TAG_STATE_PREFIX}{CHAT}:1', '♡ 49')
     await tags.sync_like_tags(db, bot, CHAT, {})
     bot.set_chat_member_tag.assert_awaited_once_with(CHAT, 1, tag='Тестер ♡ 50')
+
+
+@pytest.mark.parametrize('regular_tag, expected', [
+    ('Модер', 'Модер ♡ 31'),
+    (None, '♡ 31'),
+    ('Модер ♡ 31', 'Модер ♡ 31'),
+])
+async def test_demotion_rechecks_unchanged_count_on_next_pass(db, monkeypatch, regular_tag, expected):
+    bot = FakeBot()
+    bot.rights = True
+    bot.members[1] = member(status=ChatMemberStatus.ADMINISTRATOR, custom_title='Модер', can_be_edited=True)
+    await db.set_bot_state(f'{social_likes.COUNT_PREFIX}1', '31')
+    monkeypatch.setattr(tags, 'monotonic', lambda: 10.0)
+    checked = {}
+    await tags.sync_like_tags(db, bot, CHAT, checked)
+    assert bot.members[1].custom_title == 'Модер ♡ 31'
+
+    bot.members[1] = member(regular_tag)
+    middleware = tags.LikeTagMembershipMiddleware(CHAT, checked)
+    handler = AsyncMock()
+    change = SimpleNamespace(chat=SimpleNamespace(id=CHAT), new_chat_member=SimpleNamespace(user=SimpleNamespace(id=1)))
+    await middleware(handler, SimpleNamespace(chat_member=change, my_chat_member=None), {})
+    assert 1 not in checked
+    await tags.sync_like_tags(db, bot, CHAT, checked)
+    assert bot.members[1].tag == expected
+    state = tags.TagState.read(await db.get_bot_state(f'{tags.TAG_STATE_PREFIX}{CHAT}:1'))
+    assert not state.administrator
+    assert state.base == ('Модер' if regular_tag else '')
+    assert bot.set_chat_administrator_custom_title.await_count == 1
+
+
+async def test_bot_rights_change_invalidates_checks():
+    checked = {1: (31, 10.0), 2: (5, 10.0)}
+    middleware = tags.LikeTagMembershipMiddleware(CHAT, checked)
+    handler = AsyncMock()
+    other = SimpleNamespace(chat=SimpleNamespace(id=CHAT - 1))
+    await middleware(handler, SimpleNamespace(chat_member=None, my_chat_member=other), {})
+    assert len(checked) == 2
+    own = SimpleNamespace(chat=SimpleNamespace(id=CHAT))
+    await middleware(handler, SimpleNamespace(chat_member=None, my_chat_member=own), {})
+    assert not checked
+    assert handler.await_count == 2
