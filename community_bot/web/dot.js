@@ -1,6 +1,6 @@
 "use strict";
 window.NoraDot = (() => {
-  const {W,H,X,R,PIPE,STEP,clamp,lerp,STAGES,stageAt,speedAt,typeNames,gateShape,segments,witnessFor,createRun,seededRandom}=window.NoraDotCore;
+  const {W,H,X,R,PIPE,STEP,clamp,lerp,STAGES,stageAt,gravityMode,softMode,speedAt,typeNames,gateShape,segments,witnessFor,createRun,seededRandom}=window.NoraDotCore;
 
   let root,canvas,ctx,hud,score,progress,overlay,title,detail,button,soundButton,abort,observer;
   let raf=0,last=0,acc=0,run,mode="ready",muted=false,audio,master;
@@ -65,7 +65,7 @@ window.NoraDot = (() => {
     zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";flapAt=-10;acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
   function updateStage(announce){
-    const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",run.stage===6?"Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию.":"Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.");root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
+    const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",gravityMode(run.passed)?"Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию.":"Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.");root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
     if(announce){stageTitle.textContent=s.name;stageDescription.textContent=s.description;stageBanner.getAnimations?.().forEach(a=>a.cancel());if(!reduced)stageBanner.animate?.([{opacity:0,transform:"translateY(-8px) scale(.96)"},{opacity:1,transform:"none",offset:.15},{opacity:1,offset:.78},{opacity:0}],{duration:1850,easing:"ease-out"});}
   }
   function updateHud(){
@@ -103,7 +103,7 @@ window.NoraDot = (() => {
     if(mode==="ready"||mode==="paused"){mode="play";last=0;acc=0;run.py=run.y;run.previousDistance=run.distance;run.previousTime=run.time;flapAt=-10;showOverlay();canvas.focus?.({preventScroll:true});}
     if(run.time-flapAt<.045||flaps.at(-1)===run.ticks)return;
     run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);flapAt=run.time;stretch=1;
-    if(run.stage===6){
+    if(gravityMode(run.passed)){
       gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
       burst(X-7,run.y,12,color,60);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
     }else{burst(X-7,run.y+4,7,[255,75,103],48);rings.push({x:X,y:run.y,life:.19,max:.19,color:[255,85,117],size:12});sfx("flap");}
@@ -211,7 +211,7 @@ window.NoraDot = (() => {
       labels.push({x:X+15,y:run.y-18,life:.65,max:.65});
     }
     if(kind==="pass")updateHud();
-    if(kind==="stage"){if(run.stage===6)gravityPulse=1;updateStage(true);const c=STAGES[run.stage].color;burst(X,run.y,18,c,95);rings.push({x:X,y:run.y,life:.55,max:.55,color:c,size:55});}
+    if(kind==="stage"){if(gravityMode(run.passed))gravityPulse=1;else gravityPulse=0;updateStage(true);const c=STAGES[run.stage].color;burst(X,run.y,18,c,95);rings.push({x:X,y:run.y,life:.55,max:.55,color:c,size:55});}
     if(kind==="crash"){
       mode="crash";crashTime=0;impact=1;shake=reduced?0:1;
       burst(X,run.y,55,[255,70,96],245);burst(X,run.y,19,[255,222,228],160);
@@ -295,7 +295,7 @@ window.NoraDot = (() => {
     ctx.restore();
   }
   function drawGravity(){
-    if(run.stage!==6)return;
+    if(!gravityMode(run.passed))return;
     const up=run.gravity<0,color=up?[102,224,239]:[187,148,255],edge=up?0:H;
     const g=ctx.createLinearGradient(0,edge,0,edge+(up?90:-90));
     g.addColorStop(0,rgb(...color,.23));g.addColorStop(1,rgb(...color,0));
@@ -313,7 +313,7 @@ window.NoraDot = (() => {
       ctx.fillStyle=wave;ctx.fillRect(0,y-24,W,48);
     }
     ctx.save();ctx.font="600 10px system-ui";ctx.textAlign="center";
-    ctx.fillStyle=rgb(...color,.95);ctx.fillText(up?"↑  GRAVITY":"↓  GRAVITY",W/2,up?45:H-39);ctx.restore();
+    ctx.fillStyle=rgb(...color,.95);ctx.fillText((up?"↑  ":"↓  ")+(softMode(run.passed)?"SOFT GRAVITY":"GRAVITY"),W/2,up?45:H-39);ctx.restore();
   }
   function drawPlayer(y,distance){
     if(mode==="over"||(mode==="crash"&&crashTime>.12))return;
