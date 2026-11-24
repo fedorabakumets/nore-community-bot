@@ -4154,12 +4154,7 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 
 
 /* Telegram-style full-screen profiles. Only the LK route and person dialog are affected. */
-#app[data-screen="lk"], #sheet:has(:is(#person-profile,#music-library-profile)) {
-  --profile-surface: #19181d;
-  --profile-button: #202026;
-  --profile-ink: #f5f1ed;
-  --profile-muted: #a8a4ae;
-}
+/* Profile surfaces inherit the shared application theme. */
 #app[data-screen="lk"] { max-width: 552px; }
 #app[data-screen="lk"]:has(#profile-photo img) { padding-top: 0; }
 /* Let the cover extend behind Telegram's top controls on the profile route. */
@@ -4361,10 +4356,7 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 }
 
 /* Compact Telegram profile sections; only the own profile and person dialog. */
-#app[data-screen="lk"], #sheet:has(:is(#person-profile,#music-library-profile)) {
-  --profile-surface:#17161c; --profile-button:#1b1b20; --profile-rule:#ffffff16;
-  --profile-radius:25px; --profile-ink:#f5f1ed; --profile-muted:#96939e;
-}
+/* Compact profile components use the same root tokens as every other route. */
 #app[data-screen="lk"] .lk-screen { --lk-surface:var(--profile-surface); }
 #app[data-screen="lk"] .lk-screen > .lk-identity { background:transparent; border:0; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; gap:12px; margin:0; padding-bottom:0; }
 #app[data-screen="lk"] .lk-identity-heading h2, #sheet #person-profile .person-name-line h2 { font-size:25px; font-weight:650; line-height:1.2; }
@@ -4507,3 +4499,79 @@ body:has(#app[data-screen="lk"] #profile-photo img)::before { background: transp
 .profile-library-empty { padding:24px 15px; background:var(--profile-surface); border-radius:var(--profile-radius); text-align:center; color:var(--profile-muted); }
 .profile-library-empty strong { color:var(--profile-ink); font:500 15px/1.3 var(--body-font,system-ui); }
 .profile-library-empty p { margin:5px 0 0; font:400 13px/1.35 var(--body-font,system-ui); }
+
+
+/* NORA unified application palette — source of truth: Telegram-style profile/music. */
+:root {
+  --nora-background:#111013;
+  --nora-surface:#17161c;
+  --nora-control:#1b1b20;
+  --nora-text:#f5f1ed;
+  --nora-secondary:#96939e;
+  --nora-divider:#ffffff16;
+  --nora-radius:25px;
+
+  --bg:var(--nora-background); --panel:var(--nora-surface);
+  --line:var(--nora-divider); --white:var(--nora-text); --muted:var(--nora-secondary);
+  --poster-bg:var(--nora-background); --poster-black:var(--nora-background);
+  --poster-panel:var(--nora-surface); --poster-raised:var(--nora-control);
+  --poster-ink:var(--nora-text); --poster-muted:var(--nora-secondary);
+  --poster-rule:var(--nora-divider); --poster-edge:1px solid var(--nora-divider);
+  --glass-panel:var(--nora-surface); --glass-raised:var(--nora-control);
+  --glass-muted:var(--nora-secondary); --glass-line:var(--nora-divider);
+  --glass-radius:var(--nora-radius);
+  --profile-surface:var(--nora-surface); --profile-button:var(--nora-control);
+  --profile-ink:var(--nora-text); --profile-muted:var(--nora-secondary);
+  --profile-rule:var(--nora-divider); --profile-radius:var(--nora-radius);
+  --text:var(--nora-text);
+}
+body { background:var(--nora-background); color:var(--nora-text); }
+/* Main navigation and ordinary screens share neutral surfaces. Illustrated tiles,
+   semantic status badges and the game boards retain their individual colors. */
+#app:not([data-screen="mafia"],[data-screen="rocket"],[data-screen="sea"],[data-screen="durak"],[data-screen="barricade"])
+  :is(.card,.stat,.category-card,.product,.friend-row,.community-table,.wallet-card,.rep-level,.play-details,
+      .game-lobbies,.home-welcome,.home-access,.home-news-article,.home-shortcut,.shop-rep,.community-chat-launch):not(.lk-identity,.event-detail,.shop-featured,.seasonal-drop,.person-locked) {
+  background-color:var(--nora-surface);
+  border-color:var(--nora-divider); box-shadow:none;
+  color:var(--nora-text);
+}
+#app :is(.home-shortcut,.home-news-article,.community-chat-launch,.game-lobbies,.shop-rep) {
+  background:var(--nora-surface); border:0; border-radius:var(--nora-radius);
+}
+#app[data-screen="community"] .community-actions :is(.community-friends,.community-staff) {
+  background:var(--nora-surface); border:1px solid var(--nora-divider);
+}
+#app[data-screen="community"] .community-actions .community-friends>summary { color:#9ae7b7; }
+#app[data-screen="community"] .community-actions .community-staff>summary { color:#c2a8e4; }
+#app[data-screen="community"] .community-actions .community-table[open]>summary { border-color:var(--nora-divider); }
+#app :is(.category-symbol,.tx-icon,.icon-button,.person-avatar:not(:has(img)),.lobby-tool) {
+  background-color:var(--nora-control); border-color:var(--nora-divider);
+}
+#app:not([data-screen="mafia"],[data-screen="rocket"],[data-screen="sea"],[data-screen="durak"],[data-screen="barricade"])
+  :is(.secondary,.lk-edit,.admin-control:not(.danger,.success),.presence-choice,.staff-chat-back),
+#sheet :is(.secondary,.lk-edit,.presence-choice) {
+  background-color:var(--nora-control); border-color:var(--nora-divider);
+  box-shadow:none; color:var(--nora-text);
+}
+#app:not([data-screen="mafia"],[data-screen="rocket"],[data-screen="sea"],[data-screen="durak"],[data-screen="barricade"])
+  :is(input:not([type="checkbox"],[type="radio"],[type="range"],[type="file"]),textarea,select),
+#sheet :is(input:not([type="checkbox"],[type="radio"],[type="range"],[type="file"]),textarea,select) {
+  background-color:var(--nora-control); border-color:var(--nora-divider); color:var(--nora-text);
+}
+#sheet:not(:has(:is(#person-profile,#music-library-profile))) {
+  background:var(--nora-surface); color:var(--nora-text); border-color:var(--nora-divider);
+}
+#app .pet2-profile { background:var(--nora-surface)!important; }
+#app .pet2-art { background-color:var(--nora-control); }
+#app .adm-workspace :is(.adm-priority,.adm-group) {
+  background-color:var(--nora-surface); border-color:var(--nora-divider); box-shadow:none;
+}
+#app .adm-header { border-color:var(--nora-divider); }
+#app[data-screen="staffchat"] :is(.staff-chat-feed,.staff-chat-bubble,.staff-chat-composer) {
+  background-color:var(--nora-surface); border-color:var(--nora-divider);
+}
+#sheet .nora-staff-mod :is(.nora-staff-mod-actions button,.nora-staff-mod-close,.nora-staff-mod-entry) {
+  background-color:var(--nora-control); border-color:var(--nora-divider); color:var(--nora-text);
+}
+#nav button .nav-profile-photo:not(:has(img)) { background:var(--nora-control); border-color:var(--nora-divider); }
+#nav button.active:not([data-tab="lk"]), #nav button.active:not([data-tab="lk"])>svg { color:var(--nora-text); }
