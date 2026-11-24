@@ -57,9 +57,13 @@ globalThis.NoraDotCore=(()=>{
     if(passed===45||passed===PARADOX_START)enterParadox(s);
     else if(passed===70){s.gravity=0;s.vy=clamp(s.vy,-180,160);}
   }
-  function flipGravity(s,passed){s.gravity=-s.gravity;if(softMode(passed))s.vy*=.45;}
+  function flipGravity(s,passed){
+    s.gravity=-s.gravity;
+    // PRESSURE is the forgiving training mode: immediately move in the new direction.
+    if(softMode(passed))s.vy=s.gravity*clamp(Math.abs(s.vy)*.45,100,145);
+  }
   function paradoxPilot(s,target,deadband,passed){
-    const stopping=s.y+s.vy*Math.abs(s.vy)/(2*acceleration(passed));
+    const stopping=softMode(passed)?s.y+s.vy*.07:s.y+s.vy*Math.abs(s.vy)/(2*acceleration(passed));
     const desired=stopping>target+deadband?-1:stopping<target-deadband?1:s.gravity;
     if(desired!==s.gravity&&s.time-(s.lastFlip??-1)>=.05){flipGravity(s,passed);s.lastFlip=s.time;}
   }
