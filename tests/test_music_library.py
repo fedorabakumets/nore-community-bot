@@ -176,3 +176,55 @@ async def test_owner_profile_opens_in_place_and_duplicates_only_from_group(tmp_p
     await library_rich.library_callback(callback, db, settings)
     edit.assert_awaited_once()
     deliver.assert_not_awaited()
+
+
+async def test_share_track_checks_access_and_sends_native_audio(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from aiogram.enums import ChatMemberStatus
+    from community_bot.social_profiles import share_track
+
+    db = Database(tmp_path / "share-music.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Участник")
+    await db.ensure_user(2, telegram_name="Другой")
+    await db.execute("UPDATE users SET reputation=70 WHERE user_id=1")
+    track = sample()
+    await db.set_bot_state(track_key(1), json.dumps(track))
+    await db.set_bot_state(track_key(2), json.dumps(track))
+    await db.update_profile(2, "profile_private", 1)
+    bot = SimpleNamespace(
+        get_chat_member=AsyncMock(return_value=SimpleNamespace(status=ChatMemberStatus.MEMBER)),
+        get_chat=AsyncMock(return_value=SimpleNamespace(permissions=None)),
+        send_audio=AsyncMock(),
+    )
+
+    class Request(dict):
+        async def json(self):
+            return self.payload
+
+    req = Request(actor={"id": 1})
+    req.app = {"db": db, "bot": bot, "settings": SimpleNamespace(
+        community_chat_id=-100123, restricted_reputation_threshold=50,
+    )}
+    req.payload = {"source": "/api/profile/track", "revision": "b" * 32}
+    assert (await share_track(req)).status == 404
+    req.payload = {"source": "/api/people/2/track", "revision": track["revision"]}
+    assert (await share_track(req)).status == 404
+    req.payload["source"] = "/api/profile/track"
+    bot.get_chat_member.return_value = SimpleNamespace(
+        status=ChatMemberStatus.RESTRICTED, is_member=True, can_send_messages=False, can_send_audios=False,
+    )
+    assert (await share_track(req)).status == 403
+    bot.get_chat_member.return_value = SimpleNamespace(status=ChatMemberStatus.MEMBER)
+    await db.execute("UPDATE users SET reputation=49 WHERE user_id=1")
+    assert (await share_track(req)).status == 403
+    bot.send_audio.assert_not_awaited()
+    await db.execute("UPDATE users SET reputation=70 WHERE user_id=1")
+    assert (await share_track(req)).status == 200
+    bot.send_audio.assert_awaited_once()
+    assert bot.send_audio.call_args.kwargs["audio"] == track["file_id"]
+    assert bot.send_audio.call_args.kwargs["chat_id"] == -100123
+    assert (await share_track(req)).status == 429
+    bot.send_audio.assert_awaited_once()
