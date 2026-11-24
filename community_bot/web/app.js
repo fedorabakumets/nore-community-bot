@@ -353,6 +353,7 @@ const expanded=app.dataset.screen===tab
   ?new Set([...app.querySelectorAll('details[open][data-retain-open]')].map(el=>el.dataset.retainOpen))
   :null;
 app.dataset.screen=tab;
+if(tab==='dot'&&!expanded)window.scrollTo(0,0);
 if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
 else if (!(tab === 'durak' && app.querySelector('#durak-root')) &&
          !(tab === 'barricade' && app.querySelector('#barricade-root')) &&
@@ -809,6 +810,7 @@ function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebr
   if (!btn) return;
   const atBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 24;
   function update() {
+    if ($('#app')?.dataset.screen === 'dot') { btn.classList.remove('visible','show-up'); return; }
     const scrollable = document.documentElement.scrollHeight - window.innerHeight > 24;
     const down = !atBottom();
     btn.classList.toggle('visible', scrollable);
@@ -816,11 +818,12 @@ function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebr
     btn.setAttribute('aria-label', down ? 'В самый низ' : 'В самый верх');
   }
   btn.addEventListener('click', () => {
+    if ($('#app')?.dataset.screen === 'dot') return;
     window.scrollTo({top: atBottom() ? 0 : document.documentElement.scrollHeight, behavior: 'smooth'});
   });
   window.addEventListener('scroll', update, {passive: true});
   window.addEventListener('resize', update);
-  new MutationObserver(update).observe($('#app'), {childList: true, subtree: true});
+  new MutationObserver(update).observe($('#app'), {childList: true, subtree: true, attributes: true, attributeFilter: ['data-screen']});
   update();
 })();
 

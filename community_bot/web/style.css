@@ -4986,3 +4986,46 @@ body:has(#app[data-screen="dot"]) #nora-mini-player {display:none!important}
 .dot-reward-earned{font:800 11px/1.2 system-ui,sans-serif;color:#ffd18b;background:#d49a3620;border:1px solid #e9af5750;padding:5px 9px;border-radius:9px;animation:dot-record-in .65s ease both}
 .dot-reward-limit{font:500 10px/1.3 system-ui,sans-serif;color:#d6b9a2}
 @media(prefers-reduced-motion:reduce){.dot-intro-screen{transition:none;animation:none}.dot-intro-words span{animation:none;opacity:1}.dot-reward-earned{animation:none}}
+
+/* DOT is a fixed-height arcade, not a scrolling Mini App article. */
+html:has(#app[data-screen="dot"]),body:has(#app[data-screen="dot"]){
+  overflow:hidden!important;overscroll-behavior:none;
+}
+body:has(#app[data-screen="dot"]){height:100dvh;min-height:0}
+body:has(#app[data-screen="dot"]) #scroll-jump{display:none!important;pointer-events:none!important}
+body:has(#app[data-screen="dot"]) #nav{box-shadow:inset 0 1px 2px #ffffff35,inset 0 -1px 2px #ffffff0d,inset 0 0 0 1px #ffffff16}
+body:has(#app[data-screen="dot"]) #nav .nav-drop{box-shadow:inset 0 1px 2px #ffffff2b,inset 0 0 0 1px #ffffff15}
+body:has(#app[data-screen="dot"])::after{background:var(--nora-background,#111013)}
+#app[data-screen="dot"],body.nora-mini-player-active #app[data-screen="dot"]{
+  position:fixed!important;inset:max(var(--safe-top,0px),calc(var(--device-top,0px) + 56px)) 0 calc(80px + var(--safe-bottom,0px)) 0;
+  width:100%;max-width:680px;height:auto;min-height:0;max-height:none;margin:0 auto!important;
+  padding:0 calc(20px + var(--safe-right,0px)) 0 calc(20px + var(--safe-left,0px))!important;
+  overflow:hidden;overscroll-behavior:none;background:var(--nora-background,#111013);
+}
+#app[data-screen="dot"] .dot-game{height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:0}
+#app[data-screen="dot"] .dot-header{padding:8px 0;margin:0 0 10px}
+#app[data-screen="dot"] .dot-hud{margin:0 0 12px}
+.dot-field{position:relative;min-height:0;min-width:0;width:100%;height:100%;display:grid;place-items:center;container-type:size;overflow:hidden}
+#app[data-screen="dot"] .dot-stage{width:min(100%,72cqh,410px);height:auto;max-height:100%;min-height:0;aspect-ratio:18/25;margin:0;box-shadow:inset 0 1px 0 #ffffff18}
+#app[data-screen="dot"] .dot-game[data-dot-state="over"] .dot-stage{width:min(100%,max(250px,72cqh),410px);height:min(100cqh,569px,calc(100cqw / .72));aspect-ratio:auto}
+#app[data-screen="dot"] .dot-results-body{overflow:hidden;touch-action:manipulation}
+@container (max-height:380px){
+  .dot-results{padding:7px;gap:3px}.dot-results-body{gap:4px}.dot-result-heading>strong{font-size:23px}
+  .dot-rank-avatar{width:30px;height:30px}.rank-1 .dot-rank-avatar{width:36px;height:36px}
+  .dot-crown{font-size:13px}.dot-podium-step{height:20px}.rank-1 .dot-podium-step{height:30px}.rank-2 .dot-podium-step{height:25px}
+}
+@container (max-height:270px){
+  .dot-results{padding:4px 6px;gap:2px}.dot-results-body{gap:2px}.dot-result-heading{gap:1px}
+  .dot-result-heading>strong{font-size:19px}.dot-result-heading>span,.dot-rank-caption,.dot-rank-caption span{font-size:8px}
+  .dot-rank-caption{padding-top:3px;margin-top:1px}.dot-crown{display:none}.dot-podium-slot{gap:1px}
+  .dot-rank-avatar,.rank-1 .dot-rank-avatar{width:23px;height:23px;font-size:11px}
+  .dot-podium-step,.rank-1 .dot-podium-step,.rank-2 .dot-podium-step{height:16px;font-size:11px}
+  .dot-rank-name,.dot-rank-score{font-size:9px}.dot-rank-prefix{font-size:7px}
+  .dot-self-rank{min-height:27px;padding:2px 4px}.dot-self-rank .dot-rank-avatar{width:21px;height:21px}
+  .dot-reward-earned{padding:2px 5px;font-size:9px}.dot-reward-limit{font-size:8px}
+  .dot-game .dot-restart{min-height:30px;padding:4px;font-size:11px}.dot-results-exit{padding:3px;font-size:9px}
+}
+@media(max-height:600px){
+  #app[data-screen="dot"] .dot-header{padding:2px 0;margin-bottom:4px}
+  #app[data-screen="dot"] .dot-hud{padding:5px 2px;margin-bottom:5px}
+}
