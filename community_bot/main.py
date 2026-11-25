@@ -622,6 +622,9 @@ async def main() -> None:
         dispatcher["nora_game_chat"] = web_runner.app["nora_game_chat"]
         dispatcher["nora_cinema"] = web_runner.app["nora_cinema"]
         logger.info("Nora Mini App HTTP server started")
+    from community_bot.dot_announcement import run as publish_dot_announcement
+
+    await publish_dot_announcement(db, settings, bot)
     # Serve Mini App even while the Telegram API is returning 502 during startup.
     # Removing an old webhook is required before long polling, so retry that call.
     await retry_transient_telegram_setup(
