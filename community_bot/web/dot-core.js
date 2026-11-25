@@ -165,16 +165,28 @@ globalThis.NoraDotCore=(()=>{
       if(!tail||tail.x-r.distance<W-145)add();
       while(r.gates.length>1&&r.gates[0].x+r.gates[0].width<r.distance-30)r.gates.shift();
     };
+    r.revive=()=>{
+      if(!r.dead||r.revived)return false;
+      // Reposition in the nearest unpassed corridor, preserving progress and collected coins.
+      const next=r.gates.find(g=>!g.passed);
+      const shape=next?gateShape(next,r.time):{center:H/2};
+      r.y=clamp(shape.center,R+18,H-R-18);r.py=r.y;r.vy=0;
+      r.previousTime=r.time;r.previousDistance=r.distance;
+      if(gravityMode(r.passed))r.gravity=r.y>H/2?-1:1;
+      r.dead=false;r.revived=true;return true;
+    };
     r.generate=add;
     return r;
   }
 
 
-  function replay(seed,ticks,flaps){
+  function replay(seed,ticks,flaps,reviveTick=null){
+    if(reviveTick!==null&&(!Number.isInteger(reviveTick)||reviveTick<=0||reviveTick>=ticks))throw Error("invalid revive");
     if(!Number.isInteger(seed)||seed<0||seed>4294967295||!Number.isInteger(ticks)||ticks<1||ticks>432000||!Array.isArray(flaps)||flaps.length>ticks||flaps[0]!==0)throw Error("invalid flight");
     let previous=-1;for(const tick of flaps){if(!Number.isInteger(tick)||tick<=previous||tick>=ticks)throw Error("invalid input");previous=tick;}
     const r=createRun(seededRandom(seed));let i=0;
     for(let tick=0;tick<ticks;tick++){
+      if(tick===reviveTick&&!r.revive())throw Error("revive without crash");
       if(r.dead)throw Error("flight already ended");
       if(flaps[i]===tick){r.flap();i++;}
       r.step(STEP);

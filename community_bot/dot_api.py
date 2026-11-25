@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
 import secrets
 import shutil
 import time
@@ -61,6 +62,21 @@ CREATE TABLE IF NOT EXISTS mini_dot_skins (
     skin TEXT NOT NULL,
     PRIMARY KEY(user_id, skin)
 );
+CREATE TABLE IF NOT EXISTS mini_dot_lives (
+    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0)
+);
+CREATE TABLE IF NOT EXISTS mini_dot_life_purchases (
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    purchase_id TEXT NOT NULL,
+    PRIMARY KEY(user_id, purchase_id)
+);
+CREATE TABLE IF NOT EXISTS mini_dot_revives (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    tick INTEGER NOT NULL,
+    prefix_hash TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS mini_dot_intro_seen (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     seen_at REAL NOT NULL
@@ -71,6 +87,7 @@ TICKET_TTL = 86_400
 REWARD_WINDOW = 86_400
 REWARD_LIMIT = 2
 SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000}
+LIFE_PRICE = 1500
 RUNNER = Path(__file__).with_name("dot_replay.mjs")
 REPLAY_LIMIT = asyncio.Semaphore(2)
 
@@ -84,6 +101,7 @@ async def issue(db, uid, now=None):
     now = time.time() if now is None else now
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
+        await conn.execute("DELETE FROM mini_dot_revives WHERE token IN (SELECT token FROM mini_dot_sessions WHERE expires_at<?)", (now,))
         await conn.execute("DELETE FROM mini_dot_sessions WHERE expires_at<?", (now,))
         recent = await one(conn, "SELECT COUNT(*) n FROM mini_dot_sessions WHERE user_id=? AND issued_at>?",
                            (uid, now - 60))
@@ -115,7 +133,7 @@ def validate_input(body):
     return token, ticks, flaps
 
 
-async def replay(seed, ticks, flaps):
+async def replay(seed, ticks, flaps, revive_tick=None):
     deno = shutil.which("deno")
     node = shutil.which("node")
     if deno:
@@ -131,7 +149,7 @@ async def replay(seed, ticks, flaps):
         )
         try:
             output, _ = await asyncio.wait_for(
-                process.communicate(json.dumps({"seed": seed, "ticks": ticks, "flaps": flaps}).encode()),
+                process.communicate(json.dumps({"seed": seed, "ticks": ticks, "flaps": flaps, "reviveTick": revive_tick}).encode()),
                 timeout=12,
             )
         except (TimeoutError, asyncio.CancelledError):
@@ -157,6 +175,48 @@ async def reward_result(conn, session):
             "world_record": bool(row and row["world_record"]), "limit_reached": bool(row and row["limit_reached"])}
 
 
+def flight_hash(flaps):
+    return hashlib.sha256(json.dumps(flaps, separators=(",", ":")).encode()).hexdigest()
+
+
+async def revive(db, uid, body, now=None):
+    token, ticks, flaps = validate_input(body)
+    now = time.time() if now is None else now
+    prefix = flight_hash(flaps)
+    async with db.connect() as conn:
+        session = await one(conn, "SELECT * FROM mini_dot_sessions WHERE token=? AND user_id=?", (token, uid))
+        if not session or session["used"] or session["expires_at"] < now:
+            raise ValueError("Сессия DOT истекла")
+        existing = await one(conn, "SELECT * FROM mini_dot_revives WHERE token=?", (token,))
+        if existing:
+            if existing["tick"] != ticks or existing["prefix_hash"] != prefix:
+                raise ValueError("Вторая жизнь уже использована")
+            return await shop_state(conn, uid)
+    if ticks / 120 > now - session["issued_at"] + 2:
+        raise ValueError("Неверная продолжительность полёта")
+    try:
+        await replay(session["seed"], ticks, flaps)
+    except TimeoutError:
+        raise ValueError("Проверка полёта заняла слишком много времени") from None
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        current = await one(conn, "SELECT * FROM mini_dot_sessions WHERE token=? AND user_id=?", (token, uid))
+        if not current or current["used"] or current["expires_at"] < now:
+            raise ValueError("Сессия DOT истекла")
+        existing = await one(conn, "SELECT * FROM mini_dot_revives WHERE token=?", (token,))
+        if existing:
+            if existing["tick"] != ticks or existing["prefix_hash"] != prefix:
+                raise ValueError("Вторая жизнь уже использована")
+        else:
+            changed = await conn.execute("UPDATE mini_dot_lives SET balance=balance-1 WHERE user_id=? AND balance>0", (uid,))
+            if changed.rowcount != 1:
+                raise ValueError("Нет второй жизни")
+            await conn.execute("INSERT INTO mini_dot_revives VALUES(?,?,?,?)", (token, uid, ticks, prefix))
+        state = await shop_state(conn, uid)
+        await conn.commit()
+        return state
+
+
 async def finish(db, uid, body, now=None):
     token, ticks, flaps = validate_input(body)
     fixed_now = now
@@ -167,10 +227,19 @@ async def finish(db, uid, body, now=None):
             raise ValueError("Сессия DOT истекла")
         if session["used"]:
             return await reward_result(conn, session)
+        revived = await one(conn, "SELECT * FROM mini_dot_revives WHERE token=?", (token,))
+    revive_tick = body.get("revive_tick")
+    if revive_tick is not None:
+        if (type(revive_tick) is not int or not revived or revived["tick"] != revive_tick
+                or not 0 < revive_tick < ticks
+                or revived["prefix_hash"] != flight_hash([f for f in flaps if f < revive_tick])):
+            raise ValueError("Возрождение не подтверждено")
+    elif revived and (ticks != revived["tick"] or flight_hash(flaps) != revived["prefix_hash"]):
+        raise ValueError("Возрождение не подтверждено")
     if ticks / 120 > now - session["issued_at"] + 2:
         raise ValueError("Неверная продолжительность полёта")
     try:
-        result = await replay(session["seed"], ticks, flaps)
+        result = await replay(session["seed"], ticks, flaps, revive_tick) if revive_tick is not None else await replay(session["seed"], ticks, flaps)
     except TimeoutError:
         raise ValueError("Проверка полёта заняла слишком много времени") from None
     cookies, passed = result["cookies"], result["passed"]
@@ -182,6 +251,9 @@ async def finish(db, uid, body, now=None):
             raise ValueError("Сессия DOT истекла")
         if current["used"]:
             return await reward_result(conn, current)
+        current_revive = await one(conn, "SELECT * FROM mini_dot_revives WHERE token=?", (token,))
+        if current_revive != revived:
+            raise ValueError("Состояние полёта изменилось")
         best = await one(conn, "SELECT cookies,passed FROM mini_dot_records WHERE user_id=?", (uid,))
         world = await one(conn, "SELECT MAX(cookies) AS score FROM mini_dot_records")
         world_record = cookies > max(0, world["score"] or 0)
@@ -274,12 +346,28 @@ async def shop_state(conn, uid):
     wallet = await one(conn, "SELECT balance,equipped FROM mini_dot_wallet WHERE user_id=?", (uid,))
     rows = await (await conn.execute("SELECT skin FROM mini_dot_skins WHERE user_id=?", (uid,))).fetchall()
     owned = {"red"} | {row["skin"] for row in rows}
+    life = await one(conn, "SELECT balance FROM mini_dot_lives WHERE user_id=?", (uid,))
     return {"balance": wallet["balance"] if wallet else 0,
             "equipped": wallet["equipped"] if wallet else "red",
-            "owned": [skin for skin in SKINS if skin in owned], "prices": SKINS}
+            "owned": [skin for skin in SKINS if skin in owned], "prices": SKINS,
+            "lives": life["balance"] if life else 0, "life_price": LIFE_PRICE}
 
 
-async def shop(db, uid, action=None, skin=None):
+async def shop(db, uid, action=None, skin=None, purchase_id=None):
+    if action == "buy_life":
+        if not isinstance(purchase_id, str) or not 16 <= len(purchase_id) <= 80:
+            raise ValueError("Некорректная покупка DOT")
+        async with db.connect() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            inserted = await conn.execute("INSERT OR IGNORE INTO mini_dot_life_purchases VALUES(?,?)", (uid, purchase_id))
+            if inserted.rowcount == 1:
+                changed = await conn.execute("UPDATE mini_dot_wallet SET balance=balance-? WHERE user_id=? AND balance>=?", (LIFE_PRICE, uid, LIFE_PRICE))
+                if changed.rowcount != 1:
+                    raise ValueError("Недостаточно печенек DOT")
+                await conn.execute("INSERT INTO mini_dot_lives VALUES(?,1) ON CONFLICT(user_id) DO UPDATE SET balance=balance+1", (uid,))
+            state = await shop_state(conn, uid)
+            await conn.commit()
+            return state
     if action is not None and (action not in ("buy", "equip") or not isinstance(skin, str) or skin not in SKINS):
         raise ValueError("Неизвестный товар DOT")
     async with db.connect() as conn:
@@ -330,9 +418,15 @@ async def shop_handler(request):
     if request.method == "GET":
         return web.json_response(await shop(db, uid))
     body = await request.json()
-    if not isinstance(body, dict) or body.get("action") not in ("buy", "equip"):
+    if not isinstance(body, dict) or body.get("action") not in ("buy", "equip", "buy_life"):
         raise ValueError("Некорректное действие магазина DOT")
-    return web.json_response(await shop(db, uid, body["action"], body.get("skin")))
+    return web.json_response(await shop(db, uid, body["action"], body.get("skin"), body.get("purchase_id")))
+
+
+async def revive_handler(request):
+    if request.content_length and request.content_length > 2_000_000:
+        raise web.HTTPRequestEntityTooLarge(max_size=2_000_000, actual_size=request.content_length)
+    return web.json_response(await revive(request.app["db"], request["actor"]["id"], await request.json()))
 
 
 async def start_handler(request):
@@ -369,3 +463,4 @@ def register(app):
     app.router.add_post("/api/dot/start", start_handler)
     app.router.add_get("/api/dot/top", top_handler)
     app.router.add_post("/api/dot/finish", finish_handler)
+    app.router.add_post("/api/dot/revive", revive_handler)
