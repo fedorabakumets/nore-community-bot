@@ -134,7 +134,7 @@ class TrackResponse(web.Response):
         self.lease = lease
         super().__init__(
             body=payload.BufferedReaderPayload(lease.file, content_type=mime, disposition=None),
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "no-store", "Content-Length": str(lease._entry.size)},
         )
 
     async def prepare(self, request):
