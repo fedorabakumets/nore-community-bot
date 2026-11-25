@@ -11,16 +11,17 @@ from pathlib import Path
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import (
     BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup,
-    InputMediaPhoto, InputRichBlockParagraph, InputRichBlockPhoto,
-    InputRichBlockSectionHeading, InputRichMessage,
+    InputMediaPhoto, InputRichBlockButtons, InputRichBlockParagraph, InputRichBlockPhoto,
+    InputRichBlockSectionHeading, InputRichMessage, RichMessageButton,
 )
 from PIL import Image, ImageDraw, ImageFont
 
 from community_bot.ephemeral import keep_in_chat
-from community_bot.group_message_close import without_group_close
+from community_bot.group_message_close import HOME_SCREEN_LABEL, HOME_SCREEN_PARAM, without_group_close
 
 logger = logging.getLogger(__name__)
 KEY = "dot_announcement_message_id"
+REVISION = "layout-v2"
 ROOT = Path(__file__).resolve().parent.parent / "assets"
 
 
@@ -53,14 +54,52 @@ def cover() -> bytes:
     return out.getvalue()
 
 
-def rich_post():
+def rich_post(username, photo=None):
+    base = f"https://t.me/{username}?startapp"
+    if photo is None:
+        photo = BufferedInputFile(cover(), filename="dot.png")
     return InputRichMessage(blocks=[
-        InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(cover(), filename="dot.png"))),
-        InputRichBlockSectionHeading(text="DOT · новая игра", size=1),
-        InputRichBlockParagraph(text="Одна точка. Семь уровней. Ни одной спокойной секунды."),
-        InputRichBlockParagraph(text="🍪 Побей мировой рекорд — забери все печеньки, собранные за полёт, на основной баланс. До двух наград за 24 часа."),
-        InputRichBlockParagraph(text="Топ обнулён. Первый рекорд может быть твоим."),
+        InputRichBlockSectionHeading(text="DOT", size=1),
+        InputRichBlockPhoto(photo=InputMediaPhoto(media=photo)),
+        InputRichBlockParagraph(text="Маленькая капля в безграничном космосе. Тактильные вибрации, красивые эффекты и разнообразная механика."),
+        {"type": "blockquote", "blocks": [{"type": "paragraph", "text":
+            "🍪 Побей мировой рекорд — забери все печеньки, собранные за полёт, на основной баланс!"}]},
+        InputRichBlockButtons(buttons=[
+            RichMessageButton(text=HOME_SCREEN_LABEL, url=f"{base}={HOME_SCREEN_PARAM}", style="primary"),
+        ]),
+        InputRichBlockButtons(buttons=[
+            RichMessageButton(text="НОРА", url=base, style="primary"),
+        ]),
     ], skip_entity_detection=True)
+
+
+def dot_markup(username):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="DOT", url=f"https://t.me/{username}?startapp=nora_to_dot"),
+    ]])
+
+
+async def refresh_existing(db, settings, bot, mid, username):
+    if await db.get_bot_state(KEY + ":revision") == REVISION:
+        return
+    # Reuse the original cover file ID when the post is still the current pin.
+    chat = await bot.get_chat(settings.community_chat_id)
+    post = getattr(chat, "pinned_message", None)
+    photo = None
+    if post and str(post.message_id) == mid and post.rich_message:
+        photo = next((block.photo[-1].file_id for block in post.rich_message.blocks
+                      if block.type == "photo" and block.photo), None)
+    try:
+        with keep_in_chat(), without_group_close():
+            await bot.edit_message_text(
+                chat_id=settings.community_chat_id, message_id=int(mid),
+                rich_message=rich_post(username, photo), reply_markup=dot_markup(username),
+                parse_mode=None,
+            )
+    except TelegramBadRequest as error:
+        if "not modified" not in error.message.casefold():
+            raise
+    await db.set_bot_state(KEY + ":revision", REVISION)
 
 
 async def run(db, settings, bot):
@@ -70,17 +109,15 @@ async def run(db, settings, bot):
         return
     try:
         mid = await db.get_bot_state(KEY)
+        username = (await bot.me()).username
+        if not username:
+            return
         if not mid:
             if await db.get_bot_state(KEY + ":sending"):
                 logger.warning("DOT announcement delivery uncertain; duplicate suppressed")
                 return
-            username = (await bot.me()).username
-            if not username:
-                return
-            rich = rich_post()
-            markup = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="DOT", url=f"https://t.me/{username}?startapp=nora_to_dot"),
-            ]])
+            rich = rich_post(username)
+            markup = dot_markup(username)
             await db.set_bot_state(KEY + ":sending", "1")
             try:
                 with keep_in_chat(), without_group_close():
@@ -90,6 +127,9 @@ async def run(db, settings, bot):
                 raise
             mid = str(sent.message_id)
             await db.set_bot_state(KEY, mid)
+            await db.set_bot_state(KEY + ":revision", REVISION)
+        else:
+            await refresh_existing(db, settings, bot, mid, username)
         if await db.get_bot_state(KEY + ":pinned") == "1":
             return
         old = await db.get_bot_state("last_announcement_message_id")
