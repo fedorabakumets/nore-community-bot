@@ -13,6 +13,7 @@ from community_bot.database import Database
 from community_bot.group_profile import send_group_profile
 from community_bot.profile_track import get_track, save_from_message, track_command
 from community_bot.social_profiles import track_audio
+from community_bot.track_disk_cache import TrackDiskCache
 
 
 async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(tmp_path, monkeypatch):
@@ -57,8 +58,9 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
         destination.write(b"mp3")
 
     bot.download = telegram_download
+    cache = TrackDiskCache(directory=tmp_path / "audio")
     request = SimpleNamespace(
-        app={"db": db, "bot": bot, "settings": settings}, path="/api/people/7/track",
+        app={"db": db, "bot": bot, "settings": settings, "track_disk_cache": cache}, path="/api/people/7/track",
         match_info={"user_id": "7"}, query={"v": track["revision"]},
     )
 
@@ -67,7 +69,9 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
             return getattr(request, name)
 
     visitor = Request(actor={"id": 8})
-    assert (await track_audio(visitor)).body == b"mp3"
+    response = await track_audio(visitor)
+    assert response.lease.file.read() == b"mp3"
+    response.lease.close()
     await db.update_profile(user.id, "profile_private", 1)
     with pytest.raises(web.HTTPNotFound):
         await track_audio(visitor)
@@ -76,7 +80,10 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
     with pytest.raises(web.HTTPNotFound):
         await track_audio(Request(actor={"id": user.id}))
     request.query["v"] = track["revision"]
-    assert (await track_audio(Request(actor={"id": user.id}))).content_type == "audio/mpeg"
+    response = await track_audio(Request(actor={"id": user.id}))
+    assert response.content_type == "audio/mpeg"
+    response.lease.close()
+    cache.close()
     await db.reset_banned_user(user.id, None)
     assert await get_track(db, user.id) is None
 

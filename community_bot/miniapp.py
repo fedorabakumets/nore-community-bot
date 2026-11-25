@@ -573,9 +573,12 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app = web.Application(middlewares=[protection], client_max_size=31 * 1024 * 1024)
     app.update(db=db, settings=settings, bot=bot, avatar_uploads=asyncio.Semaphore(2))
     from community_bot.media_cache import MediaImages
+    from community_bot.track_disk_cache import TrackDiskCache
 
+    app['track_disk_cache'] = TrackDiskCache()
     app['media_images'] = MediaImages(bot, db)
     async def close_media(_):
+        app['track_disk_cache'].close()
         await app['media_images'].close()
     app.on_cleanup.append(close_media)
     app.router.add_get('/', index)
