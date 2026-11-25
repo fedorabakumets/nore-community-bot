@@ -159,3 +159,42 @@ async def test_dot_second_life_purchase_and_revive(tmp_path):
     assert (await dot_api.shop(db, 101))["lives"] == 0
     with pytest.raises(ValueError):
         await dot_api.revive(db, 101, crash, now=108)
+
+
+
+@pytest.mark.asyncio
+async def test_dot_shop_accepts_nora_cookies_atomically(tmp_path):
+    db = Database(tmp_path / "dot.sqlite")
+    await db.initialize()
+    await db.ensure_user(101, "dot_test", "DOT Test")
+    await db.execute("UPDATE users SET cookies=250 WHERE user_id=?", (101,))
+    state = await dot_api.shop(db, 101, "buy", "mint", currency="cookies")
+    assert state["cookie_balance"] == 150 and state["balance"] == 0
+    assert state["cookie_prices"]["mint"] == 100 and state["cookie_life_price"] == 150
+    assert await dot_api.shop(db, 101, "buy", "mint", currency="cookies") == state
+    purchase = "cookie-life-test-001"
+    state = await dot_api.shop(db, 101, "buy_life", purchase_id=purchase, currency="cookies")
+    assert state["cookie_balance"] == 0 and state["lives"] == 1
+    assert await dot_api.shop(db, 101, "buy_life", purchase_id=purchase, currency="cookies") == state
+    with pytest.raises(ValueError):
+        await dot_api.shop(db, 101, "buy_life", purchase_id="cookie-life-test-002", currency="cookies")
+    with pytest.raises(ValueError):
+        await dot_api.shop(db, 101, "buy", "ice", currency="invalid")
+    assert await dot_api.shop(db, 101) == state
+    rows = await db.fetchall("SELECT amount FROM transactions WHERE user_id=? AND kind='dot_shop' ORDER BY id", (101,))
+    assert [row["amount"] for row in rows] == [-100, -150]
+
+
+@pytest.mark.asyncio
+async def test_dot_v2_ticket_replay(tmp_path):
+    if not (shutil.which("deno") or shutil.which("node")):
+        pytest.skip("JavaScript runtime not installed")
+    db = Database(tmp_path / "dot.sqlite")
+    await db.initialize()
+    await db.ensure_user(101, "dot_test", "DOT Test")
+    ticket = await dot_api.issue(db, 101, now=100, rules=2)
+    assert ticket["rules"] == 2 and len(ticket["token"]) == 32
+    assert ticket["token"].startswith(dot_api.RULES_V2_PREFIX)
+    await db.execute("UPDATE mini_dot_sessions SET seed=42 WHERE token=?", (ticket["token"],))
+    result = await dot_api.finish(db, 101, {"token": ticket["token"], "ticks": 166, "flaps": [0]}, now=103)
+    assert result["dot_earned"] == 0

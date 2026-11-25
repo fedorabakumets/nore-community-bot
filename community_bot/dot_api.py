@@ -88,6 +88,8 @@ REWARD_WINDOW = 86_400
 REWARD_LIMIT = 2
 SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000}
 LIFE_PRICE = 1500
+COOKIE_RATE = 10
+RULES_V2_PREFIX = "DOTv2_"
 RUNNER = Path(__file__).with_name("dot_replay.mjs")
 REPLAY_LIMIT = asyncio.Semaphore(2)
 
@@ -97,7 +99,7 @@ async def one(connection, sql, params=()):
     return dict(row) if row else None
 
 
-async def issue(db, uid, now=None):
+async def issue(db, uid, now=None, rules=1):
     now = time.time() if now is None else now
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
@@ -108,13 +110,18 @@ async def issue(db, uid, now=None):
         if recent["n"] >= 60:
             raise ValueError("Слишком много попыток. Попробуй через минуту.")
         token, seed = secrets.token_urlsafe(24), secrets.randbits(32)
+        if rules == 2:
+            token = RULES_V2_PREFIX + secrets.token_urlsafe(24)[:26]
+        else:
+            while token.startswith(RULES_V2_PREFIX):
+                token = secrets.token_urlsafe(24)
         await conn.execute(
             "INSERT INTO mini_dot_sessions(token,user_id,seed,issued_at,expires_at) VALUES(?,?,?,?,?)",
             (token, uid, seed, now, now + TICKET_TTL),
         )
         seen = await one(conn, "SELECT 1 FROM mini_dot_intro_seen WHERE user_id=?", (uid,))
         await conn.commit()
-    return {"token": token, "seed": seed, "intro_seen": bool(seen)}
+    return {"token": token, "seed": seed, "intro_seen": bool(seen), "rules": rules}
 
 
 def validate_input(body):
@@ -133,7 +140,7 @@ def validate_input(body):
     return token, ticks, flaps
 
 
-async def replay(seed, ticks, flaps, revive_tick=None):
+async def replay(seed, ticks, flaps, revive_tick=None, rules=1):
     deno = shutil.which("deno")
     node = shutil.which("node")
     if deno:
@@ -149,7 +156,7 @@ async def replay(seed, ticks, flaps, revive_tick=None):
         )
         try:
             output, _ = await asyncio.wait_for(
-                process.communicate(json.dumps({"seed": seed, "ticks": ticks, "flaps": flaps, "reviveTick": revive_tick}).encode()),
+                process.communicate(json.dumps({"seed": seed, "ticks": ticks, "flaps": flaps, "reviveTick": revive_tick, "rules": rules}).encode()),
                 timeout=12,
             )
         except (TimeoutError, asyncio.CancelledError):
@@ -195,7 +202,10 @@ async def revive(db, uid, body, now=None):
     if ticks / 120 > now - session["issued_at"] + 2:
         raise ValueError("Неверная продолжительность полёта")
     try:
-        await replay(session["seed"], ticks, flaps)
+        if token.startswith(RULES_V2_PREFIX):
+            await replay(session["seed"], ticks, flaps, rules=2)
+        else:
+            await replay(session["seed"], ticks, flaps)
     except TimeoutError:
         raise ValueError("Проверка полёта заняла слишком много времени") from None
     async with db.connect() as conn:
@@ -239,7 +249,10 @@ async def finish(db, uid, body, now=None):
     if ticks / 120 > now - session["issued_at"] + 2:
         raise ValueError("Неверная продолжительность полёта")
     try:
-        result = await replay(session["seed"], ticks, flaps, revive_tick) if revive_tick is not None else await replay(session["seed"], ticks, flaps)
+        if token.startswith(RULES_V2_PREFIX):
+            result = await replay(session["seed"], ticks, flaps, revive_tick, rules=2)
+        else:
+            result = await replay(session["seed"], ticks, flaps, revive_tick) if revive_tick is not None else await replay(session["seed"], ticks, flaps)
     except TimeoutError:
         raise ValueError("Проверка полёта заняла слишком много времени") from None
     cookies, passed = result["cookies"], result["passed"]
@@ -347,13 +360,42 @@ async def shop_state(conn, uid):
     rows = await (await conn.execute("SELECT skin FROM mini_dot_skins WHERE user_id=?", (uid,))).fetchall()
     owned = {"red"} | {row["skin"] for row in rows}
     life = await one(conn, "SELECT balance FROM mini_dot_lives WHERE user_id=?", (uid,))
+    user = await one(conn, "SELECT cookies FROM users WHERE user_id=?", (uid,))
     return {"balance": wallet["balance"] if wallet else 0,
+            "cookie_balance": user["cookies"] if user else 0,
+            "cookie_prices": {key: price // COOKIE_RATE for key, price in SKINS.items()},
+            "cookie_life_price": LIFE_PRICE // COOKIE_RATE,
             "equipped": wallet["equipped"] if wallet else "red",
             "owned": [skin for skin in SKINS if skin in owned], "prices": SKINS,
             "lives": life["balance"] if life else 0, "life_price": LIFE_PRICE}
 
 
-async def shop(db, uid, action=None, skin=None, purchase_id=None):
+async def spend_dot(conn, uid, price, currency, item):
+    if currency == "cookies":
+        price //= COOKIE_RATE
+        stamp = datetime.now(timezone.utc).isoformat()
+        changed = await conn.execute(
+            "UPDATE users SET cookies=cookies-?,updated_at=? WHERE user_id=? AND cookies>=?",
+            (price, stamp, uid, price),
+        )
+        if changed.rowcount != 1:
+            raise ValueError("Недостаточно печенек Норы")
+        await conn.execute(
+            "INSERT INTO transactions(user_id,amount,kind,details,created_at) VALUES(?,?,?,?,?)",
+            (uid, -price, "dot_shop", f"DOT: {item}", stamp),
+        )
+    else:
+        changed = await conn.execute(
+            "UPDATE mini_dot_wallet SET balance=balance-? WHERE user_id=? AND balance>=?",
+            (price, uid, price),
+        )
+        if changed.rowcount != 1:
+            raise ValueError("Недостаточно крошек DOT")
+
+
+async def shop(db, uid, action=None, skin=None, purchase_id=None, currency="crumbs"):
+    if currency not in ("crumbs", "cookies"):
+        raise ValueError("Неизвестная валюта DOT")
     if action == "buy_life":
         if not isinstance(purchase_id, str) or not 16 <= len(purchase_id) <= 80:
             raise ValueError("Некорректная покупка DOT")
@@ -361,9 +403,7 @@ async def shop(db, uid, action=None, skin=None, purchase_id=None):
             await conn.execute("BEGIN IMMEDIATE")
             inserted = await conn.execute("INSERT OR IGNORE INTO mini_dot_life_purchases VALUES(?,?)", (uid, purchase_id))
             if inserted.rowcount == 1:
-                changed = await conn.execute("UPDATE mini_dot_wallet SET balance=balance-? WHERE user_id=? AND balance>=?", (LIFE_PRICE, uid, LIFE_PRICE))
-                if changed.rowcount != 1:
-                    raise ValueError("Недостаточно печенек DOT")
+                await spend_dot(conn, uid, LIFE_PRICE, currency, "Вторая жизнь")
                 await conn.execute("INSERT INTO mini_dot_lives VALUES(?,1) ON CONFLICT(user_id) DO UPDATE SET balance=balance+1", (uid,))
             state = await shop_state(conn, uid)
             await conn.commit()
@@ -378,12 +418,7 @@ async def shop(db, uid, action=None, skin=None, purchase_id=None):
             if skin not in state["owned"]:
                 if action != "buy":
                     raise ValueError("Сначала купи этот цвет")
-                changed = await conn.execute(
-                    "UPDATE mini_dot_wallet SET balance=balance-? WHERE user_id=? AND balance>=?",
-                    (SKINS[skin], uid, SKINS[skin]),
-                )
-                if changed.rowcount != 1:
-                    raise ValueError("Недостаточно печенек DOT")
+                await spend_dot(conn, uid, SKINS[skin], currency, f"Цвет {skin}")
                 await conn.execute("INSERT INTO mini_dot_skins(user_id,skin) VALUES(?,?)", (uid, skin))
             await conn.execute("UPDATE mini_dot_wallet SET equipped=? WHERE user_id=?", (skin, uid))
         state = await shop_state(conn, uid)
@@ -420,7 +455,7 @@ async def shop_handler(request):
     body = await request.json()
     if not isinstance(body, dict) or body.get("action") not in ("buy", "equip", "buy_life"):
         raise ValueError("Некорректное действие магазина DOT")
-    return web.json_response(await shop(db, uid, body["action"], body.get("skin"), body.get("purchase_id")))
+    return web.json_response(await shop(db, uid, body["action"], body.get("skin"), body.get("purchase_id"), body.get("currency", "crumbs")))
 
 
 async def revive_handler(request):
@@ -430,7 +465,9 @@ async def revive_handler(request):
 
 
 async def start_handler(request):
-    return web.json_response(await issue(request.app["db"], request["actor"]["id"]))
+    body = await request.json() if request.can_read_body else {}
+    rules = 2 if isinstance(body, dict) and body.get("rules") == 2 else 1
+    return web.json_response(await issue(request.app["db"], request["actor"]["id"], rules=rules))
 
 
 async def top_handler(request):
