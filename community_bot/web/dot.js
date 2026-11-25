@@ -18,7 +18,8 @@ window.NoraDot = (() => {
   let reviveTick=null,reviveBusy=false,lifePurchaseId=null,shopCurrency="crumbs";
   // Use the very same native 🍪 glyph as NORA, clipping a jagged fragment out of it.
   // No replacement emoji, network asset, or font required.
-  const CRUMB='<span class="dot-crumb-icon" role="img" aria-label="крошки" style="display:inline-block;position:relative;overflow:hidden;width:.92em;height:1em;vertical-align:-.13em;flex:none;line-height:1;letter-spacing:0;text-indent:0"><span aria-hidden="true" style="display:block;position:absolute;left:-.39em;top:-.16em;width:1em;height:1em;font:normal 1.42em/1 Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif;clip-path:polygon(51% 0,100% 0,100% 100%,52% 100%,60% 79%,46% 63%,60% 47%,48% 32%,58% 17%);-webkit-clip-path:polygon(51% 0,100% 0,100% 100%,52% 100%,60% 79%,46% 63%,60% 47%,48% 32%,58% 17%)">🍪</span></span>';
+  const CRUMB_CLIP="51% 0,100% 0,100% 100%,52% 100%,60% 79%,46% 63%,60% 47%,48% 32%,58% 17%";
+  const CRUMB=`<span class="dot-crumb-icon" role="img" aria-label="крошки" style="display:inline-block;position:relative;overflow:hidden;width:.92em;height:1em;vertical-align:-.13em;flex:none;line-height:1;letter-spacing:0;text-indent:0"><span aria-hidden="true" style="display:block;position:absolute;left:-.39em;top:-.16em;width:1em;height:1em;font:normal 1.42em/1 Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif;clip-path:polygon(${CRUMB_CLIP});-webkit-clip-path:polygon(${CRUMB_CLIP})">🍪</span></span>`;
   const skin=()=>SKINS[skinId]||SKINS.red;
   function applyShop(state){
     shopState=state;
@@ -479,17 +480,29 @@ window.NoraDot = (() => {
     line(x+8,cap+(isTop?-5:5),x+w-8,cap+(isTop?-5:5),"#ffd3e333",.7);
     ctx.restore();
   }
+  let crumbSprite=null;
+  function getCrumbSprite(){
+    if(crumbSprite)return crumbSprite;
+    // Cache the same clipped native emoji as the shop, once per page.
+    const sprite=document.createElement("canvas"),size=96;
+    sprite.width=sprite.height=size;
+    const c=sprite.getContext("2d");
+    const points=CRUMB_CLIP.split(",").map(pair=>pair.trim().split(/\s+/).map(n=>parseFloat(n)*size/100));
+    c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.clip();
+    c.font='96px Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif';
+    c.textAlign="center";c.textBaseline="middle";c.fillStyle="#fff";
+    c.fillText("🍪",size/2,size/2,size);
+    crumbSprite=sprite;
+    return sprite;
+  }
   function drawCrumb(x,y,kind){
     const bob=reduced?1:1+Math.sin(visualTime*4+x*.025)*.045;
-    ctx.save();ctx.translate(x,y);ctx.scale(bob,bob);ctx.rotate(kind*.62+(reduced?0:Math.sin(visualTime*2+x*.01)*.10));
+    const angles=[-.35,1.22,2.79,4.36];
+    ctx.save();ctx.translate(x,y);ctx.scale(bob,bob);
     ctx.fillStyle=gradient(0,0,26,[[0,"#ffc27336"],[1,"#ffc27300"]]);ctx.fillRect(-27,-27,54,54);
-    const shapes=[[[-9,-4],[-3,-9],[6,-7],[10,1],[4,8],[-6,6]],[[-8,-7],[4,-9],[9,-2],[5,8],[-3,9],[-10,1]],[[-8,-2],[-4,-8],[5,-5],[10,5],[1,9],[-7,5]],[[-10,-1],[-3,-8],[3,-5],[9,-7],[8,4],[1,8],[-7,5]]];
-    const points=shapes[kind&3];
-    ctx.beginPath();points.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));ctx.closePath();
-    const g=ctx.createLinearGradient(-8,-8,8,8);g.addColorStop(0,"#ffe1a3");g.addColorStop(.55,"#d7a05f");g.addColorStop(1,"#9e6235");ctx.fillStyle=g;ctx.fill();
-    ctx.strokeStyle="#f7cf8870";ctx.lineWidth=.8;ctx.stroke();
-    disk(-3,-2,1.4,"#774725");disk(3,2,1.2,"#8d582d");
-    disk(12,5,1.6,"#c68c4e");disk(-11,8,1.1,"#f3c67c");
+    // kind is already stable and pseudorandom per gate; never change physics or replay.
+    ctx.rotate(angles[kind&3]);
+    ctx.drawImage(getCrumbSprite(),42,0,54,96,-8.44,-15,16.88,30);
     ctx.restore();
   }
   function drawGravity(){
