@@ -107,7 +107,8 @@ def _pin_key(chat_id, message_id):
 
 
 def _pin_markup(url):
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url)]]) if url else None
+    label = "DOT" if url and url.endswith("?startapp=nora_to_dot") else "НОРА"
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=label, url=url)]]) if url else None
 
 
 def _home_screen_url(pin_url: str) -> str:
@@ -117,6 +118,8 @@ def _home_screen_url(pin_url: str) -> str:
 
 def _home_screen_rich(rich: InputRichMessage, pin_url: str) -> InputRichMessage:
     """Always keep one home-screen button in the last Rich row of pinned posts."""
+    if pin_url.endswith("?startapp=nora_to_dot"):
+        return rich
     install_url = _home_screen_url(pin_url)
     blocks = _reusable(rich.model_dump(exclude_none=True)["blocks"])
     tail = {"type": "buttons", "align": "center", "buttons": [
@@ -187,6 +190,8 @@ async def _set_pin_button(make_request, bot, chat_id, message_id, *, pinned):
         async with asyncio.timeout(5):
             username = (await bot.me()).username if pinned else None
             url = f"https://t.me/{username}?startapp" if username else ""
+            if url and await db.get_bot_state("dot_announcement_message_id") == str(message_id):
+                url += "=nora_to_dot"
             with without_group_close():
                 await make_request(bot, EditMessageReplyMarkup(
                     chat_id=chat_id, message_id=message_id, reply_markup=_pin_markup(url),
@@ -336,7 +341,8 @@ async def _migrate_current_pin(bot, message):
 def _without_pin_link(markup):
     if not isinstance(markup, InlineKeyboardMarkup):
         return markup
-    rows = [[b for b in row if not (b.text == "НОРА" and b.url and b.url.endswith("?startapp"))]
+    rows = [[b for b in row if not (b.url and ((b.text == "НОРА" and b.url.endswith("?startapp"))
+                                      or (b.text == "DOT" and b.url.endswith("?startapp=nora_to_dot"))))]
             for row in markup.inline_keyboard]
     return InlineKeyboardMarkup(inline_keyboard=[row for row in rows if row])
 
