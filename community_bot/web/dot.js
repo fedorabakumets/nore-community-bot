@@ -37,15 +37,15 @@ window.NoraDot = (() => {
     const cookie=shopCurrency==="cookies",crumbs=Number(shopState.balance||0),cookies=Number(shopState.cookie_balance||0);
     shopBalance.innerHTML=crumbs.toLocaleString("ru-RU")+" "+CRUMB+" · "+cookies.toLocaleString("ru-RU")+" 🍪";
     const balance=cookie?cookies:crumbs;
-    const labelFor=(price,other)=>cookie?price+" 🍪 · "+other+" "+CRUMB:price+" "+CRUMB+" · "+other+" 🍪";
+    const labelFor=price=>price+" "+(cookie?"🍪":CRUMB);
     const toggle='<div style="display:flex;gap:8px;grid-column:1/-1;margin-bottom:4px"><button type="button" class="dot-skin-item" data-dot-currency="crumbs" aria-pressed="'+(!cookie)+'" style="flex:1;justify-content:center;opacity:'+(!cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>'+CRUMB+' Крошки</button><button type="button" class="dot-skin-item" data-dot-currency="cookies" aria-pressed="'+cookie+'" style="flex:1;justify-content:center;opacity:'+(cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>🍪 Печеньки</button></div>';
     shopBody.innerHTML=toggle+Object.entries(SKINS).map(([id,s])=>{
       const owned=shopState.owned.includes(id),active=shopState.equipped===id,crumbPrice=Number(shopState.prices[id]),cookiePrice=Number(shopState.cookie_prices?.[id]??crumbPrice/10),price=cookie?cookiePrice:crumbPrice;
-      const label=active?"Выбран":owned?"Выбрать":labelFor(price,cookie?crumbPrice:cookiePrice);
+      const label=active?"Выбран":owned?"Выбрать":labelFor(price);
       return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
     }).join("");
     const crumbLife=Number(shopState.life_price||1500),cookieLife=Number(shopState.cookie_life_price??150),price=cookie?cookieLife:crumbLife;
-    shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price,cookie?crumbLife:cookieLife)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
+    shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
   }
   async function refreshShop(){
     const view=viewId,rev=++shopRevision;
