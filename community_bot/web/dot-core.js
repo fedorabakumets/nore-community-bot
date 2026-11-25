@@ -15,6 +15,8 @@ globalThis.NoraDotCore=(()=>{
   const PARADOX_START=130, INVERT_GRAVITY=670, SOFT_GRAVITY=780;
   const softMode=n=>n>=45&&n<70;
   const gravityMode=n=>softMode(n)||n>=PARADOX_START;
+  // CHAOS and VOID need a sharper climb at their higher scroll speed.
+  const jumpVelocity=n=>n>=70&&n<PARADOX_START?-330:-254;
   const acceleration=n=>softMode(n)?SOFT_GRAVITY:INVERT_GRAVITY;
   const stageAt=n=>n>=PARADOX_START?6:n>=100?5:n>=70?4:n>=45?3:n>=25?2:n>=10?1:0;
   const speedAt=(t,passed=0)=>{
@@ -88,7 +90,7 @@ globalThis.NoraDotCore=(()=>{
         const aim=gateShape(g,s.time+look),offset=g.type==="double"&&g.x-s.distance<X-26?g.second:0;
         const target=aim.center+offset-4;
         if(gravityMode(passed))paradoxPilot(s,target,Math.max(4,threshold*.45),passed);
-        else if(s.y>target+threshold&&s.vy>=minVy){s.vy=-254;s.lastFlip=s.time;}
+        else if(s.y>target+threshold&&s.vy>=minVy){s.vy=jumpVelocity(passed);s.lastFlip=s.time;}
         advance(s,STEP,passed);
         if(s.y<=R||s.y>=H-R||collision(s.y,s.distance,g,s.time))break;
         if(g.x+g.width<s.distance+X-R)return s;
@@ -147,7 +149,7 @@ globalThis.NoraDotCore=(()=>{
       r.gates.push(accepted);r.generated++;r.verified++;witness=nextWitness;previous=accepted;return true;
     }
     add();
-    r.flap=()=>{if(!r.dead){if(gravityMode(r.passed))flipGravity(r,r.passed);else r.vy=-254;}};
+    r.flap=()=>{if(!r.dead){if(gravityMode(r.passed))flipGravity(r,r.passed);else r.vy=jumpVelocity(r.passed);}};
     r.step=(dt,emit=()=>{})=>{
       if(r.dead)return;
       r.ticks++;r.py=r.y;r.previousDistance=r.distance;r.previousTime=r.time;
