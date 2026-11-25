@@ -43,12 +43,99 @@ window.NoraDot = (() => {
       s.connect(filter);filter.connect(g);g.connect(master);s.start(t);s.stop(t+duration);s.onended=()=>{s.disconnect();filter.disconnect();g.disconnect();};
     }catch{}
   }
+  // Original adaptive house score: one uninterrupted 128 BPM clock, no external audio.
+  const HOUSE_BEAT=60/128,HOUSE_STEP=HOUSE_BEAT/4;
+  const HOUSE_ROOTS=[45,41,48,43]; // A, F, C, G
+  const HOUSE_CHORDS=[[57,60,64],[53,57,60],[55,60,64],[55,59,62]];
+  let house=null,houseIndex=0,housePhase=0;
+  const hz=n=>440*Math.pow(2,(n-69)/12);
+  function houseVoice(t,n,duration,volume,type="sine",cutoff=0,endHz=0){
+    const h=house;if(!h)return;
+    const o=audio.createOscillator(),g=audio.createGain(),f=cutoff?audio.createBiquadFilter():null;
+    o.type=type;o.frequency.setValueAtTime(n,t);
+    if(endHz)o.frequency.exponentialRampToValueAtTime(endHz,t+duration*.7);
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(volume,t+.008);g.gain.exponentialRampToValueAtTime(.0001,t+duration);
+    if(f){f.type="lowpass";f.frequency.setValueAtTime(cutoff,t);f.Q.value=.75;o.connect(f);f.connect(g);}else o.connect(g);
+    g.connect(h.bus);h.sources.add(o);o.onended=()=>{h.sources.delete(o);o.disconnect();f?.disconnect();g.disconnect();if(h.stopped&&!h.sources.size)h.bus.disconnect();};
+    o.start(t);o.stop(t+duration+.012);
+  }
+  function houseNoise(t,duration,volume,cutoff,type="highpass"){
+    const h=house;if(!h)return;
+    if(!h.noise){h.noise=audio.createBuffer(1,Math.ceil(audio.sampleRate*.5),audio.sampleRate);const v=h.noise.getChannelData(0);let seed=53;for(let i=0;i<v.length;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;v[i]=seed/2147483648-1;}}
+    const o=audio.createBufferSource(),f=audio.createBiquadFilter(),g=audio.createGain();
+    o.buffer=h.noise;f.type=type;f.frequency.setValueAtTime(cutoff,t);f.Q.value=.65;
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(volume,t+.004);g.gain.exponentialRampToValueAtTime(.0001,t+duration);
+    o.connect(f);f.connect(g);g.connect(h.bus);h.sources.add(o);o.onended=()=>{h.sources.delete(o);o.disconnect();f.disconnect();g.disconnect();if(h.stopped&&!h.sources.size)h.bus.disconnect();};
+    o.start(t);o.stop(t+duration+.009);
+  }
+  function stopHouse(resetClock=false){
+    const h=house;house=null;housePhase=0;
+    if(resetClock)houseIndex=0;else if(h)houseIndex=Math.ceil(h.playedIndex/4)*4;
+    if(!h)return;
+    h.stopped=true;const now=h.context.currentTime;
+    try{h.bus.gain.cancelScheduledValues(now);h.bus.gain.setTargetAtTime(.0001,now,.008);}catch{}
+    for(const source of h.sources){try{source.stop(now+.035);}catch{}}
+    if(!h.sources.size)h.bus.disconnect();
+  }
+  function startHouse(){
+    if(house||muted||mode!=="play"||!audio||audio.state!=="running"||!master)return;
+    const bus=audio.createGain(),now=audio.currentTime;bus.gain.setValueAtTime(.0001,now);bus.gain.setTargetAtTime(.78,now,.04);bus.connect(master);
+    house={context:audio,bus,sources:new Set(),noise:null,next:now+.045,index:houseIndex,playedIndex:houseIndex,stage:run.stage,lastBeat:now+.045,beatQueue:[],stopped:false};
+  }
+  function houseTransition(t,stage){
+    const bar=Math.floor(house.index/16)%4,notes=HOUSE_CHORDS[bar];
+    houseNoise(t,.24,.17,1800,"bandpass");
+    houseVoice(t,hz(HOUSE_ROOTS[bar]-12),.26,.38,"sine",0,hz(HOUSE_ROOTS[bar]-12)*.8);
+    notes.forEach((n,i)=>houseVoice(t+i*HOUSE_STEP*.5,hz(n+12),.20,.105,"triangle"));
+    if(stage>=4)houseVoice(t,hz(notes[0]+24),.27,.045,"sine");
+  }
+  function houseNote(t,i){
+    const h=house,beat=i%4===0,slot=i%16,bar=Math.floor(i/16)%4,root=HOUSE_ROOTS[bar],chord=HOUSE_CHORDS[bar];
+    if(beat&&h.stage!==run.stage){h.stage=run.stage;houseTransition(t,h.stage);}
+    const stage=h.stage;
+    if(beat){
+      h.beatQueue.push({t,i});
+      houseVoice(t,145,.23,stage>=4?.77:.65,"sine",0,43);
+      houseNoise(t,.018,.08,2400);
+    }
+    // Off-beat bass leaves room for the kick; later stages add syncopation and octave accents.
+    if(slot%4===2||(stage>=4&&(slot===7||slot===15))){
+      const n=root-12+(stage>=5&&slot===14?12:0);
+      houseVoice(t,hz(n),.17,.37,"triangle",stage>=4?1100:650);
+      if(stage>=3)houseVoice(t,hz(n+12),.13,.10,"sawtooth",stage>=5?1350:800);
+    }
+    if(slot%4===2)houseNoise(t,stage>=2?.115:.07,stage>=2?.12:.075,6500);
+    if(stage>=1&&(slot===4||slot===12)){
+      houseNoise(t,.11,.16,1600,"bandpass");houseNoise(t+.012,.065,.07,4200);
+    }
+    if(stage>=2&&(slot===2||slot===10||(stage>=4&&slot===14))){
+      chord.forEach(n=>houseVoice(t,hz(n),.16,stage>=4?.055:.038,"triangle",stage>=5?2300:1250));
+    }
+    if(stage>=3&&(slot%2===1||stage>=6&&slot%4===0)){
+      const n=chord[Math.floor(slot/2)%3]+12+(slot===15?12:0);
+      houseVoice(t,hz(n),.105,stage>=5?.068:.043,"triangle",2500);
+    }
+    if(stage>=4&&slot%2===1)houseNoise(t,.035,.055,8000);
+    if(stage>=5&&slot===0)houseVoice(t,hz(root+12),.64,.035,"sawtooth",700);
+    if(stage>=6&&(slot===6||slot===14))houseVoice(t,hz(chord[2]+12),.21,.07,"triangle",3200);
+  }
+  function pumpHouse(){
+    if(muted||mode!=="play"||!audio||audio.state!=="running"){if(house)stopHouse();return;}
+    try{
+      startHouse();const h=house;if(!h)return;const now=audio.currentTime;
+      // Never burst overdue notes after a stalled frame.
+      if(h.next<now-.03){const skip=Math.ceil((now+.025-h.next)/HOUSE_STEP);h.next+=skip*HOUSE_STEP;h.index+=skip;}
+      while(h.next<now+.085){houseNote(h.next,h.index);h.index++;h.next+=HOUSE_STEP;}
+      while(h.beatQueue.length&&h.beatQueue[0].t<=now){const beat=h.beatQueue.shift();h.lastBeat=beat.t;h.playedIndex=beat.i+1;}
+      housePhase=now>=h.lastBeat?Math.max(0,1-(now-h.lastBeat)/.19):0;
+    }catch{stopHouse();}
+  }
   function sfx(kind){
     if(kind==="flap"){tone(210,430,.085,.095);tone(570,890,.05,.045);noise(.075,.045,1800);}
     if(kind==="flip"){const up=run.gravity<0;tone(up?220:540,up?560:185,.14,.12,0,"sine");tone(up?470:320,up?820:150,.10,.045,.02);}
     if(kind==="cookie"){tone(784,1047,.13,.23);tone(1175,1568,.17,.16,.047);tone(2093,1960,.20,.07,.09);}
     if(kind==="pass")tone(370,415,.065,.045);
-    if(kind==="stage"){const hz=220+run.stage*35;tone(hz,hz*1.5,.22,.17);tone(hz*1.5,hz*2,.25,.13,.10);tone(hz*2,hz*3,.30,.08,.20);noise(.24,.065,900+run.stage*200);}
+    if(kind==="stage"&&!house){const hz=220+run.stage*35;tone(hz,hz*1.5,.22,.17);tone(hz*1.5,hz*2,.25,.13,.10);tone(hz*2,hz*3,.30,.08,.20);noise(.24,.065,900+run.stage*200);}
     if(kind==="crash"){tone(145,38,.29,.42,0,"triangle");tone(76,32,.36,.3,.018);noise(.30,.38,2200);}
   }
   function setMute(value){
@@ -57,10 +144,10 @@ window.NoraDot = (() => {
     soundButton.classList.toggle("muted",muted);
     if(master&&audio)master.gain.setTargetAtTime(muted?0:.19,audio.currentTime,.015);
     try{localStorage.setItem("nora.dot.muted",muted?"1":"0");}catch{}
-    if(!muted)wakeAudio();
+    if(muted)stopHouse();else wakeAudio();
   }
   function reset(ticket=null){
-    flightId++;flightTicket=ticket;flaps=[];resultRequest=null;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;
+    stopHouse(true);flightId++;flightTicket=ticket;flaps=[];resultRequest=null;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;
     run=createRun(ticket?seededRandom(ticket.seed):Math.random);particles=[];trail=[];rings=[];labels=[];crashTime=impact=stretch=coinPulse=shake=trailClock=0;
     zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";flapAt=-10;acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
@@ -213,7 +300,7 @@ window.NoraDot = (() => {
     if(kind==="pass")updateHud();
     if(kind==="stage"){if(gravityMode(run.passed))gravityPulse=1;else gravityPulse=0;updateStage(true);const c=STAGES[run.stage].color;burst(X,run.y,18,c,95);rings.push({x:X,y:run.y,life:.55,max:.55,color:c,size:55});}
     if(kind==="crash"){
-      mode="crash";crashTime=0;impact=1;shake=reduced?0:1;
+      stopHouse();mode="crash";crashTime=0;impact=1;shake=reduced?0:1;
       burst(X,run.y,55,[255,70,96],245);burst(X,run.y,19,[255,222,228],160);
       rings.push({x:X,y:run.y,life:.48,max:.48,color:[255,75,102],size:64});rings.push({x:X,y:run.y,life:.28,max:.28,color:[255,220,235],size:34});
       showOverlay();
@@ -221,7 +308,7 @@ window.NoraDot = (() => {
     sfx(kind);haptic(kind);
   }
   function pause(){
-    if(mode==="play"){mode="paused";showOverlay();}
+    if(mode==="play"){stopHouse();mode="paused";showOverlay();}
     last=0;acc=0;
   }
   function simulate(dt){
@@ -246,7 +333,7 @@ window.NoraDot = (() => {
   function background(distance){
     ctx.fillStyle="#08090e";ctx.fillRect(0,0,W,H);
     const v=clamp((speedAt(run.time,run.passed)-125)/240,0,1),cy=H*.48-cameraY*2;
-    ctx.fillStyle=gradient(W*.36,cy,H*.61*zoom,[[0,rgb(...theme,.19)],[.5,rgb(...theme,.045)],[1,"#08090e"]]);ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=gradient(W*.36,cy,H*.61*zoom,[[0,rgb(...theme,.19+(reduced?0:housePhase*.04))],[.5,rgb(...theme,.045)],[1,"#08090e"]]);ctx.fillRect(0,0,W,H);
     ctx.save();ctx.globalAlpha=.75;
     const bands=[{s:46,p:.10,a:.055,r:.65},{s:91,p:.26,a:.15,r:1.05}];
     for(const l of bands){
@@ -399,7 +486,7 @@ window.NoraDot = (() => {
       acc+=dt;
       while(acc>=STEP&&mode==="play"){simulate(STEP);acc-=STEP;}
     }else acc=0;
-    visual(dt);
+    pumpHouse();visual(dt);
     if(mode==="play"||mode==="crash"||now-renderAt>=1000/30){draw(clamp(acc/STEP,0,1));renderAt=now;}
     raf=requestAnimationFrame(tick);
   }
@@ -429,7 +516,7 @@ window.NoraDot = (() => {
   }
   function unmount(){
     closeIntro(false);viewId++;flightId++;clearTimeout(connectTimer);connectTimer=0;initialStartPending=false;queuedTicket=null;ticketRequest=null;cancelAnimationFrame(raf);raf=0;abort?.abort();abort=null;observer?.disconnect();observer=null;
-    if(audio){const old=audio;audio=null;master=null;noiseBuffer=null;try{void old.close().catch(()=>{});}catch{}}
+    stopHouse(true);if(audio){const old=audio;audio=null;master=null;noiseBuffer=null;try{void old.close().catch(()=>{});}catch{}}
     root=canvas=ctx=null;last=acc=0;particles=[];rings=[];labels=[];trail=[];
   }
   return {screen,mount,unmount,createRun,stepSeconds:STEP,speedAt,stageAt,gateShape,segments,witnessFor};
