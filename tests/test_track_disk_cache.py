@@ -2,6 +2,8 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
 from community_bot import track_disk_cache
 from community_bot.track_disk_cache import TrackDiskCache, TrackResponse
@@ -68,4 +70,33 @@ async def test_pinned_cache_cannot_grow_and_response_keeps_mime(tmp_path):
     lease.close()
     other = await cache.open(bot, "b")
     other.close()
+    cache.close()
+
+
+async def test_http_response_sends_complete_audio_and_releases_lease(tmp_path):
+    audio = b"audio" * 40_000
+
+    async def download(file_id, *, destination, **kwargs):
+        for start in range(0, len(audio), 8192):
+            destination.write(audio[start:start + 8192])
+
+    bot = AsyncMock()
+    bot.download.side_effect = download
+    cache = TrackDiskCache(tmp_path)
+    leases = []
+
+    async def handler(request):
+        lease = await cache.open(bot, "track")
+        leases.append(lease)
+        return TrackResponse(lease, "audio/mpeg")
+
+    app = web.Application()
+    app.router.add_get("/track", handler)
+    async with TestClient(TestServer(app)) as client:
+        for _ in range(2):
+            response = await client.get("/track")
+            assert response.content_type == "audio/mpeg"
+            assert await response.read() == audio
+            assert leases[-1].file.closed
+    assert bot.download.await_count == 1
     cache.close()

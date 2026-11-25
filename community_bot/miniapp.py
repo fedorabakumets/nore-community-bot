@@ -126,7 +126,8 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/', '/api/games/', '/api/seasonal',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/',
+                                    '/api/games/', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community', '/api/story/')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})

@@ -7,8 +7,8 @@ import json
 import math
 import re
 import time
-from uuid import uuid4
 from io import BytesIO
+from uuid import uuid4
 
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError
@@ -252,6 +252,8 @@ async def track_audio(request):
     track = await get_track(db, target["user_id"])
     if not bot or not track or track["revision"] != request.query.get("v"):
         raise web.HTTPNotFound()
+    if request.query.get("check") == "1":
+        return web.Response(status=204)
     try:
         lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
     except (TelegramAPIError, ClientError, OSError, ValueError):
@@ -315,6 +317,8 @@ async def library_audio(request):
     track = (await get_collection(db, owner)).get(key)
     if not bot or not track or track["revision"] != request.query.get("v"):
         raise web.HTTPNotFound()
+    if request.query.get("check") == "1":
+        return web.Response(status=204)
     try:
         lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
     except (TelegramAPIError, ClientError, OSError, ValueError):

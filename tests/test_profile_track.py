@@ -69,12 +69,20 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
             return getattr(request, name)
 
     visitor = Request(actor={"id": 8})
+    request.query["check"] = "1"
+    assert (await track_audio(visitor)).status == 204
+    assert not cache._entries
+    del request.query["check"]
     response = await track_audio(visitor)
     assert response.lease.file.read() == b"mp3"
     response.lease.close()
     await db.update_profile(user.id, "profile_private", 1)
     with pytest.raises(web.HTTPNotFound):
         await track_audio(visitor)
+    request.query["check"] = "1"
+    with pytest.raises(web.HTTPNotFound):
+        await track_audio(visitor)
+    del request.query["check"]
     request.path = "/api/profile/track"
     request.query["v"] = "expired-revision"
     with pytest.raises(web.HTTPNotFound):
