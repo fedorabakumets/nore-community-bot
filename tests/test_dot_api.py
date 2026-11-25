@@ -198,3 +198,31 @@ async def test_dot_v2_ticket_replay(tmp_path):
     await db.execute("UPDATE mini_dot_sessions SET seed=42 WHERE token=?", (ticket["token"],))
     result = await dot_api.finish(db, 101, {"token": ticket["token"], "ticks": 166, "flaps": [0]}, now=103)
     assert result["dot_earned"] == 0
+
+
+@pytest.mark.asyncio
+async def test_fairness_release_reset_and_gift(tmp_path):
+    db = Database(tmp_path / "fairness.sqlite")
+    await db.initialize()
+    await db.ensure_user(101, "gift", "Gift")
+    before = (await db.get_user(101))["cookies"]
+    await db.execute("INSERT INTO mini_dot_records VALUES(101,9,10,99)")
+    await db.execute("INSERT INTO mini_dot_wallet(user_id,balance,equipped) VALUES(101,777,'red')")
+    await db.set_bot_state("likes_sent_day:101", "test")
+    await db.set_bot_state("likes_received:101", "7")
+    await db.execute("INSERT INTO mini_dot_reward_results VALUES('old',101,10,1,0,90)")
+    assert await dot_api.fairness_reset_once(db, now=100)
+    assert not await db.fetchone("SELECT * FROM mini_dot_records")
+    assert await db.fetchone("SELECT * FROM mini_dot_records_before_fairness_20261125")
+    assert await db.get_bot_state("likes_sent_day:101") is None
+    assert await db.get_bot_state("likes_received:101") == "7"
+    assert await db.fetchone("SELECT * FROM mini_dot_reward_results WHERE token='old'")
+    state = await dot_api.shop(db, 101)
+    assert state["equipped"] == "heart" and state["balance"] == 777
+    assert "heart" in state["owned"] and state["prices"]["heart"] == 0
+    assert (await db.get_user(101))["cookies"] == before
+    await dot_api.shop(db, 101, "equip", "red")
+    assert (await dot_api.shop(db, 101))["equipped"] == "red"
+    await db.execute("INSERT INTO mini_dot_records VALUES(101,20,21,110)")
+    assert not await dot_api.fairness_reset_once(db, now=120)
+    assert await db.fetchone("SELECT * FROM mini_dot_records WHERE cookies=20")

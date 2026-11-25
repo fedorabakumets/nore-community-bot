@@ -7,6 +7,8 @@ import hashlib
 import secrets
 import shutil
 import time
+import os
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -86,7 +88,8 @@ MAX_TICKS = 432_000
 TICKET_TTL = 86_400
 REWARD_WINDOW = 86_400
 REWARD_LIMIT = 2
-SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000}
+SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000, "heart": 0}
+GIFT_RESET_KEY = "dot:fairness-reset:20261125:v2"
 LIFE_PRICE = 1500
 COOKIE_RATE = 10
 RULES_V2_PREFIX = "DOTv2_"
@@ -271,8 +274,11 @@ async def finish(db, uid, body, now=None):
         world = await one(conn, "SELECT MAX(cookies) AS score FROM mini_dot_records")
         world_record = cookies > max(0, world["score"] or 0)
         improved = best is None or (cookies, passed) > (best["cookies"], best["passed"])
+        reset = await one(conn, "SELECT value FROM bot_state WHERE key=?", (GIFT_RESET_KEY,))
+        cutoff = max(now - REWARD_WINDOW, float(reset["value"])) if reset else now - REWARD_WINDOW
         recent = await one(conn, "SELECT COUNT(*) AS n FROM mini_dot_reward_results "
-                           "WHERE user_id=? AND reward>0 AND awarded_at>?", (uid, now - REWARD_WINDOW))
+                           "WHERE user_id=? AND reward>0 AND awarded_at>=? AND awarded_at>?",
+                           (uid, cutoff, now - REWARD_WINDOW))
         limit_reached = world_record and recent["n"] >= REWARD_LIMIT
         reward = cookies if world_record and not limit_reached else 0
         # Every verified flight earns DOT-only currency, once per session.
@@ -355,18 +361,30 @@ async def leaderboard(db, settings, uid):
     return {"top": leaders, "self": own}
 
 
+async def grant_fairness_heart(conn, uid):
+    """Gift and auto-equip once, without overwriting subsequent choices."""
+    if not await one(conn, "SELECT 1 FROM bot_state WHERE key=?", (GIFT_RESET_KEY,)):
+        return
+    inserted = await conn.execute("INSERT OR IGNORE INTO mini_dot_skins(user_id,skin) VALUES(?,'heart')", (uid,))
+    if inserted.rowcount == 1:
+        await conn.execute(
+            "INSERT INTO mini_dot_wallet(user_id,equipped) VALUES(?,'heart') "
+            "ON CONFLICT(user_id) DO UPDATE SET equipped='heart'", (uid,))
+
+
 async def shop_state(conn, uid):
     wallet = await one(conn, "SELECT balance,equipped FROM mini_dot_wallet WHERE user_id=?", (uid,))
     rows = await (await conn.execute("SELECT skin FROM mini_dot_skins WHERE user_id=?", (uid,))).fetchall()
     owned = {"red"} | {row["skin"] for row in rows}
     life = await one(conn, "SELECT balance FROM mini_dot_lives WHERE user_id=?", (uid,))
     user = await one(conn, "SELECT cookies FROM users WHERE user_id=?", (uid,))
+    prices = {key: price for key, price in SKINS.items() if key != "heart" or key in owned}
     return {"balance": wallet["balance"] if wallet else 0,
             "cookie_balance": user["cookies"] if user else 0,
-            "cookie_prices": {key: price // COOKIE_RATE for key, price in SKINS.items()},
+            "cookie_prices": {key: price // COOKIE_RATE for key, price in prices.items()},
             "cookie_life_price": LIFE_PRICE // COOKIE_RATE,
             "equipped": wallet["equipped"] if wallet else "red",
-            "owned": [skin for skin in SKINS if skin in owned], "prices": SKINS,
+            "owned": [skin for skin in SKINS if skin in owned], "prices": prices,
             "lives": life["balance"] if life else 0, "life_price": LIFE_PRICE}
 
 
@@ -411,11 +429,14 @@ async def shop(db, uid, action=None, skin=None, purchase_id=None, currency="crum
     if action is not None and (action not in ("buy", "equip") or not isinstance(skin, str) or skin not in SKINS):
         raise ValueError("Неизвестный товар DOT")
     async with db.connect() as conn:
-        await conn.execute("BEGIN IMMEDIATE" if action else "BEGIN")
+        await conn.execute("BEGIN IMMEDIATE")
+        await grant_fairness_heart(conn, uid)
         if action:
             await conn.execute("INSERT OR IGNORE INTO mini_dot_wallet(user_id) VALUES(?)", (uid,))
             state = await shop_state(conn, uid)
             if skin not in state["owned"]:
+                if skin == "heart":
+                    raise ValueError("Подарок DOT пока недоступен")
                 if action != "buy":
                     raise ValueError("Сначала купи этот цвет")
                 await spend_dot(conn, uid, SKINS[skin], currency, f"Цвет {skin}")
@@ -512,8 +533,38 @@ async def reset_leaderboard_once(db):
         return True
 
 
+async def fairness_reset_once(db, now=None):
+    """Atomic release reset. Old rewards remain in the ledger and replay protection."""
+    now = time.time() if now is None else now
+    today = datetime.fromtimestamp(now, ZoneInfo("Europe/Moscow")).date().isoformat()
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        if await one(conn, "SELECT 1 FROM bot_state WHERE key=?", (GIFT_RESET_KEY,)):
+            await conn.commit()
+            return False
+        await conn.execute("CREATE TABLE mini_dot_records_before_fairness_20261125 AS SELECT * FROM mini_dot_records")
+        await conn.execute("CREATE TABLE reputation_actions_before_fairness_20261125 AS SELECT * FROM reputation_actions WHERE action_date=?", (today,))
+        await conn.execute("CREATE TABLE pet_video_deliveries_before_fairness_20261125 AS SELECT * FROM pet_video_deliveries WHERE day=?", (today,))
+        await conn.execute("CREATE TABLE bot_state_before_fairness_20261125 AS SELECT * FROM bot_state WHERE key GLOB 'likes_sent_day:*' OR key GLOB 'story_like:dedzytwo:*' OR key GLOB 'nora_ai_daily:*' OR key GLOB ?", (f"song:daily:*:{today}",))
+        await conn.execute("DELETE FROM mini_dot_records")
+        await conn.execute("DELETE FROM reputation_actions WHERE action_date=?", (today,))
+        await conn.execute("DELETE FROM pet_video_deliveries WHERE day=?", (today,))
+        await conn.execute("DELETE FROM bot_state WHERE key IN (SELECT key FROM bot_state_before_fairness_20261125)")
+        await conn.execute("UPDATE mini_dot_sessions SET expires_at=0 WHERE used=0")
+        await conn.execute("INSERT INTO bot_state(key,value) VALUES(?,?)", (GIFT_RESET_KEY, str(now)))
+        await conn.commit()
+        return True
+
+
 async def reset_leaderboard_at_startup(app):
-    await reset_leaderboard_once(app["db"])
+    if (os.getenv("RAILWAY_SERVICE_ID") == "dae67cd6-25ee-4710-b11a-7c8f6801e35b"
+            and os.getenv("RAILWAY_ENVIRONMENT_ID") == "136c278e-4a0f-4b54-986c-8b64f9d69ad6"):
+        db = app["db"]
+        if not await db.get_bot_state(GIFT_RESET_KEY):
+            from community_bot.release_backup import verify_requested_release_backup
+            if not await verify_requested_release_backup(db, request="dot-fairness-20261125-v2"):
+                raise RuntimeError("DOT fairness backup not verified")
+            await fairness_reset_once(db)
 
 
 def register(app):

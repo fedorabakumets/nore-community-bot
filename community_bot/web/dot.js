@@ -14,7 +14,8 @@ window.NoraDot = (() => {
     red:{name:"Классика",light:"#ffb4c1",mid:"#ff5977",dark:"#b8143c",rgb:[255,89,119]},
     mint:{name:"Мята",light:"#e3ffc8",mid:"#a5e86f",dark:"#41883c",rgb:[165,232,111]},
     ice:{name:"Лёд",light:"#d5faff",mid:"#66d8f1",dark:"#237da8",rgb:[102,216,241]},
-    violet:{name:"Аметист",light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]}
+    violet:{name:"Аметист",light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]},
+    heart:{name:"Сердечко",light:"#ffd5ef",mid:"#ff8fc8",dark:"#dc4f95",rgb:[255,143,200]}
   };
   let shopPanel,shopBody,shopBalance,shopStatus,shopState=null,shopBusy=false,shopOpen=false,skinId="red",shopRevision=0;
   let reviveTick=null,reviveBusy=false,lifePurchaseId=null,shopCurrency="crumbs";
@@ -41,10 +42,10 @@ window.NoraDot = (() => {
     const balance=cookie?cookies:crumbs;
     const labelFor=price=>price+" "+(cookie?"🍪":CRUMB);
     const toggle='<div style="display:flex;gap:8px;grid-column:1/-1;margin-bottom:4px"><button type="button" class="dot-skin-item" data-dot-currency="crumbs" aria-pressed="'+(!cookie)+'" style="flex:1;justify-content:center;opacity:'+(!cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>'+CRUMB+' Крошки</button><button type="button" class="dot-skin-item" data-dot-currency="cookies" aria-pressed="'+cookie+'" style="flex:1;justify-content:center;opacity:'+(cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>🍪 Печеньки</button></div>';
-    shopBody.innerHTML=toggle+Object.entries(SKINS).map(([id,s])=>{
+    shopBody.innerHTML=toggle+Object.entries(SKINS).filter(([id])=>Object.hasOwn(shopState.prices,id)).map(([id,s])=>{
       const owned=shopState.owned.includes(id),active=shopState.equipped===id,crumbPrice=Number(shopState.prices[id]),cookiePrice=Number(shopState.cookie_prices?.[id]??crumbPrice/10),price=cookie?cookiePrice:crumbPrice;
       const label=active?"Выбран":owned?"Выбрать":labelFor(price);
-      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
+      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+';'+(id==="heart"?'background:none;box-shadow:none;display:grid;place-items:center;color:#ff8fc8;font-size:26px;text-shadow:0 0 10px #ff8fc877;':'')+'">'+(id==="heart"?'♥':'')+'</span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
     }).join("");
     const crumbLife=Number(shopState.life_price||1500),cookieLife=Number(shopState.cookie_life_price??150),price=cookie?cookieLife:crumbLife;
     shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
@@ -562,6 +563,11 @@ window.NoraDot = (() => {
     const halo=c.createRadialGradient(0,0,0,0,0,32);halo.addColorStop(0,rgb(...color.rgb,.30));halo.addColorStop(.4,rgb(...color.rgb,.15));halo.addColorStop(1,rgb(...color.rgb,0));c.fillStyle=halo;c.fillRect(-32,-32,64,64);
     const g=c.createLinearGradient(-8,-9,8,9);g.addColorStop(0,color.light);g.addColorStop(.38,color.mid);g.addColorStop(1,color.dark);
     const circle=(x,y,r,fill)=>{c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fillStyle=fill;c.fill();};
+    if(key==="heart"){
+      c.beginPath();c.moveTo(0,10);c.bezierCurveTo(-3,7,-11,1,-10,-4);c.bezierCurveTo(-9,-11,-3,-12,0,-6);c.bezierCurveTo(3,-12,9,-11,10,-4);c.bezierCurveTo(11,1,3,7,0,10);c.closePath();
+      c.globalAlpha=.68;c.fillStyle=g;c.fill();c.globalAlpha=.85;c.strokeStyle="#ffe2f3";c.lineWidth=.7;c.stroke();c.globalAlpha=1;
+      playerTextures.set(key,sprite);return sprite;
+    }
     circle(0,0,R+1,g);circle(0,0,5.5,"#160e1b");c.beginPath();c.arc(0,0,8.8,3.5,5.2);c.strokeStyle="#ffedf3ba";c.lineWidth=1.2;c.stroke();circle(-3,-6,1.05,"#fff0f3c5");
     playerTextures.set(key,sprite);return sprite;
   }
@@ -576,7 +582,12 @@ window.NoraDot = (() => {
     const maxAge=.20+clamp((speedAt(run.time,run.passed)-125)/240,0,1)*.15;
     let start=0;while(start<trail.length&&run.time-trail[start].time>maxAge)start++;
     const count=trail.length-start;
-    if(count>1&&!reduced&&mode!=="crash"){
+    if(count>1&&!reduced&&mode!=="crash"&&skinId==="heart"){
+      const sprite=playerTexture(),step=Math.max(1,Math.ceil(count/7));
+      ctx.save();
+      for(let i=0;i<count;i+=step){const p=trail[start+i],f=(i+1)/count,size=20+21*f;ctx.globalAlpha=.44*f;ctx.drawImage(sprite,X-distance+p.d-size/2,p.y-size/2,size,size);}
+      ctx.restore();
+    }else if(count>1&&!reduced&&mode!=="crash"){
       ctx.lineCap="round";ctx.lineJoin="round";
       const color=skin().rgb,groups=Math.min(8,count);
       // Batch consecutive segments with similar width/opacity rather than
