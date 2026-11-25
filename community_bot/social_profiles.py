@@ -7,8 +7,8 @@ import json
 import math
 import re
 import time
-from uuid import uuid4
 from io import BytesIO
+from uuid import uuid4
 
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError
@@ -28,7 +28,8 @@ from community_bot.music_library import (
     track_id,
 )
 from community_bot.profile_fields import profile_age
-from community_bot.profile_track import download_track, get_track, track_key
+from community_bot.profile_track import get_track, track_key
+from community_bot.track_disk_cache import TrackResponse
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mini_presence (
@@ -251,15 +252,21 @@ async def track_audio(request):
     track = await get_track(db, target["user_id"])
     if not bot or not track or track["revision"] != request.query.get("v"):
         raise web.HTTPNotFound()
+    if request.query.get("check") == "1":
+        return web.Response(status=204)
     try:
-        audio = await download_track(bot, track["file_id"])
+        lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
-    fresh = await _profile_track_target(request)
-    latest = await get_track(db, fresh["user_id"])
-    if not audio or not latest or latest["revision"] != track["revision"]:
-        raise web.HTTPNotFound()
-    return web.Response(body=audio, content_type=track["mime"])
+    try:
+        fresh = await _profile_track_target(request)
+        latest = await get_track(db, fresh["user_id"])
+        if not latest or latest["revision"] != track["revision"] or latest["file_id"] != track["file_id"]:
+            raise web.HTTPNotFound()
+        return TrackResponse(lease, track["mime"])
+    except BaseException:
+        lease.close()
+        raise
 
 
 async def save_profile_track(request):
@@ -310,14 +317,21 @@ async def library_audio(request):
     track = (await get_collection(db, owner)).get(key)
     if not bot or not track or track["revision"] != request.query.get("v"):
         raise web.HTTPNotFound()
+    if request.query.get("check") == "1":
+        return web.Response(status=204)
     try:
-        audio = await download_track(bot, track["file_id"])
+        lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
-    if (not audio or key not in await get_collection(db, owner)
-            or not await can_read_library(db, request.app["settings"], uid, owner)):
-        raise web.HTTPNotFound()
-    return web.Response(body=audio, content_type=track["mime"])
+    try:
+        latest = (await get_collection(db, owner)).get(key)
+        if (not latest or latest["revision"] != track["revision"] or latest["file_id"] != track["file_id"]
+                or not await can_read_library(db, request.app["settings"], uid, owner)):
+            raise web.HTTPNotFound()
+        return TrackResponse(lease, track["mime"])
+    except BaseException:
+        lease.close()
+        raise
 
 
 async def library_visibility(request):

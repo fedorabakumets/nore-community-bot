@@ -126,7 +126,8 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/', '/api/games/', '/api/seasonal',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/',
+                                    '/api/games/', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community', '/api/story/')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
                                      headers={'Cache-Control': 'no-store'})
@@ -573,9 +574,12 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app = web.Application(middlewares=[protection], client_max_size=31 * 1024 * 1024)
     app.update(db=db, settings=settings, bot=bot, avatar_uploads=asyncio.Semaphore(2))
     from community_bot.media_cache import MediaImages
+    from community_bot.track_disk_cache import TrackDiskCache
 
+    app['track_disk_cache'] = TrackDiskCache()
     app['media_images'] = MediaImages(bot, db)
     async def close_media(_):
+        app['track_disk_cache'].close()
         await app['media_images'].close()
     app.on_cleanup.append(close_media)
     app.router.add_get('/', index)
