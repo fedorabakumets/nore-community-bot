@@ -637,10 +637,11 @@ window.NoraProfileTrack = (() => {
   }
 
   function installBlob(state, blob) {
-    if (state.url) URL.revokeObjectURL(state.url);
+    const previous = state.url;
     state.blob = blob;
     state.url = URL.createObjectURL(blob);
     state.audio.src = state.url;
+    if (previous) URL.revokeObjectURL(previous);
   }
 
   async function loadTrack(state) {
@@ -681,7 +682,7 @@ window.NoraProfileTrack = (() => {
       media = new Media();
       state.audio.disableRemotePlayback = true;
       state.url = URL.createObjectURL(media);
-      await waitMediaEvent(media, 'sourceopen', signal, () => { state.audio.src = state.url; });
+      await waitMediaEvent(media, 'sourceopen', signal, () => { state.audio.src = state.url; }, 2000);
       buffer = media.addSourceBuffer(mime);
     } catch { state.progressiveFailed = true; }
 
@@ -722,7 +723,7 @@ window.NoraProfileTrack = (() => {
     }
     if (state.progressiveFailed || !started) {
       const position = state.audio.currentTime || 0;
-      const resume = !started || !state.audio.paused;
+      const resume = !started || state.wantsPlayback;
       state.audio.pause();
       installBlob(state, blob);
       if (position) state.audio.addEventListener('loadedmetadata', () => {
@@ -756,13 +757,16 @@ window.NoraProfileTrack = (() => {
   async function toggleActive(state) {
     if (!state || active !== state || state.loading) return;
     if (!state.audio.paused) {
+      state.wantsPlayback = false;
       state.audio.pause();
       return;
     }
+    state.wantsPlayback = true;
+    const source = state.url;
     try {
       await state.audio.play();
     } catch (error) {
-      if (active !== state) return;
+      if (active !== state || state.url !== source) return;
       if (error.name === 'NotAllowedError') toast('Нажми «Включить трек» ещё раз');
       else if (state.progressive) state.progressiveFailed = true;
       else {
