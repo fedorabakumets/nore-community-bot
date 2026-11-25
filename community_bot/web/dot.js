@@ -6,7 +6,7 @@ window.NoraDot = (() => {
   let raf=0,last=0,acc=0,run,mode="ready",muted=false,audio,master;
   let results,resultsBody,restart,queuedTicket=null,ticketRequest=null,flightTicket=null,flaps=[],flightId=0,viewId=0,resultRequest=null,connectTimer=0,initialStartPending=false;
   let intro=null,introTimer=0,introKey="",introActive=false,introStarted=false;
-  let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,flapAt=-10,gravityPulse=0;
+  let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,gravityPulse=0;
   let reduced=false,scaleX=1,scaleY=1,paceNode,meterNode,pauseButton,lastPace=-1,lastSpeed="",renderAt=0,bank=0,cameraY=0,noiseBuffer=null,nearFlash=0,nearIds=new Set(),stageNode,stageBanner,stageTitle,stageDescription,stageTimer=0,theme=STAGES[0].color.slice();
   const SKINS={
     red:{name:"Классика",light:"#ffb4c1",mid:"#ff5977",dark:"#b8143c",rgb:[255,89,119]},
@@ -205,7 +205,7 @@ window.NoraDot = (() => {
   function reset(ticket=null){
     stopHouse(true);flightId++;flightTicket=ticket;flaps=[];reviveTick=null;reviveBusy=false;resultRequest=null;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;
     run=createRun(ticket?seededRandom(ticket.seed):Math.random);particles=[];trail=[];rings=[];labels=[];crashTime=impact=stretch=coinPulse=shake=trailClock=0;
-    zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";flapAt=-10;acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
+    zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
   function updateStage(announce){
     const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",gravityMode(run.passed)?"Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию.":"Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.");root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
@@ -247,9 +247,10 @@ window.NoraDot = (() => {
       }
       startFlight();return;
     }
-    if(mode==="ready"||mode==="paused"){mode="play";last=0;acc=0;run.py=run.y;run.previousDistance=run.distance;run.previousTime=run.time;flapAt=-10;showOverlay();canvas.focus?.({preventScroll:true});}
-    if(run.time-flapAt<.0225||flaps.at(-1)===run.ticks)return;
-    run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);flapAt=run.time;stretch=1;
+    if(mode==="ready"||mode==="paused"){mode="play";last=0;acc=0;run.py=run.y;run.previousDistance=run.distance;run.previousTime=run.time;showOverlay();canvas.focus?.({preventScroll:true});}
+    // Replay records at most one input per 120 Hz physics tick.
+    if(flaps.at(-1)===run.ticks)return;
+    run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);stretch=1;
     if(gravityMode(run.passed)){
       gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
       burst(X-7,run.y,12,color,60);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
@@ -314,7 +315,7 @@ window.NoraDot = (() => {
     if(!root?.isConnected||document.hidden||document.querySelector("dialog[open]")){initialStartPending=false;showOverlay();return;}
     const ticket=queuedTicket;queuedTicket=null;
     reset(ticket);mode="play";showOverlay();canvas.focus?.({preventScroll:true});primeTicket();
-    run.flap();flaps.push(0);flapAt=0;stretch=1;burst(X-7,run.y+4,7,skin().rgb,48);sfx("flap");haptic("flap");
+    run.flap();flaps.push(0);stretch=1;burst(X-7,run.y+4,7,skin().rgb,48);sfx("flap");haptic("flap");
   }
   function avatarHTML(person){
     const id=Number(person.id),name=String(person.name||"Участник"),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
@@ -356,7 +357,7 @@ window.NoraDot = (() => {
       if(view!==viewId||id!==flightId||!root?.isConnected)return;
       ++shopRevision;applyShop(state);
       if(!run.revive())throw Error("Не удалось восстановить полёт");
-      reviveTick=tick;particles=[];trail=[];rings=[];labels=[];impact=shake=stretch=0;flapAt=-10;
+      reviveTick=tick;particles=[];trail=[];rings=[];labels=[];impact=shake=stretch=0;
       mode="paused";last=acc=0;showOverlay();haptic("cookie");
     }catch(e){if(view===viewId&&id===flightId&&root)detail.textContent=e?.message||"Не удалось использовать жизнь. Повтори попытку.";}
     finally{if(view===viewId&&id===flightId&&root){reviveBusy=false;controls.querySelectorAll("button").forEach(b=>b.disabled=false);}}
