@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS mini_dot_reward_results (
     awarded_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mini_dot_reward_window ON mini_dot_reward_results(user_id, awarded_at) WHERE reward > 0;
+CREATE TABLE IF NOT EXISTS mini_dot_credits (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL CHECK(amount >= 0)
+);
+CREATE TABLE IF NOT EXISTS mini_dot_wallet (
+    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
+    equipped TEXT NOT NULL DEFAULT 'red'
+);
+CREATE TABLE IF NOT EXISTS mini_dot_skins (
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    skin TEXT NOT NULL,
+    PRIMARY KEY(user_id, skin)
+);
 CREATE TABLE IF NOT EXISTS mini_dot_intro_seen (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     seen_at REAL NOT NULL
@@ -50,6 +65,7 @@ MAX_TICKS = 432_000
 TICKET_TTL = 86_400
 REWARD_WINDOW = 86_400
 REWARD_LIMIT = 2
+SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000}
 RUNNER = Path(__file__).with_name("dot_replay.mjs")
 REPLAY_LIMIT = asyncio.Semaphore(2)
 
@@ -130,7 +146,9 @@ async def replay(seed, ticks, flaps):
 async def reward_result(conn, session):
     row = await one(conn, "SELECT reward,world_record,limit_reached FROM mini_dot_reward_results WHERE token=?",
                     (session["token"],))
-    return {"new_record": bool(session["new_record"]), "reward": row["reward"] if row else 0,
+    credit = await one(conn, "SELECT amount FROM mini_dot_credits WHERE token=?", (session["token"],))
+    return {"new_record": bool(session["new_record"]), "dot_earned": credit["amount"] if credit else 0,
+            "reward": row["reward"] if row else 0,
             "world_record": bool(row and row["world_record"]), "limit_reached": bool(row and row["limit_reached"])}
 
 
@@ -167,6 +185,13 @@ async def finish(db, uid, body, now=None):
                            "WHERE user_id=? AND reward>0 AND awarded_at>?", (uid, now - REWARD_WINDOW))
         limit_reached = world_record and recent["n"] >= REWARD_LIMIT
         reward = cookies if world_record and not limit_reached else 0
+        # Every verified flight earns DOT-only currency, once per session.
+        await conn.execute("INSERT INTO mini_dot_credits(token,user_id,amount) VALUES(?,?,?)", (token, uid, cookies))
+        await conn.execute(
+            "INSERT INTO mini_dot_wallet(user_id,balance) VALUES(?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance",
+            (uid, cookies),
+        )
         # Record, wallet and one-use settlement share the same write transaction.
         if reward:
             stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
@@ -191,7 +216,7 @@ async def finish(db, uid, body, now=None):
             (cookies, passed, int(improved), token),
         )
         await conn.commit()
-    return {"new_record": improved, "reward": reward, "world_record": world_record,
+    return {"new_record": improved, "dot_earned": cookies, "reward": reward, "world_record": world_record,
             "limit_reached": limit_reached}
 
 
@@ -240,6 +265,49 @@ async def leaderboard(db, settings, uid):
     return {"top": leaders, "self": own}
 
 
+async def shop_state(conn, uid):
+    wallet = await one(conn, "SELECT balance,equipped FROM mini_dot_wallet WHERE user_id=?", (uid,))
+    rows = await (await conn.execute("SELECT skin FROM mini_dot_skins WHERE user_id=?", (uid,))).fetchall()
+    owned = {"red"} | {row["skin"] for row in rows}
+    return {"balance": wallet["balance"] if wallet else 0,
+            "equipped": wallet["equipped"] if wallet else "red",
+            "owned": [skin for skin in SKINS if skin in owned], "prices": SKINS}
+
+
+async def shop(db, uid, action=None, skin=None):
+    if action is not None and (action not in ("buy", "equip") or not isinstance(skin, str) or skin not in SKINS):
+        raise ValueError("Неизвестный товар DOT")
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE" if action else "BEGIN")
+        if action:
+            await conn.execute("INSERT OR IGNORE INTO mini_dot_wallet(user_id) VALUES(?)", (uid,))
+            state = await shop_state(conn, uid)
+            if skin not in state["owned"]:
+                if action != "buy":
+                    raise ValueError("Сначала купи этот цвет")
+                changed = await conn.execute(
+                    "UPDATE mini_dot_wallet SET balance=balance-? WHERE user_id=? AND balance>=?",
+                    (SKINS[skin], uid, SKINS[skin]),
+                )
+                if changed.rowcount != 1:
+                    raise ValueError("Недостаточно печенек DOT")
+                await conn.execute("INSERT INTO mini_dot_skins(user_id,skin) VALUES(?,?)", (uid, skin))
+            await conn.execute("UPDATE mini_dot_wallet SET equipped=? WHERE user_id=?", (skin, uid))
+        state = await shop_state(conn, uid)
+        await conn.commit()
+        return state
+
+
+async def shop_handler(request):
+    db, uid = request.app["db"], request["actor"]["id"]
+    if request.method == "GET":
+        return web.json_response(await shop(db, uid))
+    body = await request.json()
+    if not isinstance(body, dict) or body.get("action") not in ("buy", "equip"):
+        raise ValueError("Некорректное действие магазина DOT")
+    return web.json_response(await shop(db, uid, body["action"], body.get("skin")))
+
+
 async def start_handler(request):
     return web.json_response(await issue(request.app["db"], request["actor"]["id"]))
 
@@ -268,6 +336,8 @@ async def intro_handler(request):
 
 
 def register(app):
+    app.router.add_get("/api/dot/shop", shop_handler)
+    app.router.add_post("/api/dot/shop", shop_handler)
     app.router.add_post("/api/dot/intro", intro_handler)
     app.router.add_post("/api/dot/start", start_handler)
     app.router.add_get("/api/dot/top", top_handler)

@@ -8,6 +8,58 @@ window.NoraDot = (() => {
   let intro=null,introTimer=0,introKey="",introActive=false,introStarted=false;
   let particles=[],trail=[],rings=[],labels=[],visualTime=0,crashTime=0,impact=0,stretch=0,coinPulse=0,zoom=1,shake=0,trailClock=0,flapAt=-10,gravityPulse=0;
   let reduced=false,scaleX=1,scaleY=1,paceNode,meterNode,pauseButton,lastPace=-1,lastSpeed="",renderAt=0,bank=0,cameraY=0,noiseBuffer=null,nearFlash=0,nearIds=new Set(),stageNode,stageBanner,stageTitle,stageDescription,stageTimer=0,theme=STAGES[0].color.slice();
+  const SKINS={
+    red:{name:"Классика",light:"#ffb4c1",mid:"#ff5977",dark:"#b8143c",rgb:[255,89,119]},
+    mint:{name:"Мята",light:"#e3ffc8",mid:"#a5e86f",dark:"#41883c",rgb:[165,232,111]},
+    ice:{name:"Лёд",light:"#d5faff",mid:"#66d8f1",dark:"#237da8",rgb:[102,216,241]},
+    violet:{name:"Аметист",light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]}
+  };
+  let shopPanel,shopBody,shopBalance,shopStatus,shopState=null,shopBusy=false,shopOpen=false,skinId="red",shopRevision=0;
+  const skin=()=>SKINS[skinId]||SKINS.red;
+  function applyShop(state){
+    shopState=state;skinId=Object.hasOwn(SKINS,state.equipped)?state.equipped:"red";
+    const s=skin();
+    root.style.setProperty("--dot-skin-light",s.light);
+    root.style.setProperty("--dot-skin-mid",s.mid);
+    root.style.setProperty("--dot-skin-dark",s.dark);
+    root.style.setProperty("--dot-skin-glow",rgb(...s.rgb,.4));
+    renderShop();
+  }
+  function renderShop(){
+    if(!shopBody||!shopState)return;
+    shopBalance.textContent=Number(shopState.balance).toLocaleString("ru-RU")+" 🍪";
+    shopBody.innerHTML=Object.entries(SKINS).map(([id,s])=>{
+      const owned=shopState.owned.includes(id),active=shopState.equipped===id,price=shopState.prices[id];
+      const label=active?"Выбран":owned?"Выбрать":price+" 🍪";
+      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&shopState.balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
+    }).join("");
+  }
+  async function refreshShop(){
+    const view=viewId,rev=++shopRevision;
+    try{const state=await api("dot/shop");if(view===viewId&&rev===shopRevision&&root)applyShop(state);}
+    catch(e){if(view===viewId&&rev===shopRevision&&shopOpen)shopStatus.textContent=e?.message||"Магазин недоступен";}
+  }
+  async function openShop(e){
+    e?.stopPropagation();
+    if(shopOpen||!(mode==="ready"||mode==="over"))return;
+    shopOpen=true;shopPanel.hidden=false;shopStatus.textContent="";shopBody.innerHTML="Загрузка…";shopBalance.textContent="…";
+    const view=viewId;
+    if(resultRequest)await resultRequest.catch(()=>{});
+    if(view===viewId&&shopOpen)await refreshShop();
+  }
+  function closeShop(){
+    shopOpen=false;if(shopPanel)shopPanel.hidden=true;
+  }
+  async function chooseSkin(e){
+    const id=e.target.closest("[data-dot-skin]")?.dataset.dotSkin;
+    if(!id||shopBusy||!shopState||!shopOpen)return;
+    const view=viewId;++shopRevision;shopBusy=true;shopStatus.textContent="";renderShop();
+    try{
+      const state=await api("dot/shop",{action:shopState.owned.includes(id)?"equip":"buy",skin:id});
+      if(view===viewId&&root){applyShop(state);haptic("flap");}
+    }catch(e){if(view===viewId&&root){shopStatus.textContent=e?.message||"Не удалось выполнить покупку";}}
+    finally{if(view===viewId&&root){shopBusy=false;renderShop();}}
+  }
   const motion=()=>window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches||false;
   const rgb=(r,g,b,a)=>"rgba("+r+","+g+","+b+","+clamp(a,0,1)+")";
   function disk(x,y,r,color){ctx.beginPath();ctx.arc(x,y,Math.max(.01,r),0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
@@ -166,6 +218,7 @@ window.NoraDot = (() => {
     title.textContent=mode==="over"?"Полёт завершён":mode==="paused"?"Пауза":"DOT";
     detail.textContent=mode==="over"?"🍪 "+run.cookies+"  ·  "+run.passed+" пройдено":mode==="paused"?"Продолжи, когда будешь готов":"Касайся экрана, чтобы взлететь";
     button.textContent=mode==="over"?"Ещё раз":mode==="paused"?"Продолжить":"Играть";
+    overlay.querySelector(".dot-shop-open").hidden=mode!=="ready";
   }
   function burst(x,y,count,color,velocity){
     for(let i=0;i<(reduced?Math.ceil(count/3):count);i++){
@@ -193,13 +246,14 @@ window.NoraDot = (() => {
     if(gravityMode(run.passed)){
       gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
       burst(X-7,run.y,12,color,60);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
-    }else{burst(X-7,run.y+4,7,[255,75,103],48);rings.push({x:X,y:run.y,life:.19,max:.19,color:[255,85,117],size:12});sfx("flap");}
+    }else{burst(X-7,run.y+4,7,skin().rgb,48);rings.push({x:X,y:run.y,life:.19,max:.19,color:skin().rgb,size:12});sfx("flap");}
     haptic("flap");
   }
   const INTRO_FRAMES=[
     ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
     ["ЗАБЕРИ","ВСЕ","ПЕЧЕНЬКИ"],
-    ["НЕ БОЛЕЕ","ДВУХ НАГРАД","ЗА 24 ЧАСА"]
+    ["НЕ БОЛЕЕ","ДВУХ НАГРАД","ЗА 24 ЧАСА"],
+    ["СОБИРАЙ","ПЕЧЕНЬКИ DOT","ОТКРЫВАЙ ЦВЕТА"]
   ];
   function introStorageKey(){
     const id=typeof data!=="undefined"?data?.user?.user_id:null;
@@ -232,7 +286,7 @@ window.NoraDot = (() => {
     introKey=introStorageKey();
     try{if(localStorage.getItem(introKey)==="1")return;}catch{}
     intro=document.createElement("div");intro.className="dot-intro-screen";intro.setAttribute("role","dialog");intro.setAttribute("aria-modal","true");
-    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа.");
+    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа. Собирай печеньки DOT и открывай цвета.");
     intro.innerHTML='<div class="dot-intro-logo">D<span>O</span>T</div><div class="dot-intro-words" aria-hidden="true"></div><div class="dot-intro-line" aria-hidden="true"></div>';
     document.body.append(intro);root.inert=true;introActive=true;introStarted=false;
     introTimer=setTimeout(launchIntro,450);
@@ -253,7 +307,7 @@ window.NoraDot = (() => {
     if(!root?.isConnected||document.hidden||document.querySelector("dialog[open]")){initialStartPending=false;showOverlay();return;}
     const ticket=queuedTicket;queuedTicket=null;
     reset(ticket);mode="play";showOverlay();canvas.focus?.({preventScroll:true});primeTicket();
-    run.flap();flaps.push(0);flapAt=0;stretch=1;burst(X-7,run.y+4,7,[255,75,103],48);sfx("flap");haptic("flap");
+    run.flap();flaps.push(0);flapAt=0;stretch=1;burst(X-7,run.y+4,7,skin().rgb,48);sfx("flap");haptic("flap");
   }
   function avatarHTML(person){
     const id=Number(person.id),name=String(person.name||"Участник"),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
@@ -268,6 +322,8 @@ window.NoraDot = (() => {
     const leaders=payload?.top||[],mine=payload?.self,record=!!payload?.new_record;
     const reward=Number(payload?.reward||0),world=!!payload?.world_record;
     const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':payload?.limit_reached?'<div class="dot-reward-limit">Мировой рекорд! Лимит наград на 24 часа исчерпан.</div>':'';
+    const dotEarned=Number(payload?.dot_earned||0);
+    const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' 🍪 DOT · в магазин</div>':'';
     const slots=[2,1,3].map(rank=>{
       const row=leaders.find(p=>p.rank===rank);
       if(!row)return '<div class="dot-podium-slot rank-'+rank+' dot-podium-empty"><span class="dot-rank-avatar">·</span><span class="dot-rank-name">Свободно</span><span class="dot-rank-score">—</span><span class="dot-podium-step">'+rank+'</span></div>';
@@ -275,7 +331,7 @@ window.NoraDot = (() => {
     }).join("");
     const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+'<span><b>Ты на '+mine.rank+' месте</b><small>Личный рекорд</small></span><b>🍪 '+mine.cookies+'</b></button>':(!mine&&payload?'<p class="dot-rank-status">У тебя пока нет сохранённого результата.</p>':'');
     const podium=payload?'<div class="dot-podium">'+slots+'</div>': '<div class="dot-rank-loading">'+(message?esc(message):'<span class="dot-rank-spinner"></span> Обновляем топ…')+'</div>';
-    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>🍪 '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
+    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>🍪 '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+dotHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
     results.classList.toggle("has-record",record);
   }
   function finishFlight(){
@@ -421,18 +477,18 @@ window.NoraDot = (() => {
       ctx.lineCap="round";ctx.lineJoin="round";
       for(let i=1;i<=list.length;i++){
         const a=list[i-1],b=list[i]||{y,d:distance},f=i/list.length,ax=X-(distance-a.d),bx=X-(distance-b.d);
-        line(ax,a.y,bx,b.y,rgb(250,27,82,.055*f),5+22*f);
-        line(ax,a.y,bx,b.y,rgb(255,49,100,.15*f),2+10*f);
-        line(ax,a.y,bx,b.y,rgb(255,145,171,.52*f),.7+3.5*f);
+        line(ax,a.y,bx,b.y,rgb(...skin().rgb,.055*f),5+22*f);
+        line(ax,a.y,bx,b.y,rgb(...skin().rgb,.15*f),2+10*f);
+        line(ax,a.y,bx,b.y,rgb(...skin().rgb,.52*f),.7+3.5*f);
       }
     }
     ctx.save();ctx.translate(X,y);
     const angle=bank,s=reduced?0:stretch*.19;
     ctx.rotate(angle);ctx.scale(1+s,1-s*.72);
     if(mode==="crash"){const z=Math.max(.01,1-crashTime/.12);ctx.scale(z,z);ctx.globalAlpha=z;}
-    const halo=gradient(0,0,32,[[0,"#ff52744d"],[.4,"#ff365326"],[1,"#ff365300"]]);
+    const sColor=skin(),halo=gradient(0,0,32,[[0,rgb(...sColor.rgb,.30)],[.4,rgb(...sColor.rgb,.15)],[1,rgb(...sColor.rgb,0)]]);
     ctx.fillStyle=halo;ctx.fillRect(-32,-32,64,64);
-    const g=ctx.createLinearGradient(-8,-9,8,9);g.addColorStop(0,"#ffb4c1");g.addColorStop(.38,"#ff5977");g.addColorStop(1,"#b8143c");
+    const g=ctx.createLinearGradient(-8,-9,8,9);g.addColorStop(0,sColor.light);g.addColorStop(.38,sColor.mid);g.addColorStop(1,sColor.dark);
     disk(0,0,R+1,g);disk(0,0,5.5,"#160e1b");ctx.beginPath();ctx.arc(0,0,8.8,3.5,5.2);ctx.strokeStyle="#ffedf3ba";ctx.lineWidth=1.2;ctx.stroke();disk(-3,-6,1.05,"#fff0f3c5");if(coinPulse>.05){ctx.beginPath();ctx.arc(0,0,12+coinPulse*4,0,Math.PI*2);ctx.strokeStyle=rgb(255,211,141,coinPulse*.75);ctx.lineWidth=1.2;ctx.stroke();}
     ctx.restore();
   }
@@ -502,20 +558,24 @@ window.NoraDot = (() => {
     raf=requestAnimationFrame(tick);
   }
   function screen(){
-    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>ПЕЧЕНЬКИ</span><strong>🍪 <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-field"><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button></div></div></div></div></section>';
+    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>ПЕЧЕНЬКИ</span><strong>🍪 <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-field"><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-shop-open dot-shop-result">Магазин DOT</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button><button type="button" class="dot-shop-open">Магазин DOT</button></div></div><section class="dot-shop-panel" hidden aria-label="Магазин DOT"><div class="dot-shop-head"><button type="button" class="dot-shop-close" aria-label="Закрыть магазин">‹</button><b>МАГАЗИН</b><strong class="dot-shop-balance">…</strong></div><small>Печеньки DOT · только для кастомизации</small><div class="dot-shop-items"></div><p class="dot-shop-status" role="status"></p></section></div></div></section>';
   }
   function mount(next){
     if(root===next&&root)return;unmount();if(!next)return;
     root=next;canvas=root.querySelector("canvas");ctx=canvas.getContext("2d");if(!ctx){root.textContent="Не удалось открыть игровое поле DOT";return;}
     hud=root.querySelector(".dot-hud");score=root.querySelector("[data-dot-score]");progress=root.querySelector("[data-dot-passed]");
     overlay=root.querySelector(".dot-overlay");title=overlay.querySelector("strong");detail=overlay.querySelector("small");button=overlay.querySelector("button");soundButton=root.querySelector(".dot-sound");pauseButton=root.querySelector(".dot-pause");paceNode=root.querySelector("[data-dot-speed]");meterNode=root.querySelector("[data-dot-meter]");stageNode=root.querySelector("[data-dot-phase]");stageBanner=root.querySelector(".dot-stage-banner");stageTitle=stageBanner.querySelector("strong");stageDescription=stageBanner.querySelector("span");results=root.querySelector(".dot-results");resultsBody=root.querySelector(".dot-results-body");restart=root.querySelector(".dot-restart");
+    shopPanel=root.querySelector(".dot-shop-panel");shopBody=root.querySelector(".dot-shop-items");shopBalance=root.querySelector(".dot-shop-balance");shopStatus=root.querySelector(".dot-shop-status");shopState=null;shopOpen=shopBusy=false;skinId="red";
     viewId++;queuedTicket=null;ticketRequest=null;abort=new AbortController();const options={signal:abort.signal};reduced=motion();visualTime=renderAt=0;
     try{muted=localStorage.getItem("nora.dot.muted")==="1";}catch{muted=false;}
     soundButton.setAttribute("aria-pressed",String(muted));soundButton.setAttribute("aria-label",muted?"Включить звук DOT":"Выключить звук DOT");soundButton.classList.toggle("muted",muted);
     soundButton.addEventListener("click",()=>setMute(!muted),options);pauseButton.addEventListener("click",pause,options);
     canvas.addEventListener("pointerdown",e=>{if(e.isPrimary&&e.button===0){e.preventDefault();input();}},options);
-    overlay.addEventListener("click",()=>input(),options);restart.addEventListener("click",()=>input(),options);
+    overlay.addEventListener("click",()=>{if(!shopOpen)input();},options);restart.addEventListener("click",()=>input(),options);
+    root.querySelectorAll(".dot-shop-open").forEach(el=>el.addEventListener("click",openShop,options));
+    root.querySelector(".dot-shop-close").addEventListener("click",closeShop,options);shopBody.addEventListener("click",chooseSkin,options);
     document.addEventListener("keydown",e=>{
+      if(shopOpen){if(e.code==="Escape"){e.preventDefault();closeShop();}return;}
       if(e.code==="Escape"&&mode==="play"&&!document.querySelector("dialog[open]")){e.preventDefault();pause();return;}
       if((e.code==="Space"||e.code==="ArrowUp")&&!e.repeat&&!e.target.closest?.("button,input,textarea,select,[contenteditable]")&&!document.querySelector("dialog[open]")){e.preventDefault();input();}
     },options);
@@ -523,10 +583,10 @@ window.NoraDot = (() => {
     window.addEventListener("blur",pause,options);
     if(window.ResizeObserver){observer=new ResizeObserver(resize);observer.observe(canvas);}
     else window.addEventListener("resize",resize,options);
-    reset();resize();draw(0);prepareIntro();primeTicket();raf=requestAnimationFrame(tick);
+    reset();resize();draw(0);prepareIntro();primeTicket();void refreshShop();raf=requestAnimationFrame(tick);
   }
   function unmount(){
-    closeIntro(false);viewId++;flightId++;clearTimeout(connectTimer);connectTimer=0;initialStartPending=false;queuedTicket=null;ticketRequest=null;cancelAnimationFrame(raf);raf=0;abort?.abort();abort=null;observer?.disconnect();observer=null;
+    closeIntro(false);closeShop();shopPanel=shopBody=shopBalance=shopStatus=null;shopState=null;viewId++;flightId++;clearTimeout(connectTimer);connectTimer=0;initialStartPending=false;queuedTicket=null;ticketRequest=null;cancelAnimationFrame(raf);raf=0;abort?.abort();abort=null;observer?.disconnect();observer=null;
     stopHouse(true);if(audio){const old=audio;audio=null;master=null;noiseBuffer=null;try{void old.close().catch(()=>{});}catch{}}
     root=canvas=ctx=null;last=acc=0;particles=[];rings=[];labels=[];trail=[];
   }

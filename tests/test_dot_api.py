@@ -76,3 +76,38 @@ async def test_dot_world_record_rewards_rolling_limit_and_preserves_existing(tmp
     assert latest["cookies"] == 15
     tx = await db.fetchone("SELECT COUNT(*) n FROM transactions WHERE user_id=101 AND kind='dot_record'")
     assert tx["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_dot_currency_shop_is_separate_persistent_and_idempotent(tmp_path, monkeypatch):
+    db = Database(tmp_path / "dot.sqlite")
+    await db.initialize()
+    await db.ensure_user(101, "dot_test", "DOT Test")
+    await db.ensure_user(102, "leader", "Leader")
+    await db.execute("INSERT INTO mini_dot_records VALUES(?,?,?,?)", (102, 9999, 9999, 99))
+    before = (await db.get_user(101))["cookies"]
+
+    async def fake_replay(seed, ticks, flaps):
+        return {"cookies": 500, "passed": 501, "ticks": ticks}
+
+    monkeypatch.setattr(dot_api, "replay", fake_replay)
+    assert (await dot_api.shop(db, 101))["balance"] == 0
+    for now in (100, 110):
+        ticket = await dot_api.issue(db, 101, now=now-2)
+        body = {"token": ticket["token"], "ticks": 120, "flaps": [0]}
+        result = await dot_api.finish(db, 101, body, now=now)
+        assert result["dot_earned"] == 500 and result["reward"] == 0
+        assert await dot_api.finish(db, 101, body, now=now+1) == result
+    assert (await dot_api.shop(db, 101))["balance"] == 1000
+    with pytest.raises(ValueError):
+        await dot_api.shop(db, 101, "equip", "mint")
+    bought = await dot_api.shop(db, 101, "buy", "mint")
+    assert bought["balance"] == 0 and bought["equipped"] == "mint"
+    assert bought["owned"] == ["red", "mint"]
+    assert await dot_api.shop(db, 101, "buy", "mint") == bought
+    with pytest.raises(ValueError):
+        await dot_api.shop(db, 101, "buy", "ice")
+    assert (await dot_api.shop(db, 101, "equip", "red"))["equipped"] == "red"
+    assert (await dot_api.shop(db, 101, "equip", "mint"))["equipped"] == "mint"
+    assert (await dot_api.shop(db, 102))["owned"] == ["red"]
+    assert (await db.get_user(101))["cookies"] == before
