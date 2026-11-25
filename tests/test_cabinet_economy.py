@@ -151,7 +151,7 @@ async def test_confirmation_rejects_changed_or_unapproved_conditions_without_spe
     elif wrong == "disabled":
         await db.upsert_shop_item("rep_shield", enabled=0)
     elif wrong == "changed":
-        await db.upsert_shop_item("rep_shield", price=20)
+        await db.upsert_shop_item("rep_shield", price=21)
     ok, _ = await db.buy_item(actor, item, price, target_id=target, intent_id=token)
     assert not ok
     assert (await db.get_user(7))["cookies"] == 150
@@ -281,14 +281,12 @@ async def test_purchases_with_no_deliverable_effect_leave_balance_unchanged(db, 
     assert await db.get_wallet_intent(7, token)
 
 
-async def test_immunity_is_delivered_atomically_and_existing_time_is_not_lost(db):
-    old_until = datetime.now(UTC) + timedelta(days=2)
-    await db.set_immunity(7, old_until)
+async def test_retired_immunity_cannot_be_purchased(db):
     token = await db.create_wallet_intent(7, "immunity_24h", 10)
-    assert (await db.buy_item(7, "immunity_24h", 10, intent_id=token))[0]
+    assert not (await db.buy_item(7, "immunity_24h", 10, intent_id=token))[0]
     user = await db.get_user(7)
-    assert datetime.fromisoformat(user["hate_immunity_until"]) == old_until + timedelta(days=1)
-    assert user["cookies"] == 140
+    assert user["hate_immunity_until"] is None
+    assert user["cookies"] == 150
 
 
 async def test_missing_pet_supply_error_has_correct_result_shape_and_does_not_charge(db):

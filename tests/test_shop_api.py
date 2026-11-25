@@ -56,7 +56,7 @@ async def paid(env, token, uid=7, **extra):
 
 
 @pytest.mark.parametrize('sku,column', [('restore_rep', 'reputation'), ('rep_shield', 'hate_shields'),
-                                      ('immunity_24h', 'hate_immunity_until'), ('forgive', 'warnings'),
+                                      ('forgive', 'warnings'),
                                       ('private_profile', 'profile_private'), ('ornate_profile', 'profile_ornate')])
 async def test_shared_shop_effects_and_history_are_delivered_once(env, sku, column):
     await env.db.execute('UPDATE users SET reputation=50,warnings=3 WHERE user_id=7')

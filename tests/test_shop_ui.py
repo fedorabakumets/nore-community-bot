@@ -21,7 +21,7 @@ def test_shop_is_split_into_pet_and_reputation_blocks() -> None:
     assert "rep_shield" in SHOP_CATEGORIES["reputation"]["items"]
     assert "title_owl" not in SHOP_CATEGORIES["profile"]["items"]
     assert set(IMMUNITY_HOURS) <= set(SHOP_CATEGORIES["reputation"]["items"])
-    assert IMMUNITY_HOURS["immunity_24h"] == 24
+    assert "immunity_24h" not in SHOP_CATEGORIES["reputation"]["items"]
 
 
 def test_shop_home_has_red_close_and_green_cookies() -> None:
@@ -38,7 +38,7 @@ def test_shop_prices_apply_gold_discount() -> None:
     from community_bot.shop_catalog import SAMPLE_SHOP_PRICES
 
     prices = shop_prices_for({"reputation": 95}, 0, SAMPLE_SHOP_PRICES)
-    assert prices["immunity_24h"] < 18
+    assert prices["rep_shield"] == 18
     assert prices["forgive"] == 45
 
 

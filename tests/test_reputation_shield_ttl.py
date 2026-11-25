@@ -1,4 +1,4 @@
-"""Regression: a purchased shield absorbs exactly one −реп for at most 24 hours."""
+"""Regression: a purchased shield absorbs exactly one −реп and never expires."""
 from __future__ import annotations
 
 import asyncio
@@ -22,17 +22,17 @@ async def db(tmp_path):
 
 
 async def buy_shield(db, buyer=7, target=None):
-    return await db.buy_item(buyer, "rep_shield", 12, target_id=target)
+    return await db.buy_item(buyer, "rep_shield", 20, target_id=target)
 
 
-async def test_shield_starts_24_hour_clock_on_purchase(db):
-    before = datetime.now(UTC)
+async def test_shield_has_no_expiry_and_costs_twenty(db):
+    before = await db.get_user(7)
+    assert (await db.get_shop_item("rep_shield"))["price"] == 20
+    assert await db.get_shop_item("immunity_24h") is None
     assert await buy_shield(db) == (True, "ok")
-    after = datetime.now(UTC)
-    assert (await db.get_user(7))["hate_shields"] == 1
-    until = datetime.fromisoformat(await db.hate_shield_expiry(7))
-    assert before + timedelta(hours=24) <= until <= after + timedelta(hours=24)
+    assert (await db.get_user(7))["cookies"] == before["cookies"] - 20
     assert await db.active_hate_shields(7) == 1
+    assert await db.hate_shield_expiry(7) is None
 
 
 async def test_single_shield_only_absorbs_one_hit(db):
@@ -43,30 +43,20 @@ async def test_single_shield_only_absorbs_one_hit(db):
     assert await db.hate_shield_expiry(7) is None
 
 
-async def test_unspent_shield_expires_and_cannot_block_late_hit(db):
+async def test_unspent_shield_survives_restart(db):
     await buy_shield(db)
-    await db.execute(
-        "UPDATE reputation_shields SET expires_at=? WHERE user_id=?",
-        ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), 7),
-    )
-    assert await db.active_hate_shields(7) == 0
-    assert (await db.get_user(7))["hate_shields"] == 0
-    assert await db.consume_hate_shield(7) is False
-    assert await db.hate_shield_expiry(7) is None
-
-
-async def test_multiple_shields_have_independent_expiration(db):
-    await buy_shield(db)
-    first = await db.fetchone("SELECT id FROM reputation_shields WHERE user_id=7")
-    await db.execute(
-        "UPDATE reputation_shields SET expires_at=? WHERE id=?",
-        ((datetime.now(UTC) + timedelta(hours=2)).isoformat(), first["id"]),
-    )
-    await buy_shield(db)
-    assert (await db.get_user(7))["hate_shields"] == 2
+    await db.execute("UPDATE users SET updated_at=? WHERE user_id=7",
+                     ((datetime.now(UTC) - timedelta(days=30)).isoformat(),))
+    await db.initialize()
+    assert await db.active_hate_shields(7) == 1
     assert await db.consume_hate_shield(7) is True
-    assert await db.fetchone("SELECT id FROM reputation_shields WHERE id=?", (first["id"],)) is None
-    assert (await db.get_user(7))["hate_shields"] == 1
+
+
+async def test_multiple_shields_each_absorb_one_hit(db):
+    await buy_shield(db)
+    await buy_shield(db)
+    assert await db.active_hate_shields(7) == 2
+    assert await db.consume_hate_shield(7) is True
     assert await db.consume_hate_shield(7) is True
     assert await db.consume_hate_shield(7) is False
 
@@ -78,13 +68,13 @@ async def test_concurrent_negative_hits_can_consume_only_one_shield(db):
     assert await db.active_hate_shields(7) == 0
 
 
-async def test_gift_credits_recipient_with_own_24_hour_shield(db):
+async def test_gift_credits_recipient_with_own_one_use_shield(db):
     before = await db.get_user(7)
     assert await buy_shield(db, target=8) == (True, "ok")
     assert (await db.get_user(7))["hate_shields"] == 0
     assert (await db.get_user(8))["hate_shields"] == 1
-    assert (await db.get_user(7))["cookies"] == before["cookies"] - 12
-    assert await db.hate_shield_expiry(8) is not None
+    assert (await db.get_user(7))["cookies"] == before["cookies"] - 20
+    assert await db.hate_shield_expiry(8) is None
 
 
 async def test_reputation_vote_spends_one_shield_then_deducts_ten(db):
@@ -104,16 +94,15 @@ async def test_reputation_vote_spends_one_shield_then_deducts_ten(db):
     assert "−10" in second[1] or "-10" in second[1]
 
 
-async def test_legacy_shields_get_one_time_ttl_migration(tmp_path):
-    old = Database(tmp_path / "legacy-shields.db")
-    await old.initialize()
-    await old.ensure_user(15, telegram_name="Старый")
-    await old.execute("UPDATE users SET hate_shields=2 WHERE user_id=15")
-    await old.execute("DELETE FROM bot_state WHERE key='reputation_shields_ttl_migration_v1'")
-    await old.initialize()
-    assert await old.active_hate_shields(15) == 2
-    expiry = await old.hate_shield_expiry(15)
-    assert expiry is not None
-    await old.initialize()
-    assert await old.active_hate_shields(15) == 2
-    assert await old.hate_shield_expiry(15) == expiry
+async def test_legacy_shields_and_cloak_reset_once(db):
+    await db.execute("UPDATE users SET hate_shields=2, hate_immunity_until='2099-01-01T00:00:00+00:00' WHERE user_id=7")
+    await db.execute("INSERT INTO reputation_shields(user_id,granted_at,expires_at) VALUES (7,'2026-01-01','2099-01-01')")
+    await db.execute("DELETE FROM bot_state WHERE key='one_use_shield_reset_v2'")
+    await db.initialize()
+    assert await db.active_hate_shields(7) == 0
+    assert (await db.get_user(7))["hate_immunity_until"] is None
+    assert await db.fetchone("SELECT id FROM reputation_shields WHERE user_id=7") is None
+    assert await buy_shield(db) == (True, "ok")
+    await db.initialize()
+    assert await db.active_hate_shields(7) == 1
+    assert not (await db.buy_item(7, "immunity_24h", 18))[0]

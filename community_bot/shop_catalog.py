@@ -13,8 +13,7 @@ ITEM_LABELS = {
     "restore_rep": "Поднять репутацию +10",
     "reset_limits": RESET_LABEL,
     "forgive": "Прости меня…",
-    "rep_shield": "Щит от −реп · 1 удар / 24 часа",
-    "immunity_24h": "Плащ иммунитета · 24 часа",
+    "rep_shield": "Щит от −реп · 1 раз",
     "video_avatar": "Видео-аватар профиля",
     "private_profile": "Приватный профиль",
     "ornate_profile": "Кастомный профиль",
@@ -24,15 +23,13 @@ ITEM_LABELS = {
     "season_pack": "Сезонный набор: щит + обед",
 }
 
-RETIRED_PROFILE_SKUS = frozenset({"custom_status", "title_owl", "title_regular", "title_star"})
+RETIRED_PROFILE_SKUS = frozenset({"custom_status", "title_owl", "title_regular", "title_star", "immunity_24h", "immunity"})
 
 REMOVED_COSMETIC_SKUS = ("pet_hat", "pet_scarf", "pet_glasses")
 
 NO_REPUTATION_DISCOUNT = {"event_pass"}
 
-IMMUNITY_HOURS = {
-    "immunity_24h": 24,
-}
+IMMUNITY_HOURS: dict[str, int] = {}
 
 
 SEED_CATEGORIES = (
@@ -45,7 +42,7 @@ SEED_CATEGORIES = (
     {
         "slug": "reputation",
         "title": "🏅 Репутация",
-        "description": "Плюс к репутации, щит на один −реп в течение 24 часов, плащ на сутки и прощение варнов.",
+        "description": "Плюс к репутации, одноразовый щит и прощение варнов.",
         "sort_order": 20,
     },
     {
@@ -64,7 +61,6 @@ SEED_ITEMS = (
     {"sku": "restore_rep", "category_slug": "reputation", "title": ITEM_LABELS["restore_rep"], "sort_order": 10},
     {"sku": "reset_limits", "category_slug": "reputation", "title": ITEM_LABELS["reset_limits"], "sort_order": 20},
     {"sku": "rep_shield", "category_slug": "reputation", "title": ITEM_LABELS["rep_shield"], "sort_order": 30},
-    {"sku": "immunity_24h", "category_slug": "reputation", "title": ITEM_LABELS["immunity_24h"], "sort_order": 40},
     {"sku": "forgive", "category_slug": "reputation", "title": ITEM_LABELS["forgive"], "sort_order": 50},
     {"sku": "video_avatar", "category_slug": "profile", "title": ITEM_LABELS["video_avatar"], "sort_order": 20},
     {"sku": "private_profile", "category_slug": "profile", "title": ITEM_LABELS["private_profile"], "sort_order": 30},
@@ -91,7 +87,6 @@ GIFTABLE_ITEMS = {
     "reset_limits",
     "forgive",
     "rep_shield",
-    "immunity_24h",
     "pet_meal",
     "pet_drink",
     "season_pack",
@@ -243,8 +238,7 @@ SAMPLE_SHOP_PRICES = {
     "restore_rep": 20,
     "reset_limits": 15,
     "forgive": 50,
-    "rep_shield": 12,
-    "immunity_24h": 18,
+    "rep_shield": 20,
     "video_avatar": 10,
     "private_profile": 15,
     "ornate_profile": 25,

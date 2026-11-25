@@ -7,7 +7,6 @@ from community_bot.shop_catalog import ITEM_LABELS
 
 GIFT_ALIASES = {
     "щит": "rep_shield",
-    "плащ": "immunity_24h",
     "обед": "pet_meal",
     "поилка": "pet_drink",
     "набор": "season_pack",

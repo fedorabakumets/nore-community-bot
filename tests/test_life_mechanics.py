@@ -15,7 +15,7 @@ from community_bot.updates import UPDATES, community_announcement, staff_announc
 
 def test_gift_aliases_and_remainder() -> None:
     assert gift_item_from_args("щит") == "rep_shield"
-    assert gift_item_from_args(["плащ"]) == "immunity_24h"
+    assert gift_item_from_args(["плащ"]) is None
     assert gift_item_from_args("набор") == "season_pack"
     assert remainder_text("подарить щит") == "щит"
     assert parse_trigger("розыгрыш итог") == ("lotterydraw", "")
