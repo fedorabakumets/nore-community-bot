@@ -456,7 +456,31 @@ async def intro_handler(request):
     return web.json_response({"ok": True})
 
 
+async def reset_leaderboard_once(db):
+    """Archive the old DOT leaderboard and reset it exactly once, atomically."""
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        archive = await one(
+            conn, "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='mini_dot_records_before_20261125_reset'",
+        )
+        if archive:
+            await conn.commit()
+            return False
+        await conn.execute(
+            "CREATE TABLE mini_dot_records_before_20261125_reset AS SELECT * FROM mini_dot_records"
+        )
+        await conn.execute("DELETE FROM mini_dot_records")
+        await conn.commit()
+        return True
+
+
+async def reset_leaderboard_at_startup(app):
+    await reset_leaderboard_once(app["db"])
+
+
 def register(app):
+    app.on_startup.append(reset_leaderboard_at_startup)
     app.router.add_get("/api/dot/shop", shop_handler)
     app.router.add_post("/api/dot/shop", shop_handler)
     app.router.add_post("/api/dot/intro", intro_handler)
