@@ -449,7 +449,7 @@ window.NoraDot = (() => {
   function fieldAssets(){
     const tint=theme.map(v=>Math.round(v/4)*4),key=tint.join(",");
     if(fieldTextures&&fieldTint===key)return fieldTextures;
-    if(!fieldTextures)fieldTextures={ambient:texture(256,256),orb:texture(128,128),bands:fieldBands.map(l=>texture((W+l.s)*2,H*2))};
+    if(!fieldTextures)fieldTextures={ambient:texture(256,256),orb:texture(128,128),streak:texture(128,4),bands:fieldBands.map(l=>texture((W+l.s)*2,H*2))};
     fieldTint=key;
     const radial=(sprite,stops)=>{
       const c=sprite.getContext("2d"),r=sprite.width/2;
@@ -460,6 +460,9 @@ window.NoraDot = (() => {
     };
     radial(fieldTextures.ambient,[[0,.19],[.5,.045],[1,0]]);
     radial(fieldTextures.orb,[[0,1],[.42,.38],[1,0]]);
+    const streak=fieldTextures.streak,sc=streak.getContext("2d"),sg=sc.createLinearGradient(0,0,streak.width,0);
+    sc.clearRect(0,0,streak.width,streak.height);
+    sg.addColorStop(0,"#ff769100");sg.addColorStop(1,rgb(...tint,1));sc.fillStyle=sg;sc.fillRect(0,0,streak.width,streak.height);
     fieldBands.forEach((l,i)=>{
       const sprite=fieldTextures.bands[i],c=sprite.getContext("2d");
       c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,sprite.width,sprite.height);c.scale(2,2);
@@ -486,9 +489,8 @@ window.NoraDot = (() => {
       if(v>.06){for(let i=0;i<15;i++){
         const x=((i*91-distance*(.75+i%3*.18))%460+460)%460-60,y=22+(i*89)%456;
         const length=18+v*45;if(x+length<0||x>W)continue;
-        const g=ctx.createLinearGradient(x,y,x+length,y);g.addColorStop(0,"#ff769100");g.addColorStop(1,rgb(...theme,v*.19));
-        line(x,y,x+length,y,g,.8);
-      }}
+        ctx.globalAlpha=v*.19;ctx.drawImage(assets.streak,x,y-.4,length,.8);
+      }ctx.globalAlpha=1;}
     }
   }
   function wall(x,y,w,h,isTop,kind="static",t=0){
@@ -552,6 +554,23 @@ window.NoraDot = (() => {
     ctx.save();ctx.font="600 10px system-ui";ctx.textAlign="center";
     ctx.fillStyle=rgb(...color,.95);ctx.fillText((up?"↑  ":"↓  ")+(softMode(run.passed)?"SOFT GRAVITY":"GRAVITY"),W/2,up?45:H-39);ctx.restore();
   }
+  const playerTextures=new Map();
+  function playerTexture(){
+    const key=skinId;if(playerTextures.has(key))return playerTextures.get(key);
+    const sprite=texture(192,192),c=sprite.getContext("2d"),color=skin();
+    c.scale(3,3);c.translate(32,32);
+    const halo=c.createRadialGradient(0,0,0,0,0,32);halo.addColorStop(0,rgb(...color.rgb,.30));halo.addColorStop(.4,rgb(...color.rgb,.15));halo.addColorStop(1,rgb(...color.rgb,0));c.fillStyle=halo;c.fillRect(-32,-32,64,64);
+    const g=c.createLinearGradient(-8,-9,8,9);g.addColorStop(0,color.light);g.addColorStop(.38,color.mid);g.addColorStop(1,color.dark);
+    const circle=(x,y,r,fill)=>{c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fillStyle=fill;c.fill();};
+    circle(0,0,R+1,g);circle(0,0,5.5,"#160e1b");c.beginPath();c.arc(0,0,8.8,3.5,5.2);c.strokeStyle="#ffedf3ba";c.lineWidth=1.2;c.stroke();circle(-3,-6,1.05,"#fff0f3c5");
+    playerTextures.set(key,sprite);return sprite;
+  }
+  let edgeTexture=null;
+  function fieldEdges(){
+    if(edgeTexture)return edgeTexture;
+    const sprite=texture(2,512),c=sprite.getContext("2d"),g=c.createLinearGradient(0,0,0,sprite.height);
+    g.addColorStop(0,"#08080dbb");g.addColorStop(.075,"#08080d00");g.addColorStop(.925,"#08080d00");g.addColorStop(1,"#08080dbb");c.fillStyle=g;c.fillRect(0,0,sprite.width,sprite.height);edgeTexture=sprite;return sprite;
+  }
   function drawPlayer(y,distance){
     if(mode==="over"||mode==="revive"||(mode==="crash"&&crashTime>.12))return;
     const maxAge=.20+clamp((speedAt(run.time,run.passed)-125)/240,0,1)*.15;
@@ -575,10 +594,7 @@ window.NoraDot = (() => {
     const angle=bank,s=reduced?0:stretch*.19;
     ctx.rotate(angle);ctx.scale(1+s,1-s*.72);
     if(mode==="crash"){const z=Math.max(.01,1-crashTime/.12);ctx.scale(z,z);ctx.globalAlpha=z;}
-    const sColor=skin(),halo=gradient(0,0,32,[[0,rgb(...sColor.rgb,.30)],[.4,rgb(...sColor.rgb,.15)],[1,rgb(...sColor.rgb,0)]]);
-    ctx.fillStyle=halo;ctx.fillRect(-32,-32,64,64);
-    const g=ctx.createLinearGradient(-8,-9,8,9);g.addColorStop(0,sColor.light);g.addColorStop(.38,sColor.mid);g.addColorStop(1,sColor.dark);
-    disk(0,0,R+1,g);disk(0,0,5.5,"#160e1b");ctx.beginPath();ctx.arc(0,0,8.8,3.5,5.2);ctx.strokeStyle="#ffedf3ba";ctx.lineWidth=1.2;ctx.stroke();disk(-3,-6,1.05,"#fff0f3c5");if(coinPulse>.05){ctx.beginPath();ctx.arc(0,0,12+coinPulse*4,0,Math.PI*2);ctx.strokeStyle=rgb(255,211,141,coinPulse*.75);ctx.lineWidth=1.2;ctx.stroke();}
+    ctx.drawImage(playerTexture(),-32,-32,64,64);if(coinPulse>.05){ctx.beginPath();ctx.arc(0,0,12+coinPulse*4,0,Math.PI*2);ctx.strokeStyle=rgb(255,211,141,coinPulse*.75);ctx.lineWidth=1.2;ctx.stroke();}
     ctx.restore();
   }
   function draw(alpha){
@@ -615,9 +631,7 @@ window.NoraDot = (() => {
     for(const r of rings){const f=1-r.life/r.max;ctx.beginPath();ctx.arc(r.x,r.y,12+f*(r.size||43),0,Math.PI*2);ctx.strokeStyle=rgb(...r.color,(1-f)*.65);ctx.lineWidth=1.5;ctx.stroke();}
     for(const l of labels){ctx.font="600 13px system-ui";ctx.fillStyle=rgb(255,218,158,l.life/l.max);ctx.fillText("+1",l.x,l.y);}
     ctx.restore();
-    const edges=ctx.createLinearGradient(0,0,0,H);
-    edges.addColorStop(0,"#08080dbb");edges.addColorStop(.075,"#08080d00");edges.addColorStop(.925,"#08080d00");edges.addColorStop(1,"#08080dbb");
-    ctx.fillStyle=edges;ctx.fillRect(0,0,W,H);
+    ctx.drawImage(fieldEdges(),0,0,W,H);
     line(0,1,W,1,"#ffffff19");line(0,H-1,W,H-1,"#ffffff19");drawGravity();
     if(impact>.01&&!reduced){ctx.fillStyle=rgb(255,35,71,impact*.10);ctx.fillRect(0,0,W,H);}
     if(nearFlash>.01&&!reduced){ctx.strokeStyle=rgb(255,133,163,nearFlash*.30);ctx.lineWidth=2;ctx.strokeRect(1,1,W-2,H-2); }
