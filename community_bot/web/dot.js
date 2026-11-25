@@ -45,7 +45,7 @@ window.NoraDot = (() => {
     shopBody.innerHTML=toggle+Object.entries(SKINS).filter(([id])=>Object.hasOwn(shopState.prices,id)).map(([id,s])=>{
       const owned=shopState.owned.includes(id),active=shopState.equipped===id,crumbPrice=Number(shopState.prices[id]),cookiePrice=Number(shopState.cookie_prices?.[id]??crumbPrice/10),price=cookie?cookiePrice:crumbPrice;
       const label=active?"Выбран":owned?"Выбрать":labelFor(price);
-      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+';'+(id==="heart"?'background:none;box-shadow:none;display:grid;place-items:center;color:#ff8fc8;font-size:26px;text-shadow:0 0 10px #ff8fc877;':'')+'">'+(id==="heart"?'♥':'')+'</span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
+      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
     }).join("");
     const crumbLife=Number(shopState.life_price||1500),cookieLife=Number(shopState.cookie_life_price??150),price=cookie?cookieLife:crumbLife;
     shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
@@ -251,6 +251,17 @@ window.NoraDot = (() => {
     }
     if(particles.length>180)particles.splice(0,particles.length-180);
   }
+  // Cosmetic only: short-lived hearts share the existing particle budget.
+  function flapBurst(x,y,count=7){
+    if(skinId!=="heart"){burst(x,y,count,skin().rgb,48);return;}
+    let active=0;for(const p of particles)if(p.heart)active++;
+    const n=Math.min(reduced?2:count,Math.max(0,36-active));
+    for(let i=0;i<n;i++){
+      const a=Math.random()*Math.PI*2,v=25+Math.random()*55,life=.30+Math.random()*.28;
+      particles.push({x,y,vx:Math.cos(a)*v-16,vy:Math.sin(a)*v-12,life,max:life,size:5+Math.random()*4,color:skin().rgb,angle:(Math.random()-.5)*.6,spin:0,heart:true});
+    }
+    if(particles.length>180)particles.splice(0,particles.length-180);
+  }
   function input(){
     if(introActive||shopOpen||shopBusy||mode==="revive")return;
     if(!root||document.hidden||document.querySelector("dialog[open]")||mode==="crash"||initialStartPending)return;
@@ -270,8 +281,8 @@ window.NoraDot = (() => {
     run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);stretch=1;
     if(gravityMode(run.passed)){
       gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
-      burst(X-7,run.y,12,color,60);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
-    }else{burst(X-7,run.y+4,7,skin().rgb,48);rings.push({x:X,y:run.y,life:.19,max:.19,color:skin().rgb,size:12});sfx("flap");}
+      burst(X-7,run.y,12,color,60);if(skinId==="heart")flapBurst(X,run.y,5);rings.push({x:X,y:run.y,life:.36,max:.36,color,size:65});sfx("flip");
+    }else{flapBurst(X-7,run.y+4);rings.push({x:X,y:run.y,life:.19,max:.19,color:skin().rgb,size:12});sfx("flap");}
     haptic("flap");
   }
   const INTRO_FRAMES=[
@@ -332,7 +343,7 @@ window.NoraDot = (() => {
     if(!root?.isConnected||document.hidden||document.querySelector("dialog[open]")){initialStartPending=false;showOverlay();return;}
     const ticket=queuedTicket;queuedTicket=null;
     reset(ticket);mode="play";showOverlay();canvas.focus?.({preventScroll:true});primeTicket();
-    run.flap();flaps.push(0);stretch=1;burst(X-7,run.y+4,7,skin().rgb,48);sfx("flap");haptic("flap");
+    run.flap();flaps.push(0);stretch=1;flapBurst(X-7,run.y+4);sfx("flap");haptic("flap");
   }
   function avatarHTML(person){
     const id=Number(person.id),name=String(person.name||"Участник"),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
@@ -555,6 +566,16 @@ window.NoraDot = (() => {
     ctx.save();ctx.font="600 10px system-ui";ctx.textAlign="center";
     ctx.fillStyle=rgb(...color,.95);ctx.fillText((up?"↑  ":"↓  ")+(softMode(run.passed)?"SOFT GRAVITY":"GRAVITY"),W/2,up?45:H-39);ctx.restore();
   }
+  let heartParticleSprite=null;
+  function heartParticleTexture(){
+    if(heartParticleSprite)return heartParticleSprite;
+    const sprite=texture(48,48),c=sprite.getContext("2d");
+    c.translate(24,24);c.scale(1.8,1.8);
+    const g=c.createLinearGradient(-7,-9,7,10);g.addColorStop(0,"#ffe2f4");g.addColorStop(.45,"#ff9ace");g.addColorStop(1,"#ed5ba6");
+    c.beginPath();c.moveTo(0,10);c.bezierCurveTo(-3,7,-11,1,-10,-4);c.bezierCurveTo(-9,-11,-3,-12,0,-6);c.bezierCurveTo(3,-12,9,-11,10,-4);c.bezierCurveTo(11,1,3,7,0,10);c.closePath();
+    c.fillStyle=g;c.fill();c.strokeStyle="#ffe9f4";c.lineWidth=.7;c.stroke();
+    heartParticleSprite=sprite;return sprite;
+  }
   const playerTextures=new Map();
   function playerTexture(){
     const key=skinId;if(playerTextures.has(key))return playerTextures.get(key);
@@ -563,11 +584,6 @@ window.NoraDot = (() => {
     const halo=c.createRadialGradient(0,0,0,0,0,32);halo.addColorStop(0,rgb(...color.rgb,.30));halo.addColorStop(.4,rgb(...color.rgb,.15));halo.addColorStop(1,rgb(...color.rgb,0));c.fillStyle=halo;c.fillRect(-32,-32,64,64);
     const g=c.createLinearGradient(-8,-9,8,9);g.addColorStop(0,color.light);g.addColorStop(.38,color.mid);g.addColorStop(1,color.dark);
     const circle=(x,y,r,fill)=>{c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fillStyle=fill;c.fill();};
-    if(key==="heart"){
-      c.beginPath();c.moveTo(0,10);c.bezierCurveTo(-3,7,-11,1,-10,-4);c.bezierCurveTo(-9,-11,-3,-12,0,-6);c.bezierCurveTo(3,-12,9,-11,10,-4);c.bezierCurveTo(11,1,3,7,0,10);c.closePath();
-      c.globalAlpha=.68;c.fillStyle=g;c.fill();c.globalAlpha=.85;c.strokeStyle="#ffe2f3";c.lineWidth=.7;c.stroke();c.globalAlpha=1;
-      playerTextures.set(key,sprite);return sprite;
-    }
     circle(0,0,R+1,g);circle(0,0,5.5,"#160e1b");c.beginPath();c.arc(0,0,8.8,3.5,5.2);c.strokeStyle="#ffedf3ba";c.lineWidth=1.2;c.stroke();circle(-3,-6,1.05,"#fff0f3c5");
     playerTextures.set(key,sprite);return sprite;
   }
@@ -582,12 +598,7 @@ window.NoraDot = (() => {
     const maxAge=.20+clamp((speedAt(run.time,run.passed)-125)/240,0,1)*.15;
     let start=0;while(start<trail.length&&run.time-trail[start].time>maxAge)start++;
     const count=trail.length-start;
-    if(count>1&&!reduced&&mode!=="crash"&&skinId==="heart"){
-      const sprite=playerTexture(),step=Math.max(1,Math.ceil(count/7));
-      ctx.save();
-      for(let i=0;i<count;i+=step){const p=trail[start+i],f=(i+1)/count,size=20+21*f;ctx.globalAlpha=.44*f;ctx.drawImage(sprite,X-distance+p.d-size/2,p.y-size/2,size,size);}
-      ctx.restore();
-    }else if(count>1&&!reduced&&mode!=="crash"){
+    if(count>1&&!reduced&&mode!=="crash"){
       ctx.lineCap="round";ctx.lineJoin="round";
       const color=skin().rgb,groups=Math.min(8,count);
       // Batch consecutive segments with similar width/opacity rather than
@@ -638,7 +649,7 @@ window.NoraDot = (() => {
       }
     }
     drawPlayer(y,distance);
-    for(const p of particles){const f=p.life/p.max,s=p.size*(.45+.55*f),c=rgb(...p.color,f);if(p.shard&&!reduced){ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle=c;ctx.fillRect(-s/2,-s/2,s*1.9,s*.65);ctx.restore();}else disk(p.x,p.y,s,c);}
+    for(const p of particles){const f=p.life/p.max,s=p.size*(.45+.55*f);if(p.heart){ctx.globalAlpha=Math.min(1,f*1.45)*.85;ctx.drawImage(heartParticleTexture(),p.x-s,p.y-s,s*2,s*2);ctx.globalAlpha=1;continue;}const c=rgb(...p.color,f);if(p.shard&&!reduced){ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle=c;ctx.fillRect(-s/2,-s/2,s*1.9,s*.65);ctx.restore();}else disk(p.x,p.y,s,c);}
     for(const r of rings){const f=1-r.life/r.max;ctx.beginPath();ctx.arc(r.x,r.y,12+f*(r.size||43),0,Math.PI*2);ctx.strokeStyle=rgb(...r.color,(1-f)*.65);ctx.lineWidth=1.5;ctx.stroke();}
     for(const l of labels){ctx.font="600 13px system-ui";ctx.fillStyle=rgb(255,218,158,l.life/l.max);ctx.fillText("+1",l.x,l.y);}
     ctx.restore();
