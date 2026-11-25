@@ -549,7 +549,7 @@ function botReplyRoute() {
   if (/^nora_(?:d_[A-Za-z0-9_-]{22}|i_[a-f0-9]{16})$/.test(param)) return {view: 'durak'};
   const event = /^nora_event_([A-Za-z0-9_-]{1,64})$/.exec(param);
   if (event) return {view: 'events', eventId: event[1]};
-  const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community|durak|barricade)$/.exec(param);
+  const screen = /^nora_to_(commands|cookies|shop|pet|notices|games|mafia|rocket|events|community|durak|barricade|dot)$/.exec(param);
   if (screen?.[1] === 'cookies') return {view: 'shop', category: '__cookies'};
   if (screen) return {view: screen[1]};
   const shop = /^nora_(cat|item)_([a-zA-Z0-9_-]{1,64})$/.exec(param);
@@ -659,7 +659,7 @@ async function openApp(result) {
     if (view === 'barricade') barricadeEntry = {quick: linked.quickRoom};
   }
   if (linked?.code && !blockedLink) barricadeEntry = {code: linked.code};
-  if (linked?.invite || linked?.code || linked?.quickRoom) window.NoraIntro?.finish(true);
+  if (linked?.invite || linked?.code || linked?.quickRoom || linked?.view === 'dot') window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
   else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','community','events'].includes(view)) tab = view;
