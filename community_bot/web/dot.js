@@ -47,7 +47,7 @@ window.NoraDot = (() => {
   const HOUSE_BEAT=60/128,HOUSE_STEP=HOUSE_BEAT/4;
   const HOUSE_ROOTS=[45,41,48,43]; // A, F, C, G
   const HOUSE_CHORDS=[[57,60,64],[53,57,60],[55,60,64],[55,59,62]];
-  let house=null,houseIndex=0,housePhase=0;
+  let house=null,houseIndex=0,housePhase=0,houseBreath=0;
   const hz=n=>440*Math.pow(2,(n-69)/12);
   function houseVoice(t,n,duration,volume,type="sine",cutoff=0,endHz=0){
     const h=house;if(!h)return;
@@ -69,8 +69,8 @@ window.NoraDot = (() => {
     o.start(t);o.stop(t+duration+.009);
   }
   function stopHouse(resetClock=false){
-    const h=house;house=null;housePhase=0;
-    if(resetClock)houseIndex=0;else if(h)houseIndex=Math.ceil(h.playedIndex/4)*4;
+    const h=house;house=null;
+    if(resetClock){houseIndex=0;housePhase=0;houseBreath=0;}else if(h)houseIndex=Math.ceil(h.playedIndex/4)*4;
     if(!h)return;
     h.stopped=true;const now=h.context.currentTime;
     try{h.bus.gain.cancelScheduledValues(now);h.bus.gain.setTargetAtTime(.0001,now,.008);}catch{}
@@ -80,7 +80,7 @@ window.NoraDot = (() => {
   function startHouse(){
     if(house||muted||mode!=="play"||!audio||audio.state!=="running"||!master)return;
     const bus=audio.createGain(),now=audio.currentTime;bus.gain.setValueAtTime(.0001,now);bus.gain.setTargetAtTime(.78,now,.04);bus.connect(master);
-    house={context:audio,bus,sources:new Set(),noise:null,next:now+.045,index:houseIndex,playedIndex:houseIndex,stage:run.stage,lastBeat:now+.045,beatQueue:[],stopped:false};
+    house={context:audio,bus,sources:new Set(),noise:null,next:now+.045,index:houseIndex,playedIndex:houseIndex,stage:run.stage,lastBeat:now+.045,lastBeatIndex:houseIndex,beatQueue:[],stopped:false};
   }
   function houseTransition(t,stage){
     const bar=Math.floor(house.index/16)%4,notes=HOUSE_CHORDS[bar];
@@ -126,8 +126,8 @@ window.NoraDot = (() => {
       // Never burst overdue notes after a stalled frame.
       if(h.next<now-.03){const skip=Math.ceil((now+.025-h.next)/HOUSE_STEP);h.next+=skip*HOUSE_STEP;h.index+=skip;}
       while(h.next<now+.085){houseNote(h.next,h.index);h.index++;h.next+=HOUSE_STEP;}
-      while(h.beatQueue.length&&h.beatQueue[0].t<=now){const beat=h.beatQueue.shift();h.lastBeat=beat.t;h.playedIndex=beat.i+1;}
-      housePhase=now>=h.lastBeat?Math.max(0,1-(now-h.lastBeat)/.19):0;
+      while(h.beatQueue.length&&h.beatQueue[0].t<=now){const beat=h.beatQueue.shift();h.lastBeat=beat.t;h.lastBeatIndex=beat.i;h.playedIndex=beat.i+1;}
+      housePhase=h.lastBeatIndex/4+Math.max(0,now-h.lastBeat)/HOUSE_BEAT;
     }catch{stopHouse();}
   }
   function sfx(kind){
@@ -321,6 +321,7 @@ window.NoraDot = (() => {
     for(const x of nearIds)if(x<run.distance-140)nearIds.delete(x);
   }
   function visual(dt){
+    houseBreath=lerp(houseBreath,!reduced&&house&&mode==="play"&&!muted?1:0,1-Math.exp(-dt*3.2));
     visualTime+=dt;if(stageTimer>0){stageTimer=Math.max(0,stageTimer-dt);if(stageTimer===0)stageBanner.hidden=true;}theme=theme.map((v,i)=>lerp(v,STAGES[run.stage].color[i],1-Math.exp(-dt*2.3)));stretch*=Math.exp(-dt*10);coinPulse*=Math.exp(-dt*5);impact*=Math.exp(-dt*8);shake*=Math.exp(-dt*10);
     gravityPulse*=Math.exp(-dt*6);nearFlash*=Math.exp(-dt*6);const target=mode==="ready"?1:1+Math.min(.045,(speedAt(run.time,run.passed)-125)*.00019);
     zoom=lerp(zoom,reduced?1:target,1-Math.exp(-dt*2.6));bank=lerp(bank,reduced?0:clamp(run.vy/500,-.55,.55),1-Math.exp(-dt*13));cameraY=lerp(cameraY,reduced?0:clamp((run.y-H/2)*.055,-10,10),1-Math.exp(-dt*4));
@@ -330,10 +331,18 @@ window.NoraDot = (() => {
     for(const l of labels){l.y-=38*dt;l.life-=dt;}
     particles=particles.filter(p=>p.life>0);rings=rings.filter(r=>r.life>0);labels=labels.filter(l=>l.life>0);
   }
+  // Slow, offset breathing across the whole orb field. One cycle spans 4 or 8 beats;
+  // a continuous cosine has no attack flash or abrupt decay at the beat boundary.
+  function orbBreath(i,beats,mix){
+    const cycle=i%3===1?8:4;
+    const wave=.5-.5*Math.cos(2*Math.PI*(beats/cycle+i*.173));
+    const amount=clamp(mix,0,1)*(.72+(i%3)*.14);
+    return {light:.024*wave*amount,scale:1+.115*wave*amount};
+  }
   function background(distance){
     ctx.fillStyle="#08090e";ctx.fillRect(0,0,W,H);
     const v=clamp((speedAt(run.time,run.passed)-125)/240,0,1),cy=H*.48-cameraY*2;
-    ctx.fillStyle=gradient(W*.36,cy,H*.61*zoom,[[0,rgb(...theme,.19+(reduced?0:housePhase*.04))],[.5,rgb(...theme,.045)],[1,"#08090e"]]);ctx.fillRect(0,0,W,H);
+    ctx.fillStyle=gradient(W*.36,cy,H*.61*zoom,[[0,rgb(...theme,.19)],[.5,rgb(...theme,.045)],[1,"#08090e"]]);ctx.fillRect(0,0,W,H);
     ctx.save();ctx.globalAlpha=.75;
     const bands=[{s:46,p:.10,a:.055,r:.65},{s:91,p:.26,a:.15,r:1.05}];
     for(const l of bands){
@@ -346,7 +355,9 @@ window.NoraDot = (() => {
     if(!reduced){
       for(let i=0;i<6;i++){
         const y=35+i*85-cameraY*(.4+i*.1),x=((i*193-distance*.09)%510+510)%510-150;
-        ctx.fillStyle=gradient(x,y,65+i*5,[[0,rgb(...theme,.045+v*.035)],[1,"#ad508900"]]);ctx.fillRect(x-90,y-90,180,180);
+        const breath=orbBreath(i,housePhase,houseBreath),radius=(65+i*5)*breath.scale;
+        ctx.fillStyle=gradient(x,y,radius,[[0,rgb(...theme,.045+v*.035+breath.light)],[.42,rgb(...theme,(.045+v*.035+breath.light)*.38)],[1,rgb(...theme,0)]]);
+        ctx.fillRect(x-radius,y-radius,2*radius,2*radius);
       }
       if(v>.06){for(let i=0;i<15;i++){
         const x=((i*91-distance*(.75+i%3*.18))%460+460)%460-60,y=22+(i*89)%456;
