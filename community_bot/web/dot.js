@@ -1,6 +1,6 @@
 "use strict";
 window.NoraDot = (() => {
-  const {W,H,X,R,PIPE,STEP,clamp,lerp,STAGES,stageAt,gravityMode,softMode,speedAt,typeNames,gateShape,segments,witnessFor,createRun,seededRandom}=window.NoraDotCore;
+  const {W,H,X,R,PIPE,STEP,clamp,lerp,STAGES,stageAt,gravityMode,softMode,speedAt,typeNames,gateShape,crumbPosition,segments,witnessFor,createRun,seededRandom}=window.NoraDotCore;
 
   let root,canvas,ctx,hud,score,progress,overlay,title,detail,button,soundButton,abort,observer;
   let raf=0,last=0,acc=0,run,mode="ready",muted=false,audio,master;
@@ -15,10 +15,13 @@ window.NoraDot = (() => {
     violet:{name:"Аметист",light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]}
   };
   let shopPanel,shopBody,shopBalance,shopStatus,shopState=null,shopBusy=false,shopOpen=false,skinId="red",shopRevision=0;
-  let reviveTick=null,reviveBusy=false,lifePurchaseId=null;
+  let reviveTick=null,reviveBusy=false,lifePurchaseId=null,shopCurrency="crumbs";
+  const CRUMB="◆";
   const skin=()=>SKINS[skinId]||SKINS.red;
   function applyShop(state){
-    shopState=state;skinId=Object.hasOwn(SKINS,state.equipped)?state.equipped:"red";
+    shopState=state;
+    if(typeof data!=="undefined"&&data?.user&&Number.isFinite(state.cookie_balance))data.user.cookies=state.cookie_balance;
+    skinId=Object.hasOwn(SKINS,state.equipped)?state.equipped:"red";
     const s=skin();
     root.style.setProperty("--dot-skin-light",s.light);
     root.style.setProperty("--dot-skin-mid",s.mid);
@@ -28,12 +31,18 @@ window.NoraDot = (() => {
   }
   function renderShop(){
     if(!shopBody||!shopState)return;
-    shopBalance.textContent=Number(shopState.balance).toLocaleString("ru-RU")+" 🍪";
-    shopBody.innerHTML=Object.entries(SKINS).map(([id,s])=>{
-      const owned=shopState.owned.includes(id),active=shopState.equipped===id,price=shopState.prices[id];
-      const label=active?"Выбран":owned?"Выбрать":price+" 🍪";
-      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&shopState.balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
-    }).join("")+'<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||shopState.balance<(shopState.life_price||1500)?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+Number(shopState.life_price||1500)+' 🍪 · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
+    const cookie=shopCurrency==="cookies",crumbs=Number(shopState.balance||0),cookies=Number(shopState.cookie_balance||0);
+    shopBalance.textContent=crumbs.toLocaleString("ru-RU")+" "+CRUMB+" · "+cookies.toLocaleString("ru-RU")+" 🍪";
+    const balance=cookie?cookies:crumbs;
+    const labelFor=(price,other)=>cookie?price+" 🍪 · "+other+" "+CRUMB:price+" "+CRUMB+" · "+other+" 🍪";
+    const toggle='<div style="display:flex;gap:8px;grid-column:1/-1;margin-bottom:4px"><button type="button" class="dot-skin-item" data-dot-currency="crumbs" aria-pressed="'+(!cookie)+'" style="flex:1;justify-content:center;opacity:'+(!cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>'+CRUMB+' Крошки</button><button type="button" class="dot-skin-item" data-dot-currency="cookies" aria-pressed="'+cookie+'" style="flex:1;justify-content:center;opacity:'+(cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>🍪 Печеньки</button></div>';
+    shopBody.innerHTML=toggle+Object.entries(SKINS).map(([id,s])=>{
+      const owned=shopState.owned.includes(id),active=shopState.equipped===id,crumbPrice=Number(shopState.prices[id]),cookiePrice=Number(shopState.cookie_prices?.[id]??crumbPrice/10),price=cookie?cookiePrice:crumbPrice;
+      const label=active?"Выбран":owned?"Выбрать":labelFor(price,cookie?crumbPrice:cookiePrice);
+      return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
+    }).join("");
+    const crumbLife=Number(shopState.life_price||1500),cookieLife=Number(shopState.cookie_life_price??150),price=cookie?cookieLife:crumbLife;
+    shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price,cookie?crumbLife:cookieLife)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
   }
   async function refreshShop(){
     const view=viewId,rev=++shopRevision;
@@ -52,13 +61,15 @@ window.NoraDot = (() => {
     shopOpen=false;if(shopPanel)shopPanel.hidden=true;
   }
   async function chooseSkin(e){
+    const currency=e.target.closest("[data-dot-currency]")?.dataset.dotCurrency;
+    if(currency&&!shopBusy){shopCurrency=currency;renderShop();return;}
     const id=e.target.closest("[data-dot-skin]")?.dataset.dotSkin;
     const life=!!e.target.closest("[data-dot-life]");
     if((!id&&!life)||shopBusy||!shopState||!shopOpen)return;
     const view=viewId;++shopRevision;shopBusy=true;shopStatus.textContent="";renderShop();
     try{
       if(life&&!lifePurchaseId)lifePurchaseId=globalThis.crypto?.randomUUID?.()||Date.now()+"-"+Math.random().toString(36).slice(2)+"-"+Math.random().toString(36).slice(2);
-      const state=await api("dot/shop",life?{action:"buy_life",purchase_id:lifePurchaseId}:{action:shopState.owned.includes(id)?"equip":"buy",skin:id});
+      const state=await api("dot/shop",life?{action:"buy_life",purchase_id:lifePurchaseId,currency:shopCurrency}:{action:shopState.owned.includes(id)?"equip":"buy",skin:id,currency:shopCurrency});
       if(life)lifePurchaseId=null;
       if(view===viewId&&root){applyShop(state);haptic("flap");}
     }catch(e){if(view===viewId&&root){shopStatus.textContent=e?.message||"Не удалось выполнить покупку";}}
@@ -204,7 +215,7 @@ window.NoraDot = (() => {
   }
   function reset(ticket=null){
     stopHouse(true);flightId++;flightTicket=ticket;flaps=[];reviveTick=null;reviveBusy=false;resultRequest=null;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;
-    run=createRun(ticket?seededRandom(ticket.seed):Math.random);particles=[];trail=[];rings=[];labels=[];crashTime=impact=stretch=coinPulse=shake=trailClock=0;
+    run=createRun(ticket?seededRandom(ticket.seed):Math.random,ticket?(ticket.rules||1):2);particles=[];trail=[];rings=[];labels=[];crashTime=impact=stretch=coinPulse=shake=trailClock=0;
     zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
   function updateStage(announce){
@@ -214,13 +225,13 @@ window.NoraDot = (() => {
   function updateHud(){
     const value=String(run.cookies);if(score.textContent!==value){score.textContent=value;score.classList.remove("pop");score.classList.add("pop");if(score.animate&&!reduced)score.animate([{transform:"scale(.82)",color:"#ffe0ac"},{transform:"scale(1.22)",color:"#ffe0ac",offset:.55},{transform:"scale(1)"}],{duration:330,easing:"cubic-bezier(.16,1,.3,1)"});}
     progress.textContent=String(run.passed);
-    hud.setAttribute("aria-label","Печеньки: "+run.cookies+", пройдено: "+run.passed);
+    hud.setAttribute("aria-label","Крошки: "+run.cookies+", пройдено: "+run.passed);
   }
   function showOverlay(){
     overlay.hidden=mode==="play"||mode==="crash"||mode==="over";results.hidden=mode!=="over";
     overlay.dataset.state=mode;root.dataset.dotState=mode;if(pauseButton){pauseButton.disabled=mode!=="play";pauseButton.setAttribute("aria-disabled",String(mode!=="play"));}
     title.textContent=mode==="over"?"Полёт завершён":mode==="paused"?"Пауза":"DOT";
-    detail.textContent=mode==="over"?"🍪 "+run.cookies+"  ·  "+run.passed+" пройдено":mode==="paused"?"Продолжи, когда будешь готов":"Касайся экрана, чтобы взлететь";
+    detail.textContent=mode==="over"?"◆ "+run.cookies+"  ·  "+run.passed+" пройдено":mode==="paused"?"Продолжи, когда будешь готов":"Касайся экрана, чтобы взлететь";
     button.textContent=mode==="over"?"Ещё раз":mode==="paused"?"Продолжить":"Играть";
     overlay.querySelector(".dot-shop-open").hidden=mode!=="ready";
     overlay.querySelector(".dot-start").hidden=mode==="revive";
@@ -261,7 +272,7 @@ window.NoraDot = (() => {
     ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
     ["ЗАБЕРИ","ВСЕ","ПЕЧЕНЬКИ"],
     ["НЕ БОЛЕЕ","ДВУХ НАГРАД","ЗА 24 ЧАСА"],
-    ["СОБИРАЙ","ПЕЧЕНЬКИ DOT","ОТКРЫВАЙ ЦВЕТА"]
+    ["СОБИРАЙ","КРОШКИ DOT","ОТКРЫВАЙ ЦВЕТА"]
   ];
   function introStorageKey(){
     const id=typeof data!=="undefined"?data?.user?.user_id:null;
@@ -294,7 +305,7 @@ window.NoraDot = (() => {
     introKey=introStorageKey();
     try{if(localStorage.getItem(introKey)==="1")return;}catch{}
     intro=document.createElement("div");intro.className="dot-intro-screen";intro.setAttribute("role","dialog");intro.setAttribute("aria-modal","true");
-    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа. Собирай печеньки DOT и открывай цвета.");
+    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа. Собирай крошки DOT и открывай цвета.");
     intro.innerHTML='<div class="dot-intro-logo">D<span>O</span>T</div><div class="dot-intro-words" aria-hidden="true"></div><div class="dot-intro-line" aria-hidden="true"></div>';
     document.body.append(intro);root.inert=true;introActive=true;introStarted=false;
     introTimer=setTimeout(launchIntro,450);
@@ -302,7 +313,7 @@ window.NoraDot = (() => {
   function primeTicket(){
     if(queuedTicket||ticketRequest||!root)return;
     const view=viewId;
-    const promise=api("dot/start",{}).then(ticket=>{
+    const promise=api("dot/start",{rules:2}).then(ticket=>{
       if(view===viewId&&root&&ticket&&Number.isInteger(ticket.seed)&&typeof ticket.token==="string"){
         queuedTicket=ticket;
         if(introActive&&ticket.intro_seen){try{localStorage.setItem(introKey,"1");}catch{}closeIntro(false);}
@@ -331,15 +342,15 @@ window.NoraDot = (() => {
     const reward=Number(payload?.reward||0),world=!!payload?.world_record;
     const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':payload?.limit_reached?'<div class="dot-reward-limit">Мировой рекорд! Лимит наград на 24 часа исчерпан.</div>':'';
     const dotEarned=Number(payload?.dot_earned||0);
-    const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' 🍪 DOT · в магазин</div>':'';
+    const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' ◆ КРОШКИ · в магазин</div>':'';
     const slots=[2,1,3].map(rank=>{
       const row=leaders.find(p=>p.rank===rank);
       if(!row)return '<div class="dot-podium-slot rank-'+rank+' dot-podium-empty"><span class="dot-rank-avatar">·</span><span class="dot-rank-name">Свободно</span><span class="dot-rank-score">—</span><span class="dot-podium-step">'+rank+'</span></div>';
-      return '<button type="button" class="dot-podium-slot rank-'+rank+(row.self?' is-self':'')+'"'+profileAttrs(row)+' aria-label="'+esc(row.name)+', место '+rank+'">'+(rank===1?'<span class="dot-crown" aria-hidden="true">♛</span>':'')+avatarHTML(row)+'<span class="dot-rank-name">'+esc(row.name)+'</span>'+(row.prefix?'<span class="dot-rank-prefix">'+esc(row.prefix.emoji||"")+' '+esc(row.prefix.text||"")+'</span>':'')+'<span class="dot-rank-score">🍪 '+row.cookies+'</span><span class="dot-podium-step">'+rank+'</span>'+(row.self?'<span class="dot-rank-you">ТЫ</span>':'')+'</button>';
+      return '<button type="button" class="dot-podium-slot rank-'+rank+(row.self?' is-self':'')+'"'+profileAttrs(row)+' aria-label="'+esc(row.name)+', место '+rank+'">'+(rank===1?'<span class="dot-crown" aria-hidden="true">♛</span>':'')+avatarHTML(row)+'<span class="dot-rank-name">'+esc(row.name)+'</span>'+(row.prefix?'<span class="dot-rank-prefix">'+esc(row.prefix.emoji||"")+' '+esc(row.prefix.text||"")+'</span>':'')+'<span class="dot-rank-score">◆ '+row.cookies+'</span><span class="dot-podium-step">'+rank+'</span>'+(row.self?'<span class="dot-rank-you">ТЫ</span>':'')+'</button>';
     }).join("");
-    const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+'<span><b>Ты на '+mine.rank+' месте</b><small>Личный рекорд</small></span><b>🍪 '+mine.cookies+'</b></button>':(!mine&&payload?'<p class="dot-rank-status">У тебя пока нет сохранённого результата.</p>':'');
+    const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+'<span><b>Ты на '+mine.rank+' месте</b><small>Личный рекорд</small></span><b>◆ '+mine.cookies+'</b></button>':(!mine&&payload?'<p class="dot-rank-status">У тебя пока нет сохранённого результата.</p>':'');
     const podium=payload?'<div class="dot-podium">'+slots+'</div>': '<div class="dot-rank-loading">'+(message?esc(message):'<span class="dot-rank-spinner"></span> Обновляем топ…')+'</div>';
-    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>🍪 '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+dotHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
+    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>◆ '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+dotHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
     results.classList.toggle("has-record",record);
   }
   function endFlight(){
@@ -466,14 +477,17 @@ window.NoraDot = (() => {
     line(x+8,cap+(isTop?-5:5),x+w-8,cap+(isTop?-5:5),"#ffd3e333",.7);
     ctx.restore();
   }
-  function drawCookie(x,y){
+  function drawCrumb(x,y,kind){
     const bob=reduced?1:1+Math.sin(visualTime*4+x*.025)*.045;
-    ctx.save();ctx.translate(x,y);ctx.scale(bob,bob);ctx.rotate(reduced?0:Math.sin(visualTime*2+x*.01)*.10);
-    ctx.fillStyle=gradient(0,0,29,[[0,"#ffc27338"],[1,"#ffc27300"]]);ctx.fillRect(-30,-30,60,60);
-    disk(0,1.6,11.8,"#70432a");disk(0,0,11.5,"#b57740");disk(0,-1,10.6,"#e2af70");
-    const g=ctx.createLinearGradient(-7,-8,8,8);g.addColorStop(0,"#ffe0a2");g.addColorStop(1,"#c98242");disk(0,-1,9.4,g);
-    for(const [dx,dy,r] of [[-4,-5,1.8],[4,-4,1.6],[-1,1,1.7],[-5,4,1.5],[5,5,1.8]]){disk(dx,dy+.5,r+.3,"#8d582d");disk(dx,dy,r,"#633721");}
-    ctx.beginPath();ctx.arc(0,-1,9.2,3.5,5.1);ctx.strokeStyle="#fff0c68a";ctx.lineWidth=.8;ctx.stroke();
+    ctx.save();ctx.translate(x,y);ctx.scale(bob,bob);ctx.rotate(kind*.62+(reduced?0:Math.sin(visualTime*2+x*.01)*.10));
+    ctx.fillStyle=gradient(0,0,26,[[0,"#ffc27336"],[1,"#ffc27300"]]);ctx.fillRect(-27,-27,54,54);
+    const shapes=[[[-9,-4],[-3,-9],[6,-7],[10,1],[4,8],[-6,6]],[[-8,-7],[4,-9],[9,-2],[5,8],[-3,9],[-10,1]],[[-8,-2],[-4,-8],[5,-5],[10,5],[1,9],[-7,5]],[[-10,-1],[-3,-8],[3,-5],[9,-7],[8,4],[1,8],[-7,5]]];
+    const points=shapes[kind&3];
+    ctx.beginPath();points.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));ctx.closePath();
+    const g=ctx.createLinearGradient(-8,-8,8,8);g.addColorStop(0,"#ffe1a3");g.addColorStop(.55,"#d7a05f");g.addColorStop(1,"#9e6235");ctx.fillStyle=g;ctx.fill();
+    ctx.strokeStyle="#f7cf8870";ctx.lineWidth=.8;ctx.stroke();
+    disk(-3,-2,1.4,"#774725");disk(3,2,1.2,"#8d582d");
+    disk(12,5,1.6,"#c68c4e");disk(-11,8,1.1,"#f3c67c");
     ctx.restore();
   }
   function drawGravity(){
@@ -540,7 +554,7 @@ window.NoraDot = (() => {
         wall(px,-20,p.width,top+20,true,g.type,t);wall(px,bottom,p.width,H-bottom+20,false,g.type,t);
       }
       const shape=gateShape(g,t);
-      if(!g.collected)drawCookie(x+g.width/2,shape.center);
+      if(!g.collected){const crumb=crumbPosition(g,t,run.rules);drawCrumb(x+g.width/2,crumb.y,crumb.kind);}
       if(g.type!=="static"){
         const color=STAGES[g.stage].color;
         ctx.save();ctx.font="600 8px system-ui";ctx.textAlign="center";ctx.fillStyle=rgb(...color,.9);ctx.fillText(typeNames[g.type],x+g.width/2,shape.center-shape.gap/2-12);
@@ -586,7 +600,7 @@ window.NoraDot = (() => {
     raf=requestAnimationFrame(tick);
   }
   function screen(){
-    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>ПЕЧЕНЬКИ</span><strong>🍪 <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-field"><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-shop-open dot-shop-result">Магазин DOT</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button><button type="button" class="dot-shop-open">Магазин DOT</button><div class="dot-revive-actions" hidden><button type="button" class="dot-start" data-dot-revive>♥ Использовать жизнь</button><button type="button" class="dot-revive-decline" data-dot-decline>Завершить полёт</button></div></div></div><section class="dot-shop-panel" hidden aria-label="Магазин DOT"><div class="dot-shop-head"><button type="button" class="dot-shop-close" aria-label="Закрыть магазин">‹</button><b>МАГАЗИН</b><strong class="dot-shop-balance">…</strong></div><small>Печеньки DOT · цвета и вторая жизнь</small><div class="dot-shop-items"></div><p class="dot-shop-status" role="status"></p></section></div></div></section>';
+    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>КРОШКИ</span><strong>◆ <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-field"><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-shop-open dot-shop-result">Магазин DOT</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button><button type="button" class="dot-shop-open">Магазин DOT</button><div class="dot-revive-actions" hidden><button type="button" class="dot-start" data-dot-revive>♥ Использовать жизнь</button><button type="button" class="dot-revive-decline" data-dot-decline>Завершить полёт</button></div></div></div><section class="dot-shop-panel" hidden aria-label="Магазин DOT"><div class="dot-shop-head"><button type="button" class="dot-shop-close" aria-label="Закрыть магазин">‹</button><b>МАГАЗИН</b><strong class="dot-shop-balance">…</strong></div><small>Крошки DOT или печеньки Норы</small><div class="dot-shop-items"></div><p class="dot-shop-status" role="status"></p></section></div></div></section>';
   }
   function mount(next){
     if(root===next&&root)return;unmount();if(!next)return;

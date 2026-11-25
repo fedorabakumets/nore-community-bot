@@ -99,8 +99,20 @@ globalThis.NoraDotCore=(()=>{
   function seededRandom(seed){
     let n=seed>>>0;return ()=>{n=(Math.imul(n,1664525)+1013904223)>>>0;return n/4294967296;};
   }
-  function createRun(random=Math.random){
-    const r={y:H*.48,py:H*.48,vy:0,time:0,previousTime:0,distance:0,previousDistance:0,cookies:0,passed:0,gates:[],dead:false,stage:0,ticks:0,generated:0,verified:0,fallbacks:0};
+  // Stable independent hash: variation never consumes the gate RNG or changes physics.
+  function crumbHash(g){
+    let n=(Math.imul(g.index,0x9e3779b1)^Math.floor(g.phase*1000000)^Math.floor(g.center*4096))>>>0;
+    n=Math.imul(n^(n>>>16),0x85ebca6b)>>>0;return (n^(n>>>13))>>>0;
+  }
+  function crumbPosition(g,t,rules=2){
+    const shape=gateShape(g,t),hash=crumbHash(g);
+    if(rules!==2)return {y:shape.center,kind:hash>>>2&3};
+    // Four slots within the shared opening, including DOUBLE gates.
+    const half=(shape.gap-Math.abs(g.second))/2;
+    return {y:shape.center+g.second/2+[-.54,-.18,.18,.54][hash&3]*half,kind:hash>>>2&3};
+  }
+  function createRun(random=Math.random,rules=2){
+    const r={y:H*.48,py:H*.48,vy:0,time:0,previousTime:0,distance:0,previousDistance:0,cookies:0,passed:0,gates:[],rules,dead:false,stage:0,ticks:0,generated:0,verified:0,fallbacks:0};
     let witness={y:r.y,vy:-254,time:0,distance:0},previous=null;
     function typeFor(index,stage){
       const since=index-1-STAGES[stage].start;
@@ -155,9 +167,9 @@ globalThis.NoraDotCore=(()=>{
       function die(){r.dead=true;emit("crash");}
       if(r.y-R<=0||r.y+R>=H){r.y=clamp(r.y,R,H-R);die();return;}
       for(const g of r.gates){
-        const x=g.x-r.distance,shape=gateShape(g,r.time);
+        const x=g.x-r.distance,crumb=crumbPosition(g,r.time,rules);
         if(collision(r.y,r.distance,g,r.time)){die();return;}
-        if(!g.collected&&Math.hypot(X-x-g.width/2,r.y-shape.center)<R+17){
+        if(!g.collected&&Math.hypot(X-x-g.width/2,r.y-crumb.y)<R+17){
           g.collected=true;r.cookies++;emit("cookie");
         }
         if(!g.passed&&x+g.width<X-R){
@@ -184,11 +196,11 @@ globalThis.NoraDotCore=(()=>{
   }
 
 
-  function replay(seed,ticks,flaps,reviveTick=null){
+  function replay(seed,ticks,flaps,reviveTick=null,rules=1){
     if(reviveTick!==null&&(!Number.isInteger(reviveTick)||reviveTick<=0||reviveTick>=ticks))throw Error("invalid revive");
     if(!Number.isInteger(seed)||seed<0||seed>4294967295||!Number.isInteger(ticks)||ticks<1||ticks>432000||!Array.isArray(flaps)||flaps.length>ticks||flaps[0]!==0)throw Error("invalid flight");
     let previous=-1;for(const tick of flaps){if(!Number.isInteger(tick)||tick<=previous||tick>=ticks)throw Error("invalid input");previous=tick;}
-    const r=createRun(seededRandom(seed));let i=0;
+    const r=createRun(seededRandom(seed),rules);let i=0;
     for(let tick=0;tick<ticks;tick++){
       if(tick===reviveTick&&!r.revive())throw Error("revive without crash");
       if(r.dead)throw Error("flight already ended");
@@ -198,5 +210,5 @@ globalThis.NoraDotCore=(()=>{
     if(!r.dead||i!==flaps.length)throw Error("flight not finished");
     return {cookies:r.cookies,passed:r.passed,ticks:r.ticks};
   }
-  return {W,H,X,R,PIPE,STEP,PARADOX_START,gravityMode,softMode,clamp,lerp,STAGES,stageAt,speedAt,typeNames,gateShape,segments,witnessFor,createRun,seededRandom,replay};
+  return {W,H,X,R,PIPE,STEP,PARADOX_START,gravityMode,softMode,clamp,lerp,STAGES,stageAt,speedAt,typeNames,gateShape,crumbPosition,segments,witnessFor,createRun,seededRandom,replay};
 })();
