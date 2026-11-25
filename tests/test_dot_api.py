@@ -126,3 +126,36 @@ async def test_owner_dot_grant_only_once(tmp_path):
     assert (await dot_api.shop(db, 101))["balance"] == 4000
     assert (await dot_api.shop(db, 102))["balance"] == 0
     assert (await db.get_user(101))["cookies"] == before
+
+
+@pytest.mark.asyncio
+async def test_dot_second_life_purchase_and_revive(tmp_path):
+    if not (shutil.which("deno") or shutil.which("node")):
+        pytest.skip("JavaScript runtime not installed")
+    db = Database(tmp_path / "dot.sqlite")
+    await db.initialize()
+    await db.ensure_user(101, "dot_test", "DOT Test")
+    await db.ensure_user(102, "other", "Other")
+    await db.execute("INSERT INTO mini_dot_wallet(user_id,balance) VALUES(?,?)", (101, 3000))
+    purchase = "second-life-test-001"
+    state = await dot_api.shop(db, 101, "buy_life", purchase_id=purchase)
+    assert state["lives"] == 1 and state["balance"] == 1500
+    assert await dot_api.shop(db, 101, "buy_life", purchase_id=purchase) == state
+    ticket = await dot_api.issue(db, 101, now=100)
+    await db.execute("UPDATE mini_dot_sessions SET seed=42 WHERE token=?", (ticket["token"],))
+    crash = {"token": ticket["token"], "ticks": 166, "flaps": [0]}
+    with pytest.raises(ValueError):
+        await dot_api.revive(db, 102, crash, now=103)
+    with pytest.raises(ValueError):
+        await dot_api.revive(db, 101, {**crash, "ticks": 1}, now=103)
+    assert (await dot_api.shop(db, 101))["lives"] == 1
+    assert (await dot_api.revive(db, 101, crash, now=103))["lives"] == 0
+    assert (await dot_api.revive(db, 101, crash, now=104))["lives"] == 0
+    with pytest.raises(ValueError):
+        await dot_api.finish(db, 101, {**crash, "ticks": 167, "revive_tick": 165}, now=105)
+    continued = {**crash, "ticks": 347, "flaps": [0, 166], "revive_tick": 166}
+    result = await dot_api.finish(db, 101, continued, now=106)
+    assert await dot_api.finish(db, 101, continued, now=107) == result
+    assert (await dot_api.shop(db, 101))["lives"] == 0
+    with pytest.raises(ValueError):
+        await dot_api.revive(db, 101, crash, now=108)
