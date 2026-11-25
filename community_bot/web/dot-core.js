@@ -55,21 +55,25 @@ globalThis.NoraDotCore=(()=>{
     s.y+=s.vy*dt;
   }
   function enterParadox(s){
-    // One gentle, deterministic handoff; subsequent flips preserve full momentum.
+    // Deterministic handoff toward the center of the field.
     s.vy=clamp(s.vy,-160,160);
     s.gravity=s.y>H/2?-1:s.y<H/2?1:s.vy>0?-1:1;
   }
   function stageHandoff(s,passed){
-    if(passed===45||passed===PARADOX_START)enterParadox(s);
+    if(passed===45||passed===PARADOX_START){
+      enterParadox(s);
+      if(passed===PARADOX_START)s.vy=s.gravity*clamp(Math.abs(s.vy),160,200);
+    }
     else if(passed===70){s.gravity=0;s.vy=clamp(s.vy,-180,160);}
   }
   function flipGravity(s,passed){
     s.gravity=-s.gravity;
-    // PRESSURE is the forgiving training mode: immediately move in the new direction.
+    // Both gravity stages respond immediately; PARADOX retains its faster pace.
     if(softMode(passed))s.vy=s.gravity*clamp(Math.abs(s.vy)*.55,145,190);
+    else if(passed>=PARADOX_START)s.vy=s.gravity*clamp(Math.abs(s.vy)*.55,180,235);
   }
   function paradoxPilot(s,target,deadband,passed){
-    const stopping=softMode(passed)?s.y+s.vy*.07:s.y+s.vy*Math.abs(s.vy)/(2*acceleration(passed));
+    const stopping=s.y+s.vy*.07;
     const desired=stopping>target+deadband?-1:stopping<target-deadband?1:s.gravity;
     if(desired!==s.gravity&&s.time-(s.lastFlip??-1)>=.05){flipGravity(s,passed);s.lastFlip=s.time;}
   }
@@ -125,7 +129,7 @@ globalThis.NoraDotCore=(()=>{
         const margin=gap/2+amp+Math.abs(second)+25;
         const direction=random()<.5?-1:1;
         const center=clamp(attempt>=9?witness.y:priorCenter+(kind==="zigzag"?direction*(shift*.55+random()*shift*.45):(random()-.5)*shift*2),margin,H-margin);
-        const interval=Math.max(170,spacingSpeed*(stage===3?(index===46?2.1:1.40):stage===4&&index===71?1.65:stage===6?(index===PARADOX_START+1?2.1:1.30):stage>=4?1.02:1.16))+(previous?Math.max(0,previous.width-46):0)+(easy?55:0)+(attempt>=9?50:0);
+        const interval=Math.max(170,spacingSpeed*(stage===3?(index===46?2.1:1.40):stage===4&&index===71?1.65:stage===6?(index===PARADOX_START+1?2.1:index<=PARADOX_START+4?1.55:1.30):stage>=4?1.02:1.16))+(previous?Math.max(0,previous.width-46):0)+(easy?55:0)+(attempt>=9?50:0);
         const x=previous?previous.x+interval:W-30;
         const g={index,stage,type:kind,x,width,center,gap,amp,squeeze,second,rate:.85+stage*.14,phase:random()*Math.PI*2,collected:false,passed:false};
         const path=witnessFor(witness,g,index-1);
