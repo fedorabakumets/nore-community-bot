@@ -38,7 +38,7 @@ async def test_dot_record_is_single_use_and_does_not_touch_wallet(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_dot_world_record_rewards_rolling_limit_and_preserves_existing(tmp_path, monkeypatch):
+async def test_dot_world_record_rewards_without_daily_limit_and_preserves_existing(tmp_path, monkeypatch):
     db = Database(tmp_path / "dot.sqlite")
     await db.initialize()
     for uid in (101, 102):
@@ -64,18 +64,18 @@ async def test_dot_world_record_rewards_rolling_limit_and_preserves_existing(tmp
     assert (await play(10, 100))["reward"] == 0
     assert (await play(11, 110))["reward"] == 11
     assert (await play(12, 120))["reward"] == 12
-    capped = await play(13, 130)
-    assert capped["world_record"] and capped["limit_reached"] and capped["reward"] == 0
+    third = await play(13, 130)
+    assert third["world_record"] and not third["limit_reached"] and third["reward"] == 13
     assert (await play(13, 140))["reward"] == 0
-    assert (await play(14, 86_509))["reward"] == 0
-    assert (await play(15, 86_510))["reward"] == 15
-    assert (await db.get_user(101))["cookies"] == before + 38
+    assert (await play(14, 150))["reward"] == 14
+    assert (await play(15, 160))["reward"] == 15
+    assert (await db.get_user(101))["cookies"] == before + 65
     old = await db.fetchone("SELECT cookies,passed FROM mini_dot_records WHERE user_id=102")
     assert (old["cookies"], old["passed"]) == (10, 12)
     latest = await db.fetchone("SELECT cookies FROM mini_dot_records WHERE user_id=101")
     assert latest["cookies"] == 15
     tx = await db.fetchone("SELECT COUNT(*) n FROM transactions WHERE user_id=101 AND kind='dot_record'")
-    assert tx["n"] == 3
+    assert tx["n"] == 5
 
 
 @pytest.mark.asyncio

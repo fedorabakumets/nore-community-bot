@@ -86,8 +86,6 @@ CREATE TABLE IF NOT EXISTS mini_dot_intro_seen (
 """
 MAX_TICKS = 432_000
 TICKET_TTL = 86_400
-REWARD_WINDOW = 86_400
-REWARD_LIMIT = 2
 SKINS = {"red": 0, "mint": 1000, "ice": 1000, "violet": 1000, "heart": 0}
 GIFT_RESET_KEY = "dot:fairness-reset:20261125:v2"
 LIFE_PRICE = 1500
@@ -274,13 +272,10 @@ async def finish(db, uid, body, now=None):
         world = await one(conn, "SELECT MAX(cookies) AS score FROM mini_dot_records")
         world_record = cookies > max(0, world["score"] or 0)
         improved = best is None or (cookies, passed) > (best["cookies"], best["passed"])
-        reset = await one(conn, "SELECT value FROM bot_state WHERE key=?", (GIFT_RESET_KEY,))
-        cutoff = max(now - REWARD_WINDOW, float(reset["value"])) if reset else now - REWARD_WINDOW
-        recent = await one(conn, "SELECT COUNT(*) AS n FROM mini_dot_reward_results "
-                           "WHERE user_id=? AND reward>0 AND awarded_at>=? AND awarded_at>?",
-                           (uid, cutoff, now - REWARD_WINDOW))
-        limit_reached = world_record and recent["n"] >= REWARD_LIMIT
-        reward = cookies if world_record and not limit_reached else 0
+        # Every strictly improved world record earns its full reward, without a daily cap.
+        # Keep the legacy response/ledger field for compatibility with stored flights.
+        limit_reached = False
+        reward = cookies if world_record else 0
         # Every verified flight earns DOT-only currency, once per session.
         await conn.execute("INSERT INTO mini_dot_credits(token,user_id,amount) VALUES(?,?,?)", (token, uid, cookies))
         await conn.execute(

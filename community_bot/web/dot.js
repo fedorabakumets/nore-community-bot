@@ -288,7 +288,7 @@ window.NoraDot = (() => {
   const INTRO_FRAMES=[
     ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
     ["ЗАБЕРИ","ВСЕ","ПЕЧЕНЬКИ"],
-    ["НЕ БОЛЕЕ","ДВУХ НАГРАД","ЗА 24 ЧАСА"],
+    ["КАЖДЫЙ","НОВЫЙ РЕКОРД","ПРИНОСИТ НАГРАДУ"],
     ["СОБИРАЙ","КРОШКИ DOT","ОТКРЫВАЙ ЦВЕТА"]
   ];
   function introStorageKey(){
@@ -322,7 +322,7 @@ window.NoraDot = (() => {
     introKey=introStorageKey();
     try{if(localStorage.getItem(introKey)==="1")return;}catch{}
     intro=document.createElement("div");intro.className="dot-intro-screen";intro.setAttribute("role","dialog");intro.setAttribute("aria-modal","true");
-    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Не более двух наград за 24 часа. Собирай крошки DOT и открывай цвета.");
+    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Каждый новый рекорд приносит награду. Собирай крошки DOT и открывай цвета.");
     intro.innerHTML='<div class="dot-intro-logo">D<span>O</span>T</div><div class="dot-intro-words" aria-hidden="true"></div><div class="dot-intro-line" aria-hidden="true"></div>';
     document.body.append(intro);root.inert=true;introActive=true;introStarted=false;
     introTimer=setTimeout(launchIntro,450);
@@ -357,7 +357,7 @@ window.NoraDot = (() => {
     if(!root||!resultsBody)return;
     const leaders=payload?.top||[],mine=payload?.self,record=!!payload?.new_record;
     const reward=Number(payload?.reward||0),world=!!payload?.world_record;
-    const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':payload?.limit_reached?'<div class="dot-reward-limit">Мировой рекорд! Лимит наград на 24 часа исчерпан.</div>':'';
+    const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':'';
     const dotEarned=Number(payload?.dot_earned||0);
     const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' '+CRUMB+' КРОШКИ · в магазин</div>':'';
     const slots=[2,1,3].map(rank=>{
