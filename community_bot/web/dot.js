@@ -241,7 +241,7 @@ window.NoraDot = (() => {
       startFlight();return;
     }
     if(mode==="ready"||mode==="paused"){mode="play";last=0;acc=0;run.py=run.y;run.previousDistance=run.distance;run.previousTime=run.time;flapAt=-10;showOverlay();canvas.focus?.({preventScroll:true});}
-    if(run.time-flapAt<.045||flaps.at(-1)===run.ticks)return;
+    if(run.time-flapAt<.0225||flaps.at(-1)===run.ticks)return;
     run.flap();if(flaps.at(-1)!==run.ticks)flaps.push(run.ticks);flapAt=run.time;stretch=1;
     if(gravityMode(run.passed)){
       gravityPulse=1;const color=run.gravity<0?[102,224,239]:[187,148,255];
