@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS mini_dot_credits (
     user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     amount INTEGER NOT NULL CHECK(amount >= 0)
 );
+CREATE TABLE IF NOT EXISTS mini_dot_grants (
+    grant_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL CHECK(amount > 0)
+);
 CREATE TABLE IF NOT EXISTS mini_dot_wallet (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
@@ -298,8 +303,30 @@ async def shop(db, uid, action=None, skin=None):
         return state
 
 
+async def grant_owner_dot_cookies(db, uid, owner_id):
+    if not owner_id or uid != owner_id:
+        return False
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        inserted = await conn.execute(
+            "INSERT OR IGNORE INTO mini_dot_grants(grant_id,user_id,amount) VALUES(?,?,?)",
+            ("owner-dot-4000-2026-11-25", uid, 4000),
+        )
+        if inserted.rowcount != 1:
+            await conn.commit()
+            return False
+        await conn.execute(
+            "INSERT INTO mini_dot_wallet(user_id,balance) VALUES(?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance",
+            (uid, 4000),
+        )
+        await conn.commit()
+        return True
+
+
 async def shop_handler(request):
     db, uid = request.app["db"], request["actor"]["id"]
+    await grant_owner_dot_cookies(db, uid, request.app["settings"].owner_id)
     if request.method == "GET":
         return web.json_response(await shop(db, uid))
     body = await request.json()

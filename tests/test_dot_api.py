@@ -111,3 +111,18 @@ async def test_dot_currency_shop_is_separate_persistent_and_idempotent(tmp_path,
     assert (await dot_api.shop(db, 101, "equip", "mint"))["equipped"] == "mint"
     assert (await dot_api.shop(db, 102))["owned"] == ["red"]
     assert (await db.get_user(101))["cookies"] == before
+
+
+@pytest.mark.asyncio
+async def test_owner_dot_grant_only_once(tmp_path):
+    db = Database(tmp_path / "dot.sqlite")
+    await db.initialize()
+    for uid in (101, 102):
+        await db.ensure_user(uid, f"user{uid}", f"User {uid}")
+    before = (await db.get_user(101))["cookies"]
+    assert not await dot_api.grant_owner_dot_cookies(db, 102, 101)
+    assert await dot_api.grant_owner_dot_cookies(db, 101, 101)
+    assert not await dot_api.grant_owner_dot_cookies(db, 101, 101)
+    assert (await dot_api.shop(db, 101))["balance"] == 4000
+    assert (await dot_api.shop(db, 102))["balance"] == 0
+    assert (await db.get_user(101))["cookies"] == before
