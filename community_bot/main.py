@@ -566,6 +566,13 @@ async def main() -> None:
     from community_bot.profile_maintenance import run_requested_reset
 
     await run_requested_reset(db, settings, bot)
+    from community_bot.dot_api import grant_owner_dot_cookies
+
+    try:
+        if await grant_owner_dot_cookies(db, settings.owner_id, settings.owner_id):
+            logger.info("DOT: one-time owner grant of 4000 cookies applied")
+    except Exception:
+        logger.exception("DOT owner grant failed; shop request can retry")
     from community_bot.access import OnboardingKeyboardMiddleware, configure_private_menus
     from community_bot.group_message_close import GroupCloseSendMiddleware, normalize_current_pin
     from community_bot.private_rich import PrivateRichMiddleware
