@@ -59,6 +59,7 @@ export function PokerTable({ state }: { state: RoomSnapshot }) {
                 <div><span>{player.name}{player.isBot || !player.connected ? <em>{player.isBot ? "БОТ" : "ОТОШЁЛ"}</em> : null}</span><strong key={player.stack} className={styles.stack}>{player.stack.toLocaleString()}</strong></div>
               </div>
               <div className={styles.hole}>{player.hole.map((card, index) => <Card key={`${state.hand?.id ?? "waiting"}-${index}`} card={card} small={player.id !== state.viewerId} deal delay={index * 85} highlighted={player.id === state.viewerId && hand.cards.has(card ?? "")} />)}</div>
+              {state.hand?.street === "complete" && isWinner ? <span key={`${state.hand.id}-${player.id}`} className={styles.winAmount}>+{state.hand.winners.filter(winner => winner.playerId === player.id).reduce((sum, winner) => sum + winner.amount, 0).toLocaleString()}</span> : null}
               {player.lastAction ? <span key={`${state.hand?.id}-${player.lastAction}-${player.bet}-${player.committed}`} className={styles.action}>{player.lastAction}</span> : null}
               {player.sittingOut ? <span className={styles.sitting}>Пропускает</span> : null}
               <BetAmount key={`${state.hand?.id}-${state.hand?.street}-${player.bet}`} amount={state.hand?.street === "complete" ? 0 : player.bet} />
