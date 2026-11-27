@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import secrets
+import shutil
 import time
 from pathlib import Path
 
@@ -32,11 +33,14 @@ class PokerEngine:
             await process.communicate()
 
     async def _start(self):
+        executable = shutil.which("deno")
+        if not executable:
+            raise FileNotFoundError("Deno executable not found")
         self._process = await asyncio.create_subprocess_exec(
-            "deno", "run", "--no-prompt", str(ENGINE),
+            executable, "run", "--no-prompt", str(ENGINE),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=None,
             env={},
             limit=256 * 1024,
         )
@@ -57,7 +61,7 @@ class PokerEngine:
                 raise
             except (OSError, ValueError, TimeoutError):
                 await self._stop()
-                log.warning("Poker engine unavailable")
+                log.warning("Poker engine unavailable", exc_info=True)
                 return {"status": 503, "error": "Покер пока недоступен. Попробуй чуть позже"}
 
     async def close(self):
