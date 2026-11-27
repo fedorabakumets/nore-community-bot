@@ -38,3 +38,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--signal); ou
   background: #1c171b;
   cursor: pointer;
 }
+
+:host { --font-display: system-ui; --ink: #09090b; --panel: #151518; --panel-raised: #202024; --felt: #151519; --felt-light: #242429; --parchment: #f6f5f7; --muted: #929298; --signal: #ef4657; --oxblood-light: #ef4657; --danger: #ef4657; --ease-out: cubic-bezier(.2,.75,.25,1); }
+.poker-back { border: 0; background: #ffffff0a; border-radius: 14px; }

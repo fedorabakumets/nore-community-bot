@@ -77,7 +77,7 @@ export function snapshot(room: RoomState, viewerId: string | null): RoomSnapshot
       winners: room.hand.winners, pots: room.hand.pots, message: room.hand.message,
     } : null,
     paused: room.paused,
-    pot: totalPot(room),
+    pot: room.hand?.street === "complete" ? room.hand.winners.reduce((sum, winner) => sum + winner.amount, 0) : totalPot(room),
     legal: viewerId ? legalActions(room, viewerId) : null,
     history: room.history,
     chat: room.chat,

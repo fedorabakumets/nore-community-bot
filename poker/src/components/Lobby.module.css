@@ -46,3 +46,12 @@
 @media (max-width: 480px) { .avatars { grid-template-columns: repeat(6, 1fr); gap: 5px; } .avatars span { width: 44px; height: 44px; } .entry > button + button { margin-top: 12px; }
 .joinRow { grid-template-columns: 1fr auto; } .joinRow span { grid-column: 1 / -1; } }
 @media (prefers-reduced-motion: reduce) { .atmosphere, .pitch > *, .entry, .busy::after, .error { animation: none; } }
+
+.lobby { background: #09090b; }
+.atmosphere, .lobby::after, .entry::before { display: none; }
+.pitch h1 { font: 700 clamp(3rem,12vw,5rem)/1 system-ui; letter-spacing: -.05em; }
+.pitch p, .features { color: #96969c; }
+.features { text-transform: none; letter-spacing: 0; }
+.entry { background: #151518; border-color: #ffffff14; box-shadow: none; border-radius: 22px; }
+.primary { background: #d93649; border-color: #ed5668; box-shadow: none; border-radius: 15px; }
+.joinRow input, .joinRow button { background: #202024; border-color: #ffffff15; }

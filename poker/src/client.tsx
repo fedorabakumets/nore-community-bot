@@ -5,7 +5,7 @@ import { TableRoom } from "./components/TableRoom";
 import type { RoomSnapshot } from "./lib/poker/view";
 import "./globals.css";
 
-type PokerResponse = { snapshot?: RoomSnapshot | null; joinable?: boolean; url?: string };
+type PokerResponse = { snapshot?: RoomSnapshot | null; joinable?: boolean; url?: string; buyIn?: number; balance?: number; code?: string | null; left?: boolean; returned?: number };
 export type PokerApi = (path: string, body?: object, signal?: AbortSignal) => Promise<PokerResponse>;
 export interface PokerOptions {
   api: PokerApi;
@@ -39,7 +39,7 @@ export function mount(host: HTMLElement, options: PokerOptions) {
   const shadow = host.attachShadow({ mode: "open" });
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
-  stylesheet.href = "/poker-assets/table.css?v=booth-1";
+  stylesheet.href = "/poker-assets/table.css?v=nora-wallet-1";
   const container = document.createElement("div");
   container.hidden = true;
   const root = createRoot(container);

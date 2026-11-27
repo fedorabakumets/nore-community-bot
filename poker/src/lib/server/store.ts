@@ -13,6 +13,12 @@ export function sweep(now = Date.now()) {
   }
 }
 
+// Each request is restored from SQLite; memory is never the wallet authority.
+export function restoreRoom(room?: RoomState) {
+  rooms.clear();
+  if (room) rooms.set(room.code, room);
+}
+
 export function createStoredRoom(room: RoomState): boolean {
   if (rooms.has(room.code)) return false;
   if (rooms.size >= 500) throw new Error("Все столы заняты. Попробуй позже");

@@ -1,4 +1,13 @@
-import { combinations } from "./cards";
+// Pure enumeration: the evaluator is also bundled for the browser. Keep node:crypto out.
+function combinations<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  const pick = (start: number, chosen: T[]) => {
+    if (chosen.length === size) { result.push(chosen); return; }
+    for (let index = start; index <= items.length - (size - chosen.length); index++) pick(index + 1, [...chosen, items[index]]);
+  };
+  pick(0, []);
+  return result;
+}
 import { RANKS, type Card, type HandScore } from "./types";
 
 const RANK_VALUE = new Map(RANKS.map((rank, index) => [rank, index + 2]));

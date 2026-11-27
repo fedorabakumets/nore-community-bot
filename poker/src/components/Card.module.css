@@ -89,3 +89,12 @@
   .concealed { opacity: .72; transform: rotateY(180deg); }
   .front::after { display: none; }
 }
+
+/* NORA: highlight only the cards forming the current combination. */
+.highlighted { z-index: 4; }
+.highlighted .front { border-color: #ff5266; box-shadow: 0 0 0 2px #ff5266, 0 4px 12px #ef40504a; }
+.highlighted .front::after { display: none; }
+.back { background: #8f2638; }
+.back i { background: none; border: 1px solid #ffffff45; position: relative; }
+.back i::after { content: ""; position: absolute; width: 38%; aspect-ratio: 1; border: 2px solid #ffffff96; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.placeholder .back i::after { display: none; }

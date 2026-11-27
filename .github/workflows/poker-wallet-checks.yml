@@ -1,0 +1,38 @@
+name: Poker wallet and client checks
+on:
+  pull_request:
+    branches: [cursor/nora-2-update-d133]
+    paths:
+      - 'poker/**'
+      - 'community_bot/poker_api.py'
+      - 'tests/test_poker_wallet.py'
+      - '.github/workflows/poker-wallet-checks.yml'
+  workflow_dispatch:
+jobs:
+  poker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: poker/package-lock.json
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.6.10
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Build client and server
+        working-directory: poker
+        run: npm ci && npm run build
+      - name: Test poker rules and privacy
+        working-directory: poker
+        run: npx tsx --test tests/poker.test.ts tests/privacy.test.ts
+      - name: Install NORA dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run wallet integration tests
+        run: python -m pytest -q tests/test_poker_wallet.py
