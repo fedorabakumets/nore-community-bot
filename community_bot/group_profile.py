@@ -17,6 +17,7 @@ from aiogram.types import (
     InputRichBlockDetails,
     InputRichBlockParagraph,
     InputRichBlockPhoto,
+    InputRichBlockSectionHeading,
     InputRichBlockTable,
     InputRichBlockVideo,
     InputRichMessage,
@@ -25,6 +26,7 @@ from aiogram.types import (
     RichMessageButton,
     RichTextBold,
     RichTextButton,
+    RichTextItalic,
 )
 
 from community_bot import friends_api, social_likes
@@ -56,14 +58,15 @@ def _stats(user, settings):
 
 
 def _table(user, settings):
-    rows = (("🍪 Печеньки", "Репутация"), _stats(user, settings))
+    labels = ("🍪 Печеньки", "Репутация")
     return InputRichBlockTable(
         cells=[
-            [RichBlockTableCell(text=value, align="center", valign="middle", is_header=(index == 0))
-             for value in row]
-            for index, row in enumerate(rows)
+            [RichBlockTableCell(text=label, align="center", valign="middle", is_header=True) for label in labels],
+            [RichBlockTableCell(text=RichTextBold(text=value), align="center", valign="middle")
+             for value in _stats(user, settings)],
         ],
         is_bordered=True,
+        is_striped=True,
         is_compact=True,
     )
 
@@ -159,12 +162,12 @@ async def group_profile_body(
     library = [RichTextButton(button=music)] if music else []
     body = [
         reputation,
+        InputRichBlockSectionHeading(text=name, size=2),
         InputRichBlockParagraph(text=[
-            RichTextBold(text=name), "  ",
+            *([RichTextItalic(text=subtitle), "\n"] if subtitle else []),
             RichTextButton(button=RichMessageButton(text=like, style="link", callback_data=f"{LIKE_PREFIX}{uid}")),
             *(["  ", *library] if library else []), "  ", RichTextButton(button=tgk),
         ]),
-        InputRichBlockParagraph(text=subtitle),
         *details,
         _table(user, settings),
         await _limits_detail(db, settings, user),

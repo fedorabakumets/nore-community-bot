@@ -143,9 +143,11 @@ async def test_chat_rankings_and_stats_use_main_chat_history(env, monkeypatch):
     for suffix, label, value in (("", "сегодня", "12"), (" неделя", "неделю", "15"), (" месяц", "месяц", "35")):
         calls = await dispatch("Нора топ" + suffix)
         board = next(call.rich_message for call in calls if isinstance(call, SendRichMessage))
-        assert label in board.blocks[0].text.text
-        table = board.blocks[1].cells
+        assert board.blocks[0].type == "heading"
+        assert label in board.blocks[1].text.text
+        table = next(block.cells for block in board.blocks if block.type == "table")
         assert [cell.text for cell in table[0]] == ["№", "Участник", "Сообщения"]
+        assert [row[0].text for row in table[1:3]] == ["🥇", "🥈"]
         assert [row[1].text for row in table[1:3]] == (
             ["Анна <тест>", "Борис"] if suffix == " месяц" else ["Борис", "Анна <тест>"]
         )
@@ -156,45 +158,74 @@ async def test_chat_rankings_and_stats_use_main_chat_history(env, monkeypatch):
     sent = message(None, uid=123456).model_copy(update={
         "rich_message": RichMessage.model_validate(board.model_dump(exclude_none=True)),
     })
+    clicker = User(id=7, first_name="Тест", is_bot=False)
+    week = next(button for button in board.blocks[-2].buttons if button.text == "Неделя")
+    calls = await dispatch(CallbackQuery(
+        id="week", chat_instance="test", data=week.callback_data, from_user=clicker, message=sent,
+    ))
+    edited = next(call for call in calls if isinstance(call, EditMessageText))
+    assert edited.message_id == sent.message_id
+    assert "За неделю" in edited.rich_message.blocks[1].text.text
+    active_period = next(button for button in edited.rich_message.blocks[-2].buttons if button.style == "primary")
+    assert active_period.text == "Неделя"
     for metric, header, rank in (("likes", "Лайки", "1"), ("cookies", "Печеньки", "799")):
         button = next(b for b in board.blocks[-1].buttons if b.callback_data == f"nora_top:{metric}:month")
         calls = await dispatch(CallbackQuery(id=metric, chat_instance="test", data=button.callback_data,
-                                             from_user=User(id=7, first_name="Тест", is_bot=False), message=sent))
+                                             from_user=clicker, message=sent))
         edited = next(call for call in calls if isinstance(call, EditMessageText))
         assert edited.message_id == sent.message_id
         table = edited.rich_message.blocks[1].cells
         assert [[cell.text for cell in row] for row in table] == [
-            ["№", "Участник", header], ["1", "Анна <тест>", rank],
+            ["№", "Участник", header], ["🥇", "Анна <тест>", rank],
         ]
         assert all(not isinstance(call, SendRichMessage) for call in calls)
+    session.fail = lambda method: isinstance(method, SendRichMessage)
+    calls = await dispatch("Нора топ")
+    basic_board = next(call for call in calls if isinstance(call, SendMessage))
+    assert "Анна &lt;тест&gt;" in basic_board.text
+    week = basic_board.reply_markup.inline_keyboard[0][1]
+    calls = await dispatch(CallbackQuery(
+        id="basic-week", chat_instance="test", data=week.callback_data, from_user=clicker,
+        message=message(basic_board.text).model_copy(update={"reply_markup": basic_board.reply_markup}),
+    ))
+    basic_edit = next(call for call in calls if isinstance(call, EditMessageText))
+    assert "За неделю" in basic_edit.text and "Анна &lt;тест&gt; · <b>15</b>" in basic_edit.text
+    session.fail = None
     apply_rows([{"slug": "millionaires", "aliases_json": '["миллионеры"]'}])
     assert get_command("millionaires") is None
     assert not any(isinstance(call, SendRichMessage) for call in await dispatch("Нора миллионеры"))
-    calls = await dispatch("Нора стата @alice")
-    stats = next(call.text for call in calls if isinstance(call, SendMessage))
-    assert "Сообщений в чате · <b>1" in stats
-    assert "18 дн. с первого учтённого сообщения" in stats
-    assert "Тест &lt;кот&gt; · уровень 2" in stats
+    calls = await dispatch("Нора стата @alice", message_thread_id=42, is_topic_message=True)
+    post = next(call for call in calls if isinstance(call, SendRichMessage))
+    assert post.message_thread_id == 42
+    stats = post.rich_message
+    assert stats.blocks[0].text == "📊 Анна <тест>"
+    assert [row[1].text.text for row in stats.blocks[1].cells] == [
+        "1", "18 дн. с первого учтённого сообщения", "Тест <кот> · уровень 2",
+    ]
     await db.remember_community_join(-100123, 8, "2026-10-01")
     await db.remember_community_join(-100123, 8, "2026-11-02")
     reply = message("Привет", uid=8).model_copy(update={
         "from_user": User(id=8, first_name="Анна <тест>", is_bot=False, username="alice"),
     })
+    session.fail = lambda method: isinstance(method, SendRichMessage)
     calls = await dispatch("Нора стата", reply_to_message=reply)
-    assert any("48 дн.</b>" in call.text for call in calls if isinstance(call, SendMessage))
+    fallback_stats = next(call.text for call in calls if isinstance(call, SendMessage))
+    assert "48 дн.</b>" in fallback_stats and "Тест &lt;кот&gt; · уровень 2" in fallback_stats
+    session.fail = None
     calls = await dispatch("Нора стата @boris")
     assert any("Статистика скрыта" in call.text for call in calls if isinstance(call, SendMessage))
     await db.execute("UPDATE users SET profile_private = 0 WHERE user_id = 9")
     calls = await dispatch("Нора стата @boris")
-    assert any("Питомец · <b>нет</b>" in call.text for call in calls if isinstance(call, SendMessage))
+    stats = next(call.rich_message for call in calls if isinstance(call, SendRichMessage))
+    assert stats.blocks[1].cells[-1][1].text.text == "нет"
 
+
+async def test_music_chart_command_keeps_its_route(env, monkeypatch):
+    _, dispatch, _ = env
     chart = AsyncMock(return_value="Музыка")
     monkeypatch.setattr("community_bot.nora.music_chart", chart)
     await dispatch("Нора топ чартов")
     chart.assert_awaited_once()
-    session.fail = lambda method: isinstance(method, SendRichMessage)
-    calls = await dispatch("Нора топ")
-    assert any("Анна &lt;тест&gt;" in call.text for call in calls if isinstance(call, SendMessage))
 
 
 async def test_likes_share_daily_quota_and_purchase_restores_it(env, monkeypatch):

@@ -41,20 +41,24 @@ async def test_group_profile_card(tmp_path, fallback):
     send = bot.send_rich_message.await_args.kwargs
     assert send["message_thread_id"] == 5
     blocks = bot.send_rich_message.await_args_list[0].kwargs["rich_message"].blocks
-    photo, votes, name, _, about, hobbies, table, limits, actions = blocks
+    photo, votes, name, details, about, hobbies, table, limits, actions = blocks
     assert photo.type == "photo" and photo.photo.media == "telegram-photo"
-    assert name.type == "paragraph" and name.text[0].text == "Анна <3"
-    assert name.text[2].button.text == "❤️ 0" and name.text[2].button.style == "link"
-    assert name.text[2].button.callback_data == "gprofile:like:2"
+    assert name.type == "heading" and name.text == "Анна <3"
+    like = next(part.button for part in details.text if getattr(part, "type", None) == "button")
+    assert like.text == "❤️ 0" and like.style == "link"
+    assert like.callback_data == "gprofile:like:2"
     assert [(button.text, button.style) for button in actions.buttons] == [
         ("❌", "danger"), ("📱", "primary"), ("👤", "success"),
     ]
     assert actions.buttons[0].callback_data == "ui:close"
     assert actions.buttons[1].url == "https://t.me/nora_bot?startapp=nora_profile_2"
     assert actions.buttons[2].callback_data == "gprofile:friend:2"
-    assert table.is_compact and [cell.text for cell in table.cells[0]] == ["🍪 Печеньки", "Репутация"]
+    assert table.is_compact and table.is_striped
+    assert [cell.text for cell in table.cells[0]] == ["🍪 Печеньки", "Репутация"]
     tier = reputation_tier(user["reputation"], 15)
-    assert [cell.text for cell in table.cells[1]] == [str(user["cookies"]), f'{user["reputation"]}/100 · {tier.label}']
+    assert [cell.text.text for cell in table.cells[1]] == [
+        str(user["cookies"]), f'{user["reputation"]}/100 · {tier.label}',
+    ]
     assert limits.type == "details" and limits.summary == "Лимиты" and not limits.is_open
     limit_table, limit_action = limits.blocks
     assert limit_table.is_compact

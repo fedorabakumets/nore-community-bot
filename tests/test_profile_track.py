@@ -50,7 +50,10 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
     bot.send_rich_message = AsyncMock(return_value=message)
     await send_group_profile(message, db, settings, await db.get_user(user.id), user.id)
     blocks = bot.send_rich_message.await_args.kwargs["rich_message"].blocks
-    age_pos = next(i for i, block in enumerate(blocks) if block.type == "paragraph" and "Возраст" in block.text)
+    age_pos = next(
+        i for i, block in enumerate(blocks)
+        if block.type == "paragraph" and "Возраст" in getattr(block.text[0], "text", "")
+    )
     assert blocks[age_pos + 1].audio.media == track["file_id"]
 
     async def telegram_download(file_id, *, destination, **options):

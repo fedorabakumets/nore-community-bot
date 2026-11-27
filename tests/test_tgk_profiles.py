@@ -59,15 +59,15 @@ async def test_tgk_persists_and_is_rendered_as_rich_link(tmp_path):
 
     user = await db.get_user(7)
     body, *_ = await group_profile_body(db, settings, user, 7, bot)
-    assert body[1].text[-1].button.callback_data == "gprofile:tgk:7"
+    assert body[2].text[-1].button.callback_data == "gprofile:tgk:7"
 
     await db.update_profile(7, "tg_channel_url", "@my_channel")
     await db.initialize()  # repeated startup must not lose an existing channel
     saved = await db.get_user(7)
     assert saved["tg_channel_url"] == "https://t.me/my_channel"
     body, *_ = await group_profile_body(db, settings, saved, 7, bot)
-    assert body[1].text[-1].button.url == "https://t.me/my_channel"
-    assert body[1].text[-1].button.callback_data is None
+    assert body[2].text[-1].button.url == "https://t.me/my_channel"
+    assert body[2].text[-1].button.callback_data is None
 
     await db.update_profile(7, "tg_channel_url", "удалить")
     assert (await db.get_user(7))["tg_channel_url"] == ""

@@ -13,12 +13,14 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InputRichBlockButtons,
     InputRichBlockParagraph,
+    InputRichBlockSectionHeading,
     InputRichBlockTable,
     InputRichMessage,
     Message,
     RichBlockTableCell,
     RichMessageButton,
     RichTextBold,
+    RichTextItalic,
 )
 
 from community_bot.aliases import command_or_alias
@@ -34,7 +36,8 @@ _GROUP = F.chat.type.in_({"group", "supergroup"})
 _MOSCOW = ZoneInfo("Europe/Moscow")
 _LIMIT = 10
 _METRICS = {"likes": ("❤️", "Лайки"), "messages": ("💬", "Сообщения"), "cookies": ("🍪", "Печеньки")}
-_PERIODS = {"неделя": "week", "месяц": "month"}
+_PERIODS = {"сегодня": "day", "неделя": "week", "месяц": "month"}
+_MEDALS = ("🥇", "🥈", "🥉")
 
 
 def _number(value: int) -> str:
@@ -80,14 +83,34 @@ async def member_stats(message: Message, db: Database, settings: Settings) -> No
         if since != joined:
             tenure += " с первого учтённого сообщения"
     pet = await db.get_pet(uid, settle=False)
-    pet_status = f"{html.escape(str(pet['name']))} · уровень {await level(db, uid) or 1}" if pet else "нет"
-    await message.answer(
-        f"📊 <b>{html.escape(display_name(target))}</b>\n"
-        f"Сообщений в чате · <b>{_number(history['messages'] or 0)}</b>\n"
-        f"В сообществе · <b>{tenure}</b>\n"
-        f"Питомец · <b>{pet_status}</b>",
-        parse_mode="HTML",
-    )
+    pet_status = f"{pet['name']} · уровень {await level(db, uid) or 1}" if pet else "нет"
+    name = display_name(target)
+    stats = [
+        ("💬 Сообщений в чате", _number(history["messages"] or 0)),
+        ("👥 В сообществе", tenure),
+        ("🐾 Питомец", pet_status),
+    ]
+    rich = InputRichMessage(blocks=[
+        InputRichBlockSectionHeading(text=f"📊 {name}", size=2),
+        InputRichBlockTable(
+            cells=[
+                [RichBlockTableCell(text=label, align="left", valign="middle"),
+                 RichBlockTableCell(text=RichTextBold(text=value), align="left", valign="middle")]
+                for label, value in stats
+            ],
+            is_striped=True,
+            is_compact=True,
+        ),
+    ], skip_entity_detection=True)
+    try:
+        await message.bot.send_rich_message(
+            chat_id, rich_message=rich,
+            message_thread_id=message.message_thread_id if message.is_topic_message else None,
+        )
+    except (TelegramBadRequest, TelegramNotFound):
+        lines = [f"{label} · <b>{html.escape(value)}</b>" for label, value in stats]
+        with bot_publication():
+            await message.answer("\n".join([f"📊 <b>{html.escape(name)}</b>", *lines]), parse_mode="HTML")
 
 
 def _period(today: date, period: str) -> tuple[date, str]:
@@ -100,34 +123,52 @@ def _period(today: date, period: str) -> tuple[date, str]:
 
 async def _show_board(message: Message, bot: Bot, db: Database, metric: str, period: str, *, edit=False) -> None:
     icon, heading = _METRICS[metric]
+    date_label = ""
     if metric == "messages":
         today = datetime.now(_MOSCOW).date()
         start, label = _period(today, period)
         span = today.strftime("%d.%m") if start == today else f"{start:%d.%m}–{today:%d.%m}"
-        title = f"{icon} Топ сообщений {label} · {span}"
+        title = f"{icon} Топ сообщений"
+        date_label = f"{label.capitalize()} · {span}"
         rows = await db.daily_message_board(start.isoformat(), message.chat.id, limit=-1, through=today.isoformat())
     else:
         title = f"{icon} Топ по {'лайкам' if metric == 'likes' else 'печенькам'}"
         rows = await db.public_profile_board(message.chat.id, metric)
     leaders = _leader_rows(rows, await marked_bots(db) | {str(bot.id)}, metric)
     data = [("№", "Участник", heading)]
-    data.extend((str(rank), name, amount) for rank, (name, amount) in enumerate(leaders, 1))
+    data.extend(
+        (_MEDALS[rank - 1] if rank <= len(_MEDALS) else str(rank), name, amount)
+        for rank, (name, amount) in enumerate(leaders, 1)
+    )
     cells = [
         [RichBlockTableCell(text=text, align=align, valign="middle", is_header=(row == 0))
          for text, align in zip(values, ("right", "left", "right"), strict=True)]
         for row, values in enumerate(data)
     ]
-    options = [
+    metrics = [
         (key, f"{emoji} {label}", f"nora_top:{key}:{period}") for key, (emoji, label) in _METRICS.items()
     ]
-    buttons = InputRichBlockButtons(buttons=[
-        RichMessageButton(text=label, style="primary" if key == metric else "link", callback_data=callback)
-        for key, label, callback in options
-    ], align="center")
+    periods = [
+        (key, label.capitalize(), f"nora_top:messages:{key}") for label, key in _PERIODS.items()
+    ]
+    controls = [(metrics, metric)]
+    if metric == "messages":
+        controls.insert(0, (periods, period))
+    buttons = [
+        InputRichBlockButtons(align="center", buttons=[
+            RichMessageButton(text=label, style="primary" if key == selected else "link", callback_data=callback)
+            for key, label, callback in options
+        ])
+        for options, selected in controls
+    ]
     content = (InputRichBlockTable(cells=cells, is_bordered=True, is_striped=True, is_compact=True)
                if leaders else InputRichBlockParagraph(text="Пока нет данных."))
-    rich = InputRichMessage(blocks=[InputRichBlockParagraph(text=RichTextBold(text=title)), content, buttons],
-                            skip_entity_detection=True)
+    rich = InputRichMessage(blocks=[
+        InputRichBlockSectionHeading(text=title, size=2),
+        *([InputRichBlockParagraph(text=RichTextItalic(text=date_label))] if date_label else []),
+        content,
+        *buttons,
+    ], skip_entity_detection=True)
     try:
         if edit and message.rich_message:
             await message.edit_text(parse_mode=None, rich_message=rich)
@@ -141,12 +182,15 @@ async def _show_board(message: Message, bot: Bot, db: Database, metric: str, per
     except (TelegramBadRequest, TelegramNotFound):
         if edit and message.rich_message:
             raise
-    lines = [f"{rank}. {html.escape(name)} · <b>{amount}</b>" for rank, name, amount in data[1:]]
-    text = f"<b>{title}</b>\n" + ("\n".join(lines) or "Пока нет данных.")
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=label, style="primary" if key == metric else None, callback_data=callback)
-        for key, label, callback in options
-    ]])
+    lines = [f"{rank}. {html.escape(name)} · <b>{amount}</b>" for rank, (name, amount) in enumerate(leaders, 1)]
+    text = "\n".join(filter(None, (f"<b>{title}</b>", date_label, "\n".join(lines) or "Пока нет данных.")))
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=label, style="primary" if key == selected else None, callback_data=callback)
+            for key, label, callback in options
+        ]
+        for options, selected in controls
+    ])
     with bot_publication():
         if edit:
             await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
