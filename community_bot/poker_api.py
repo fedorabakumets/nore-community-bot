@@ -137,11 +137,11 @@ async def eligible(conn, uid, amount):
 async def leave(conn, uid, code, room):
     if not room:
         raise ValueError("Стол закрыт")
-    if room.get("hand") and room["hand"]["street"] != "complete":
-        raise ValueError("Дождись конца раздачи, чтобы забрать печеньки")
     member = await one(conn, "SELECT player_id FROM poker_wallet_seats WHERE uid=? AND code=?", (uid, code))
     if not member:
         return {"left": True, "returned": 0}
+    if room.get("hand") and room["hand"]["street"] != "complete":
+        raise ValueError("Дождись конца раздачи, чтобы забрать печеньки")
     money = funds(room)
     seats = await seat_ids(conn, code)
     if set(money) != set(seats):
@@ -225,6 +225,8 @@ async def wallet_action(conn, engine, uid, kind, code, body, actor):
     new_code = new["code"]
     if old and new_code != code:
         raise RuntimeError("Poker room changed identity")
+    if not old and await one(conn, "SELECT 1 FROM poker_wallet_rooms WHERE code=?", (new_code,)):
+        raise ValueError("Не удалось создать стол. Попробуй ещё раз")
     expected = set(before)
     if entering:
         pid = result["snapshot"]["viewerId"]
