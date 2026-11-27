@@ -63,7 +63,7 @@ function requestGameExit(onExit) {
   $('#game-exit-details').textContent = {
     world: 'Ты покинешь мир Норы.',
     dot: 'Текущий полёт завершится.',
-    poker: 'Место за столом сохранится. Если время хода истечёт, сервер сделает чек или пас.',
+    poker: 'Место и печеньки сохранятся за столом. Забрать их можно после раздачи. При закрытии неактивного стола остаток вернётся на баланс.',
     rocket: 'Текущий полёт завершится. Ставка будет проиграна.',
     mafia: 'Ты выйдешь из лобби или сдашься в начавшейся партии.',
   }[game] || 'Поиск отменится. Если партия уже началась, тебе засчитается поражение.';
@@ -296,7 +296,7 @@ function mountPoker() {
   if (!host || host === pokerHost) return;
   pokerHost = host;
   const code = pokerCode;
-  pokerModule ??= import('/poker-assets/table.js?v=booth-1').catch(error => {
+  pokerModule ??= import('/poker-assets/table.js?v=nora-wallet-1').catch(error => {
     pokerModule = null;
     throw error;
   });
