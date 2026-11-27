@@ -5,7 +5,6 @@ import type { RoomSnapshot } from "../lib/poker/view";
 import type { RoomCommand } from "../lib/server/rooms";
 import { playSound } from "../lib/client/sound";
 import type { PokerApi } from "../client";
-import { EffectsCanvas } from "./EffectsCanvas";
 import { Avatar } from "./Avatar";
 import { PokerTable } from "./PokerTable";
 import styles from "./TableRoom.module.css";
@@ -79,7 +78,7 @@ export function TableRoom({ code, api, share, remember, lobby }: {
 
   useEffect(() => {
     if (state?.legal) setRaiseTo(Math.min(state.legal.minRaiseTo, state.legal.maxRaiseTo));
-  }, [state?.version]);
+  }, [state?.hand?.id, state?.hand?.actorId, state?.legal?.minRaiseTo, state?.legal?.maxRaiseTo]);
 
   useEffect(() => {
     if (!state || !sound) return;
@@ -178,27 +177,24 @@ export function TableRoom({ code, api, share, remember, lobby }: {
   const host = state.hostId === state.viewerId;
   const betweenHands = !state.hand || state.hand.street === "complete";
   const eligible = state.players.filter((player) => !player.sittingOut && player.stack > 0).length;
-  const winner = state.players.find((player) => player.id === state.hand?.winners[0]?.playerId);
-  const winnerSeat = winner ? (winner.seat - viewer.seat + 5) % 5 : 0;
 
   return (
     <section className={styles.room}>
       <div className={styles.backdrop} />
       <header className={styles.topbar}>
         <button className="poker-back" onClick={lobby}>← Покер</button>
-        <div className={styles.roomMeta}><span className={online ? styles.online : styles.reconnecting}>{online ? "На связи" : "Подключаемся"}</span><button onClick={invite} disabled={sharing}>Позвать · {code}</button></div>
-        <div className={styles.headerActions}><button aria-label="Звук" aria-pressed={sound} onClick={toggleSound}>{sound ? "Звук вкл." : "Звук выкл."}</button><button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? "Вернуться" : "Пропускать раздачи"}</button><button onClick={() => setDrawer((value) => !value)}>Журнал</button></div>
+        <div className={styles.roomMeta}><span className={online ? styles.online : styles.reconnecting}>{online ? "На связи" : "Подключаемся"}</span><button onClick={invite} disabled={sharing}>Пригласить</button></div>
+        <div className={styles.headerActions}><button aria-label="Звук" aria-pressed={sound} onClick={toggleSound}>{sound ? "Звук вкл." : "Звук выкл."}</button><button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? "Вернуться" : "Пропускать раздачи"}</button><button onClick={() => setDrawer((value) => !value)}>···</button></div>
       </header>
       <div className={styles.tableStage}>
         <PokerTable state={state} />
-        <EffectsCanvas handId={state.hand?.id ?? ""} boardCount={state.hand?.board.length ?? 0} pot={state.pot} winnerKey={state.hand?.winners.map((item) => `${state.hand?.id}-${item.playerId}`).join(":") ?? ""} winnerSeat={winnerSeat} />
       </div>
       <div className={styles.reactions}>{["👏", "🔥", "😮", "♠", "♥"].map((reaction) => <button key={reaction} disabled={pending || !online} onClick={() => command({ type: "reaction", text: reaction })}>{reaction}</button>)}</div>
       <div className={`${styles.controls} ${pending ? styles.processing : ""}`} aria-busy={pending}>
         {state.legal ? <>
-          <button className={styles.fold} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "fold" } })}>Пас <kbd>F</kbd></button>
-          <button className={styles.call} disabled={pending || !online} onClick={() => command({ type: "poker", action: state.legal!.canCheck ? { type: "check" } : { type: "call" } })}>{state.legal.canCheck ? "Чек" : `Колл ${state.legal.toCall}`} <kbd>C</kbd></button>
-          {state.legal.canRaise ? <div className={styles.raise}><div><span>До</span><strong>{raiseTo.toLocaleString()}</strong></div><input aria-label="Размер повышения" type="range" min={Math.min(state.legal.minRaiseTo, state.legal.maxRaiseTo)} max={state.legal.maxRaiseTo} step={1} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /><div className={styles.presets}><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, Math.round(state.pot * .5 / state.settings.bigBlind) * state.settings.bigBlind)))}>½ банка</button><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, state.pot)))}>Банк</button><button onClick={() => setRaiseTo(state.legal!.maxRaiseTo)}>Олл-ин</button>{viewer.timeBankMs > 0 ? <button onClick={() => command({ type: "timeBank" })}>+{viewer.timeBankMs / 1000}s</button> : null}<button className={styles.raiseButton} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "raise", amount: raiseTo } })}>Рейз</button></div></div> : null}
+          <button className={styles.fold} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "fold" } })}>Сбросить</button>
+          <button className={styles.call} disabled={pending || !online} onClick={() => command({ type: "poker", action: state.legal!.canCheck ? { type: "check" } : { type: "call" } })}>{state.legal.canCheck ? "Пропустить" : `Уравнять ${state.legal.toCall}`}</button>
+          {state.legal.canRaise ? <div className={styles.raise}><div><span>До</span><strong>{raiseTo.toLocaleString()}</strong></div><input aria-label="Размер повышения" type="range" min={Math.min(state.legal.minRaiseTo, state.legal.maxRaiseTo)} max={state.legal.maxRaiseTo} step={1} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /><div className={styles.presets}><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, Math.round(state.pot * .5 / state.settings.bigBlind) * state.settings.bigBlind)))}>½ банка</button><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, state.pot)))}>Банк</button><button onClick={() => setRaiseTo(state.legal!.maxRaiseTo)}>Всё</button>{viewer.timeBankMs > 0 ? <button onClick={() => command({ type: "timeBank" })}>+{viewer.timeBankMs / 1000}s</button> : null}<button className={styles.raiseButton} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "raise", amount: raiseTo } })}>Повысить</button></div></div> : null}
         </> : <div className={styles.waitingControls}>
           {host && betweenHands && eligible >= 2 ? <button className={styles.deal} disabled={pending || !online} onClick={() => command({ type: "start" })}>Раздать карты</button> : null}
           {host && betweenHands && state.seatsOpen > 0 ? <div className={styles.botButtons}><span>Добавить бота</span>{(["tight", "balanced", "aggressive"] as const).map((style) => <button key={style} disabled={pending || !online} onClick={() => command({ type: "addBot", style })}>{{ tight: "Осторожный", balanced: "Обычный", aggressive: "Агрессивный" }[style]}</button>)}</div> : null}
