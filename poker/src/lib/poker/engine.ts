@@ -113,9 +113,9 @@ export function startHand(room: RoomState, now = Date.now(), deck = shuffleDeck(
   }
 
   commit(smallBlind, room.settings.smallBlind);
-  smallBlind.lastAction = `Малый блайнд ${smallBlind.bet}`;
+  smallBlind.lastAction = `Обязательная ставка ${smallBlind.bet}`;
   commit(bigBlind, room.settings.bigBlind);
-  bigBlind.lastAction = `Большой блайнд ${bigBlind.bet}`;
+  bigBlind.lastAction = `Обязательная ставка ${bigBlind.bet}`;
   const actionable = eligible.filter((player) => !player.allIn);
   if (actionable.length < 2) room.hand.currentBet = Math.max(...eligible.map((player) => player.bet));
   if (!actionable.length || (actionable.length === 1 && actionable[0].bet === room.hand.currentBet)) {
@@ -254,16 +254,16 @@ export function applyPokerAction(room: RoomState, playerId: string, action: Poke
 
   if (action.type === "fold") {
     player.folded = true;
-    player.lastAction = "Пас";
+    player.lastAction = "Сбросил";
     hand.actedIds.push(player.id);
   } else if (action.type === "check") {
     if (!legal.canCheck) throw new Error("Checking is not legal");
-    player.lastAction = "Чек";
+    player.lastAction = "Пропустил";
     hand.actedIds.push(player.id);
   } else if (action.type === "call") {
     if (!legal.canCall) throw new Error("Calling is not legal");
     const paid = commit(player, legal.toCall);
-    player.lastAction = player.allIn ? `Олл-ин ${player.bet}` : `Колл ${paid}`;
+    player.lastAction = player.allIn ? `Всё ${player.bet}` : `Уравнял ${paid}`;
     hand.actedIds.push(player.id);
   } else {
     if (!legal.canRaise) throw new Error("Raising is not legal");
@@ -282,7 +282,7 @@ export function applyPokerAction(room: RoomState, playerId: string, action: Poke
     } else {
       hand.actedIds.push(player.id);
     }
-    player.lastAction = player.allIn ? `Олл-ин ${amount}` : `${previousBet === 0 ? "Ставка" : "Рейз до"} ${amount}`;
+    player.lastAction = player.allIn ? `Всё ${amount}` : `${previousBet === 0 ? "Ставка" : "Повысил до"} ${amount}`;
   }
 
   const remaining = contenders(room);
