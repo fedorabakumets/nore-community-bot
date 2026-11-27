@@ -3,7 +3,7 @@ window.NoraChat = (() => {
   const colors = ['#f6bf80', '#90d9e5', '#f0a9ca', '#bfdb90', '#c6b7fe',
     '#ffab9e', '#99d9ba', '#ffe090', '#abc9ff', '#eeb4f7'];
   const roomNames = {
-    lobby:'Лобби', cinema:'Кинотеатр', observatory:'Воспоминание', tavern:'Твоя Нора', forest:'Твоя Нора',
+    lobby:NoraI18n.t("Лобби"), cinema:NoraI18n.t("Кинотеатр"), observatory:NoraI18n.t("Воспоминание"), tavern:NoraI18n.t("Твоя Нора"), forest:NoraI18n.t("Твоя Нора"),
   };
   const clock = new Intl.DateTimeFormat('ru', {hour:'2-digit', minute:'2-digit'});
 
@@ -60,28 +60,28 @@ window.NoraChat = (() => {
 
   function mount(root, T, player, findAvatar, reset, location, visitAction) {
     root.insertAdjacentHTML('beforeend', `
-      <button type="button" class="nora-chat-open" aria-controls="nora-chat" aria-expanded="false">Чат<span hidden aria-hidden="true"></span></button>
-      <aside class="nora-chat-mini" aria-label="Последние сообщения" hidden><ol></ol></aside>
+      <button type="button" class="nora-chat-open" aria-controls="nora-chat" aria-expanded="false">${NoraI18n.html("Чат")}<span hidden aria-hidden="true"></span></button>
+      <aside class="nora-chat-mini" aria-label="${NoraI18n.html("Последние сообщения")}" hidden><ol></ol></aside>
       <dialog class="nora-chat" id="nora-chat" aria-labelledby="nora-chat-title">
         <div class="nora-chat-panel">
           <div class="nora-chat-top">
-            <h2 id="nora-chat-title">Лобби</h2>
+            <h2 id="nora-chat-title">${NoraI18n.html("Лобби")}</h2>
             <div class="nora-chat-tools">
-              <button type="button" class="nora-chat-telegram" aria-label="Связь с Telegram"
-                aria-pressed="false" title="Связь с Telegram"></button>
-            <button type="button" class="nora-chat-close" aria-label="Закрыть чат" autofocus>×</button></div>
+              <button type="button" class="nora-chat-telegram" aria-label="${NoraI18n.html("Связь с Telegram")}"
+                aria-pressed="false" title="${NoraI18n.html("Связь с Telegram")}"></button>
+            <button type="button" class="nora-chat-close" aria-label="${NoraI18n.html("Закрыть чат")}" autofocus>×</button></div>
           </div>
-          <div class="nora-chat-feed" role="log" aria-label="Сообщения" tabindex="0">
-            <ol></ol><section class="nora-visit-messages" aria-label="Личные сообщения системы"></section><div class="nora-chat-empty">Загрузка сообщений…</div>
+          <div class="nora-chat-feed" role="log" aria-label="${NoraI18n.html("Сообщения")}" tabindex="0">
+            <ol></ol><section class="nora-visit-messages" aria-label="${NoraI18n.html("Личные сообщения системы")}"></section><div class="nora-chat-empty">${NoraI18n.html("Загрузка сообщений…")}</div>
           </div>
           <form class="nora-chat-form">
             <div class="nora-chat-draft-quote" hidden>
-              <span></span><button type="button" aria-label="Отменить ответ">×</button>
+              <span></span><button type="button" aria-label="${NoraI18n.html("Отменить ответ")}">×</button>
             </div>
-            <div class="nora-chat-status" role="status">Только этот игровой чат.</div>
+            <div class="nora-chat-status" role="status">${NoraI18n.html("Только этот игровой чат.")}</div>
             <div class="nora-chat-compose">
-              <input name="message" aria-label="Сообщение" placeholder="Написать в чат…" maxlength="240" required autocomplete="off" enterkeyhint="send" disabled>
-              <button type="submit" disabled>Отправить</button>
+              <input name="message" aria-label="${NoraI18n.html("Сообщение")}" placeholder="${NoraI18n.html("Написать в чат…")}" maxlength="240" required autocomplete="off" enterkeyhint="send" disabled>
+              <button type="submit" disabled>${NoraI18n.html("Отправить")}</button>
             </div>
           </form>
         </div>
@@ -117,20 +117,20 @@ window.NoraChat = (() => {
     let previewLines = [], visitPreview = null;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let shownStatus = '', currentRoom = location(), telegram = false, view = 0, replyTo = null;
-    title.textContent = roomNames[currentRoom] || 'Нора · '+currentRoom.slice(7);
+    title.textContent = roomNames[currentRoom] || NoraI18n.t("Нора · ")+currentRoom.slice(7);
     document.fonts?.load('15px NoraCraft').catch(() => {});
 
     const system=dialog.querySelector('.nora-visit-messages');
     let visitRevision='';
-    const visitText=n=>n.other+({request:' стучится в дверь твоей норы.',invite:' приглашает тебя в свою нору.',
-      allowed:' открыл для тебя нору.',declined:' отклонил запрос на визит.'}[n.kind]||'');
+    const visitText=n=>n.other+({request:NoraI18n.t(" стучится в дверь твоей норы."),invite:NoraI18n.t(" приглашает тебя в свою нору."),
+      allowed:NoraI18n.t(" открыл для тебя нору."),declined:NoraI18n.t(" отклонил запрос на визит.")}[n.kind]||'');
     function visits(notes){
       const revision=notes.map(n=>n.id).join();
       if(visitRevision===revision)return;
       const fresh=notes.filter(n=>!system.querySelector('[data-note="'+n.id+'"]')).at(-1);
       visitRevision=revision;system.replaceChildren();
       if(fresh&&!dialog.open){
-        dot.hidden=false;opener.setAttribute('aria-label','Чат · личное сообщение от Норы');
+        dot.hidden=false;opener.setAttribute('aria-label',NoraI18n.t("Чат · личное сообщение от Норы"));
         visitPreview={id:fresh.id,line:{author:'[NORA]',text:visitText(fresh),color:7},until:Date.now()+12000};
       }
       if(!notes.some(n=>n.id===visitPreview?.id))visitPreview=null;
@@ -140,9 +140,9 @@ window.NoraChat = (() => {
         const name=document.createElement('strong');name.textContent='[NORA]';
         const msg=document.createElement('p');msg.textContent=visitText(n);
         card.append(name,msg);system.append(card);
-        const options=n.kind==='request'?[['accept','Впустить'],['decline','Отказать']]:
-          n.kind==='invite'?[['accept','В гости'],['decline','Отказать']]:
-          n.kind==='allowed'?[['enter','Войти в нору'],['dismiss','Закрыть']]:[['dismiss','Закрыть']];
+        const options=n.kind==='request'?[['accept',NoraI18n.t("Впустить")],['decline',NoraI18n.t("Отказать")]]:
+          n.kind==='invite'?[['accept',NoraI18n.t("В гости")],['decline',NoraI18n.t("Отказать")]]:
+          n.kind==='allowed'?[['enter',NoraI18n.t("Войти в нору")],['dismiss',NoraI18n.t("Закрыть")]]:[['dismiss',NoraI18n.t("Закрыть")]];
         for(const [action,label] of options){
           const b=document.createElement('button');b.textContent=label;
           b.onclick=async()=>{
@@ -159,7 +159,7 @@ window.NoraChat = (() => {
     function updateForm() {
       input.disabled = !online;
       send.disabled = !online || sending || !input.value.trim();
-      const message = shownStatus || (telegram ? 'В игре и в группе Telegram.' : 'Только этот игровой чат.');
+      const message = shownStatus || (telegram ? NoraI18n.t("В игре и в группе Telegram.") : NoraI18n.t("Только этот игровой чат."));
       if (status.textContent !== message) status.textContent = message;
     }
     function selectReply(line) {
@@ -174,11 +174,11 @@ window.NoraChat = (() => {
       revision = '';
       online = false;
       shownStatus = '';
-      title.textContent = roomNames[currentRoom] || 'Нора · '+currentRoom.slice(7);
+      title.textContent = roomNames[currentRoom] || NoraI18n.t("Нора · ")+currentRoom.slice(7);
       dot.hidden = true;
       updateFeed([]);
       for (const key of bubbles.keys()) clearBubble(key);
-      empty.textContent = 'Подключаем чат…';
+      empty.textContent = NoraI18n.t("Подключаем чат…");
       updateForm();
       void poll();
     }
@@ -209,7 +209,7 @@ window.NoraChat = (() => {
       dialog.showModal();
       close.focus({preventScroll:true});
       opener.setAttribute('aria-expanded', 'true');
-      opener.setAttribute('aria-label','Чат');
+      opener.setAttribute('aria-label',NoraI18n.t("Чат"));
       dot.hidden = true;
       feed.scrollTop = feed.scrollHeight;
       if (!online) void poll();
@@ -230,7 +230,7 @@ window.NoraChat = (() => {
       if (!online || sending || !text) return;
       sending = true;
       const target = replyTo, sentView = view;
-      shownStatus = 'Отправляем…';
+      shownStatus = NoraI18n.t("Отправляем…");
       updateForm();
       try {
         await api('nora-game/chat', {text, location:currentRoom, telegram, replyTo:target?.id}, signal(15000));
@@ -241,7 +241,7 @@ window.NoraChat = (() => {
           void poll();
         }
       } catch (error) {
-        if (view === sentView) shownStatus = error.message || 'Не удалось отправить сообщение.';
+        if (view === sentView) shownStatus = error.message || NoraI18n.t("Не удалось отправить сообщение.");
       } finally {
         sending = false;
         if (!stopped) updateForm();
@@ -291,7 +291,7 @@ window.NoraChat = (() => {
       const time = document.createElement('time');
       const message = document.createElement('p');
       const date = new Date(line.time);
-      origin.textContent = line.source === 'game' ? 'Игра' : 'Telegram';
+      origin.textContent = line.source === 'game' ? NoraI18n.t("Игра") : 'Telegram';
       origin.dataset.source = line.source;
       time.dateTime = date.toISOString();
       time.textContent = clock.format(date);
@@ -300,8 +300,8 @@ window.NoraChat = (() => {
       const reply = document.createElement('button');
       reply.type = 'button';
       reply.className = 'nora-chat-reply';
-      reply.setAttribute('aria-label', 'Ответить · ' + line.author);
-      reply.title = 'Ответить';
+      reply.setAttribute('aria-label', NoraI18n.t("Ответить · ") + line.author);
+      reply.title = NoraI18n.t("Ответить");
       reply.onclick = () => { selectReply(line); input.focus(); };
       meta.append(author, origin, time, reply);
       row.append(meta);
@@ -344,7 +344,7 @@ window.NoraChat = (() => {
       if (bottom) feed.scrollTop = feed.scrollHeight;
       else if (first?.isConnected) feed.scrollTop = first.offsetTop - offset;
       empty.hidden = rows.size > 0 || !!system.children.length;
-      empty.textContent = 'Здесь появятся сообщения этого чата.';
+      empty.textContent = NoraI18n.t("Здесь появятся сообщения этого чата.");
     }
 
     function clearBubble(key) {
@@ -381,7 +381,7 @@ window.NoraChat = (() => {
         for (const key of bubbles.keys()) clearBubble(key);
         dot.hidden = true;
         empty.textContent = '';
-        shownStatus = error.message || 'Связь с чатом потеряна.';
+        shownStatus = error.message || NoraI18n.t("Связь с чатом потеряна.");
       } finally {
         polling = false;
         pollRequest = null;

@@ -102,7 +102,7 @@ window.NoraWorld = (() => {
     const interval=80, playbackDelay=150, maxPrediction=65, correctionSpeed=4.8;
     let session=null,pending=null,next=0,clockOffset=null,lastReply=0,failures=0;
     let socket=null,retrySocket=0,room=null;
-    const roomLabel=()=>room==='cinema'?'КИНОТЕАТР':room?.startsWith('burrow:')?'НОРА · '+room.slice(7):room?'ВОСПОМИНАНИЕ':lobbyLabel();
+    const roomLabel=()=>room==='cinema'?NoraI18n.t("КИНОТЕАТР"):room?.startsWith('burrow:')?NoraI18n.t("НОРА · ")+room.slice(7):room?NoraI18n.t("ВОСПОМИНАНИЕ"):lobbyLabel();
     function clearPeers(){for(const nickname of peers.keys())remove(nickname);}
     function setRoom(nextRoom){
       if(room===nextRoom)return;
@@ -193,7 +193,7 @@ window.NoraWorld = (() => {
     function update(time,dt,grounded,sprinting,boosting,interaction,cinema){
       if(!session){
         session=crypto.randomUUID();next=0;clockOffset=null;lastReply=time;failures=0;
-        status.textContent=roomLabel()+' · ПОДКЛЮЧЕНИЕ';
+        status.textContent=roomLabel()+NoraI18n.t(" · ПОДКЛЮЧЕНИЕ");
       }
       connect(time);
       if(socket&&time-lastReply>2500){socket.close();socket=null;retrySocket=time+30000;next=0;}
@@ -219,7 +219,7 @@ window.NoraWorld = (() => {
             if(session!==sentSession)return;
             failures++;
             next=performance.now()+Math.min(1000,interval*2**Math.min(failures,4));
-            if(failures>=2)status.textContent=roomLabel()+' · СВЯЗЬ ПОТЕРЯНА';
+            if(failures>=2)status.textContent=roomLabel()+NoraI18n.t(" · СВЯЗЬ ПОТЕРЯНА");
           });
           const sent=pending;
           sent.finally(()=>{if(pending===sent)pending=null;});
@@ -369,7 +369,7 @@ window.NoraWorld = (() => {
     const character=window.NoraVoxel.createCharacter(T,outfit), player=character.group;
     player.scale.setScalar(.32);player.position.set(lobbySpawn.x,.017,lobbySpawn.z);player.rotation.y=Math.PI;scene.add(player);
     const locationLabel=root.querySelector('.nora-world-bar small');
-    const lobbyLabel=()=>trail&&player.position.x>trail.start?'ЛЕСНАЯ ДОРОЖКА':'ЛОББИ';
+    const lobbyLabel=()=>trail&&player.position.x>trail.start?NoraI18n.t("ЛЕСНАЯ ДОРОЖКА"):NoraI18n.t("ЛОББИ");
     const lobby=lobbyPlayers(T,scene,player,locationLabel,receiveChallenge,payload=>cinema?.receive(payload),stamp=>furnishing?.burst(stamp),lobbyLabel);
     // Soft contact patches without costly real-time shadow maps.
     const shadowCanvas=document.createElement('canvas');shadowCanvas.width=64;shadowCanvas.height=64;
@@ -385,8 +385,8 @@ window.NoraWorld = (() => {
     let pov=Number(root.dataset.pov ?? 100), actualDistance=5.7,cameraRelease=0,cameraSpeed=0,opacity=1,jumpHeight=0,jumpVelocity=0,view=0,velocityX=0,velocityZ=0,sprintTouch=false;
     let lobbyView=0, cinemaDistance=0;
     const viewButton=root.querySelector('.nora-world-view');
-    const views=['За спиной','От первого лица','Селфи'];
-    function syncView(){viewButton.setAttribute('aria-label','Вид: '+views[view]+'. Сменить вид');viewButton.querySelector('small').textContent=views[view];}
+    const views=[NoraI18n.t("За спиной"),NoraI18n.t("От первого лица"),NoraI18n.t("Селфи")];
+    function syncView(){viewButton.setAttribute('aria-label',NoraI18n.t("Вид: ")+views[view]+NoraI18n.t(". Сменить вид"));viewButton.querySelector('small').textContent=views[view];}
     syncView();
     const sprintButton=root.querySelector('.nora-world-sprint');
     const keys=new Set(), jumpButton=root.querySelector('.nora-world-jump');
@@ -529,7 +529,7 @@ window.NoraWorld = (() => {
       const canToggle=inLobby?records?.canToggleLobby():!records||records.hasRecord();
       if(canToggle){
         const playing=inLobby?records.lobbyPlaying():recordPlaying;
-        options.push({id:'toggle',text:playing?'Выключить':'Включить',run:()=>{
+        options.push({id:'toggle',text:playing?NoraI18n.t("Выключить"):NoraI18n.t("Включить"),run:()=>{
           if(inLobby)records.toggleLobby();
           else{recordPlaying=!recordPlaying;audioPlaying=recordPlaying;sounds?.playing(recordPlaying);}
         }});
@@ -547,7 +547,7 @@ window.NoraWorld = (() => {
     }
     function receiveChallenge(state){
       if(!inChallenge)return;
-      locationLabel.textContent='ВОСПОМИНАНИЕ';
+      locationLabel.textContent=NoraI18n.t("ВОСПОМИНАНИЕ");
       const previous=challengeState;
       if(interaction&&state.action>=interaction.serial)interaction=null;
       if(state.reset&&(!previous?.reset||previous.checkpoint!==state.checkpoint))respawnChallenge(state.checkpoint);
@@ -559,7 +559,7 @@ window.NoraWorld = (() => {
       }
       const [title,hint]=observatory.chapters[Math.min(state.checkpoint,3)];
       const heading=state.checkpoint===1?`${title} · ${state.bells}/3`:title;
-      const message=state.hold!==null?`Круг удерживает тьму. Осталось ${state.hold} с.`:state.notice||hint;
+      const message=state.hold!==null?`${NoraI18n.t("Круг удерживает тьму. Осталось")} ${state.hold} ${NoraI18n.t("с.")}`:state.notice||hint;
       if(challengeProgress.textContent!==heading)challengeProgress.textContent=heading;
       if(challengeHint.textContent!==message)challengeHint.textContent=message;
     }
@@ -570,8 +570,8 @@ window.NoraWorld = (() => {
       if(scenery.cinemaHall)scenery.cinemaHall.visible=inCinema;
       if(challenge)challenge.course.visible=inChallenge;
       landscape.visible=sun.visible=moon.visible=groundShadows.visible=home;
-      locationLabel.textContent=inCinema?'КИНОТЕАТР':inChallenge?'ВОСПОМИНАНИЕ':inside?(burrow?.host()?'НОРА · '+burrow.host():'ТАВЕРНА'):inLobby?lobbyLabel():'ЛЕСНАЯ ПОЛЯНА';
-      canvas.setAttribute('aria-label',inCinema?'Зал кинотеатра Норы':inChallenge?observatory.title:inside?'Интерьер Норы':inLobby?'Общее лобби и лесная дорожка Норы':'Стартовый остров Норы. Обзор поворачивается пальцем');
+      locationLabel.textContent=inCinema?NoraI18n.t("КИНОТЕАТР"):inChallenge?NoraI18n.t("ВОСПОМИНАНИЕ"):inside?(burrow?.host()?NoraI18n.t("НОРА · ")+burrow.host():NoraI18n.t("ТАВЕРНА")):inLobby?lobbyLabel():NoraI18n.t("ЛЕСНАЯ ПОЛЯНА");
+      canvas.setAttribute('aria-label',inCinema?NoraI18n.t("Зал кинотеатра Норы"):inChallenge?observatory.title:inside?NoraI18n.t("Интерьер Норы"):inLobby?NoraI18n.t("Общее лобби и лесная дорожка Норы"):NoraI18n.t("Стартовый остров Норы. Обзор поворачивается пальцем"));
       lightingAt=-Infinity;updateLighting(Date.now());
       resize();
     }
@@ -584,7 +584,7 @@ window.NoraWorld = (() => {
       if(entering){
         challenge.checkpoint(0);
         respawnChallenge(0);
-        challengeProgress.textContent=observatory.chapters[0][0];challengeHint.textContent='Воспоминание проступает…';
+        challengeProgress.textContent=observatory.chapters[0][0];challengeHint.textContent=NoraI18n.t("Воспоминание проступает…");
       }else{
         player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
         player.rotation.y=Math.PI;yaw=targetYaw=0;
@@ -599,7 +599,7 @@ window.NoraWorld = (() => {
       transition={entering,reward,elapsed:0,switched:false};
       veil.dataset.phase=entering?'enter':'return';
       veil.style.opacity='0';
-      veil.querySelector('span').textContent=entering?'Воспоминание':'Ты снова в Норе';
+      veil.querySelector('span').textContent=entering?NoraI18n.t("Воспоминание"):NoraI18n.t("Ты снова в Норе");
       resultLabel.hidden=true;resultTime=0;
       if(entering)sounds?.memory?.(true);
       reset();
@@ -619,7 +619,7 @@ window.NoraWorld = (() => {
       const {reward}=transition;
       transition=null;delete veil.dataset.phase;
       if(reward!==null){
-        resultLabel.textContent=reward>0?`Воспоминание пройдено · +${reward} 🍪`:'Воспоминание пройдено. Награда уже в кошельке.';
+        resultLabel.textContent=reward>0?`${NoraI18n.t("Воспоминание пройдено · +")}${reward} 🍪`:NoraI18n.t("Воспоминание пройдено. Награда уже в кошельке.");
         resultLabel.hidden=false;resultTime=6;
       }
     }
@@ -662,12 +662,12 @@ window.NoraWorld = (() => {
       cinemaLayout&&gateTarget(cinemaModule.title,cinemaLayout.portal),
       challenge&&gateTarget(observatory.title,challenge.entrance),
     ].filter(Boolean);
-    const islandPortal=gateTarget('ЛОББИ',{x:0,z:portalZ.home},1);
-    const tavernEntry={text:'Войти в таверну',box:aimBounds(0,tavernOffset+2.47,.76,2.18,.18)};
-    const tavernExit={text:'Выйти из таверны',box:aimBounds(0,4.99,.8,2.25,.2)};
-    const cinemaExit=cinemaLayout&&gateTarget('В лобби',cinemaLayout.exit);
-    const cinemaSeats=cinemaLayout?.seats.map(([x,z],seat)=>({text:'Сесть',seat,box:aimBounds(x,z,.56,1.15,.55)}));
-    const standUp={text:'Встать'};
+    const islandPortal=gateTarget(NoraI18n.t("ЛОББИ"),{x:0,z:portalZ.home},1);
+    const tavernEntry={text:NoraI18n.t("Войти в таверну"),box:aimBounds(0,tavernOffset+2.47,.76,2.18,.18)};
+    const tavernExit={text:NoraI18n.t("Выйти из таверны"),box:aimBounds(0,4.99,.8,2.25,.2)};
+    const cinemaExit=cinemaLayout&&gateTarget(NoraI18n.t("В лобби"),cinemaLayout.exit);
+    const cinemaSeats=cinemaLayout?.seats.map(([x,z],seat)=>({text:NoraI18n.t("Сесть"),seat,box:aimBounds(x,z,.56,1.15,.55)}));
+    const standUp={text:NoraI18n.t("Встать")};
     function nearbyAction(accepts){
       if(inputPaused()||jumpHeight>0||jumpVelocity!==0)return null;
       const {x,z}=player.position;
@@ -716,12 +716,12 @@ window.NoraWorld = (() => {
       }
       if(label===cinemaModule?.title){switchCinema(true);return;}
       if(inCinema){
-        if(label==='В лобби')switchCinema(false);
+        if(label===NoraI18n.t("В лобби"))switchCinema(false);
         else cinema.requestSeat(selected.seat??null);
         return;
       }
       if(label===observatory?.title){beginTransition(true);return;}
-      if(label==='ЛОББИ'){
+      if(label===NoraI18n.t("ЛОББИ")){
         inLobby=true;
         player.position.set(lobbySpawn.x,.017,lobbySpawn.z);
         player.rotation.y=Math.PI;yaw=targetYaw=0;
@@ -830,7 +830,7 @@ window.NoraWorld = (() => {
       return zone.cameraBoxes.some(bounds=>hitDistance(bounds)<distance-.1)?Infinity:distance;
     }
     function worldTarget(selected){
-      const text=burrow&&selected===tavernExit?'Выйти из норы':selected.text;
+      const text=burrow&&selected===tavernExit?NoraI18n.t("Выйти из норы"):selected.text;
       return {key:selected.id??selected.seat??text,text,actions:[{id:'use',text,run:()=>performAction(selected)}]};
     }
     function targetInSight(){
@@ -850,14 +850,14 @@ window.NoraWorld = (() => {
       if(burrow&&inLobby){
         const {x,z}=window.NoraBurrowModels.stall;
         if(Math.hypot(player.position.x-x,player.position.z-z)<3)
-          consider('merchant','Лавка у портала',aimBounds(x,z,1.32,2.9,1.1),[{id:'shop',text:'Торговать',run:()=>burrow.run(()=>burrow.open('shop'))}]);
+          consider('merchant',NoraI18n.t("Лавка у портала"),aimBounds(x,z,1.32,2.9,1.1),[{id:'shop',text:NoraI18n.t("Торговать"),run:()=>burrow.run(()=>burrow.open('shop'))}]);
         const door=jumpHeight===0&&jumpVelocity===0&&trail?.nearby(player.position);
         if(door){
           const {name,likes,cookies,messages}=door.house, owner=name===nickname;
-          const text=owner?'Войти':'Постучать';
+          const text=owner?NoraI18n.t("Войти"):NoraI18n.t("Постучать");
           const key='burrow-door:'+name;
-          const stats=likes===null?'Счётчики скрыты':`Лайки ${likes}, печеньки ${cookies}, сообщения ${messages}`;
-          const description=`${text} · Нора ${name}. ${stats}`;
+          const stats=likes===null?NoraI18n.t("Счётчики скрыты"):`${NoraI18n.t("Лайки")} ${likes}${NoraI18n.t(", печеньки")} ${cookies}${NoraI18n.t(", сообщения")} ${messages}`;
+          const description=`${text} ${NoraI18n.t("· Нора")} ${name}. ${stats}`;
           const actions=[{id:'door',text,run:()=>burrow.run(()=>owner?burrow.go(name):burrow.knock(name))}];
           consider(key,text,aimBounds(door.x,door.z+.2,.63,2.24,.16),actions);
           if(best?.key===key)best.description=description;
@@ -871,20 +871,20 @@ window.NoraWorld = (() => {
           if(Math.hypot(player.position.x-x,player.position.z-z)>2.65)continue;
           const mine=burrow.host()===nickname;
           let label,action;
-          if(id==='tv'){label='Телевизор';action=()=>cinema?.openPanel();}
-          if(id==='hifi'&&mine){label='Выбрать пластинку';action=()=>burrow.open('deck');}
-          if(id==='confetti'){label='Завести шкатулку';action=()=>burrow.burst();}
-          if(id==='lamp'&&mine){label=burrow.home().lamp?'Погасить фонарь':'Зажечь фонарь';action=()=>burrow.switchLamp();}
+          if(id==='tv'){label=NoraI18n.t("Телевизор");action=()=>cinema?.openPanel();}
+          if(id==='hifi'&&mine){label=NoraI18n.t("Выбрать пластинку");action=()=>burrow.open('deck');}
+          if(id==='confetti'){label=NoraI18n.t("Завести шкатулку");action=()=>burrow.burst();}
+          if(id==='lamp'&&mine){label=burrow.home().lamp?NoraI18n.t("Погасить фонарь"):NoraI18n.t("Зажечь фонарь");action=()=>burrow.switchLamp();}
           if(action)consider(id,label,aimBounds(x,z,(id==='tv'||id==='hifi')?.79:.52,(id==='tv'||id==='lamp')?1.86:.96,.53),[{id,text:label,run:()=>burrow.run(action)}]);
         }
       }
       const shelf=records?.shelfAction();
-      if(shelf)consider('record-shelf','Стеллаж',shelfBounds,[shelf]);
+      if(shelf)consider('record-shelf',NoraI18n.t("Стеллаж"),shelfBounds,[shelf]);
       if(inLobby||inside){
-        consider('record-player','Проигрыватель',inLobby?lobbyRecordBounds:recordBounds,recordOptions());
+        consider('record-player',NoraI18n.t("Проигрыватель"),inLobby?lobbyRecordBounds:recordBounds,recordOptions());
       }
       const petPosition=companion.aimPosition();
-      if(petPosition)consider('pet','Питомец',aimBounds(petPosition.x,petPosition.z,.51,.92,.51),companion.actions);
+      if(petPosition)consider('pet',NoraI18n.t("Питомец"),aimBounds(petPosition.x,petPosition.z,.51,.92,.51),companion.actions);
       return best||doorTarget;
     }
     function closeAimChoices(){
@@ -1106,7 +1106,7 @@ window.NoraWorld = (() => {
       raf=requestAnimationFrame(tick);
     }tick(0);
     function stop(){if(disposed)return;disposed=true;controls.abort();releaseMouse();lobby.leave();sounds?.stop();cancelAnimationFrame(raf);observer.disconnect();resetStick();burrow?.dispose();furnishing?.dispose();cinema?.dispose();chat?.dispose();records?.dispose();companion.dispose();character.dispose();wind.dispose();windMaterial.dispose();atmosphere.dispose();challenge?.dispose();trail?.dispose();scenery.dispose();landscape.dispose();groundShadows.dispose();geometry.dispose();material.dispose();sunMaterial.dispose();moonMaterial.dispose();shadowTexture.dispose();shadowGeo.dispose();shadowMat.dispose();renderer.dispose();}
-    on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent='Графика остановлена. Закрой и открой игру снова.';});
+    on(canvas,'webglcontextlost',e=>{e.preventDefault();stop();root.querySelector('.nora-world-help').textContent=NoraI18n.t("Графика остановлена. Закрой и открой игру снова.");});
     return stop;
   }
   return {mount,move,cameraDistance,timeOfDay,createAtmosphere,tavernAcoustics};

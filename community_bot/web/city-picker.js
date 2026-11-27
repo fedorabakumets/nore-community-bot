@@ -7,7 +7,7 @@ window.NoraCity = (() => {
     const list = document.createElement('div');
     list.className = 'city-suggestions';
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'Подходящие города');
+    list.setAttribute('aria-label', NoraI18n.t("Подходящие города"));
     list.hidden = true;
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('aria-autocomplete', 'list');
@@ -15,7 +15,7 @@ window.NoraCity = (() => {
     input.after(list);
     const feedback = document.createElement('small');
     feedback.className = 'city-picker-feedback';
-    feedback.textContent = 'Начни вводить город и выбери подходящий вариант.';
+    feedback.textContent = NoraI18n.t("Начни вводить город и выбери подходящий вариант.");
     list.after(feedback);
     let seq = 0;
     let timer;
@@ -24,7 +24,7 @@ window.NoraCity = (() => {
       if (!items.length) {
         const empty = document.createElement('p');
         empty.className = 'sub';
-        empty.textContent = 'Совпадений нет. Попробуй другое написание.';
+        empty.textContent = NoraI18n.t("Совпадений нет. Попробуй другое написание.");
         list.append(empty);
       }
       for (const city of items) {
@@ -44,7 +44,7 @@ window.NoraCity = (() => {
           input.value = city.name;
           input.dataset.cityId = city.id;
           input.setAttribute('aria-expanded', 'false');
-          feedback.textContent = '✓ Выбран город: ' + city.name;
+          feedback.textContent = NoraI18n.t("✓ Выбран город: ") + city.name;
           list.hidden = true;
         });
         list.append(button);
@@ -61,7 +61,7 @@ window.NoraCity = (() => {
       } catch (err) {
         if (thisSeq !== seq || !form.isConnected) return;
         list.hidden = true;
-        feedback.textContent = err.message || 'Не удалось загрузить города';
+        feedback.textContent = err.message || NoraI18n.t("Не удалось загрузить города");
       }
     }
     input.addEventListener('input', () => {
@@ -69,7 +69,7 @@ window.NoraCity = (() => {
       list.hidden = true;
       input.setAttribute('aria-expanded', 'false');
       input.dataset.cityId = '';
-      feedback.textContent = 'Выбери город из подсказок.';
+      feedback.textContent = NoraI18n.t("Выбери город из подсказок.");
       clearTimeout(timer);
       if (input.value.trim().length === 1) {
         list.hidden = true;
@@ -105,15 +105,15 @@ window.NoraCity = (() => {
       if (!form.isConnected) { controller.abort(); observer.disconnect(); clearTimeout(timer); }
     });
     observer.observe(form.closest('dialog') || document.querySelector('#app') || document.body, {childList:true, subtree:true});
-    if (original) feedback.textContent = 'Изменяешь город? Выбери новое значение из подсказок.';
+    if (original) feedback.textContent = NoraI18n.t("Изменяешь город? Выбери новое значение из подсказок.");
   }
   function choice(form, original = '') {
     const input = form?.querySelector('input[name="city"]');
-    if (!input) throw Error('Поле города не найдено');
+    if (!input) throw Error(NoraI18n.t("Поле города не найдено"));
     if (input.dataset.cityId) return input.dataset.cityId;
     if (original && original === input.value.trim()) return null;
     input.focus();
-    throw Error('Выбери настоящий город из предложенного списка');
+    throw Error(NoraI18n.t("Выбери настоящий город из предложенного списка"));
   }
   return {mount, choice};
 })();

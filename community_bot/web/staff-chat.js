@@ -38,16 +38,16 @@ window.NoraStaffChat = (() => {
   const maxAlbumItems = 6;
   const quickEmoji = ['😂','❤️','🔥','👍','🥲','👀','🍪','🎧','🤝','💀'];
   const mediaLabels = {
-    photo: 'Фото', video: 'Видео', animation: 'GIF',
-    voice: 'Голосовое', video_note: 'Кружочек',
-    audio: 'Аудио', document: 'Документ',
-    sticker: 'Стикер', poll: 'Опрос',
-    location: 'Геопозиция', contact: 'Контакт'
+    photo: NoraI18n.t("Фото"), video: NoraI18n.t("Видео"), animation: 'GIF',
+    voice: NoraI18n.t("Голосовое"), video_note: NoraI18n.t("Кружочек"),
+    audio: NoraI18n.t("Аудио"), document: NoraI18n.t("Документ"),
+    sticker: NoraI18n.t("Стикер"), poll: NoraI18n.t("Опрос"),
+    location: NoraI18n.t("Геопозиция"), contact: NoraI18n.t("Контакт")
   };
   const time = value => {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? '' :
-      d.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'});
+      d.toLocaleTimeString(NoraI18n.locale, {hour:'2-digit',minute:'2-digit'});
   };
   const mediaTile = m => {
     if(!m.media_type)return '';
@@ -55,7 +55,7 @@ window.NoraStaffChat = (() => {
     const type = esc(m.media_type);
     const playable = ['photo','sticker','video','animation','voice','video_note','audio'].includes(m.media_type);
     if(!playable || !m.has_media)
-      return `<div class="staff-chat-media"><span>📎 ${esc(mediaLabels[m.media_type] || 'Вложение')}</span></div>`;
+      return `<div class="staff-chat-media"><span>📎 ${esc(mediaLabels[m.media_type] || NoraI18n.t("Вложение"))}</span></div>`;
     const autoplay = ['photo','sticker'].includes(m.media_type) || (m.has_thumbnail && ['video','animation','video_note'].includes(m.media_type));
     const symbol = {photo:'▧',sticker:'◈',video:'▶',animation:'▶',video_note:'▶',voice:'♫',audio:'♫'}[m.media_type] || '▷';
     return `<div class="staff-chat-asset" data-chat-asset="${id}" data-chat-type="${type}" data-chat-thumb="${m.has_thumbnail?'1':'0'}" data-chat-auto="${autoplay?'1':'0'}" data-chat-link="${esc(m.link||'')}">
@@ -76,17 +76,17 @@ window.NoraStaffChat = (() => {
       if(type==='text')return `<p class="staff-rich-text">${text}</p>`;
       if(type==='details')return `<p class="staff-rich-detail">${text}</p>`;
       if(type==='photo'){
-        if(!Number.isInteger(block.asset))return '<div class="staff-rich-placeholder">Обложка в Telegram</div>';
+        if(!Number.isInteger(block.asset))return ("<div class=\"staff-rich-placeholder\">" + NoraI18n.html("Обложка в Telegram") + "</div>");
         return `<div class="staff-rich-cover" data-rich-cover="${id}" data-rich-part="${block.asset}">
-          <span>Загружаем обложку…</span></div>`;
+          <span>${NoraI18n.html("Загружаем обложку…")}</span></div>`;
       }
       if(type==='audio'){
-        const title=esc(block.title||'Аудиотрек');
+        const title=esc(block.title||NoraI18n.t("Аудиотрек"));
         const performer=esc(block.performer||'');
         const duration=Number(block.duration)>0?`${Math.floor(Number(block.duration)/60)}:${String(Number(block.duration)%60).padStart(2,'0')}`:'';
         const playable=Number.isInteger(block.asset);
         return `<div class="staff-rich-track">
-          <button type="button" class="staff-rich-track-start" data-rich-play="${id}" data-rich-part="${playable?block.asset:'-1'}" ${playable?'':'disabled'} aria-label="Воспроизвести ${title}">▶</button>
+          <button type="button" class="staff-rich-track-start" data-rich-play="${id}" data-rich-part="${playable?block.asset:'-1'}" ${playable?'':'disabled'} aria-label="${NoraI18n.html("Воспроизвести")} ${title}">▶</button>
           <div class="staff-rich-track-copy"><strong>${title}</strong>${performer?`<span>${performer}</span>`:''}</div>
           ${duration?`<time>${duration}</time>`:''}
           <div class="staff-rich-track-player" hidden></div>
@@ -94,16 +94,16 @@ window.NoraStaffChat = (() => {
       }
       if(type==='buttons'){
         return `<div class="staff-rich-buttons">${(block.buttons||[]).slice(0,12).map(btn=>{
-          const label=esc(btn.text||'Открыть');
+          const label=esc(btn.text||NoraI18n.t("Открыть"));
           const url=typeof btn.url==='string' && /^https?:\/\//i.test(btn.url)?esc(btn.url):'';
-          return url?`<a href="${url}" data-chat-telegram target="_blank" rel="noopener noreferrer">${label}</a>`:`<span>${label} · в Telegram</span>`;
+          return url?`<a href="${url}" data-chat-telegram target="_blank" rel="noopener noreferrer">${label}</a>`:`<span>${label} ${NoraI18n.html("· в Telegram")}</span>`;
         }).join('')}</div>`;
       }
       if(['video','animation','voice_note','document'].includes(type))
-        return `<div class="staff-rich-placeholder">📎 ${esc(mediaLabels[type]||'Медиа')} · ${m.link?'<span>Открыть в Telegram ↗</span>':''}</div>`;
+        return `<div class="staff-rich-placeholder">📎 ${esc(mediaLabels[type]||NoraI18n.t("Медиа"))} · ${m.link?("<span>" + NoraI18n.html("Открыть в Telegram ↗") + "</span>"):''}</div>`;
       return '';
     }).join('');
-    return `<section class="staff-rich-card" aria-label="${nAudio?'Музыкальная подборка':'Rich-сообщение'}">
+    return `<section class="staff-rich-card" aria-label="${nAudio?NoraI18n.t("Музыкальная подборка"):NoraI18n.t("Rich-сообщение")}">
       ${parts}
     </section>`;
   };
@@ -128,10 +128,10 @@ window.NoraStaffChat = (() => {
     .filter(item=>reactionSet.includes(item.emoji) && Number(item.count)>0)
     .map(item=>`<button type="button" class="staff-chat-react-chip${item.mine?' is-mine':''}"
        data-chat-react="${id}" data-chat-emoji-value="${esc(item.emoji)}"
-       aria-pressed="${item.mine?'true':'false'}" aria-label="${esc(item.emoji)}: ${Number(item.count)} реакций">${esc(item.emoji)} <span>${Math.max(0,Number(item.count)||0)}</span></button>`)
+       aria-pressed="${item.mine?'true':'false'}" aria-label="${esc(item.emoji)}: ${Number(item.count)} ${NoraI18n.html("реакций")}">${esc(item.emoji)} <span>${Math.max(0,Number(item.count)||0)}</span></button>`)
     .join('');
-  const reactionPicker = id => `<div class="staff-chat-reaction-picker" data-chat-picker hidden role="group" aria-label="Реакции Норы">
-    ${reactionSet.map(emoji=>`<button type="button" data-chat-react="${id}" data-chat-emoji-value="${esc(emoji)}" title="Реакция ${esc(emoji)}">${esc(emoji)}</button>`).join('')}
+  const reactionPicker = id => `<div class="staff-chat-reaction-picker" data-chat-picker hidden role="group" aria-label="${NoraI18n.html("Реакции Норы")}">
+    ${reactionSet.map(emoji=>`<button type="button" data-chat-react="${id}" data-chat-emoji-value="${esc(emoji)}" title="${NoraI18n.html("Реакция")} ${esc(emoji)}">${esc(emoji)}</button>`).join('')}
   </div>`;
 
   const line = m => {
@@ -140,34 +140,34 @@ window.NoraStaffChat = (() => {
     const day = Number.isNaN(sent.getTime()) ? '' :
       [sent.getFullYear(),String(sent.getMonth()+1).padStart(2,'0'),String(sent.getDate()).padStart(2,'0')].join('-');
     const dayLabel = Number.isNaN(sent.getTime()) ? '' :
-      sent.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-    const name = esc(m.name || 'Участник');
+      sent.toLocaleDateString(NoraI18n.locale,{day:'numeric',month:'long',year:'numeric'});
+    const name = esc(m.name || NoraI18n.t("Участник"));
     const initial = esc((m.name || '?').match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() || '?');
     const who = Number(m.user_id) > 0
       ? `<button class="staff-chat-author" data-person-view="${m.user_id}" type="button">${name}</button>`
       : `<span class="staff-chat-author">${name}</span>`;
     const avatar = `<span class="staff-chat-avatar" ${Number(m.user_id) > 0 ? `data-person-avatar="${m.user_id}" ${!m.has_avatar?'data-avatar-unavailable':''}` : ''}>${initial}</span>`;
     const quote = m.reply_to_id ? `<button class="staff-chat-reply" type="button" data-chat-reply="${Number(m.reply_to_id)}" data-chat-link="${esc(m.reply_link||'')}">
-        <b>${esc(m.reply_name || 'Сообщение')}</b><span>${esc((m.reply_text || mediaLabels[m.reply_media_type] || 'Сообщение').slice(0,90))}</span>
+        <b>${esc(m.reply_name || NoraI18n.t("Сообщение"))}</b><span>${esc((m.reply_text || mediaLabels[m.reply_media_type] || NoraI18n.t("Сообщение")).slice(0,90))}</span>
       </button>` : '';
     const body = m.text ? `<div class="staff-chat-text">${esc(m.text)}</div>` : '';
     const media = m.album?.length>1
-      ? `<div class="staff-chat-album-grid" aria-label="Альбом из ${m.album.length} файлов">${m.album.map(mediaTile).join('')}</div>`
+      ? `<div class="staff-chat-album-grid" aria-label="${NoraI18n.html("Альбом из")} ${m.album.length} ${NoraI18n.html("файлов")}">${m.album.map(mediaTile).join('')}</div>`
       : mediaTile(m);
-    const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="Открыть в Telegram">↗</a>` : '';
-    const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || 'Rich-сообщение').slice(0,140))}" aria-label="Ответить на сообщение">↩</button>`;
-    const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="Скрыть сообщение из зеркала" title="Скрыть из зеркала">×</button>`;
-    const more = `<button type="button" class="staff-chat-more" data-chat-more="${id}" aria-label="Действия с сообщением" aria-expanded="false" title="Действия">•••</button>`;
+    const link = m.link ? `<a class="staff-chat-original" href="${esc(m.link)}" target="_blank" rel="noopener noreferrer" aria-label="${NoraI18n.html("Открыть в Telegram")}">↗</a>` : '';
+    const replyButton = `<button class="staff-chat-answer" type="button" data-chat-answer="${id}" data-chat-name="${name}" data-chat-preview="${esc((m.text || (m.media_type ? mediaLabels[m.media_type] : '') || NoraI18n.t("Rich-сообщение")).slice(0,140))}" aria-label="${NoraI18n.html("Ответить на сообщение")}">↩</button>`;
+    const hideButton = `<button class="staff-chat-hide" type="button" data-chat-hide="${id}" aria-label="${NoraI18n.html("Скрыть сообщение из зеркала")}" title="${NoraI18n.html("Скрыть из зеркала")}">×</button>`;
+    const more = `<button type="button" class="staff-chat-more" data-chat-more="${id}" aria-label="${NoraI18n.html("Действия с сообщением")}" aria-expanded="false" title="${NoraI18n.html("Действия")}">•••</button>`;
     const actions = `<div class="staff-chat-actions" data-chat-menu hidden>
-      <button type="button" class="staff-chat-react-open" data-chat-react-open="${id}" aria-label="Поставить реакцию" title="Реакция">☺</button>
+      <button type="button" class="staff-chat-react-open" data-chat-react-open="${id}" aria-label="${NoraI18n.html("Поставить реакцию")}" title="${NoraI18n.html("Реакция")}">☺</button>
       ${replyButton}
-      <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="Копировать текст" title="Копировать">⧉</button>
-      <button type="button" class="staff-chat-mod-trigger" data-chat-mod-message="${id}" title="Модерация" aria-label="Модерация сообщения">🛡</button>
-      <button type="button" class="staff-chat-admin-message-trigger" data-chat-admin-message="${id}" title="Админка сообщения" aria-label="Админка сообщения">⚙</button>
+      <button type="button" class="staff-chat-copy" data-chat-copy="${id}" aria-label="${NoraI18n.html("Копировать текст")}" title="${NoraI18n.html("Копировать")}">⧉</button>
+      <button type="button" class="staff-chat-mod-trigger" data-chat-mod-message="${id}" title="${NoraI18n.html("Модерация")}" aria-label="${NoraI18n.html("Модерация сообщения")}">🛡</button>
+      <button type="button" class="staff-chat-admin-message-trigger" data-chat-admin-message="${id}" title="${NoraI18n.html("Админка сообщения")}" aria-label="${NoraI18n.html("Админка сообщения")}">⚙</button>
       ${link}${hideButton}</div>`;
     return `<article class="staff-chat-message" data-message-id="${id}" data-chat-user-id="${Number(m.user_id)||0}" data-chat-day="${day}" data-chat-date="${esc(dayLabel)}">
        ${avatar}<div class="staff-chat-bubble">
-         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?'<span class="staff-chat-edited">изм.</span>':''}${more}</div>
+         <div class="staff-chat-meta">${who}<time datetime="${esc(m.sent_at)}">${time(m.sent_at)}</time>${m.edited_at?("<span class=\"staff-chat-edited\">" + NoraI18n.html("изм.") + "</span>"):''}${more}</div>
          ${actions}
          ${quote}${media}${richRow(m)}${body}
          <div class="staff-chat-reactions" data-chat-reactions="${id}">${reactionMarkup(m.reactions,id)}</div>
@@ -178,23 +178,23 @@ window.NoraStaffChat = (() => {
   function screen() {
     return `<section class="nora-staff-chat">
       <header class="staff-chat-header">
-        <button class="staff-chat-back" type="button" data-tab="community" aria-label="Назад в Коммьюнити">
+        <button class="staff-chat-back" type="button" data-tab="community" aria-label="${NoraI18n.html("Назад в Коммьюнити")}">
           <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg>
         </button>
         <span class="staff-chat-mark" aria-hidden="true"><span></span></span>
         <div class="staff-chat-heading">
-          <h1>Чат Норы</h1>
-          <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>Подключаем…</b><small id="staff-chat-live-count"></small></span>
+          <h1>${NoraI18n.html("Чат Норы")}</h1>
+          <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>${NoraI18n.html("Подключаем…")}</b><small id="staff-chat-live-count"></small></span>
         </div>
-        <span class="staff-chat-team-label">КОМАНДА</span>
+        <span class="staff-chat-team-label">${NoraI18n.html("КОМАНДА")}</span>
       </header>
-      <div id="staff-chat-feed" class="staff-chat-feed" aria-label="Сообщения чата" aria-live="off">
-        <p class="staff-chat-empty">Подключаем чат…</p>
+      <div id="staff-chat-feed" class="staff-chat-feed" aria-label="${NoraI18n.html("Сообщения чата")}" aria-live="off">
+        <p class="staff-chat-empty">${NoraI18n.html("Подключаем чат…")}</p>
       </div>
       <div class="staff-chat-activity" aria-live="polite">
-        <button type="button" id="staff-chat-new" class="staff-chat-new" data-chat-scroll-new hidden>Новые сообщения ↓</button>
+        <button type="button" id="staff-chat-new" class="staff-chat-new" data-chat-scroll-new hidden>${NoraI18n.html("Новые сообщения ↓")}</button>
         <div id="staff-chat-typing" class="staff-chat-typing" hidden></div>
-        <button type="button" class="staff-chat-latest" data-chat-latest hidden>К последним ↓</button>
+        <button type="button" class="staff-chat-latest" data-chat-latest hidden>${NoraI18n.html("К последним ↓")}</button>
       </div>
       <form id="staff-chat-compose" class="staff-chat-compose" autocomplete="off">
         <div class="staff-chat-compose-reply" id="staff-chat-compose-reply" hidden></div>
@@ -203,17 +203,17 @@ window.NoraStaffChat = (() => {
         <div id="staff-chat-send-confirm" class="staff-chat-send-confirm" hidden></div>
         <div class="staff-chat-record-status" id="staff-chat-record-status" hidden aria-live="polite"></div>
         <div class="staff-chat-compose-row">
-          <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="Прикрепить файл" title="Прикрепить файл">＋</button>
+          <button type="button" class="staff-chat-add-file" data-chat-attach aria-label="${NoraI18n.html("Прикрепить файл")}" title="${NoraI18n.html("Прикрепить файл")}">＋</button>
           <input id="staff-chat-file" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.gif,.mp4,.mov,.webm,.mp3,.m4a,.ogg,.oga,.opus,.aac,.wav,.pdf,.txt" hidden>
-          <textarea id="staff-chat-draft" rows="1" maxlength="3000" placeholder="Сообщение в чат…" aria-label="Сообщение в Telegram-чат"></textarea>
-          <button type="button" class="staff-chat-record-toggle" data-chat-record aria-label="Записать голосовое" title="Голосовое">🎙</button>
-          <button type="button" class="staff-chat-emoji-toggle" data-chat-emoji-toggle aria-label="Эмодзи" title="Эмодзи">☺</button>
-          <button type="submit" id="staff-chat-submit" class="staff-chat-submit" aria-label="Отправить в чат" disabled>➤</button>
+          <textarea id="staff-chat-draft" rows="1" maxlength="3000" placeholder="${NoraI18n.html("Сообщение в чат…")}" aria-label="${NoraI18n.html("Сообщение в Telegram-чат")}"></textarea>
+          <button type="button" class="staff-chat-record-toggle" data-chat-record aria-label="${NoraI18n.html("Записать голосовое")}" title="${NoraI18n.html("Голосовое")}">🎙</button>
+          <button type="button" class="staff-chat-emoji-toggle" data-chat-emoji-toggle aria-label="${NoraI18n.html("Эмодзи")}" title="${NoraI18n.html("Эмодзи")}">☺</button>
+          <button type="submit" id="staff-chat-submit" class="staff-chat-submit" aria-label="${NoraI18n.html("Отправить в чат")}" disabled>➤</button>
         </div>
         <div class="staff-chat-emoji-palette" id="staff-chat-emoji-palette" hidden>
-          ${quickEmoji.map(emoji=>`<button type="button" data-chat-emoji="${esc(emoji)}" aria-label="Добавить ${esc(emoji)}">${emoji}</button>`).join('')}
+          ${quickEmoji.map(emoji=>`<button type="button" data-chat-emoji="${esc(emoji)}" aria-label="${NoraI18n.html("Добавить")} ${esc(emoji)}">${emoji}</button>`).join('')}
         </div>
-        <p class="staff-chat-compose-hint"><span aria-hidden="true">●</span> От имени бота Норы с подписью автора · 12 МБ на файл, альбом до 30 МБ</p>
+        <p class="staff-chat-compose-hint"><span aria-hidden="true">●</span> ${NoraI18n.html("От имени бота Норы с подписью автора · 12 МБ на файл, альбом до 30 МБ")}</p>
       </form>
     </section>`;
   }
@@ -243,7 +243,7 @@ window.NoraStaffChat = (() => {
         if(!response.ok) {
           let payload = {};
           try { payload = await response.json(); } catch {}
-          throw new Error(payload.error || 'Файл недоступен');
+          throw new Error(NoraI18n.server(payload.error) || NoraI18n.t("Файл недоступен"));
         }
         const blob = await response.blob();
         if(currentVisit !== visit || tab !== 'staffchat')return null;
@@ -274,7 +274,7 @@ window.NoraStaffChat = (() => {
     if(!action || !stage)return;
     if(asset.type.startsWith('image/')) {
       const img = new Image();
-      img.alt = mediaLabels[type] || 'Вложение';
+      img.alt = mediaLabels[type] || NoraI18n.t("Вложение");
       img.src = asset.url;
       img.decoding = 'async';
       action.replaceChildren(img);
@@ -303,13 +303,13 @@ window.NoraStaffChat = (() => {
       if(type==='voice'){
         const wrapper=document.createElement('div');
         wrapper.className='staff-chat-voice-player';
-        wrapper.innerHTML='<button class="staff-chat-voice-play" type="button" data-chat-voice-play aria-label="Воспроизвести голосовое">▶</button>'+
+        wrapper.innerHTML=("<button class=\"staff-chat-voice-play\" type=\"button\" data-chat-voice-play aria-label=\"" + NoraI18n.html("Воспроизвести голосовое") + "\">▶</button>")+
           '<div class="staff-chat-voice-body"><div class="staff-chat-voice-wave" aria-hidden="true">'+
           Array.from({length:24},(_,i)=>'<span style="height:'+
             (8+Math.abs(Math.sin(i*1.73)*Math.cos(i*.52))*17)+'px"></span>').join('')+
-          '</div><input class="staff-chat-voice-progress" type="range" min="0" max="100" value="0" step=".1" aria-label="Позиция голосового">'+
+          ("</div><input class=\"staff-chat-voice-progress\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\".1\" aria-label=\"" + NoraI18n.html("Позиция голосового") + "\">")+
           '<time class="staff-chat-voice-time">0:00</time></div>'+
-          '<button type="button" class="staff-chat-voice-speed" data-chat-voice-speed aria-label="Скорость воспроизведения">1×</button>';
+          ("<button type=\"button\" class=\"staff-chat-voice-speed\" data-chat-voice-speed aria-label=\"" + NoraI18n.html("Скорость воспроизведения") + "\">1×</button>");
         wrapper.append(audio);
         const format=seconds=>{
           if(!Number.isFinite(seconds)||seconds<0)return '0:00';
@@ -322,7 +322,7 @@ window.NoraStaffChat = (() => {
           const duration=Number.isFinite(audio.duration)?audio.duration:0;
           if(progress)progress.value=duration>0?String(audio.currentTime/duration*100):'0';
           if(label)label.textContent=format(audio.currentTime)+' / '+format(duration);
-          if(play){play.textContent=audio.paused?'▶':'Ⅱ';play.setAttribute('aria-label',audio.paused?'Воспроизвести':'Приостановить');}
+          if(play){play.textContent=audio.paused?'▶':'Ⅱ';play.setAttribute('aria-label',audio.paused?NoraI18n.t("Воспроизвести"):NoraI18n.t("Приостановить"));}
         };
         for(const event of ['loadedmetadata','durationchange','timeupdate','play','pause','ended'])audio.addEventListener(event,update);
         stage.replaceChildren(wrapper);
@@ -342,7 +342,7 @@ window.NoraStaffChat = (() => {
     if(!stage || !action)return;
     const url = node.dataset.chatLink;
     stage.innerHTML = `<div class="staff-chat-media-fallback">${esc(message)}</div>`+
-      (url ? `<a class="staff-chat-telegram-link" href="${esc(url)}" data-chat-telegram target="_blank" rel="noopener noreferrer">Открыть в Telegram</a>` : '');
+      (url ? `<a class="staff-chat-telegram-link" href="${esc(url)}" data-chat-telegram target="_blank" rel="noopener noreferrer">${NoraI18n.html("Открыть в Telegram")}</a>` : '');
     action.hidden = true;stage.hidden = false;
   }
   async function displayAsset(node, thumb=false) {
@@ -363,7 +363,7 @@ window.NoraStaffChat = (() => {
           return;
         }catch {}
       }
-      assetError(node, error.message || 'Файл недоступен');
+      assetError(node, error.message || NoraI18n.t("Файл недоступен"));
     } finally {
       node.dataset.chatLoading = '0';
     }
@@ -376,12 +376,12 @@ window.NoraStaffChat = (() => {
     try {
       const result=await getAsset(id,false,part);
       if(!node.isConnected)return;
-      if(!result?.type.startsWith('image/'))throw Error('Обложка недоступна');
+      if(!result?.type.startsWith('image/'))throw Error(NoraI18n.t("Обложка недоступна"));
       const image=new Image();
-      image.src=result.url;image.alt='Обложка подборки';image.decoding='async';
+      image.src=result.url;image.alt=NoraI18n.t("Обложка подборки");image.decoding='async';
       node.replaceChildren(image);
     }catch {
-      if(node.isConnected)node.textContent='Обложка доступна в Telegram';
+      if(node.isConnected)node.textContent=NoraI18n.t("Обложка доступна в Telegram");
     }
   }
   async function richPlay(button) {
@@ -395,18 +395,18 @@ window.NoraStaffChat = (() => {
     try {
       const result=await getAsset(id,false,part);
       if(!button.isConnected || !result)return;
-      if(!result.type.startsWith('audio/'))throw Error('Аудио недоступно');
+      if(!result.type.startsWith('audio/'))throw Error(NoraI18n.t("Аудио недоступно"));
       const player=document.createElement('audio');
       player.controls=true;player.preload='metadata';player.src=result.url;
-      player.setAttribute('aria-label','Аудиотрек Норы');
+      player.setAttribute('aria-label',NoraI18n.t("Аудиотрек Норы"));
       holder.replaceChildren(player);holder.hidden=false;
       button.textContent='♫';
       void player.play().catch(()=>{});
     }catch(error){
       button.textContent='▶';
       const link=button.closest('.staff-chat-message')?.querySelector('.staff-chat-original');
-      holder.innerHTML=`<p class="staff-rich-error">${esc(error.message||'Не удалось открыть аудио')}</p>`+
-        (link ? `<a data-chat-telegram href="${esc(link.href)}" target="_blank" rel="noopener noreferrer">Открыть в Telegram ↗</a>`:'');
+      holder.innerHTML=`<p class="staff-rich-error">${esc(error.message||NoraI18n.t("Не удалось открыть аудио"))}</p>`+
+        (link ? `<a data-chat-telegram href="${esc(link.href)}" target="_blank" rel="noopener noreferrer">${NoraI18n.html("Открыть в Telegram ↗")}</a>`:'');
       holder.hidden=false;
     }finally{if(button.isConnected)button.disabled=false;}
   }
@@ -443,7 +443,7 @@ window.NoraStaffChat = (() => {
     const firstExisting = existing.keys().next().value;
     if(force || !existing.size || (items.length && items[0].id < firstExisting)) {
       feed.innerHTML = items.length ? items.map(line).join('') :
-        '<p class="staff-chat-empty">Новых сообщений пока нет. Всё появится автоматически.</p>';
+        ("<p class=\"staff-chat-empty\">" + NoraI18n.html("Новых сообщений пока нет. Всё появится автоматически.") + "</p>");
     } else {
       const ids = new Set(items.map(m=>Number(m.id)));
       for(const [id,node] of existing)if(!ids.has(id))node.remove();
@@ -516,8 +516,8 @@ window.NoraStaffChat = (() => {
     } catch(error) {
       const target = document.getElementById('staff-chat-feed');
       if(tab === 'staffchat' && target && !target.querySelector('.staff-chat-message'))
-        target.innerHTML = `<p class="staff-chat-empty">${esc(error.message || 'Чат недоступен')}</p><button type="button" class="staff-chat-retry" data-staff-chat-retry>Повторить</button>`;
-      else if(contextId !== null)toast(error.message || 'Сообщение недоступно');
+        target.innerHTML = `<p class="staff-chat-empty">${esc(error.message || NoraI18n.t("Чат недоступен"))}</p><button type="button" class="staff-chat-retry" data-staff-chat-retry>${NoraI18n.html("Повторить")}</button>`;
+      else if(contextId !== null)toast(error.message || NoraI18n.t("Сообщение недоступно"));
     } finally {
       loading=false;
       if(refreshPending && tab==='staffchat' && !document.hidden) {
@@ -546,27 +546,27 @@ window.NoraStaffChat = (() => {
       contextId = oldContext;
       const link = button.dataset.chatLink;
       if(link && tg?.openTelegramLink)tg.openTelegramLink(link);
-      else toast(error.message || 'Сообщение не найдено');
+      else toast(error.message || NoraI18n.t("Сообщение не найдено"));
     }
   }
   function showPhoto(asset) {
     if(!asset || !asset.type.startsWith('image/'))return;
-    sheet(`<div class="staff-chat-image-view"><img src="${esc(asset.url)}" alt="Фото из чата Норы"></div>`);
+    sheet(`<div class="staff-chat-image-view"><img src="${esc(asset.url)}" alt="${NoraI18n.html("Фото из чата Норы")}"></div>`);
   }
 
   async function hideEntry(button) {
     if(!button || !button.isConnected)return;
     if(button.dataset.confirm !== '1') {
       button.dataset.confirm='1';
-      button.textContent='Скрыть?';
+      button.textContent=NoraI18n.t("Скрыть?");
       button.classList.add('confirm');
-      button.setAttribute('aria-label','Подтвердить скрытие только из зеркала');
+      button.setAttribute('aria-label',NoraI18n.t("Подтвердить скрытие только из зеркала"));
       setTimeout(()=>{
         if(button.isConnected && button.dataset.confirm==='1') {
           button.dataset.confirm='';
           button.textContent='×';
           button.classList.remove('confirm');
-          button.setAttribute('aria-label','Скрыть сообщение из зеркала');
+          button.setAttribute('aria-label',NoraI18n.t("Скрыть сообщение из зеркала"));
         }
       },5000);
       return;
@@ -580,7 +580,7 @@ window.NoraStaffChat = (() => {
       button.closest('.staff-chat-message')?.remove();
       signature='outdated after hide';
       if(feed && !feed.querySelector('.staff-chat-message')) {
-        feed.innerHTML='<p class="staff-chat-empty">В сохранённой истории больше нет сообщений.</p>';
+        feed.innerHTML=("<p class=\"staff-chat-empty\">" + NoraI18n.html("В сохранённой истории больше нет сообщений.") + "</p>");
       }
       void load();
     } catch(error) {
@@ -588,7 +588,7 @@ window.NoraStaffChat = (() => {
       button.dataset.confirm='';
       button.textContent='×';
       button.classList.remove('confirm');
-      toast(error.message||'Не удалось скрыть сообщение');
+      toast(error.message||NoraI18n.t("Не удалось скрыть сообщение"));
     }
   }
 
@@ -618,16 +618,16 @@ window.NoraStaffChat = (() => {
     if(attachmentKind==='voice')clearUploads();
     const combined=[...attachments,...chosen];
     if(combined.length>maxAlbumItems) {
-      toast('В одном альбоме не больше 6 файлов');return;
+      toast(NoraI18n.t("В одном альбоме не больше 6 файлов"));return;
     }
     if(combined.some(file=>file.size>maxUpload || file.size<=0)){
-      toast('Размер каждого файла должен быть от 1 байта до 12 МБ');return;
+      toast(NoraI18n.t("Размер каждого файла должен быть от 1 байта до 12 МБ"));return;
     }
     if(combined.reduce((size,file)=>size+file.size,0)>maxAlbumUpload){
-      toast('Общий размер альбома не больше 30 МБ');return;
+      toast(NoraI18n.t("Общий размер альбома не больше 30 МБ"));return;
     }
     if(combined.length>1&&!combined.every(isPhotoUpload)){
-      toast('Несколько файлов можно отправить только альбомом JPG/PNG');return;
+      toast(NoraI18n.t("Несколько файлов можно отправить только альбомом JPG/PNG"));return;
     }
     attachments=combined;
     attachmentKind='file';
@@ -640,9 +640,9 @@ window.NoraStaffChat = (() => {
     if(!recording){status.replaceChildren();return;}
     const seconds=Math.min(120,Math.floor((Date.now()-recordStarted)/1000));
     status.innerHTML='<span class="staff-chat-record-dot" aria-hidden="true"></span>'+
-      '<span>Запись голосового · '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')+'</span>'+
-      '<button type="button" data-chat-record-cancel aria-label="Отменить запись">Отменить</button>'+
-      '<button type="button" data-chat-record-stop>Готово</button>';
+      ("<span>" + NoraI18n.html("Запись голосового ·") + " ")+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')+'</span>'+
+      ("<button type=\"button\" data-chat-record-cancel aria-label=\"" + NoraI18n.html("Отменить запись") + "\">" + NoraI18n.html("Отменить") + "</button>")+
+      ("<button type=\"button\" data-chat-record-stop>" + NoraI18n.html("Готово") + "</button>");
   }
   function stopRecording(discard=false) {
     if(!recorder)return;
@@ -660,7 +660,7 @@ window.NoraStaffChat = (() => {
     if(recording){stopRecording();return;}
     if(recorder)return; // Wait for the previous onstop before starting again.
     if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined'){
-      toast('Запись голоса недоступна в этом Telegram WebView');return;
+      toast(NoraI18n.t("Запись голоса недоступна в этом Telegram WebView"));return;
     }
     let stream;
     try{
@@ -676,7 +676,7 @@ window.NoraStaffChat = (() => {
       microphone=stream;recorder=active;
       active.ondataavailable=event=>{if(event.data?.size)chunks.push(event.data);};
       active.onerror=()=>{
-        toast('Не удалось записать голосовое');
+        toast(NoraI18n.t("Не удалось записать голосовое"));
         stopRecording(true);
       };
       active.onstop=()=>{
@@ -689,7 +689,7 @@ window.NoraStaffChat = (() => {
         const extension=actual.includes('mp4')?'m4a':actual.includes('ogg')?'ogg':'webm';
         const clip=new File(chunks,'nora-voice.'+extension,{type:actual});
         if(clip.size>maxUpload||!clip.size){
-          toast('Голосовое пустое или превышает 12 МБ');return;
+          toast(NoraI18n.t("Голосовое пустое или превышает 12 МБ"));return;
         }
         clearUploads();
         attachments=[clip];attachmentKind='voice';
@@ -707,8 +707,8 @@ window.NoraStaffChat = (() => {
     }catch(error){
       stream?.getTracks().forEach(track=>track.stop());
       recording=false;recorder=null;microphone=null;
-      toast(error?.name==='NotAllowedError'?'Разреши доступ к микрофону в Telegram':
-        'Не удалось включить микрофон');
+      toast(error?.name==='NotAllowedError'?NoraI18n.t("Разреши доступ к микрофону в Telegram"):
+        NoraI18n.t("Не удалось включить микрофон"));
       recordStatus();composeUpdate();
     }
   }
@@ -728,7 +728,7 @@ window.NoraStaffChat = (() => {
       microphoneButton.disabled=sending||delivery.pending;
       microphoneButton.classList.toggle('is-recording',recording);
       microphoneButton.textContent=recording?'■':'🎙';
-      microphoneButton.setAttribute('aria-label',recording?'Завершить запись':'Записать голосовое');
+      microphoneButton.setAttribute('aria-label',recording?NoraI18n.t("Завершить запись"):NoraI18n.t("Записать голосовое"));
     }
     field.disabled=sending||delivery.pending;
     const attachButton=form.querySelector('[data-chat-attach]');
@@ -741,7 +741,7 @@ window.NoraStaffChat = (() => {
       back.hidden=!replyTarget;
       back.innerHTML=replyTarget
         ? '<span><b>↩ '+esc(replyTarget.name)+'</b><small>'+esc(replyTarget.preview)+
-          '</small></span><button type="button" data-chat-cancel-reply aria-label="Отменить ответ">×</button>'
+          ("</small></span><button type=\"button\" data-chat-cancel-reply aria-label=\"" + NoraI18n.html("Отменить ответ") + "\">×</button>")
         : '';
     }
     const chosen=document.getElementById('staff-chat-compose-file');
@@ -751,22 +751,22 @@ window.NoraStaffChat = (() => {
         const cards=attachments.map((file,index)=>{
           const label=esc(file.name),src=esc(uploadUrl(file));
           const media=attachmentKind==='voice'
-            ? '<audio controls preload="metadata" src="'+src+'" aria-label="Прослушать голосовое"></audio>'
+            ? '<audio controls preload="metadata" src="'+src+(NoraI18n.html("\" aria-label=\"Прослушать голосовое\">") + "</audio>")
             : file.type.startsWith('image/') || isPhotoUpload(file)
               ? '<img src="'+src+'" alt="'+label+'" loading="lazy">'
               : file.type.startsWith('video/') && file.size<=maxUpload
                 ? '<video src="'+src+'" muted playsinline preload="metadata"></video>'
                 : '<span class="staff-chat-preview-symbol">📎</span>';
           return '<div class="staff-chat-preview-item">'+media+
-            '<span title="'+label+'">'+(attachmentKind==='voice'?'Голосовое':label)+'</span>'+
+            '<span title="'+label+'">'+(attachmentKind==='voice'?NoraI18n.t("Голосовое"):label)+'</span>'+
             '<button type="button" data-chat-remove-file="'+index+'" '+(sending?'disabled':'')+
-            ' aria-label="Убрать '+label+'">×</button></div>';
+            NoraI18n.t(" aria-label=\"Убрать ")+label+'">×</button></div>';
         }).join('');
         const size=(attachments.reduce((total,file)=>total+file.size,0)/1048576).toFixed(1);
         chosen.innerHTML='<div class="staff-chat-preview-header"><span>'+
-          (attachmentKind==='voice'?'🎤 Голосовое':
-            attachments.length>1?'▧ Альбом · '+attachments.length+' фото':'Вложение')+
-          ' · '+size+' МБ</span>'+(sending?'<b>'+(uploadProgress?uploadProgress+'%':'Отправка…')+'</b>':'')+
+          (attachmentKind==='voice'?NoraI18n.t("🎤 Голосовое"):
+            attachments.length>1?NoraI18n.t("▧ Альбом · ")+attachments.length+NoraI18n.t(" фото"):NoraI18n.t("Вложение"))+
+          ' · '+size+(" " + NoraI18n.html("МБ") + "</span>")+(sending?'<b>'+(uploadProgress?uploadProgress+'%':NoraI18n.t("Отправка…"))+'</b>':'')+
           '</div><div class="staff-chat-preview-grid">'+cards+'</div>';
       }else chosen.replaceChildren();
     }
@@ -797,24 +797,24 @@ window.NoraStaffChat = (() => {
         if(uploadXHR===xhr)uploadXHR=null;
         let response;
         try{response=JSON.parse(xhr.responseText)}catch{
-          reject(new Error('Нет ответа от сервера Норы'));return;
+          reject(new Error(NoraI18n.t("Нет ответа от сервера Норы")));return;
         }
         if(xhr.status<200||xhr.status>=300){
-          reject(new Error(response.error||'Не удалось отправить вложение'));return;
+          reject(new Error(response.error||NoraI18n.t("Не удалось отправить вложение")));return;
         }
         resolve(response);
       };
       xhr.onerror=()=>{
         if(uploadXHR===xhr)uploadXHR=null;
-        reject(new Error('Нет связи с сервером. Перед повтором проверь чат'));
+        reject(new Error(NoraI18n.t("Нет связи с сервером. Перед повтором проверь чат")));
       };
       xhr.onabort=()=>{
         if(uploadXHR===xhr)uploadXHR=null;
-        reject(new Error('Отправка прервана. Проверь чат перед повтором'));
+        reject(new Error(NoraI18n.t("Отправка прервана. Проверь чат перед повтором")));
       };
       xhr.ontimeout=()=>{
         if(uploadXHR===xhr)uploadXHR=null;
-        reject(new Error('Превышено время отправки. Проверяем результат.'));
+        reject(new Error(NoraI18n.t("Превышено время отправки. Проверяем результат.")));
       };
       xhr.send(form);
     });
@@ -827,19 +827,19 @@ window.NoraStaffChat = (() => {
   function showSendConfirmation(text){
     const node=document.getElementById('staff-chat-send-confirm');
     if(!node)return;
-    node.innerHTML='<b>Отправить сообщение?</b>'+
-      '<small>От имени бота, с именем автора и без кнопок'+
-      (attachments.length?' · вложений: '+attachments.length:'')+'</small>'+
+    node.innerHTML=("<b>" + NoraI18n.html("Отправить сообщение?") + "</b>")+
+      ("<small>" + NoraI18n.html("От имени бота, с именем автора и без кнопок"))+
+      (attachments.length?NoraI18n.t(" · вложений: ")+attachments.length:'')+'</small>'+
       (text?'<p>'+esc(text.slice(0,240))+'</p>':'')+
-      '<div class="staff-chat-send-controls"><button type="button" data-chat-send-back>Назад</button>'+
-      '<button type="button" data-chat-send-confirm>Отправить</button></div>';
+      ("<div class=\"staff-chat-send-controls\"><button type=\"button\" data-chat-send-back>" + NoraI18n.html("Назад") + "</button>")+
+      ("<button type=\"button\" data-chat-send-confirm>" + NoraI18n.html("Отправить") + "</button></div>");
     node.hidden=false;
   }
   async function sendCompose(skipConfirm=false) {
     if(sending||delivery.pending||recording||(!draft.trim()&&!attachments.length))return;
     const text=draft.trim(),reply_to=replyTarget?.id||null;
     if(text.length>(attachments.length?800:3000)){
-      toast('Слишком длинный текст для сообщения с вложением');return;
+      toast(NoraI18n.t("Слишком длинный текст для сообщения с вложением"));return;
     }
     if(confirmationEnabled&&!skipConfirm){showSendConfirmation(text);return;}
     hideSendConfirmation();
@@ -851,7 +851,7 @@ window.NoraStaffChat = (() => {
       if(attachments.length){
         const size=attachments.reduce((sum,file)=>sum+file.size,0);
         if(attachments.some(file=>file.size>maxUpload)||size>maxAlbumUpload){
-          throw new Error('Один файл до 12 МБ, альбом до 30 МБ');
+          throw new Error(NoraI18n.t("Один файл до 12 МБ, альбом до 30 МБ"));
         }
         const form=new FormData();
         for(const file of attachments)form.append('file',file,file.name);
@@ -864,7 +864,7 @@ window.NoraStaffChat = (() => {
       if(!delivery.acknowledge(result))await delivery.check();
     }catch(error){
       await delivery.check();
-      if(delivery.pending)toast('Статус отправки неизвестен. Проверь Telegram.');
+      if(delivery.pending)toast(NoraI18n.t("Статус отправки неизвестен. Проверь Telegram."));
       else if(error?.message)toast(error.message);
     }finally{
       sending=false;uploadProgress=0;composeUpdate();
@@ -875,8 +875,8 @@ window.NoraStaffChat = (() => {
     if(!Number.isSafeInteger(id) || id<=0)return;
     replyTarget={
       id,
-      name:button.dataset.chatName || 'Сообщение',
-      preview:button.dataset.chatPreview || 'Ответ в Telegram'
+      name:button.dataset.chatName || NoraI18n.t("Сообщение"),
+      preview:button.dataset.chatPreview || NoraI18n.t("Ответ в Telegram")
     };
     hideSendConfirmation();
     composeUpdate();
@@ -931,14 +931,14 @@ window.NoraStaffChat = (() => {
     reactionBusy.add(id);
     try{
       const result=await api('community/chat/reaction',{message_id:id,emoji,active:!own});
-      if(!result?.ok)throw new Error('Реакция не сохранилась');
+      if(!result?.ok)throw new Error(NoraI18n.t("Реакция не сохранилась"));
       updateReactionChips(id,result.reactions);
       const picker=article?.querySelector('[data-chat-picker]');
       if(picker)picker.hidden=true;
       tg?.HapticFeedback?.impactOccurred?.('light');
       queueRefresh();
     }catch(error){
-      toast(error.message||'Не удалось изменить реакцию');
+      toast(error.message||NoraI18n.t("Не удалось изменить реакцию"));
     }finally{
       reactionBusy.delete(id);
     }
@@ -948,7 +948,7 @@ window.NoraStaffChat = (() => {
     const text=article.querySelector('.staff-chat-text')?.textContent?.trim() ||
       [...article.querySelectorAll('.staff-rich-text,.staff-rich-heading')]
         .map(node=>node.textContent).join('\n').trim();
-    if(!text){toast('В сообщении нет текста для копирования');return;}
+    if(!text){toast(NoraI18n.t("В сообщении нет текста для копирования"));return;}
     let copied=false;
     try{
       if(navigator.clipboard?.writeText){
@@ -964,7 +964,7 @@ window.NoraStaffChat = (() => {
       try{copied=document.execCommand('copy')}catch{}
       field.remove();
     }
-    toast(copied?'Текст скопирован':'Не удалось скопировать текст');
+    toast(copied?NoraI18n.t("Текст скопирован"):NoraI18n.t("Не удалось скопировать текст"));
     if(copied)tg?.HapticFeedback?.notificationOccurred?.('success');
   }
   function cancelChatGesture() {
@@ -978,7 +978,7 @@ window.NoraStaffChat = (() => {
     node.dataset.liveState=state;
     const title=node.querySelector('b'),count=node.querySelector('small');
     if(title)title.textContent=label;
-    if(count && online!==null)count.textContent=online>0?` · ${online} в Mini App`:'';
+    if(count && online!==null)count.textContent=online>0?` · ${online} ${NoraI18n.t("в Mini App")}`:'';
     if(count && state!=='live')count.textContent='';
   }
   function isFeedAtBottom() {
@@ -989,7 +989,7 @@ window.NoraStaffChat = (() => {
     const button=document.getElementById('staff-chat-new');
     if(!button)return;
     button.hidden=newCount<1;
-    if(newCount>0)button.textContent=`${newCount} новых сообщений ↓`;
+    if(newCount>0)button.textContent=`${newCount} ${NoraI18n.t("новых сообщений ↓")}`;
   }
   function queueRefresh() {
     if(tab!=='staffchat'||document.hidden)return;
@@ -1027,7 +1027,7 @@ window.NoraStaffChat = (() => {
   function showTyping(name) {
     const node=document.getElementById('staff-chat-typing');
     if(!node||tab!=='staffchat')return;
-    node.textContent=name+' печатает из Mini App…';
+    node.textContent=name+NoraI18n.t(" печатает из Mini App…");
     node.hidden=false;
     if(typingTimeout!==null)clearTimeout(typingTimeout);
     typingTimeout=setTimeout(()=>{
@@ -1046,7 +1046,7 @@ window.NoraStaffChat = (() => {
     if(tab!=='staffchat'||document.hidden)return;
     if(liveSocket && (liveSocket.readyState===WebSocket.CONNECTING || liveSocket.readyState===WebSocket.OPEN))return;
     if(typeof WebSocket==='undefined'||!auth){
-      connectionStatus('Режим обновления','fallback');
+      connectionStatus(NoraI18n.t("Режим обновления"),'fallback');
       startFallback();return;
     }
     const generation=++liveAttempt;
@@ -1055,12 +1055,12 @@ window.NoraStaffChat = (() => {
       const protocol=location.protocol==='https:'?'wss:':'ws:';
       socket=new WebSocket(protocol+'//'+location.host+'/ws/community/chat');
     }catch{
-      connectionStatus('Режим обновления','fallback');
+      connectionStatus(NoraI18n.t("Режим обновления"),'fallback');
       startFallback();return;
     }
     liveSocket=socket;
     liveReady=false;
-    connectionStatus(liveFailures?'Переподключаем…':'Подключаем…');
+    connectionStatus(liveFailures?NoraI18n.t("Переподключаем…"):NoraI18n.t("Подключаем…"));
     const valid=()=>generation===liveAttempt && liveSocket===socket && tab==='staffchat';
     const cleanup=()=>{
       if(handshakeTimer!==null){clearTimeout(handshakeTimer);handshakeTimer=null;}
@@ -1082,7 +1082,7 @@ window.NoraStaffChat = (() => {
         liveReady=true;liveFailures=0;
         cleanup();
         stopFallback();
-        connectionStatus('В реальном времени','live',Number(payload.online)||0);
+        connectionStatus(NoraI18n.t("В реальном времени"),'live',Number(payload.online)||0);
         heartbeatTimer=setInterval(()=>{
           if(valid()&&liveReady&&socket.readyState===WebSocket.OPEN){
             try{socket.send(JSON.stringify({type:'ping'}));}catch{}
@@ -1108,11 +1108,11 @@ window.NoraStaffChat = (() => {
         }
         queueRefresh();
       }else if(payload.type==='presence'){
-        connectionStatus('В реальном времени','live',Number(payload.online)||0);
+        connectionStatus(NoraI18n.t("В реальном времени"),'live',Number(payload.online)||0);
       }else if(payload.type==='typing'&&typeof payload.name==='string'){
         showTyping(payload.name.slice(0,48));
       }else if(payload.type==='error'&&payload.reason==='access'){
-        connectionStatus('Нет доступа','offline');
+        connectionStatus(NoraI18n.t("Нет доступа"),'offline');
         socket._noraDenied=true;
       }
     };
@@ -1123,11 +1123,11 @@ window.NoraStaffChat = (() => {
       liveSocket=null;
       liveReady=false;
       if(socket._noraDenied){
-        connectionStatus('Нет доступа','offline');return;
+        connectionStatus(NoraI18n.t("Нет доступа"),'offline');return;
       }
       if(document.hidden)return;
       liveFailures=Math.min(liveFailures+1,5);
-      connectionStatus('Переподключаем…','fallback');
+      connectionStatus(NoraI18n.t("Переподключаем…"),'fallback');
       startFallback();
       const delay=Math.min(16000,800*2**Math.min(liveFailures,4));
       retryTimer=setTimeout(()=>{retryTimer=null;connectLive()},delay);
@@ -1153,9 +1153,9 @@ window.NoraStaffChat = (() => {
 
   // All authorization and permission/rank checks occur again in the server endpoints.
   const adminStats=[
-    {key:'cookies',title:'🍪 Печеньки',minimum:0,maximum:1000000,permission:'can_cookies'},
-    {key:'reputation',title:'⭐ Репутация',minimum:-20,maximum:100,permission:'can_profile'},
-    {key:'likes',title:'💜 Лайки',minimum:0,maximum:1000000,permission:'can_likes'}
+    {key:'cookies',title:NoraI18n.t("🍪 Печеньки"),minimum:0,maximum:1000000,permission:'can_cookies'},
+    {key:'reputation',title:NoraI18n.t("⭐ Репутация"),minimum:-20,maximum:100,permission:'can_profile'},
+    {key:'likes',title:NoraI18n.t("💜 Лайки"),minimum:0,maximum:1000000,permission:'can_likes'}
   ];
   function activeAdminStat(){return adminStats.find(item=>item.key===adminMetric);}
   function closeChatAdmin(){
@@ -1176,55 +1176,55 @@ window.NoraStaffChat = (() => {
   function renderChatAdmin(){
     const node=document.querySelector('#staff-chat-feed [data-chat-admin-panel]');
     if(!node||!node.isConnected||!adminAccess)return;
-    const header='<header class="staff-chat-admin-heading"><b>⚙ Управление сообщением</b>'+
-      '<button type="button" data-chat-admin-close aria-label="Закрыть окно">×</button></header>';
+    const header=("<header class=\"staff-chat-admin-heading\"><b>" + NoraI18n.html("⚙ Управление сообщением") + "</b>")+
+      ("<button type=\"button\" data-chat-admin-close aria-label=\"" + NoraI18n.html("Закрыть окно") + "\">×</button></header>");
     let view='';
     if(adminView==='home'){
-      view='<label class="staff-chat-admin-switch"><span><b>Подтверждать отправку</b>'+
-        '<small>Выключи, чтобы отправлять сразу</small></span>'+
+      view=("<label class=\"staff-chat-admin-switch\"><span><b>" + NoraI18n.html("Подтверждать отправку") + "</b>")+
+        ("<small>" + NoraI18n.html("Выключи, чтобы отправлять сразу") + "</small></span>")+
         '<input type="checkbox" role="switch" data-chat-confirm-toggle '+
         (confirmationEnabled?'checked':'')+'></label>';
       if(adminAccess.can_cookies||adminAccess.can_profile){
         view+='<form id="staff-chat-admin-search" class="staff-chat-admin-form">'+
-          '<label for="staff-chat-admin-user">Управление участником</label>'+
-          '<select id="staff-chat-admin-user"><option value="">Выбери из чата…</option>'+
+          ("<label for=\"staff-chat-admin-user\">" + NoraI18n.html("Управление участником") + "</label>")+
+          ("<select id=\"staff-chat-admin-user\"><option value=\"\">" + NoraI18n.html("Выбери из чата…") + "</option>")+
           recentChatAuthors().map(person=>'<option value="'+person.id+'">'+
             esc(person.name)+' · '+person.id+'</option>').join('')+'</select>'+
           '<div class="staff-chat-admin-row"><input id="staff-chat-admin-id" type="text" '+
-          'inputmode="numeric" maxlength="12" pattern="[0-9]{1,12}" placeholder="Или Telegram ID" value="'+
-          esc(adminSelectedId)+'" required><button type="submit">Найти</button></div></form>';
-      }else view+='<p class="staff-chat-admin-muted">Для изменения показателей нужны права администратора.</p>';
-      view+='<button type="button" class="staff-chat-admin-subtle" data-chat-mod-log>☷ Журнал модерации</button>';
+          NoraI18n.t("inputmode=\"numeric\" maxlength=\"12\" pattern=\"[0-9]{1,12}\" placeholder=\"Или Telegram ID\" value=\"")+
+          esc(adminSelectedId)+("\" required><button type=\"submit\">" + NoraI18n.html("Найти") + "</button></div></form>");
+      }else view+=("<p class=\"staff-chat-admin-muted\">" + NoraI18n.html("Для изменения показателей нужны права администратора.") + "</p>");
+      view+=("<button type=\"button\" class=\"staff-chat-admin-subtle\" data-chat-mod-log>" + NoraI18n.html("☷ Журнал модерации") + "</button>");
     }else if(adminView==='person'&&adminTarget){
-      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К выбору участника</button>'+
+      view=("<button class=\"staff-chat-admin-back\" type=\"button\" data-chat-admin-back>" + NoraI18n.html("‹ К выбору участника") + "</button>")+
         '<div class="staff-chat-admin-person"><b>'+esc(adminTarget.name)+'</b>'+
         '<small>Telegram ID '+adminTarget.id+'</small></div>'+
         '<div class="staff-chat-admin-stats">'+adminStats.map(stat=>
           '<button type="button" data-chat-admin-stat="'+stat.key+'" '+
           (adminAccess[stat.permission]?'':'disabled')+'><span>'+stat.title+'</span>'+
-          '<b>'+Number(adminTarget[stat.key]).toLocaleString('ru-RU')+'</b><span>›</span></button>'
+          '<b>'+Number(adminTarget[stat.key]).toLocaleString(NoraI18n.locale)+'</b><span>›</span></button>'
         ).join('')+'</div>'+
-        '<label class="staff-chat-admin-switch"><span><b>Подтверждать отправку</b><small>Настройка чата</small></span>'+
+        ("<label class=\"staff-chat-admin-switch\"><span><b>" + NoraI18n.html("Подтверждать отправку") + "</b><small>" + NoraI18n.html("Настройка чата") + "</small></span>")+
         '<input type="checkbox" role="switch" data-chat-confirm-toggle '+(confirmationEnabled?'checked':'')+'></label>'+
-        '<button type="button" class="staff-chat-admin-subtle" data-chat-mod-log>☷ Журнал модерации</button>';
+        ("<button type=\"button\" class=\"staff-chat-admin-subtle\" data-chat-mod-log>" + NoraI18n.html("☷ Журнал модерации") + "</button>");
     }else if(adminView==='edit'&&adminTarget){
       const stat=activeAdminStat();
-      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ К показателям</button>'+
+      view=("<button class=\"staff-chat-admin-back\" type=\"button\" data-chat-admin-back>" + NoraI18n.html("‹ К показателям") + "</button>")+
         '<form id="staff-chat-admin-edit" class="staff-chat-admin-form">'+
         '<label for="staff-chat-admin-value">'+stat.title+' · '+esc(adminTarget.name)+'</label>'+
         '<input id="staff-chat-admin-value" type="number" step="1" min="'+stat.minimum+
         '" max="'+stat.maximum+'" value="'+Number(adminTarget[stat.key])+'" required>'+
-        '<small>Сейчас: '+Number(adminTarget[stat.key]).toLocaleString('ru-RU')+'</small>'+
-        '<button type="submit">Продолжить</button></form>';
+        ("<small>" + NoraI18n.html("Сейчас:") + " ")+Number(adminTarget[stat.key]).toLocaleString(NoraI18n.locale)+'</small>'+
+        ("<button type=\"submit\">" + NoraI18n.html("Продолжить") + "</button></form>");
     }else if(adminView==='confirm'&&adminTarget){
       const stat=activeAdminStat();
-      view='<button class="staff-chat-admin-back" type="button" data-chat-admin-back>‹ Изменить число</button>'+
-        '<p class="staff-chat-admin-summary">Подтверди изменение '+stat.title+
-        ' для <b>'+esc(adminTarget.name)+'</b>: <b>'+
-        Number(adminTarget[stat.key]).toLocaleString('ru-RU')+
-        ' → '+Number(adminNewValue).toLocaleString('ru-RU')+'</b></p>'+
+      view=("<button class=\"staff-chat-admin-back\" type=\"button\" data-chat-admin-back>" + NoraI18n.html("‹ Изменить число") + "</button>")+
+        ("<p class=\"staff-chat-admin-summary\">" + NoraI18n.html("Подтверди изменение") + " ")+stat.title+
+        (" " + NoraI18n.html("для") + " <b>")+esc(adminTarget.name)+'</b>: <b>'+
+        Number(adminTarget[stat.key]).toLocaleString(NoraI18n.locale)+
+        ' → '+Number(adminNewValue).toLocaleString(NoraI18n.locale)+'</b></p>'+
         '<button class="staff-chat-admin-primary" type="button" data-chat-admin-save '+
-        (adminBusy?'disabled':'')+'>'+(adminBusy?'Сохраняем…':'Подтвердить изменение')+'</button>';
+        (adminBusy?'disabled':'')+'>'+(adminBusy?NoraI18n.t("Сохраняем…"):NoraI18n.t("Подтвердить изменение"))+'</button>';
     }
     node.innerHTML=header+'<div class="staff-chat-admin-content">'+
       (adminNotice?'<p class="staff-chat-admin-notice">'+esc(adminNotice)+'</p>':'')+
@@ -1248,7 +1248,7 @@ window.NoraStaffChat = (() => {
     closeChatAdmin();
     if(!adminAccess)await initChatAdmin();
     if(!adminAccess?.can_open||tab!=='staffchat'||!article.isConnected){
-      toast('Админка сообщений недоступна');return;
+      toast(NoraI18n.t("Админка сообщений недоступна"));return;
     }
     const menu=article.querySelector('[data-chat-menu]');
     if(menu)menu.hidden=true;
@@ -1261,7 +1261,7 @@ window.NoraStaffChat = (() => {
     const node=document.createElement('section');
     node.className='staff-chat-admin-panel';
     node.dataset.chatAdminPanel=String(messageId);
-    node.setAttribute('aria-label','Управление сообщением №'+messageId);
+    node.setAttribute('aria-label',NoraI18n.t("Управление сообщением №")+messageId);
     if(menu)menu.insertAdjacentElement('afterend',node);
     else bubble.prepend(node);
     const uid=Number(article.dataset.chatUserId);
@@ -1275,15 +1275,15 @@ window.NoraStaffChat = (() => {
     const id=String(raw||'').trim();
     if(adminBusy)return;
     if(!/^[0-9]{1,12}$/.test(id)||Number(id)<=0){
-      adminNotice='Укажи корректный Telegram ID';renderChatAdmin();return;
+      adminNotice=NoraI18n.t("Укажи корректный Telegram ID");renderChatAdmin();return;
     }
     const sourceId=adminSourceMessageId;
-    adminSelectedId=id;adminBusy=true;adminNotice='Загружаем профиль…';renderChatAdmin();
+    adminSelectedId=id;adminBusy=true;adminNotice=NoraI18n.t("Загружаем профиль…");renderChatAdmin();
     try{
       const data=await api('community/chat/admin?target_id='+encodeURIComponent(id));
       if(tab!=='staffchat'||adminSourceMessageId!==sourceId)return;
       adminTarget=data.target;adminView='person';adminNotice='';
-    }catch(error){if(adminSourceMessageId===sourceId){adminView='home';adminNotice=error.message||'Не удалось открыть профиль';}}
+    }catch(error){if(adminSourceMessageId===sourceId){adminView='home';adminNotice=error.message||NoraI18n.t("Не удалось открыть профиль");}}
     finally{adminBusy=false;if(tab==='staffchat'&&adminSourceMessageId===sourceId)renderChatAdmin();}
   }
   function prepareChatAdminValue(){
@@ -1291,11 +1291,11 @@ window.NoraStaffChat = (() => {
     if(!stat||!field||!adminTarget)return;
     const value=Number(field.value);
     if(!field.value.trim()||!Number.isSafeInteger(value)||value<stat.minimum||value>stat.maximum){
-      adminNotice='Допустимо целое число от '+stat.minimum+' до '+stat.maximum;
+      adminNotice=NoraI18n.t("Допустимо целое число от ")+stat.minimum+NoraI18n.t(" до ")+stat.maximum;
       renderChatAdmin();return;
     }
     if(value===Number(adminTarget[stat.key])){
-      adminNotice='Значение уже установлено';renderChatAdmin();return;
+      adminNotice=NoraI18n.t("Значение уже установлено");renderChatAdmin();return;
     }
     adminNewValue=value;adminView='confirm';adminNotice='';renderChatAdmin();
   }
@@ -1309,20 +1309,20 @@ window.NoraStaffChat = (() => {
         expected:Number(adminTarget[stat.key]),confirmed:true
       });
       if(tab!=='staffchat')return;
-      adminTarget=result.target;adminView='person';adminNotice='Показатель сохранён';
+      adminTarget=result.target;adminView='person';adminNotice=NoraI18n.t("Показатель сохранён");
       tg?.HapticFeedback?.notificationOccurred?.('success');
-    }catch(error){adminNotice=error.message||'Изменение не сохранено';}
+    }catch(error){adminNotice=error.message||NoraI18n.t("Изменение не сохранено");}
     finally{adminBusy=false;if(tab==='staffchat')renderChatAdmin();}
   }
 
   function moderationTitle(name) {
-    return '<header class="nora-staff-mod-head"><span>🛡</span><div><small>МОДЕРАЦИЯ НОРЫ</small><h3>'+esc(name)+'</h3></div></header>';
+    return ("<header class=\"nora-staff-mod-head\"><span>🛡</span><div><small>" + NoraI18n.html("МОДЕРАЦИЯ НОРЫ") + "</small><h3>")+esc(name)+'</h3></div></header>';
   }
   function moderationCloseButton() {
-    return '<button type="button" class="nora-staff-mod-close" data-chat-mod-close>Закрыть</button>';
+    return ("<button type=\"button\" class=\"nora-staff-mod-close\" data-chat-mod-close>" + NoraI18n.html("Закрыть") + "</button>");
   }
   function moderationError(message) {
-    sheet('<section class="nora-staff-mod">'+moderationTitle('Ошибка')+
+    sheet('<section class="nora-staff-mod">'+moderationTitle(NoraI18n.t("Ошибка"))+
       '<p class="nora-staff-mod-warning">'+esc(message)+'</p>'+moderationCloseButton()+'</section>');
   }
   function moderationMenu(info) {
@@ -1330,21 +1330,21 @@ window.NoraStaffChat = (() => {
     const buttons=(info.actions||[]).map(action=>
       '<button type="button" data-chat-mod-action="'+esc(action.id)+'">'+
       esc(action.label)+' <span aria-hidden="true">›</span></button>').join('');
-    sheet('<section class="nora-staff-mod">'+moderationTitle(info.target_name || 'Сообщение')+
-      '<div class="nora-staff-mod-meta">Сообщение №'+Number(info.message_id)+
-      (info.target_id?' · '+Number(info.warnings||0)+' предупреждений':' · автор недоступен')+'</div>'+
+    sheet('<section class="nora-staff-mod">'+moderationTitle(info.target_name || NoraI18n.t("Сообщение"))+
+      ("<div class=\"nora-staff-mod-meta\">" + NoraI18n.html("Сообщение №"))+Number(info.message_id)+
+      (info.target_id?' · '+Number(info.warnings||0)+NoraI18n.t(" предупреждений"):NoraI18n.t(" · автор недоступен"))+'</div>'+
       (buttons?'<div class="nora-staff-mod-actions">'+buttons+'</div>':
-        '<p class="nora-staff-mod-warning">Нет прав для действий с этим участником или сообщение не содержит доступного автора.</p>')+
-      '<p class="nora-staff-mod-footnote">Права проверяются сервером перед каждым действием. Удаление из Telegram отличается от скрытия в Норе.</p>'+
+        ("<p class=\"nora-staff-mod-warning\">" + NoraI18n.html("Нет прав для действий с этим участником или сообщение не содержит доступного автора.") + "</p>"))+
+      ("<p class=\"nora-staff-mod-footnote\">" + NoraI18n.html("Права проверяются сервером перед каждым действием. Удаление из Telegram отличается от скрытия в Норе.") + "</p>")+
       moderationCloseButton()+'</section>');
   }
   async function openModeration(id) {
     if(!Number.isSafeInteger(id)||id<=0||tab!=='staffchat')return;
-    sheet('<section class="nora-staff-mod">'+moderationTitle('Проверка прав…')+'</section>');
+    sheet('<section class="nora-staff-mod">'+moderationTitle(NoraI18n.t("Проверка прав…"))+'</section>');
     try{
       const info=await api('community/chat/moderation?message_id='+id);
       if(tab==='staffchat')moderationMenu(info);
-    }catch(error){moderationError(error.message||'Не удалось открыть модерацию');}
+    }catch(error){moderationError(error.message||NoraI18n.t("Не удалось открыть модерацию"));}
   }
   function moderationConfirm(action) {
     const info=moderationContext;
@@ -1352,35 +1352,35 @@ window.NoraStaffChat = (() => {
     const label=info.actions.find(entry=>entry.id===action).label;
     const needsDuration=action==='ban'||action==='mute';
     const durations=needsDuration
-      ? '<label class="nora-staff-mod-label">Срок<select id="staff-chat-mod-duration">'+
+      ? ("<label class=\"nora-staff-mod-label\">" + NoraI18n.html("Срок") + "<select id=\"staff-chat-mod-duration\">")+
         (action==='ban'
-          ? '<option value="1d">1 день</option><option value="7d" selected>7 дней</option><option value="forever">Навсегда</option>'
-          : '<option value="10m">10 минут</option><option value="1h" selected>1 час</option><option value="12h">12 часов</option><option value="1d">1 день</option><option value="7d">7 дней</option>')+
+          ? ("<option value=\"1d\">" + NoraI18n.html("1 день") + "</option><option value=\"7d\" selected>" + NoraI18n.html("7 дней") + "</option><option value=\"forever\">" + NoraI18n.html("Навсегда") + "</option>")
+          : ("<option value=\"10m\">" + NoraI18n.html("10 минут") + "</option><option value=\"1h\" selected>" + NoraI18n.html("1 час") + "</option><option value=\"12h\">" + NoraI18n.html("12 часов") + "</option><option value=\"1d\">" + NoraI18n.html("1 день") + "</option><option value=\"7d\">" + NoraI18n.html("7 дней") + "</option>"))+
         '</select></label>' : '';
     const risk=action==='ban'
-      ? 'Бан в основном чате сбрасывает профиль и прогресс по существующим правилам Норы. Действие потенциально необратимо.'
+      ? NoraI18n.t("Бан в основном чате сбрасывает профиль и прогресс по существующим правилам Норы. Действие потенциально необратимо.")
       : action==='kick'
-        ? 'Участник будет исключён из чата Telegram. Он сможет вступить повторно.'
+        ? NoraI18n.t("Участник будет исключён из чата Telegram. Он сможет вступить повторно.")
         : action==='delete'
-          ? 'Сообщение будет удалено из Telegram и зеркала Норы для всех.'
+          ? NoraI18n.t("Сообщение будет удалено из Telegram и зеркала Норы для всех.")
           : action==='warn'
-            ? 'Предупреждение влияет на счётчик пользователя. На установленных порогах действует автоматическая лесенка наказаний.'
-            : 'Действие изменит реальное состояние участника в Telegram или Норе.';
+            ? NoraI18n.t("Предупреждение влияет на счётчик пользователя. На установленных порогах действует автоматическая лесенка наказаний.")
+            : NoraI18n.t("Действие изменит реальное состояние участника в Telegram или Норе.");
     sheet('<section class="nora-staff-mod" data-chat-mod-confirm="'+esc(action)+'">'+
-      moderationTitle(label)+'<p>Участник: <b>'+esc(info.target_name)+'</b></p>'+
+      moderationTitle(label)+("<p>" + NoraI18n.html("Участник:") + " <b>")+esc(info.target_name)+'</b></p>'+
       '<div class="nora-staff-mod-warning">'+esc(risk)+'</div>'+
       durations+
-      '<label class="nora-staff-mod-label">Причина<textarea id="staff-chat-mod-reason" rows="3" maxlength="250" placeholder="Напиши причину, минимум 3 символа" required></textarea></label>'+
+      ("<label class=\"nora-staff-mod-label\">" + NoraI18n.html("Причина") + "<textarea id=\"staff-chat-mod-reason\" rows=\"3\" maxlength=\"250\" placeholder=\"" + NoraI18n.html("Напиши причину, минимум 3 символа") + "\" required></textarea></label>")+
       '<div class="nora-staff-mod-confirm-row">'+
-      '<button type="button" data-chat-mod-back>Назад</button>'+
-      '<button type="button" class="nora-staff-mod-danger" data-chat-mod-execute="'+esc(action)+'">Подтвердить</button>'+
+      ("<button type=\"button\" data-chat-mod-back>" + NoraI18n.html("Назад") + "</button>")+
+      '<button type="button" class="nora-staff-mod-danger" data-chat-mod-execute="'+esc(action)+(NoraI18n.html("\">Подтвердить") + "</button>")+
       '</div></section>');
   }
   function moderationOpId() {
     if(window.crypto?.randomUUID)return window.crypto.randomUUID();
     const bytes=new Uint8Array(16);
     if(window.crypto?.getRandomValues)window.crypto.getRandomValues(bytes);
-    else throw Error('Безопасное подтверждение недоступно на этом устройстве');
+    else throw Error(NoraI18n.t("Безопасное подтверждение недоступно на этом устройстве"));
     bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
     const hex=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
     return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
@@ -1390,12 +1390,12 @@ window.NoraStaffChat = (() => {
     if(moderationBusy||!info||!(info.actions||[]).some(x=>x.id===action))return;
     const reason=document.getElementById('staff-chat-mod-reason')?.value?.trim()||'';
     const duration=document.getElementById('staff-chat-mod-duration')?.value||'';
-    if(reason.length<3||reason.length>250){toast('Укажи причину: 3–250 символов');return;}
+    if(reason.length<3||reason.length>250){toast(NoraI18n.t("Укажи причину: 3–250 символов"));return;}
     let opId;
     try{opId=moderationOpId();}catch(error){toast(error.message);return;}
     moderationBusy=true;
     const button=document.querySelector('[data-chat-mod-execute]');
-    if(button){button.disabled=true;button.textContent='Выполняем…';}
+    if(button){button.disabled=true;button.textContent=NoraI18n.t("Выполняем…");}
     let confirmed=false;
     try{
       const result=await api('community/chat/moderation',{
@@ -1411,7 +1411,7 @@ window.NoraStaffChat = (() => {
         confirmed=receipt.state==='sent';
       }catch{}
       if(!confirmed){
-        moderationError('Telegram мог применить действие, но ответ не подтвердился. Проверь журнал и сам чат. Не повторяй наказание вслепую.');
+        moderationError(NoraI18n.t("Telegram мог применить действие, но ответ не подтвердился. Проверь журнал и сам чат. Не повторяй наказание вслепую."));
         moderationBusy=false;
         return;
       }
@@ -1420,33 +1420,33 @@ window.NoraStaffChat = (() => {
     }
     if(confirmed){
       moderationContext=null;
-      sheet('<section class="nora-staff-mod">'+moderationTitle('Готово')+
-        '<p class="nora-staff-mod-success">Действие подтверждено. Запись добавлена в журнал Норы.</p>'+
-        '<button type="button" data-chat-mod-log>Открыть журнал</button>'+
+      sheet('<section class="nora-staff-mod">'+moderationTitle(NoraI18n.t("Готово"))+
+        ("<p class=\"nora-staff-mod-success\">" + NoraI18n.html("Действие подтверждено. Запись добавлена в журнал Норы.") + "</p>")+
+        ("<button type=\"button\" data-chat-mod-log>" + NoraI18n.html("Открыть журнал") + "</button>")+
         moderationCloseButton()+'</section>');
       signature='';void load(true);
       tg?.HapticFeedback?.notificationOccurred?.('success');
     }
   }
   async function openModerationLog() {
-    sheet('<section class="nora-staff-mod">'+moderationTitle('Журнал действий')+
-      '<p>Загружаем записи…</p></section>');
+    sheet('<section class="nora-staff-mod">'+moderationTitle(NoraI18n.t("Журнал действий"))+
+      ("<p>" + NoraI18n.html("Загружаем записи…") + "</p></section>"));
     try{
       const result=await api('community/chat/moderation/logs');
       if(tab!=='staffchat')return;
       const items=Array.isArray(result.items)?result.items:[];
       const entries=items.slice(0,30).map(item=>
-        '<article class="nora-staff-mod-entry"><div><b>'+esc(item.action||'Действие')+
+        '<article class="nora-staff-mod-entry"><div><b>'+esc(item.action||NoraI18n.t("Действие"))+
         '</b><time>'+esc(item.created_at||'')+'</time></div>'+
         '<small>'+esc(item.actor||'')+' → '+esc(item.target||'')+'</small>'+
-        '<p>'+esc(item.reason||item.details||'Без причины')+'</p></article>').join('');
-      sheet('<section class="nora-staff-mod">'+moderationTitle('Журнал действий')+
+        '<p>'+esc(item.reason||item.details||NoraI18n.t("Без причины"))+'</p></article>').join('');
+      sheet('<section class="nora-staff-mod">'+moderationTitle(NoraI18n.t("Журнал действий"))+
         '<p class="nora-staff-mod-footnote">'+
-        (result.scope==='all'?'Последние действия команды':'Только твои последние действия')+
+        (result.scope==='all'?NoraI18n.t("Последние действия команды"):NoraI18n.t("Только твои последние действия"))+
         '</p><div class="nora-staff-mod-entries">'+
-        (entries||'<p>Записей пока нет.</p>')+'</div>'+
+        (entries||("<p>" + NoraI18n.html("Записей пока нет.") + "</p>"))+'</div>'+
         moderationCloseButton()+'</section>');
-    }catch(error){moderationError(error.message||'Не удалось загрузить журнал');}
+    }catch(error){moderationError(error.message||NoraI18n.t("Не удалось загрузить журнал"));}
   }
 
   function mount() {
@@ -1571,7 +1571,7 @@ window.NoraStaffChat = (() => {
     if(voicePlay){
       const audio=voicePlay.closest('.staff-chat-voice-player')?.querySelector('audio');
       if(audio){
-        if(audio.paused)void audio.play().catch(()=>toast('Не удалось воспроизвести голосовое'));
+        if(audio.paused)void audio.play().catch(()=>toast(NoraI18n.t("Не удалось воспроизвести голосовое")));
         else audio.pause();
       }
       return;

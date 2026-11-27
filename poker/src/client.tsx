@@ -1,3 +1,4 @@
+import { copy } from "./i18n";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Lobby } from "./components/Lobby";
@@ -49,7 +50,7 @@ export function mount(host: HTMLElement, options: PokerOptions) {
   };
   stylesheet.onerror = () => {
     container.hidden = false;
-    container.textContent = "Покер не загрузился. Открой «Игры» и попробуй ещё раз.";
+    container.textContent = copy("Покер не загрузился. Открой «Игры» и попробуй ещё раз.");
   };
   shadow.append(stylesheet, container);
   return () => {

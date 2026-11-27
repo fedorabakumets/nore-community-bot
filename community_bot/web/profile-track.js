@@ -392,24 +392,24 @@ window.NoraProfileTrack = (() => {
     if (!track) return '';
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     const saved = library || Boolean(track.saved);
-    const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? 'Удалить из моих треков' : 'Добавить в мои треки'}">${saved ? '✓' : '+'}</button>` : '';
-    return `<section class="profile-track" data-track-src="${esc(src)}" data-track-id="${esc(track.id || '')}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || 'Неизвестен')}" data-track-length="${esc(track.duration || 0)}" aria-label="${library ? 'Сохранённый трек' : 'Трек профиля'}"><div class="profile-track-actions">
-      <button type="button" class="profile-track-toggle" data-track-toggle aria-label="Включить трек: ${esc(track.title)}">
+    const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? NoraI18n.t("Удалить из моих треков") : NoraI18n.t("Добавить в мои треки")}">${saved ? '✓' : '+'}</button>` : '';
+    return `<section class="profile-track" data-track-src="${esc(src)}" data-track-id="${esc(track.id || '')}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || NoraI18n.t("Неизвестен"))}" data-track-length="${esc(track.duration || 0)}" aria-label="${library ? NoraI18n.t("Сохранённый трек") : NoraI18n.t("Трек профиля")}"><div class="profile-track-actions">
+      <button type="button" class="profile-track-toggle" data-track-toggle aria-label="${NoraI18n.html("Включить трек:")} ${esc(track.title)}">
         <span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
-          <small>${library ? '' : '– '}${esc(track.artist || 'Неизвестен')}</small>
+          <small>${library ? '' : '– '}${esc(track.artist || NoraI18n.t("Неизвестен"))}</small>
         </span>
       </button>${library ? `<span class="profile-library-duration">${clock(track.duration)}</span>` : ''}${save}</div>
       <div class="profile-track-timeline">
         <span data-track-time>0:00</span>
-        <input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled>
+        <input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="${NoraI18n.html("Позиция в треке")}" disabled>
         <span data-track-duration>${clock(track.duration)}</span>
       </div>
     </section>`;
   }
 
   function libraryButton(owner = '') {
-    return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? 'Треки' : 'Мои треки'} <span aria-hidden="true">›</span></button>`;
+    return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? NoraI18n.t("Треки") : NoraI18n.t("Мои треки")} <span aria-hidden="true">›</span></button>`;
   }
 
   function libraryScreen(title, subtitle, content) {
@@ -421,11 +421,11 @@ window.NoraProfileTrack = (() => {
   }
 
   function libraryCount(count) {
-    return number(count) + ' ' + plural(count, 'трек', 'трека', 'треков');
+    return number(count) + ' ' + plural(count, NoraI18n.t("трек"), NoraI18n.t("трека"), NoraI18n.t("треков"));
   }
 
   function libraryEmpty() {
-    return '<div class="profile-library-empty"><strong>Пока нет треков</strong><p>Сохранённая музыка появится здесь.</p></div>';
+    return ("<div class=\"profile-library-empty\"><strong>" + NoraI18n.html("Пока нет треков") + "</strong><p>" + NoraI18n.html("Сохранённая музыка появится здесь.") + "</p></div>");
   }
 
   function back() {
@@ -445,24 +445,24 @@ window.NoraProfileTrack = (() => {
 
   async function showLibrary(owner = '') {
     const path = owner ? 'people/' + encodeURIComponent(owner) + '/music-library' : 'music-library';
-    const title = owner ? 'Треки' : 'Мои треки';
+    const title = owner ? NoraI18n.t("Треки") : NoraI18n.t("Мои треки");
     const person = $('#person-profile');
     libraryReturn = person ? Number(person.dataset.personId) : null;
-    sheet(libraryScreen(title, 'Загрузка…', '<div class="profile-library-empty" role="status">Загрузка…</div>'));
+    sheet(libraryScreen(title, NoraI18n.t("Загрузка…"), ("<div class=\"profile-library-empty\" role=\"status\">" + NoraI18n.html("Загрузка…") + "</div>")));
     const panel = $('#music-library-profile');
     panel.focus({preventScroll:true});
     $('#sheet').scrollTop = 0;
     try {
       const result = await api(path);
       if (!panel.isConnected || !$('#sheet').open) return;
-      const visibility = owner ? '' : '<label class="profile-library-visibility"><span><strong>Публичная коллекция</strong><small>Другие участники смогут слушать твои треки</small></span><input type="checkbox" role="switch" data-library-visibility ' + (result.public ? 'checked' : '') + '></label>';
+      const visibility = owner ? '' : ("<label class=\"profile-library-visibility\"><span><strong>" + NoraI18n.html("Публичная коллекция") + "</strong><small>" + NoraI18n.html("Другие участники смогут слушать твои треки") + "</small></span><input type=\"checkbox\" role=\"switch\" data-library-visibility ") + (result.public ? 'checked' : '') + '></label>';
       panel.querySelector('[data-library-count]').textContent = libraryCount(result.tracks.length);
       panel.querySelector('.profile-library-content').innerHTML = (result.tracks.length
         ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/' + path + '/' + track.id, true, Boolean(owner))).join('') + '</div>'
         : libraryEmpty()) + visibility;
     } catch (error) {
       if (panel.isConnected) {
-        panel.querySelector('[data-library-count]').textContent = 'Коллекция недоступна';
+        panel.querySelector('[data-library-count]').textContent = NoraI18n.t("Коллекция недоступна");
         panel.querySelector('.profile-library-content').innerHTML = '<div class="profile-library-empty">' + esc(error.message) + '</div>';
       }
     }
@@ -483,7 +483,7 @@ window.NoraProfileTrack = (() => {
     input.disabled = true;
     try {
       await api('music-library/visibility', { public: value });
-      toast(value ? 'Коллекция открыта' : 'Коллекция приватная');
+      toast(value ? NoraI18n.t("Коллекция открыта") : NoraI18n.t("Коллекция приватная"));
     } catch (error) {
       input.checked = !value;
       toast(error.message);
@@ -495,7 +495,7 @@ window.NoraProfileTrack = (() => {
   function paintSaved(button, saved) {
     button.dataset.saved = String(saved);
     button.setAttribute('aria-pressed', String(saved));
-    button.setAttribute('aria-label', saved ? 'Удалить из моих треков' : 'Добавить в мои треки');
+    button.setAttribute('aria-label', saved ? NoraI18n.t("Удалить из моих треков") : NoraI18n.t("Добавить в мои треки"));
     button.textContent = saved ? '✓' : '+';
   }
 
@@ -528,7 +528,7 @@ window.NoraProfileTrack = (() => {
           if (!count) panel.querySelector('.profile-library-list')?.remove();
         }
       }
-      toast(result.saved ? 'Добавлено в Мои треки' : 'Удалено из Моих треков');
+      toast(result.saved ? NoraI18n.t("Добавлено в Мои треки") : NoraI18n.t("Удалено из Моих треков"));
     } catch (error) {
       toast(error.message);
     } finally {
@@ -555,7 +555,7 @@ window.NoraProfileTrack = (() => {
     if (!visible) return;
     const { audio, loading, track } = state;
     const playing = !audio.paused && !audio.ended;
-    const artist = loading ? 'Загрузка…' : track.artist;
+    const artist = loading ? NoraI18n.t("Загрузка…") : track.artist;
     if (miniTitle.textContent !== track.title) miniTitle.textContent = track.title;
     if (miniArtist.textContent !== artist) miniArtist.textContent = artist;
     if (miniSource !== state.src) {
@@ -567,7 +567,7 @@ window.NoraProfileTrack = (() => {
     miniShare.disabled = loading || sharePending || Date.now() < shareUntil;
     miniShare.dataset.sending = String(sharePending);
     miniShare.dataset.sent = String(!sharePending && sharedSource === state.src && Date.now() < shareUntil);
-    miniShare.setAttribute('aria-label', sharePending ? 'Отправляем трек' : Date.now() < shareUntil ? 'Повторная отправка доступна через 5 минут' : 'Поделиться треком в чате');
+    miniShare.setAttribute('aria-label', sharePending ? NoraI18n.t("Отправляем трек") : Date.now() < shareUntil ? NoraI18n.t("Повторная отправка доступна через 5 минут") : NoraI18n.t("Поделиться треком в чате"));
     const fullShare = $('#nora-now-playing [data-now-share]');
     if (fullShare) {
       fullShare.disabled = miniShare.disabled;
@@ -577,8 +577,8 @@ window.NoraProfileTrack = (() => {
     }
     mini.dataset.playing = String(playing);
     miniToggle.disabled = loading;
-    miniToggle.setAttribute('aria-label', loading ? 'Загружаем трек' : playing ? 'Пауза' : 'Воспроизвести');
-    miniOpen.setAttribute('aria-label', 'Открыть плеер: ' + track.title);
+    miniToggle.setAttribute('aria-label', loading ? NoraI18n.t("Загружаем трек") : playing ? NoraI18n.t("Пауза") : NoraI18n.t("Воспроизвести"));
+    miniOpen.setAttribute('aria-label', NoraI18n.t("Открыть плеер: ") + track.title);
     const progress = Number.isFinite(audio.duration) && audio.duration > 0
       ? Math.min(1, Math.max(0, audio.currentTime / audio.duration)) : 0;
     miniProgress.value = progress;
@@ -605,7 +605,7 @@ window.NoraProfileTrack = (() => {
       element.dataset.loading = String(loading);
       const play = element.querySelector('[data-track-toggle]');
       play.disabled = loading;
-      play.setAttribute('aria-label', (loading ? 'Загружаем трек' : playing ? 'Поставить на паузу' : 'Включить трек') + ': ' + state.track.title);
+      play.setAttribute('aria-label', (loading ? NoraI18n.t("Загружаем трек") : playing ? NoraI18n.t("Поставить на паузу") : NoraI18n.t("Включить трек")) + ': ' + state.track.title);
     }
     state.element = currentRow(state);
     NoraProfileWaves.sync(state.element, playing && !loading, state);
@@ -767,11 +767,11 @@ window.NoraProfileTrack = (() => {
       await state.audio.play();
     } catch (error) {
       if (active !== state || state.url !== source) return;
-      if (error.name === 'NotAllowedError') toast('Нажми «Включить трек» ещё раз');
+      if (error.name === 'NotAllowedError') toast(NoraI18n.t("Нажми «Включить трек» ещё раз"));
       else if (state.progressive) state.progressiveFailed = true;
       else {
         stop();
-        toast('Не удалось воспроизвести трек');
+        toast(NoraI18n.t("Не удалось воспроизвести трек"));
       }
     }
   }
@@ -789,11 +789,11 @@ window.NoraProfileTrack = (() => {
     button.dataset.saved = String(state.saved === true);
     button.disabled = Boolean(state.savePending) || state.saved == null;
     button.setAttribute('aria-pressed', String(state.saved === true));
-    button.setAttribute('aria-label', state.saved ? 'Убрать из лайков' : 'Поставить лайк треку');
+    button.setAttribute('aria-label', state.saved ? NoraI18n.t("Убрать из лайков") : NoraI18n.t("Поставить лайк треку"));
     profile.dataset.saved = String(state.inProfile === true);
     profile.disabled = Boolean(state.savePending) || state.inProfile == null || state.inProfile === true;
     profile.setAttribute('aria-pressed', String(state.inProfile === true));
-    profile.setAttribute('aria-label', state.inProfile ? 'Трек уже в профиле' : 'Добавить трек в профиль');
+    profile.setAttribute('aria-label', state.inProfile ? NoraI18n.t("Трек уже в профиле") : NoraI18n.t("Добавить трек в профиль"));
   }
 
   async function loadNowSaved(state) {
@@ -844,7 +844,7 @@ window.NoraProfileTrack = (() => {
           data.profile_track.saved = result.saved;
         }
       }
-      toast(action === 'profile' ? 'Трек добавлен в профиль' : result.saved ? 'Добавлено в Мои треки' : 'Убрано из лайков');
+      toast(action === 'profile' ? NoraI18n.t("Трек добавлен в профиль") : result.saved ? NoraI18n.t("Добавлено в Мои треки") : NoraI18n.t("Убрано из лайков"));
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (error) {
       toast(error.message);
@@ -859,16 +859,16 @@ window.NoraProfileTrack = (() => {
     if (!state) return;
     libraryReturn = null;
     const svg = (path, cls='') => '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
-    sheet('<section id="nora-now-playing" aria-label="Музыкальный плеер" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
-      '<p class="nora-now-playing-label">Сейчас играет</p>' +
+    sheet('<section id="nora-now-playing" aria-label="' + NoraI18n.html("Музыкальный плеер") + '" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
+      ("<p class=\"nora-now-playing-label\">" + NoraI18n.html("Сейчас играет") + "</p>") +
       '<div class="nora-now-playing-art" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/></svg></div>' +
       '<div class="nora-now-meta"><div class="nora-now-copy"><h2>' + esc(state.track.title) + '</h2><p>' + esc(state.track.artist) + '</p></div>' +
-      '<button type="button" class="nora-now-save" data-now-save data-saved="false" aria-label="Поставить лайк треку" aria-pressed="false" disabled>' +
+      ("<button type=\"button\" class=\"nora-now-save\" data-now-save data-saved=\"false\" aria-label=\"" + NoraI18n.html("Поставить лайк треку") + "\" aria-pressed=\"false\" disabled>") +
       svg('M20.8 8.5c0 4.1-8.8 9.7-8.8 9.7S3.2 12.6 3.2 8.5a4.7 4.7 0 0 1 8.8-2.3 4.7 4.7 0 0 1 8.8 2.3Z','nora-now-heart') + svg('m5 12 4 4L19 6','nora-now-check') + '</button></div>' +
-      '<div class="nora-now-timeline"><input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="Позиция в треке" disabled><div class="nora-now-times"><span data-track-time>0:00</span><span data-track-duration>' + clock(state.track.duration) + '</span></div></div>' +
-      '<div class="nora-now-controls"><button type="button" class="nora-now-secondary nora-now-profile" data-now-profile data-saved="false" aria-label="Добавить трек в профиль" aria-pressed="false" disabled>' + svg('M12 5v14M5 12h14','nora-now-profile-plus') + svg('m5 12 4 4L19 6','nora-now-profile-check') + '</button>' +
-      '<button type="button" class="nora-now-play" data-track-toggle aria-label="Воспроизвести"><svg class="nora-now-play-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 4.5v15l12-7.5z"/></svg><svg class="nora-now-pause-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg></button>' +
-      '<button type="button" class="nora-now-secondary nora-mini-share" data-now-share aria-label="Поделиться треком в чате">' + svg('m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13','nora-mini-send') + svg('m5 12 4 4L19 6','nora-mini-sent') + '</button></div></section>');
+      ("<div class=\"nora-now-timeline\"><input type=\"range\" min=\"0\" max=\"1\" step=\"0.001\" value=\"0\" data-track-seek aria-label=\"" + NoraI18n.html("Позиция в треке") + "\" disabled><div class=\"nora-now-times\"><span data-track-time>0:00</span><span data-track-duration>") + clock(state.track.duration) + '</span></div></div>' +
+      ("<div class=\"nora-now-controls\"><button type=\"button\" class=\"nora-now-secondary nora-now-profile\" data-now-profile data-saved=\"false\" aria-label=\"" + NoraI18n.html("Добавить трек в профиль") + "\" aria-pressed=\"false\" disabled>") + svg('M12 5v14M5 12h14','nora-now-profile-plus') + svg('m5 12 4 4L19 6','nora-now-profile-check') + '</button>' +
+      ("<button type=\"button\" class=\"nora-now-play\" data-track-toggle aria-label=\"" + NoraI18n.html("Воспроизвести") + "\"><svg class=\"nora-now-play-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 4.5v15l12-7.5z\"/></svg><svg class=\"nora-now-pause-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/><rect x=\"14\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/></svg></button>") +
+      ("<button type=\"button\" class=\"nora-now-secondary nora-mini-share\" data-now-share aria-label=\"" + NoraI18n.html("Поделиться треком в чате") + "\">") + svg('m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13','nora-mini-send') + svg('m5 12 4 4L19 6','nora-mini-sent') + '</button></div></section>');
     $('#sheet').scrollTop = 0;
     $('#nora-now-playing')?.focus({preventScroll:true});
     window.NoraShop?.syncBack();
@@ -885,12 +885,12 @@ window.NoraProfileTrack = (() => {
     try {
       const [source, revision] = state.src.split('?v=');
       const result = await api('community/music/share', {source, revision: decodeURIComponent(revision || '')});
-      if (!result.sent) throw Error(result.message || 'Не удалось отправить трек');
+      if (!result.sent) throw Error(result.message || NoraI18n.t("Не удалось отправить трек"));
       sharedSource = state.src;
       shareUntil = Date.now() + Math.max(1, Number(result.retry_after) || 300) * 1000;
       clearTimeout(shareTimer);
       shareTimer = setTimeout(paintMini, Math.max(0, shareUntil - Date.now()));
-      toast(result.message || 'Трек отправлен в чат 🎧');
+      toast(result.message || NoraI18n.t("Трек отправлен в чат 🎧"));
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (error) {
       toast(error.message);
@@ -931,13 +931,13 @@ window.NoraProfileTrack = (() => {
         if (active === state) {
           if (state.progressive) { state.progressiveFailed = true; return; }
           stop();
-          toast('Не удалось воспроизвести трек');
+          toast(NoraI18n.t("Не удалось воспроизвести трек"));
         }
       });
       paint(state);
       try { await loadTrack(state); }
       catch {
-        if (active === state) { stop(); toast('Трек сейчас недоступен'); }
+        if (active === state) { stop(); toast(NoraI18n.t("Трек сейчас недоступен")); }
       }
       return;
     }

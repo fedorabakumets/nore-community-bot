@@ -4,13 +4,13 @@ globalThis.NoraDotCore=(()=>{
   const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
   const lerp=(a,b,t)=>a+(b-a)*t;
   const STAGES=[
-    {name:"FLOW",start:0,color:[174,164,194],gap:180,shift:66,description:"Поймай ритм"},
-    {name:"PULSE",start:10,color:[103,151,255],gap:166,shift:85,description:"Темп растёт"},
-    {name:"SHIFT",start:25,color:[177,118,255],gap:158,shift:76,description:"Препятствия движутся"},
-    {name:"PRESSURE",start:45,color:[250,181,100],gap:220,shift:54,description:"Тап меняет гравитацию · мягкий режим"},
-    {name:"CHAOS",start:70,color:[255,83,112],gap:138,shift:75,description:"Скорость пульсирует"},
-    {name:"VOID",start:100,color:[230,215,255],gap:130,shift:79,description:"Предела больше нет"},
-    {name:"PARADOX",start:130,color:[102,224,239],gap:178,shift:108,description:"Тап меняет гравитацию"}
+    {name:"FLOW",start:0,color:[174,164,194],gap:180,shift:66,description:NoraI18n.t("Поймай ритм")},
+    {name:"PULSE",start:10,color:[103,151,255],gap:166,shift:85,description:NoraI18n.t("Темп растёт")},
+    {name:"SHIFT",start:25,color:[177,118,255],gap:158,shift:76,description:NoraI18n.t("Препятствия движутся")},
+    {name:"PRESSURE",start:45,color:[250,181,100],gap:220,shift:54,description:NoraI18n.t("Тап меняет гравитацию · мягкий режим")},
+    {name:"CHAOS",start:70,color:[255,83,112],gap:138,shift:75,description:NoraI18n.t("Скорость пульсирует")},
+    {name:"VOID",start:100,color:[230,215,255],gap:130,shift:79,description:NoraI18n.t("Предела больше нет")},
+    {name:"PARADOX",start:130,color:[102,224,239],gap:178,shift:108,description:NoraI18n.t("Тап меняет гравитацию")}
   ];
   const PARADOX_START=130, INVERT_GRAVITY=670, SOFT_GRAVITY=780;
   const softMode=n=>n>=45&&n<70;

@@ -2,7 +2,7 @@
 window.NoraRecords = (() => {
   const catalog = {
     standard: {name:'Standard Music',url:'/game/nora-theme.mp3'},
-    dedzytwo: {name:'Музыкальная пластинка «?» — dedzytwo',url:'/game/dedzytwo-s1.mp3'},
+    dedzytwo: {name:NoraI18n.t("Музыкальная пластинка «?» — dedzytwo"),url:'/game/dedzytwo-s1.mp3'},
   };
   const giftIcon = '<svg viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true"><path fill="#160d16" d="M5 12h22v17H5zM3 9h26v7H3zM8 1h6v3h4V1h6v3h3v5H5V4h3z"/><path fill="#e64a57" d="M6 16h20v11H6zM4 10h24v4H4zM9 2h4v3h-4zM19 2h4v3h-4zM6 5h4v3H6zM22 5h4v3h-4z"/><path fill="#9c243e" d="M23 16h3v11h-3zM6 25h20v2H6z"/><path fill="#ffd39a" d="M14 9h4v18h-4zM10 5h4v3h-4zM18 5h4v3h-4z"/><path fill="#fff0cb" d="M14 9h2v18h-2z"/></svg>';
   let coverUrl='/game/dedzytwo-cover.png';
@@ -33,9 +33,9 @@ window.NoraRecords = (() => {
     const controls=new AbortController();
     const inventory=document.createElement('button');
     inventory.type='button';inventory.className='nora-world-outfit nora-world-inventory';
-    inventory.textContent='Инвентарь';inventory.dataset.recordInventory='';
+    inventory.textContent=NoraI18n.t("Инвентарь");inventory.dataset.recordInventory='';
     root.querySelector('.nora-world-bar').append(inventory);
-    const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label','Пластинки и инвентарь');
+    const panel=document.createElement('dialog');panel.className='nora-pet-panel nora-record-panel';panel.setAttribute('aria-label',NoraI18n.t("Пластинки и инвентарь"));
     root.append(panel);
     let homeTrack, visiting=false;
     function track(){
@@ -100,33 +100,33 @@ window.NoraRecords = (() => {
     function showGift() {
       panel.dataset.view='gift';
       const claimed=state?.claimed;
-      openPanel(`${art()}<p class="nora-record-season">SEASON 1 • BLOODY NORA</p><h2>${catalog.dedzytwo.name}</h2><p>${claimed?'Твоя пластинка уже в коллекции. Найди стеллаж у дальней стены таверны.':'Забери подарок и поставь пластинку на полку таверны.'}</p><p role="status"></p>${claimed?'':'<button data-record-claim>Забрать пластинку</button>'}<button data-record-close>Войти в мир</button>`);
+      openPanel(`${art()}<p class="nora-record-season">SEASON 1 • BLOODY NORA</p><h2>${catalog.dedzytwo.name}</h2><p>${claimed?NoraI18n.t("Твоя пластинка уже в коллекции. Найди стеллаж у дальней стены таверны."):NoraI18n.t("Забери подарок и поставь пластинку на полку таверны.")}</p><p role="status"></p>${claimed?'':("<button data-record-claim>" + NoraI18n.html("Забрать пластинку") + "</button>")}<button data-record-close>${NoraI18n.html("Войти в мир")}</button>`);
     }
     function showShelf() {
       panel.dataset.view='shelf';
-      openPanel(`<p class="nora-record-season">ТАВЕРНА / КОЛЛЕКЦИЯ</p><h2>Пластинки</h2><div class="nora-record-shelf-list">${state.shelf.map(id=>`<button data-record-take="${id}" ${state.hand?'disabled':''}>${art(id)}<span>${catalog[id].name}</span><small>${state.hand?'Сначала освободи руки':'Взять с полки'}</small></button>`).join('')||'<p>Полка пока пуста.</p>'}</div>${state.hand?'<button data-record-store>Поставить пластинку из рук</button>':''}<p class="nora-record-future">ТРОФЕИ · СКОРО<br>ДРУГИЕ НАХОДКИ · СКОРО</p><p role="status"></p><button data-record-close>Вернуться в таверну</button>`);
+      openPanel(`<p class="nora-record-season">${NoraI18n.html("ТАВЕРНА / КОЛЛЕКЦИЯ")}</p><h2>${NoraI18n.html("Пластинки")}</h2><div class="nora-record-shelf-list">${state.shelf.map(id=>`<button data-record-take="${id}" ${state.hand?'disabled':''}>${art(id)}<span>${catalog[id].name}</span><small>${state.hand?NoraI18n.t("Сначала освободи руки"):NoraI18n.t("Взять с полки")}</small></button>`).join('')||("<p>" + NoraI18n.html("Полка пока пуста.") + "</p>")}</div>${state.hand?("<button data-record-store>" + NoraI18n.html("Поставить пластинку из рук") + "</button>"):''}<p class="nora-record-future">${NoraI18n.html("ТРОФЕИ · СКОРО")}<br>${NoraI18n.html("ДРУГИЕ НАХОДКИ · СКОРО")}</p><p role="status"></p><button data-record-close>${NoraI18n.html("Вернуться в таверну")}</button>`);
     }
     function showInventory(){
       panel.dataset.view='inventory';
       const slots=state.inventory.map((id,slot)=>{
-        const name=id?catalog[id].name:'пусто';
-        return `<button type="button" data-record-slot="${slot}" aria-label="Клетка ${slot+1}: ${name}"
+        const name=id?catalog[id].name:NoraI18n.t("пусто");
+        return `<button type="button" data-record-slot="${slot}" aria-label="${NoraI18n.html("Клетка")} ${slot+1}: ${name}"
           title="${name}" ${Boolean(id)===Boolean(state.hand)?'disabled':''}>${id?art(id):`<span>${slot+1}</span>`}</button>`;
       }).join('');
-      const hint=state.hand?`В руках: ${catalog[state.hand].name}. Выбери свободную клетку.`:'Нажми на пластинку, чтобы взять её в руки.';
-      openPanel(`<p class="nora-record-season">СУМКА / ${state.inventory.filter(Boolean).length} ИЗ ${state.inventory.length}</p>
-        <h2>Инвентарь</h2><p>${hint}</p><div class="nora-inventory-grid">${slots}</div>
-        <p role="status"></p><button data-record-close>Закрыть</button>`);
+      const hint=state.hand?`${NoraI18n.t("В руках:")} ${catalog[state.hand].name}${NoraI18n.t(". Выбери свободную клетку.")}`:NoraI18n.t("Нажми на пластинку, чтобы взять её в руки.");
+      openPanel(`<p class="nora-record-season">${NoraI18n.html("СУМКА /")} ${state.inventory.filter(Boolean).length} ${NoraI18n.html("ИЗ")} ${state.inventory.length}</p>
+        <h2>${NoraI18n.html("Инвентарь")}</h2><p>${hint}</p><div class="nora-inventory-grid">${slots}</div>
+        <p role="status"></p><button data-record-close>${NoraI18n.html("Закрыть")}</button>`);
     }
     function syncInventory(){inventory.disabled=loading||busy;}
-    const shelfAction={id:'shelf',text:'Пластинки',run:showShelf};
+    const shelfAction={id:'shelf',text:NoraI18n.t("Пластинки"),run:showShelf};
     function playerAction() {
       if(!state||busy||panel.open||!nearPlayer)return null;
       const id=inLobby?deck?.record:state.player;
       const canInsert=state.hand&&(!inLobby||(deck&&!id));
       const canEject=id&&(inLobby?deck.mine&&(!state.hand||state.inventory.includes(null)):!state.hand);
-      if(canInsert)return {id:'insert',text:'Вставить пластинку',run:()=>change(inLobby?'lobby_insert':'insert')};
-      if(canEject)return {id:'eject',text:'Достать пластинку',run:()=>change(inLobby?'lobby_eject':'eject')};
+      if(canInsert)return {id:'insert',text:NoraI18n.t("Вставить пластинку"),run:()=>change(inLobby?'lobby_insert':'insert')};
+      if(canEject)return {id:'eject',text:NoraI18n.t("Достать пластинку"),run:()=>change(inLobby?'lobby_eject':'eject')};
       return null;
     }
     async function click(e) {

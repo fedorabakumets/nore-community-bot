@@ -1,3 +1,4 @@
+import { copy } from "../i18n";
 import type { CSSProperties } from "react";
 import styles from "./Card.module.css";
 
@@ -21,7 +22,7 @@ export function Card({ card, small = false, delay = 0, deal = false, placeholder
   const red = Boolean(card && (card[1] === "h" || card[1] === "d"));
   const style = { "--card-delay": `${delay}ms` } as CSSProperties;
   return (
-    <span className={`${styles.slot} ${small ? styles.small : ""} ${placeholder ? styles.placeholder : ""} ${highlighted ? styles.highlighted : ""}`} style={style} aria-label={placeholder ? "Место для общей карты" : revealed ? `${rank} ${suit}` : "Закрытая карта"}>
+    <span className={`${styles.slot} ${small ? styles.small : ""} ${placeholder ? styles.placeholder : ""} ${highlighted ? styles.highlighted : ""}`} style={style} aria-label={placeholder ? copy("Место для общей карты") : revealed ? `${rank} ${suit}` : copy("Закрытая карта")}>
       <span className={`${styles.motion} ${deal ? styles.dealt : ""}`}>
         <span className={`${styles.card} ${revealed ? styles.revealed : styles.concealed} ${red ? styles.red : ""}`}>
           <span className={`${styles.face} ${styles.front}`} aria-hidden="true">

@@ -1,5 +1,7 @@
 "use client";
 
+import { copy } from "../i18n";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RoomSnapshot } from "../lib/poker/view";
 import type { RoomCommand } from "../lib/server/rooms";
@@ -145,7 +147,7 @@ export function TableRoom({ code, api, share, remember, lobby }: {
     setError("");
     try {
       const { url } = await api(endpoint + "/link");
-      if (!url) throw new Error("Ссылка пока недоступна");
+      if (!url) throw new Error(copy("Ссылка пока недоступна"));
       share(url);
     } catch (caught) {
       setError((caught as Error).message);
@@ -174,15 +176,15 @@ export function TableRoom({ code, api, share, remember, lobby }: {
     return () => removeEventListener("keydown", onKeyDown);
   });
 
-  if (loading) return <section className={styles.loading}><div className={styles.loader}>Тасуем колоду</div></section>;
+  if (loading) return <section className={styles.loading}><div className={styles.loader}>{copy("Тасуем колоду")}</div></section>;
   if (!state) return (
     <section className={styles.joinPage}>
       <div className={styles.joinBackdrop} />
       <div className={styles.joinCard}>
-        <button type="button" className="poker-back" onClick={lobby}>← Покер</button>
-        <h1>Стол {code}</h1>
-        {joinable && <button className={styles.joinButton} onClick={join} disabled={joining}>{joining ? "Занимаем место…" : `Сесть за стол · 🍪 ${entryAmount}`}</button>}
-        <p role="status">{error || (joinable ? "" : "Все места заняты")}</p>
+        <button type="button" className="poker-back" onClick={lobby}>{copy("← Покер")}</button>
+        <h1>{copy("Стол")}{" "}{code}</h1>
+        {joinable && <button className={styles.joinButton} onClick={join} disabled={joining}>{joining ? copy("Занимаем место…") : `${copy("Сесть за стол · 🍪")} ${entryAmount}`}</button>}
+        <p role="status">{copy(error) || (joinable ? "" : copy("Все места заняты"))}</p>
       </div>
     </section>
   );
@@ -196,9 +198,9 @@ export function TableRoom({ code, api, share, remember, lobby }: {
     <section className={styles.room}>
       <div className={styles.backdrop} />
       <header className={styles.topbar}>
-        <button className="poker-back" onClick={betweenHands ? cashOut : lobby} disabled={pending}>← {betweenHands ? "Выйти" : "Покер"}</button>
-        <div className={styles.roomMeta}><span className={online ? styles.online : styles.reconnecting}>{online ? "На связи" : "Подключаемся"}</span><button onClick={invite} disabled={sharing}>Пригласить</button></div>
-        <div className={styles.headerActions}><button aria-label="Звук" aria-pressed={sound} onClick={toggleSound}>{sound ? "Звук вкл." : "Звук выкл."}</button><button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? "Вернуться" : "Пропускать раздачи"}</button><button onClick={() => setDrawer((value) => !value)}>···</button></div>
+        <button className="poker-back" onClick={betweenHands ? cashOut : lobby} disabled={pending}>← {betweenHands ? copy("Выйти") : copy("Покер")}</button>
+        <div className={styles.roomMeta}><span className={online ? styles.online : styles.reconnecting}>{online ? copy("На связи") : copy("Подключаемся")}</span><button onClick={invite} disabled={sharing}>{copy("Пригласить")}</button></div>
+        <div className={styles.headerActions}><button aria-label={copy("Звук")} aria-pressed={sound} onClick={toggleSound}>{sound ? copy("Звук вкл.") : copy("Звук выкл.")}</button><button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? copy("Вернуться") : copy("Пропускать раздачи")}</button><button onClick={() => setDrawer((value) => !value)}>···</button></div>
       </header>
       <div className={styles.tableStage}>
         <PokerTable state={state} />
@@ -206,33 +208,33 @@ export function TableRoom({ code, api, share, remember, lobby }: {
       <div className={styles.reactions}>{["👏", "🔥", "😮", "♠", "♥"].map((reaction) => <button key={reaction} disabled={pending || !online} onClick={() => command({ type: "reaction", text: reaction })}>{reaction}</button>)}</div>
       <div className={`${styles.controls} ${pending ? styles.processing : ""}`} aria-busy={pending}>
         {state.legal ? <>
-          <button className={styles.fold} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "fold" } })}>Сбросить</button>
-          <button className={styles.call} disabled={pending || !online} onClick={() => command({ type: "poker", action: state.legal!.canCheck ? { type: "check" } : { type: "call" } })}>{state.legal.canCheck ? "Пропустить" : `Уравнять 🍪 ${state.legal.toCall}`}</button>
-          {state.legal.canRaise ? <div className={styles.raise}><div><span>До</span><strong>🍪 {raiseTo.toLocaleString()}</strong></div><input aria-label="Размер повышения" type="range" min={Math.min(state.legal.minRaiseTo, state.legal.maxRaiseTo)} max={state.legal.maxRaiseTo} step={1} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /><div className={styles.presets}><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, Math.round(state.pot * .5 / state.settings.bigBlind) * state.settings.bigBlind)))}>½ банка</button><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, state.pot)))}>Банк</button><button onClick={() => setRaiseTo(state.legal!.maxRaiseTo)}>Всё</button>{viewer.timeBankMs > 0 ? <button onClick={() => command({ type: "timeBank" })}>+{viewer.timeBankMs / 1000}s</button> : null}<button className={styles.raiseButton} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "raise", amount: raiseTo } })}>Повысить</button></div></div> : null}
+          <button className={styles.fold} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "fold" } })}>{copy("Сбросить")}</button>
+          <button className={styles.call} disabled={pending || !online} onClick={() => command({ type: "poker", action: state.legal!.canCheck ? { type: "check" } : { type: "call" } })}>{state.legal.canCheck ? copy("Пропустить", true) : `${copy("Уравнять", true) + " 🍪"} ${state.legal.toCall}`}</button>
+          {state.legal.canRaise ? <div className={styles.raise}><div><span>{copy("До")}</span><strong>🍪 {raiseTo.toLocaleString()}</strong></div><input aria-label={copy("Размер повышения")} type="range" min={Math.min(state.legal.minRaiseTo, state.legal.maxRaiseTo)} max={state.legal.maxRaiseTo} step={1} value={raiseTo} onChange={(event) => setRaiseTo(Number(event.target.value))} /><div className={styles.presets}><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, Math.round(state.pot * .5 / state.settings.bigBlind) * state.settings.bigBlind)))}>{copy("½ банка")}</button><button onClick={() => setRaiseTo(Math.min(state.legal!.maxRaiseTo, Math.max(state.legal!.minRaiseTo, state.pot)))}>{copy("Банк", true)}</button><button onClick={() => setRaiseTo(state.legal!.maxRaiseTo)}>{copy("Всё")}</button>{viewer.timeBankMs > 0 ? <button onClick={() => command({ type: "timeBank" })}>+{viewer.timeBankMs / 1000}s</button> : null}<button className={styles.raiseButton} disabled={pending || !online} onClick={() => command({ type: "poker", action: { type: "raise", amount: raiseTo } })}>{copy("Повысить", true)}</button></div></div> : null}
         </> : <div className={styles.waitingControls}>
-          {host && betweenHands && eligible >= 2 ? <button className={styles.deal} disabled={pending || !online} onClick={() => command({ type: "start" })}>Раздать карты</button> : null}
-          {host && betweenHands && eligible < 2 ? <span>Пригласи второго игрока</span> : null}
-          {!host && betweenHands ? <span>Ждём раздачу</span> : null}
-          {!betweenHands ? <span>{state.hand?.actorId === viewer.id ? "Твой ход" : `Ходит ${state.players.find((player) => player.id === state.hand?.actorId)?.name ?? "игрок"}`}</span> : null}
-          {betweenHands ? <button disabled={pending || !online} onClick={cashOut}>Забрать 🍪 {viewer.stack.toLocaleString()}</button> : null}
+          {host && betweenHands && eligible >= 2 ? <button className={styles.deal} disabled={pending || !online} onClick={() => command({ type: "start" })}>{copy("Раздать карты")}</button> : null}
+          {host && betweenHands && eligible < 2 ? <span>{copy("Пригласи второго игрока")}</span> : null}
+          {!host && betweenHands ? <span>{copy("Ждём раздачу")}</span> : null}
+          {!betweenHands ? <span>{state.hand?.actorId === viewer.id ? copy("Твой ход") : `${copy("Ходит")} ${state.players.find((player) => player.id === state.hand?.actorId)?.name ?? copy("игрок")}`}</span> : null}
+          {betweenHands ? <button disabled={pending || !online} onClick={cashOut}>{copy("Забрать 🍪")}{" "}{viewer.stack.toLocaleString()}</button> : null}
         </div>}
       </div>
       {state.chat.filter((item) => item.reaction).slice(-1).map((item) => <div key={item.id} className={styles.reactionBurst}>{item.text}<small>{item.name}</small></div>)}
-      <button className={`${styles.drawerScrim} ${drawer ? styles.drawerScrimOpen : ""}`} aria-label="Закрыть журнал" tabIndex={drawer ? 0 : -1} onClick={() => setDrawer(false)} />
+      <button className={`${styles.drawerScrim} ${drawer ? styles.drawerScrimOpen : ""}`} aria-label={copy("Закрыть журнал")} tabIndex={drawer ? 0 : -1} onClick={() => setDrawer(false)} />
       <aside inert={!drawer} className={`${styles.drawer} ${drawer ? styles.drawerOpen : ""}`}>
-        <div className={styles.drawerHeader}><div><span>Журнал стола</span><strong>{state.players.length}/5 за столом</strong></div><button onClick={() => setDrawer(false)}>Закрыть</button></div>
-        <div className={styles.tabs}><span>Чат</span></div>
+        <div className={styles.drawerHeader}><div><span>{copy("Журнал стола")}</span><strong>{state.players.length}{copy("/5 за столом")}</strong></div><button onClick={() => setDrawer(false)}>{copy("Закрыть")}</button></div>
+        <div className={styles.tabs}><span>{copy("Чат")}</span></div>
         <div className={styles.seatActions}>
-          <button disabled={!betweenHands || pending || !online} onClick={cashOut}>Забрать печеньки и выйти</button><button aria-pressed={sound} onClick={toggleSound}>{sound ? "Выключить звук" : "Включить звук"}</button>
-          <button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? "Вернуться в игру" : "Пропускать раздачи"}</button>
+          <button disabled={!betweenHands || pending || !online} onClick={cashOut}>{copy("Забрать печеньки и выйти")}</button><button aria-pressed={sound} onClick={toggleSound}>{sound ? copy("Выключить звук") : copy("Включить звук")}</button>
+          <button onClick={() => command({ type: "sitOut", value: !viewer.sittingOut })}>{viewer.sittingOut ? copy("Вернуться в игру") : copy("Пропускать раздачи")}</button>
         </div>
-        <div className={styles.feed}>{state.chat.filter((item) => !item.reaction).length ? state.chat.filter((item) => !item.reaction).map((item) => <p key={item.id}><b>{item.name}</b>{item.text}</p>) : <div className={styles.empty}>Сообщений пока нет</div>}</div>
-        <form onSubmit={(event) => { event.preventDefault(); if (chat.trim()) { void command({ type: "chat", text: chat }); setChat(""); } }}><input value={chat} onChange={(event) => setChat(event.target.value)} maxLength={180} placeholder="Сообщение за стол" /><button>Отправить</button></form>
-        <div className={styles.history}><span>Последние раздачи</span>{state.history.map((entry) => <p key={entry.id}>{entry.text}<b>{entry.pot === undefined ? "" : `🍪 ${entry.pot.toLocaleString()}`}</b></p>)}</div>
-        <div className={styles.roster}><span>Игроки</span>{state.players.map((player) => <p key={player.id}><span><Avatar index={player.avatar} size="sm" />{player.name}{player.isBot ? " · бот" : ""}</span>{host && player.id !== viewer.id ? <span className={styles.seatActions}>{!player.isBot ? <button onClick={() => command({ type: "transferHost", playerId: player.id })}>Передать стол</button> : null}</span> : null}</p>)}</div>
-        {host ? <button className={styles.pauseButton} onClick={() => command({ type: "pause", value: !state.paused })}>{state.paused ? "Продолжать раздачи" : "Пауза после раздачи"}</button> : null}
+        <div className={styles.feed}>{state.chat.filter((item) => !item.reaction).length ? state.chat.filter((item) => !item.reaction).map((item) => <p key={item.id}><b>{item.name}</b>{item.text}</p>) : <div className={styles.empty}>{copy("Сообщений пока нет")}</div>}</div>
+        <form onSubmit={(event) => { event.preventDefault(); if (chat.trim()) { void command({ type: "chat", text: chat }); setChat(""); } }}><input value={chat} onChange={(event) => setChat(event.target.value)} maxLength={180} placeholder={copy("Сообщение за стол")} /><button>{copy("Отправить")}</button></form>
+        <div className={styles.history}><span>{copy("Последние раздачи")}</span>{state.history.map((entry) => <p key={entry.id}>{copy(entry.text)}<b>{entry.pot === undefined ? "" : `🍪 ${entry.pot.toLocaleString()}`}</b></p>)}</div>
+        <div className={styles.roster}><span>{copy("Игроки")}</span>{state.players.map((player) => <p key={player.id}><span><Avatar index={player.avatar} size="sm" />{player.name}{player.isBot ? copy(" · бот") : ""}</span>{host && player.id !== viewer.id ? <span className={styles.seatActions}>{!player.isBot ? <button onClick={() => command({ type: "transferHost", playerId: player.id })}>{copy("Передать стол")}</button> : null}</span> : null}</p>)}</div>
+        {host ? <button className={styles.pauseButton} onClick={() => command({ type: "pause", value: !state.paused })}>{state.paused ? copy("Продолжать раздачи") : copy("Пауза после раздачи")}</button> : null}
       </aside>
-      {error ? <div className={styles.toast} role="alert">{error}<button onClick={() => setError("")}>Закрыть</button></div> : null}
+      {error ? <div className={styles.toast} role="alert">{copy(error)}<button onClick={() => setError("")}>{copy("Закрыть")}</button></div> : null}
     </section>
   );
 }

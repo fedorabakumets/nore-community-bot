@@ -1,12 +1,12 @@
 'use strict';
 window.NoraCinema = (() => {
-  const room = 'cinema', title = 'Кинотеатр';
+  const room = 'cinema', title = NoraI18n.t("Кинотеатр");
   const surfaceWidth = 640, surfaceHeight = 360;
   let youtubePromise;
 
   async function load() {
     const response = await fetch('/nora-cinema.json?v=cinema-hall');
-    if (!response.ok) throw Error('Не удалось загрузить кинотеатр');
+    if (!response.ok) throw Error(NoraI18n.t("Не удалось загрузить кинотеатр"));
     return response.json();
   }
 
@@ -23,7 +23,7 @@ window.NoraCinema = (() => {
           script.remove();
           youtubePromise = null;
           delete window.onYouTubeIframeAPIReady;
-          reject(new Error('YouTube сейчас недоступен.'));
+          reject(new Error(NoraI18n.t("YouTube сейчас недоступен.")));
         }
         script.onerror = fail;
         window.onYouTubeIframeAPIReady = () => {
@@ -39,22 +39,22 @@ window.NoraCinema = (() => {
 
   function mount(root, T, layout, {reset, sessionId, clock, onSeatChange}) {
     root.insertAdjacentHTML('beforeend', '<div class="nora-cinema-viewport" inert aria-hidden="true"><div class="nora-cinema-media" hidden></div></div>' +
-      '<div class="nora-cinema-tools" hidden><button type="button" data-projector>Проектор</button>' +
-      '<button type="button" data-audio hidden>Включить звук</button></div>' +
-      '<dialog class="nora-cinema" aria-label="Проектор кинотеатра"><header><h2>Проектор</h2>' +
-      '<button type="button" data-close autofocus>Закрыть</button></header>' +
+      ("<div class=\"nora-cinema-tools\" hidden><button type=\"button\" data-projector>" + NoraI18n.html("Проектор") + "</button>") +
+      ("<button type=\"button\" data-audio hidden>" + NoraI18n.html("Включить звук") + "</button></div>") +
+      ("<dialog class=\"nora-cinema\" aria-label=\"" + NoraI18n.html("Проектор кинотеатра") + "\"><header><h2>" + NoraI18n.html("Проектор") + "</h2>") +
+      ("<button type=\"button\" data-close autofocus>" + NoraI18n.html("Закрыть") + "</button></header>") +
       '<p role="status" data-note></p>' +
-      '<details hidden><summary>Выбрать видео</summary><form>' +
-      '<label>Ссылка на YouTube или MP4<input name="url" type="url" placeholder="https://" maxlength="2048"></label>' +
-      '<label>Видео из Telegram<select name="clip"><option value="">Выбери ролик</option></select></label>' +
-      '<button type="button" data-clips>Обновить список</button>' +
-      '<button type="submit">Начать сеанс</button></form></details>' +
-      '<button type="button" data-retry hidden>Перезагрузить плеер</button>' +
-      '<div class="nora-cinema-controls" hidden><button type="button" data-toggle>Пауза для всех</button>' +
-      '<button type="button" data-back aria-label="Назад на 30 секунд">−30 с</button>' +
-      '<button type="button" data-forward aria-label="Вперёд на 30 секунд">+30 с</button>' +
-      '<input type="range" min="0" max="1" value="0" aria-label="Перемотка сеанса" disabled>' +
-      '<button type="button" data-stop>Завершить</button></div></dialog>');
+      ("<details hidden><summary>" + NoraI18n.html("Выбрать видео") + "</summary><form>") +
+      ("<label>" + NoraI18n.html("Ссылка на YouTube или MP4") + "<input name=\"url\" type=\"url\" placeholder=\"https://\" maxlength=\"2048\"></label>") +
+      ("<label>" + NoraI18n.html("Видео из Telegram") + "<select name=\"clip\"><option value=\"\">" + NoraI18n.html("Выбери ролик") + "</option></select></label>") +
+      ("<button type=\"button\" data-clips>" + NoraI18n.html("Обновить список") + "</button>") +
+      ("<button type=\"submit\">" + NoraI18n.html("Начать сеанс") + "</button></form></details>") +
+      ("<button type=\"button\" data-retry hidden>" + NoraI18n.html("Перезагрузить плеер") + "</button>") +
+      ("<div class=\"nora-cinema-controls\" hidden><button type=\"button\" data-toggle>" + NoraI18n.html("Пауза для всех") + "</button>") +
+      ("<button type=\"button\" data-back aria-label=\"" + NoraI18n.html("Назад на 30 секунд") + "\">" + NoraI18n.html("−30 с") + "</button>") +
+      ("<button type=\"button\" data-forward aria-label=\"" + NoraI18n.html("Вперёд на 30 секунд") + "\">" + NoraI18n.html("+30 с") + "</button>") +
+      ("<input type=\"range\" min=\"0\" max=\"1\" value=\"0\" aria-label=\"" + NoraI18n.html("Перемотка сеанса") + "\" disabled>") +
+      ("<button type=\"button\" data-stop>" + NoraI18n.html("Завершить") + "</button></div></dialog>"));
     const tools = root.querySelector('.nora-cinema-tools');
     const opener = tools.querySelector('[data-projector]');
     const audio = tools.querySelector('[data-audio]');
@@ -122,18 +122,18 @@ window.NoraCinema = (() => {
       const leading = !!show && (homeRoom ? homeOwner : show.host || moderator);
       picker.hidden = !connected || (homeRoom && !homeOwner) || !!show && !leading;
       controls.hidden = !connected || !leading;
-      toggle.textContent = show?.playing ? 'Пауза для всех' : 'Продолжить для всех';
+      toggle.textContent = show?.playing ? NoraI18n.t("Пауза для всех") : NoraI18n.t("Продолжить для всех");
       retry.hidden = !playerError;
       audio.hidden = !show || !ready || !!playerError;
-      const audioLabel = autoplayBlocked ? 'Включить видео' : soundEnabled ? 'Выключить звук' : 'Включить звук';
-      audio.textContent = autoplayBlocked ? 'Пуск' : 'Звук';
+      const audioLabel = autoplayBlocked ? NoraI18n.t("Включить видео") : soundEnabled ? NoraI18n.t("Выключить звук") : NoraI18n.t("Включить звук");
+      audio.textContent = autoplayBlocked ? NoraI18n.t("Пуск") : NoraI18n.t("Звук");
       audio.setAttribute('aria-label', audioLabel);
       audio.setAttribute('aria-pressed', String(soundEnabled));
       if (playerError) note.textContent = playerError;
-      else if (!connected) note.textContent = 'Подключаем проектор…';
-      else if (!show) note.textContent = 'Экран свободен. Выбери видео для сеанса.';
-      else if (!show.playing) note.textContent = 'Общая пауза.';
-      else note.textContent = leading ? 'Ты управляешь сеансом.' : 'Идёт общий сеанс.';
+      else if (!connected) note.textContent = NoraI18n.t("Подключаем проектор…");
+      else if (!show) note.textContent = NoraI18n.t("Экран свободен. Выбери видео для сеанса.");
+      else if (!show.playing) note.textContent = NoraI18n.t("Общая пауза.");
+      else note.textContent = leading ? NoraI18n.t("Ты управляешь сеансом.") : NoraI18n.t("Идёт общий сеанс.");
     }
 
     function fail(message) {
@@ -149,7 +149,7 @@ window.NoraCinema = (() => {
         moderator = result.moderator;
         const select = form.elements.clip;
         const selected = select.value;
-        select.replaceChildren(new Option('Выбери ролик', ''));
+        select.replaceChildren(new Option(NoraI18n.t("Выбери ролик"), ''));
         for (const clip of result.clips) select.add(new Option(clip.label, clip.id));
         if (result.clips.some(clip => clip.id === selected)) select.value = selected;
         render();
@@ -198,7 +198,7 @@ window.NoraCinema = (() => {
           if (current !== version) return;
           const iframe = document.createElement('iframe');
           const params = new URLSearchParams({enablejsapi: '1', playsinline: '1', controls: '0', disablekb: '1', fs: '0', origin: location.origin});
-          iframe.title = 'Плеер YouTube на экране зала';
+          iframe.title = NoraI18n.t("Плеер YouTube на экране зала");
           iframe.tabIndex = -1;
           iframe.allow = 'autoplay; encrypted-media';
           iframe.referrerPolicy = 'strict-origin-when-cross-origin';
@@ -228,7 +228,7 @@ window.NoraCinema = (() => {
               render();
             },
             onError() {
-              if (current === version) fail('Ролик YouTube недоступен во встроенном плеере.');
+              if (current === version) fail(NoraI18n.t("Ролик YouTube недоступен во встроенном плеере."));
             },
           }});
         } else {
@@ -243,7 +243,7 @@ window.NoraCinema = (() => {
             if (current === version) markReady();
           });
           video.addEventListener('error', () => {
-            if (current === version) fail('Видео не загрузилось. Проверь формат MP4 и доступность файла.');
+            if (current === version) fail(NoraI18n.t("Видео не загрузилось. Проверь формат MP4 и доступность файла."));
           });
           media.replaceChildren(video);
           video.src = url;
@@ -278,7 +278,7 @@ window.NoraCinema = (() => {
       }
       if (playerError) return;
       if (!ready) {
-        if (now - loadAt > 21000) fail('Плеер не ответил. Можно попробовать ещё раз.');
+        if (now - loadAt > 21000) fail(NoraI18n.t("Плеер не ответил. Можно попробовать ещё раз."));
         return;
       }
       if (!force && now - lastSync < 700) return;
@@ -385,8 +385,8 @@ window.NoraCinema = (() => {
     function enter(room=null,surface=screen,owner=false) {
       homeRoom=room;homeOwner=owner;setScreen(surface);
       opener.hidden=!!room;
-      panel.querySelector('h2').textContent=room?'Телевизор':'Проектор';
-      panel.setAttribute('aria-label',room?'Домашний телевизор':'Проектор кинотеатра');
+      panel.querySelector('h2').textContent=room?NoraI18n.t("Телевизор"):NoraI18n.t("Проектор");
+      panel.setAttribute('aria-label',room?NoraI18n.t("Домашний телевизор"):NoraI18n.t("Проектор кинотеатра"));
       active = true;
       tools.hidden = false;
       root.classList.add(room?'nora-tv-room':'nora-cinema-room');
@@ -425,7 +425,7 @@ window.NoraCinema = (() => {
       const url = form.elements.url.value.trim();
       const clip = form.elements.clip.value;
       if (url || clip) void command('start', url ? {url} : {clip});
-      else note.textContent = 'Вставь ссылку или выбери видео из Telegram.';
+      else note.textContent = NoraI18n.t("Вставь ссылку или выбери видео из Telegram.");
     });
     on(toggle, 'click', () => command('toggle'));
     on(controls.querySelector('[data-stop]'), 'click', () => command('stop'));

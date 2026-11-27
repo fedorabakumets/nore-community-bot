@@ -8,10 +8,9 @@
   const scripts = new Map();
   function loadScript(name) {
     if (!scripts.has(name)) scripts.set(name, new Promise((resolve, reject) => {
-      const version = {"nora-companion":"aim-actions", "nora-world":"game-exit", "nora-chat":"burrow-trail", "nora-cinema":"burrow-trail", "nora-scenery":"burrow-trail", "nora-burrow":"burrow-trail", "nora-burrow-models":"burrow-trail",
-        "nora-voxel":"burrows", "nora-observatory":"reticle-hud"}[name];
-      const script = document.createElement("script"); script.src = "/" + name + ".js" + (version ? "?v=" + version : "");
-      script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error("Не удалось загрузить игру")); };
+      const script = document.createElement("script");
+      script.src = "/" + name + ".js?v=miniapp-english";
+      script.onload = resolve; script.onerror = () => { script.remove(); scripts.delete(name); reject(Error(NoraI18n.t("Не удалось загрузить игру"))); };
       document.head.appendChild(script);
     }));
     return scripts.get(name);
@@ -60,12 +59,12 @@
     function update() {
       if (!button) return;
       const silent = muted || blocked || level === 0;
-      button.setAttribute('aria-label', 'Настройки громкости');
+      button.setAttribute('aria-label', NoraI18n.t("Настройки громкости"));
       button.setAttribute('aria-expanded', String(expanded));
       button.innerHTML = silent ? '<span aria-hidden="true">🔇</span>' : '<span aria-hidden="true">🔊</span>';
       panel.hidden = !expanded;
       slider.value = Math.round(level*100);
-      muteButton.textContent = muted || level === 0 ? 'Включить звук' : 'Выключить звук';
+      muteButton.textContent = muted || level === 0 ? NoraI18n.t("Включить звук") : NoraI18n.t("Выключить звук");
       muteButton.setAttribute('aria-pressed', String(muted || level === 0));
     }
     function volume(value, seconds) {
@@ -164,11 +163,11 @@
     function attach(parent) {
       button = document.createElement('button'); button.type = 'button'; button.className = 'nora-game-music';
       panel = document.createElement('div'); panel.className = 'nora-game-mixer';
-      panel.innerHTML = '<label>Громкость <input type="range" min="0" max="100" step="1" aria-label="Громкость игры"></label><button type="button" class="nora-game-mute"></button>';
+      panel.innerHTML = ("<label>" + NoraI18n.html("Громкость") + " <input type=\"range\" min=\"0\" max=\"100\" step=\"1\" aria-label=\"" + NoraI18n.html("Громкость игры") + "\"></label><button type=\"button\" class=\"nora-game-mute\"></button>");
       slider = panel.querySelector('input'); muteButton = panel.querySelector('button');
       button.onclick = async () => { expanded = !expanded; update(); if(expanded) await ensureAudio(); update(); };
       slider.oninput = async () => { level = Number(slider.value)/100; muted = level===0; await ensureAudio(); volume(muted?0:level,.12); update(); };
-      muteButton.onclick = async () => { if(level===0)level=.4; muted=!muted; if(level>0 && muteButton.textContent==='Включить звук')muted=false; await ensureAudio(); volume(muted?0:level,.2); update(); };
+      muteButton.onclick = async () => { if(level===0)level=.4; muted=!muted; if(level>0 && muteButton.textContent===NoraI18n.t("Включить звук"))muted=false; await ensureAudio(); volume(muted?0:level,.2); update(); };
       parent.appendChild(button);parent.appendChild(panel);update();
     }
     function close() {
@@ -278,16 +277,16 @@
     if (!overlay) return;
     sceneStop?.(); sceneStop = null;
     overlay.classList.toggle('nora-world-active', content.includes('class="nora-world"'));
-    overlay.innerHTML = `<div class="nora-game-inner"><button type="button" class="nora-game-back" aria-label="Вернуться к играм">← Игры</button><div class="nora-game-body">${content}</div><div class="nora-game-foot">NORA / НОВЫЙ МИР</div></div>`;
+    overlay.innerHTML = `<div class="nora-game-inner"><button type="button" class="nora-game-back" aria-label="${NoraI18n.html("Вернуться к играм")}">${NoraI18n.html("← Игры")}</button><div class="nora-game-body">${content}</div><div class="nora-game-foot">${NoraI18n.html("NORA / НОВЫЙ МИР")}</div></div>`;
     overlay.querySelector('.nora-game-back').onclick = confirmExit;
     music?.attach(overlay);
   }
   async function world(nickname) {
     let cameraHelp = '';
     if (matchMedia('(any-pointer: fine)').matches) {
-      cameraHelp = document.exitPointerLock ? ' · Клик — захват мыши · Esc — курсор · E — действие' : ' · Мышь — камера · E — действие';
+      cameraHelp = document.exitPointerLock ? NoraI18n.t(" · Клик — захват мыши · Esc — курсор · E — действие") : NoraI18n.t(" · Мышь — камера · E — действие");
     }
-    frame(`<div class="nora-world"><canvas aria-label="Общее лобби Норы"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>ЛОББИ</small></span><button class="nora-world-outfit" type="button">Внешность</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">Джойстик / WASD — идти · Shift — бег · Пробел — прыжок${cameraHelp}</span><button class="nora-world-help-close" type="button" aria-label="Закрыть инструкцию движения">×</button></p><button class="nora-world-view" type="button" aria-label="Сменить вид камеры">◉<small>ВИД</small></button><button class="nora-world-jump" type="button" aria-label="Прыжок">↑<small>ПРЫЖОК</small></button><button class="nora-world-sprint" type="button" aria-label="Спринт" aria-pressed="false">»<small>БЕГ</small></button><button type="button" class="nora-pet-away" hidden>Питомец в походе</button><dialog class="nora-pet-panel" aria-label="Мой питомец"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">Вернуться в мир</button></dialog><div class="nora-world-joystick" role="group" aria-label="Джойстик передвижения"><span class="nora-world-knob"></span></div></div>`);
+    frame(`<div class="nora-world"><canvas aria-label="${NoraI18n.html("Общее лобби Норы")}"></canvas><div class="nora-world-bar"><span>${esc(nickname)}<small>${NoraI18n.html(NoraI18n.t("ЛОББИ"))}</small></span><button class="nora-world-outfit" type="button">${NoraI18n.html("Внешность")}</button></div><p class="nora-world-help"${helpDismissed?' hidden':''}><span class="nora-world-help-copy">${NoraI18n.html("Джойстик / WASD — идти · Shift — бег · Пробел — прыжок")}${cameraHelp}</span><button class="nora-world-help-close" type="button" aria-label="${NoraI18n.html("Закрыть инструкцию движения")}">×</button></p><button class="nora-world-view" type="button" aria-label="${NoraI18n.html("Сменить вид камеры")}">◉<small>${NoraI18n.html("ВИД")}</small></button><button class="nora-world-jump" type="button" aria-label="${NoraI18n.html("Прыжок")}">↑<small>${NoraI18n.html("ПРЫЖОК")}</small></button><button class="nora-world-sprint" type="button" aria-label="${NoraI18n.html("Спринт")}" aria-pressed="false">»<small>${NoraI18n.html("БЕГ")}</small></button><button type="button" class="nora-pet-away" hidden>${NoraI18n.html("Питомец в походе")}</button><dialog class="nora-pet-panel" aria-label="${NoraI18n.html("Мой питомец")}"><div class="nora-pet-content"></div><p class="nora-pet-message" role="status"></p><button type="button" class="nora-pet-close">${NoraI18n.html("Вернуться в мир")}</button></dialog><div class="nora-world-joystick" role="group" aria-label="${NoraI18n.html("Джойстик передвижения")}"><span class="nora-world-knob"></span></div></div>`);
     const root = overlay.querySelector('.nora-world');
     root.insertAdjacentHTML('beforeend', `<div class="nora-reticle" aria-hidden="true" hidden></div>
     <button type="button" class="nora-aim-action" aria-keyshortcuts="E" hidden>
@@ -296,37 +295,37 @@
     <div class="nora-aim-choices" role="group" hidden>
       <button type="button"></button><button type="button"></button>
     </div>
-    <section class="nora-observatory-hud" aria-label="Воспоминание" hidden>
+    <section class="nora-observatory-hud" aria-label="${NoraI18n.html("Воспоминание")}" hidden>
       <div role="status"><strong class="nora-observatory-progress"></strong><span class="nora-observatory-hint"></span></div>
-      <button type="button">В лобби</button>
+      <button type="button">${NoraI18n.html(NoraI18n.t("В лобби"))}</button>
     </section><div class="nora-memory-veil" aria-hidden="true"><span></span></div>
     <p class="nora-memory-result" role="status" hidden></p>`);
     const back = overlay.querySelector('.nora-game-back');
-    back.innerHTML='<span aria-hidden="true">⚙</span> <span class="nora-settings-caption">Настройки</span>';
-    back.setAttribute('aria-label','Настройки игры');
-    const dialog=document.createElement('dialog'); dialog.className='nora-settings'; dialog.setAttribute('aria-label','Настройки игры');
+    back.innerHTML=("<span aria-hidden=\"true\">⚙</span> <span class=\"nora-settings-caption\">" + NoraI18n.html("Настройки") + "</span>");
+    back.setAttribute('aria-label',NoraI18n.t("Настройки игры"));
+    const dialog=document.createElement('dialog'); dialog.className='nora-settings'; dialog.setAttribute('aria-label',NoraI18n.t("Настройки игры"));
     function videoControl(kind,label,hint) {
       const [min,max] = limits[kind];
       return `<label>${label}<span>${hint}</span><div class="nora-settings-control">
         <input type="range" min="${min}" max="${max}" step="1" data-setting="${kind}" aria-label="${label}">
-        <input type="number" min="${min}" max="${max}" step="1" data-number="${kind}" aria-label="${label}, в процентах">
+        <input type="number" min="${min}" max="${max}" step="1" data-number="${kind}" aria-label="${label}${NoraI18n.html(", в процентах")}">
       </div></label>`;
     }
-    dialog.innerHTML=`<h2>Настройки</h2>
+    dialog.innerHTML=`<h2>${NoraI18n.html("Настройки")}</h2>
       <div class="nora-settings-menu">
-        <button type="button" data-section="video">Видео</button><button type="button" data-section="sounds">Звуки</button>
-        <label class="nora-settings-chat"><input type="checkbox" id="nora-chat-preview-setting" checked>Мини-чат на экране</label>
-        <button type="button" class="nora-settings-continue">Продолжить</button><button type="button" class="nora-settings-exit">Вылезти из норы</button>
+        <button type="button" data-section="video">${NoraI18n.html("Видео")}</button><button type="button" data-section="sounds">${NoraI18n.html("Звуки")}</button>
+        <label class="nora-settings-chat"><input type="checkbox" id="nora-chat-preview-setting" checked>${NoraI18n.html("Мини-чат на экране")}</label>
+        <button type="button" class="nora-settings-continue">${NoraI18n.html("Продолжить")}</button><button type="button" class="nora-settings-exit">${NoraI18n.html("Вылезти из норы")}</button>
       </div>
-      <div data-settings-section="video" hidden><h3>Видео</h3>
-        ${videoControl('pov','Дальность камеры','0% — от первого лица, 180% — дальше всего')}
-        ${videoControl('hud','Масштаб интерфейса','Размер кнопок и подсказок в игре')}
-        <button type="button" data-settings-back>Назад</button>
+      <div data-settings-section="video" hidden><h3>${NoraI18n.html("Видео")}</h3>
+        ${videoControl('pov',NoraI18n.t("Дальность камеры"),NoraI18n.t("0% — от первого лица, 180% — дальше всего"))}
+        ${videoControl('hud',NoraI18n.t("Масштаб интерфейса"),NoraI18n.t("Размер кнопок и подсказок в игре"))}
+        <button type="button" data-settings-back>${NoraI18n.html("Назад")}</button>
       </div>
-      <div data-settings-section="sounds" hidden><h3>Звуки</h3>
-        <label>Музыка <output data-output="music"></output><input type="range" min="0" max="100" step="1" data-setting="music" aria-label="Громкость музыки"></label>
-        <label>Эффекты игры <output data-output="effects"></output><input type="range" min="0" max="100" step="1" data-setting="effects" aria-label="Громкость эффектов игры"></label>
-        <button type="button" data-settings-back>Назад</button>
+      <div data-settings-section="sounds" hidden><h3>${NoraI18n.html("Звуки")}</h3>
+        <label>${NoraI18n.html("Музыка")} <output data-output="music"></output><input type="range" min="0" max="100" step="1" data-setting="music" aria-label="${NoraI18n.html("Громкость музыки")}"></label>
+        <label>${NoraI18n.html("Эффекты игры")} <output data-output="effects"></output><input type="range" min="0" max="100" step="1" data-setting="effects" aria-label="${NoraI18n.html("Громкость эффектов игры")}"></label>
+        <button type="button" data-settings-back>${NoraI18n.html("Назад")}</button>
       </div>`;
     root.appendChild(dialog);
     function showSection(name){dialog.querySelector('.nora-settings-menu').hidden=!!name;dialog.querySelectorAll('[data-settings-section]').forEach(el=>{el.hidden=el.dataset.settingsSection!==name;});}
@@ -375,19 +374,19 @@
       sounds?.stop();
       if (root.isConnected) {
         root.querySelector('.nora-world-help').hidden = false;
-        root.querySelector('.nora-world-help-copy').textContent = 'Не удалось открыть 3D-мир. Закрой и открой игру снова.';
+        root.querySelector('.nora-world-help-copy').textContent = NoraI18n.t("Не удалось открыть 3D-мир. Закрой и открой игру снова.");
       }
     }
   }
   function portal(nickname) {
-    frame(`<div class="nora-game-portal-scene" aria-label="Вход в Нору"><div class="nora-game-portal"></div><span class="nora-game-portal-caption">ВХОД В НОРУ</span></div>`);
+    frame(`<div class="nora-game-portal-scene" aria-label="${NoraI18n.html("Вход в Нору")}"><div class="nora-game-portal"></div><span class="nora-game-portal-caption">${NoraI18n.html("ВХОД В НОРУ")}</span></div>`);
     const version = active;
     setTimeout(() => { if (version === active) editor(nickname); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 150 : 2100);
   }
   async function editor(nickname) {
-    const categories = {gender:'Пол',hairstyle:'Причёска',hair_color:'Цвет волос',eye_color:'Цвет глаз',shirt:'Футболка',pants:'Штаны',shoes:'Обувь',wings:'Крылья'};
+    const categories = {gender:NoraI18n.t("Пол"),hairstyle:NoraI18n.t("Причёска"),hair_color:NoraI18n.t("Цвет волос"),eye_color:NoraI18n.t("Цвет глаз"),shirt:NoraI18n.t("Футболка"),pants:NoraI18n.t("Штаны"),shoes:NoraI18n.t("Обувь"),wings:NoraI18n.t("Крылья")};
     const {choices, icon} = window.NoraVoxel;
-    frame(`<div class="nora-editor"><header><span class="nora-game-kicker">ИГРОК / ${esc(nickname)}</span><h1>Твой персонаж</h1></header><div class="nora-editor-stage"><canvas aria-label="Трёхмерный персонаж, вращайте пальцем"></canvas><span class="nora-editor-hint">↔ ПОВЕРНИ ПЕРСОНАЖА</span></div><div class="nora-editor-controls"><div class="nora-editor-tabs" role="group" aria-label="Разделы внешности">${Object.entries(categories).map(([key,label])=>`<button type="button" data-category="${key}" aria-label="${label}" title="${label}" aria-pressed="${key==='gender'}" class="${key==='gender'?'active':''}">${key==='wings'?wingShop.icon():icon(key,outfit[key],outfit)}</button>`).join('')}</div><div class="nora-editor-caption"><span class="nora-editor-category">Пол</span><span class="nora-editor-selection" role="status"></span></div><div class="nora-editor-options" role="group" aria-label="Пол"></div><p class="nora-game-error" role="alert"></p><button class="nora-editor-save">СОХРАНИТЬ И ВОЙТИ <span>↗</span></button></div></div>`);
+    frame(`<div class="nora-editor"><header><span class="nora-game-kicker">${NoraI18n.html("ИГРОК /")} ${esc(nickname)}</span><h1>${NoraI18n.html("Твой персонаж")}</h1></header><div class="nora-editor-stage"><canvas aria-label="${NoraI18n.html("Трёхмерный персонаж, вращайте пальцем")}"></canvas><span class="nora-editor-hint">${NoraI18n.html("↔ ПОВЕРНИ ПЕРСОНАЖА")}</span></div><div class="nora-editor-controls"><div class="nora-editor-tabs" role="group" aria-label="${NoraI18n.html("Разделы внешности")}">${Object.entries(categories).map(([key,label])=>`<button type="button" data-category="${key}" aria-label="${label}" title="${label}" aria-pressed="${key==='gender'}" class="${key==='gender'?'active':''}">${key==='wings'?wingShop.icon():icon(key,outfit[key],outfit)}</button>`).join('')}</div><div class="nora-editor-caption"><span class="nora-editor-category">${NoraI18n.html("Пол")}</span><span class="nora-editor-selection" role="status"></span></div><div class="nora-editor-options" role="group" aria-label="${NoraI18n.html("Пол")}"></div><p class="nora-game-error" role="alert"></p><button class="nora-editor-save">${NoraI18n.html("СОХРАНИТЬ И ВОЙТИ")} <span>↗</span></button></div></div>`);
     const root = overlay.querySelector('.nora-editor');
     let category = 'gender', saving = false, preview = wingState.equipped;
     const optionList = root.querySelector('.nora-editor-options');
@@ -407,17 +406,17 @@
       optionList.innerHTML = Object.entries(wingShop.catalog).map(([id,item])=>{
         const equipped = wingState.equipped===id;
         const owned = wingState.owned.includes(id);
-        const action = equipped?'Снять':owned?'Надеть':'Купить';
+        const action = equipped?NoraI18n.t("Снять"):owned?NoraI18n.t("Надеть"):NoraI18n.t("Купить");
         return `<article class="nora-wing-card">
-          <button type="button" data-wing-preview="${id}" aria-label="Примерить: ${item.name}"
+          <button type="button" data-wing-preview="${id}" aria-label="${NoraI18n.html("Примерить:")} ${item.name}"
             aria-pressed="${preview===id}" class="${preview===id?'selected':''}">
             ${wingShop.icon(id)}<strong>${item.name}</strong>
           </button>
-          <span>50 🍪</span><small>Двойной прыжок с плавным спуском</small>
+          <span>50 🍪</span><small>${NoraI18n.html("Двойной прыжок с плавным спуском")}</small>
           <button type="button" data-wing-action="${id}">${action}</button>
         </article>`;
       }).join('');
-      root.querySelector('.nora-editor-selection').textContent = wingShop.catalog[preview]?.name || 'Выбери пару для примерки';
+      root.querySelector('.nora-editor-selection').textContent = wingShop.catalog[preview]?.name || NoraI18n.t("Выбери пару для примерки");
     }
     function options() {
       optionList.classList.toggle('nora-editor-swatches', category.endsWith('_color'));
@@ -507,10 +506,10 @@
         if (category==='wings') previewWings(preview,true);
       } else stop();
     }
-    catch (_) { root.querySelector('.nora-editor-stage').textContent = '3D сейчас недоступно на этом устройстве'; root.querySelector('.nora-editor-save').disabled = true; }
+    catch (_) { root.querySelector('.nora-editor-stage').textContent = NoraI18n.t("3D сейчас недоступно на этом устройстве"); root.querySelector('.nora-editor-save').disabled = true; }
   }
   function registration(message = '') {
-    frame(`${logo}<div class="nora-game-mark" aria-hidden="true">✦</div><p class="nora-game-kicker">НОВЫЙ МИР ЖДЁТ</p><h1>Как тебя<br>звать в игре?</h1><p>Выбери имя для своей истории. Другие игроки увидят только игровой ник.</p><form class="nora-game-form"><label for="nora-game-nickname">ИГРОВОЙ НИКНЕЙМ</label><input id="nora-game-nickname" name="nickname" minlength="3" maxlength="16" pattern="[A-Za-z]{3,16}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="YourName" required><small>3–16 латинских букв, без пробелов</small><p class="nora-game-error" role="alert">${esc(message)}</p><button type="submit">ВОЙТИ В НОРУ <span>↗</span></button></form>`);
+    frame(`${logo}<div class="nora-game-mark" aria-hidden="true">✦</div><p class="nora-game-kicker">${NoraI18n.html("НОВЫЙ МИР ЖДЁТ")}</p><h1>${NoraI18n.html("Как тебя")}<br>${NoraI18n.html("звать в игре?")}</h1><p>${NoraI18n.html("Выбери имя для своей истории. Другие игроки увидят только игровой ник.")}</p><form class="nora-game-form"><label for="nora-game-nickname">${NoraI18n.html("ИГРОВОЙ НИКНЕЙМ")}</label><input id="nora-game-nickname" name="nickname" minlength="3" maxlength="16" pattern="[A-Za-z]{3,16}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="YourName" required><small>${NoraI18n.html("3–16 латинских букв, без пробелов")}</small><p class="nora-game-error" role="alert">${esc(message)}</p><button type="submit">${NoraI18n.html("ВОЙТИ В НОРУ")} <span>↗</span></button></form>`);
     const form = overlay.querySelector('form');
     form.onsubmit = async (event) => {
       event.preventDefault();
@@ -526,14 +525,14 @@
     petTrigger = trigger;
     const version = ++active;
     overlay = document.createElement('section'); overlay.className = 'nora-game-screen';
-    overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Игра НОРА');
+    overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', NoraI18n.t("Игра НОРА"));
     document.body.appendChild(overlay);
     window.NoraShop?.syncBack();
     music = createMusic(); music.start();
     try { if (tg?.requestFullscreen && !tg.isFullscreen) { tg.requestFullscreen(); requestedFullscreen = true; } } catch (_) {}
-    frame(`${logo}<p>Открываем новый мир…</p>`);
+    frame(`${logo}<p>${NoraI18n.html("Открываем новый мир…")}</p>`);
     try { await loadGame(); if (version !== active) return; const result = await api('nora-game'); if (version === active) { wingState = result.wings || {owned:[],equipped:null}; outfit = {...defaults,...result.outfit,wings:wingState.equipped}; result.nickname ? (result.outfit ? world(result.nickname) : portal(result.nickname)) : registration(); } }
-    catch (error) { if (version === active) { frame(`${logo}<h1>Не удалось открыть игру</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">Попробовать снова</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const destination=entry, trigger=petTrigger;close();open(destination,trigger); }; } }
+    catch (error) { if (version === active) { frame(`${logo}<h1>${NoraI18n.html("Не удалось открыть игру")}</h1><p>${esc(error.message)}</p><button class="nora-game-retry" type="button">${NoraI18n.html("Попробовать снова")}</button>`); overlay.querySelector('.nora-game-retry').onclick = () => { const destination=entry, trigger=petTrigger;close();open(destination,trigger); }; } }
   }
   function confirmExit() { NoraShop.exitGameView(close); }
   window.NoraGame = {open, close, isOpen: () => Boolean(overlay)};

@@ -11,18 +11,18 @@ window.NoraDot = (() => {
   // Render resolution is independent of the deterministic 120 Hz physics.
   let renderDpr=2,slowFrames=0,frameAverage=0;
   const SKINS={
-    red:{name:"Классика",light:"#ffb4c1",mid:"#ff5977",dark:"#b8143c",rgb:[255,89,119]},
-    mint:{name:"Мята",light:"#e3ffc8",mid:"#a5e86f",dark:"#41883c",rgb:[165,232,111]},
-    ice:{name:"Лёд",light:"#d5faff",mid:"#66d8f1",dark:"#237da8",rgb:[102,216,241]},
-    violet:{name:"Аметист",light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]},
-    heart:{name:"Сердечко",light:"#ffd5ef",mid:"#ff8fc8",dark:"#dc4f95",rgb:[255,143,200]}
+    red:{name:NoraI18n.t("Классика"),light:"#ffb4c1",mid:"#ff5977",dark:"#b8143c",rgb:[255,89,119]},
+    mint:{name:NoraI18n.t("Мята"),light:"#e3ffc8",mid:"#a5e86f",dark:"#41883c",rgb:[165,232,111]},
+    ice:{name:NoraI18n.t("Лёд"),light:"#d5faff",mid:"#66d8f1",dark:"#237da8",rgb:[102,216,241]},
+    violet:{name:NoraI18n.t("Аметист"),light:"#eadbff",mid:"#ac83f5",dark:"#6541b6",rgb:[172,131,245]},
+    heart:{name:NoraI18n.t("Сердечко"),light:"#ffd5ef",mid:"#ff8fc8",dark:"#dc4f95",rgb:[255,143,200]}
   };
   let shopPanel,shopBody,shopBalance,shopStatus,shopState=null,shopBusy=false,shopOpen=false,skinId="red",shopRevision=0;
   let reviveTick=null,reviveBusy=false,lifePurchaseId=null,shopCurrency="crumbs";
   // Use the very same native 🍪 glyph as NORA, clipping a jagged fragment out of it.
   // No replacement emoji, network asset, or font required.
   const CRUMB_CLIP="51% 0,100% 0,100% 100%,52% 100%,60% 79%,46% 63%,60% 47%,48% 32%,58% 17%";
-  const CRUMB=`<span class="dot-crumb-icon" role="img" aria-label="крошки" style="display:inline-block;position:relative;overflow:hidden;width:.92em;height:1em;vertical-align:-.13em;flex:none;line-height:1;letter-spacing:0;text-indent:0"><span aria-hidden="true" style="display:block;position:absolute;left:-.39em;top:-.16em;width:1em;height:1em;font:normal 1.42em/1 Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif;clip-path:polygon(${CRUMB_CLIP});-webkit-clip-path:polygon(${CRUMB_CLIP})">🍪</span></span>`;
+  const CRUMB=`<span class="dot-crumb-icon" role="img" aria-label="${NoraI18n.html("крошки")}" style="display:inline-block;position:relative;overflow:hidden;width:.92em;height:1em;vertical-align:-.13em;flex:none;line-height:1;letter-spacing:0;text-indent:0"><span aria-hidden="true" style="display:block;position:absolute;left:-.39em;top:-.16em;width:1em;height:1em;font:normal 1.42em/1 Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif;clip-path:polygon(${CRUMB_CLIP});-webkit-clip-path:polygon(${CRUMB_CLIP})">🍪</span></span>`;
   const skin=()=>SKINS[skinId]||SKINS.red;
   function applyShop(state){
     shopState=state;
@@ -38,27 +38,27 @@ window.NoraDot = (() => {
   function renderShop(){
     if(!shopBody||!shopState)return;
     const cookie=shopCurrency==="cookies",crumbs=Number(shopState.balance||0),cookies=Number(shopState.cookie_balance||0);
-    shopBalance.innerHTML=crumbs.toLocaleString("ru-RU")+" "+CRUMB+" · "+cookies.toLocaleString("ru-RU")+" 🍪";
+    shopBalance.innerHTML=crumbs.toLocaleString(NoraI18n.locale)+" "+CRUMB+" · "+cookies.toLocaleString(NoraI18n.locale)+" 🍪";
     const balance=cookie?cookies:crumbs;
     const labelFor=price=>price+" "+(cookie?"🍪":CRUMB);
-    const toggle='<div style="display:flex;gap:8px;grid-column:1/-1;margin-bottom:4px"><button type="button" class="dot-skin-item" data-dot-currency="crumbs" aria-pressed="'+(!cookie)+'" style="flex:1;justify-content:center;opacity:'+(!cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>'+CRUMB+' Крошки</button><button type="button" class="dot-skin-item" data-dot-currency="cookies" aria-pressed="'+cookie+'" style="flex:1;justify-content:center;opacity:'+(cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>🍪 Печеньки</button></div>';
+    const toggle='<div style="display:flex;gap:8px;grid-column:1/-1;margin-bottom:4px"><button type="button" class="dot-skin-item" data-dot-currency="crumbs" aria-pressed="'+(!cookie)+'" style="flex:1;justify-content:center;opacity:'+(!cookie?1:.6)+'" '+(shopBusy?"disabled":"")+'>'+CRUMB+(" " + NoraI18n.html("Крошки") + "</button><button type=\"button\" class=\"dot-skin-item\" data-dot-currency=\"cookies\" aria-pressed=\"")+cookie+'" style="flex:1;justify-content:center;opacity:'+(cookie?1:.6)+'" '+(shopBusy?"disabled":"")+(">" + NoraI18n.html("🍪 Печеньки") + "</button></div>");
     shopBody.innerHTML=toggle+Object.entries(SKINS).filter(([id])=>Object.hasOwn(shopState.prices,id)).map(([id,s])=>{
       const owned=shopState.owned.includes(id),active=shopState.equipped===id,crumbPrice=Number(shopState.prices[id]),cookiePrice=Number(shopState.cookie_prices?.[id]??crumbPrice/10),price=cookie?cookiePrice:crumbPrice;
-      const label=active?"Выбран":owned?"Выбрать":labelFor(price);
+      const label=active?NoraI18n.t("Выбран"):owned?NoraI18n.t("Выбрать"):labelFor(price);
       return '<button type="button" class="dot-skin-item" data-dot-skin="'+id+'" '+(active||shopBusy||(!owned&&balance<price)?"disabled":"")+'><span class="dot-skin-preview" style="--sl:'+s.light+';--sm:'+s.mid+';--sd:'+s.dark+'"></span><span><b>'+s.name+'</b><small>'+label+'</small></span></button>';
     }).join("");
     const crumbLife=Number(shopState.life_price||1500),cookieLife=Number(shopState.cookie_life_price??150),price=cookie?cookieLife:crumbLife;
-    shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+'><span class="dot-life-icon">♥</span><span><b>Вторая жизнь</b><small>'+labelFor(price)+' · в запасе '+Number(shopState.lives||0)+'</small></span></button>';
+    shopBody.innerHTML+='<button type="button" class="dot-skin-item dot-life-item" data-dot-life '+(shopBusy||balance<price?"disabled":"")+("><span class=\"dot-life-icon\">♥</span><span><b>" + NoraI18n.html("Вторая жизнь") + "</b><small>")+labelFor(price)+NoraI18n.t(" · в запасе ")+Number(shopState.lives||0)+'</small></span></button>';
   }
   async function refreshShop(){
     const view=viewId,rev=++shopRevision;
     try{const state=await api("dot/shop");if(view===viewId&&rev===shopRevision&&root)applyShop(state);}
-    catch(e){if(view===viewId&&rev===shopRevision&&shopOpen)shopStatus.textContent=e?.message||"Магазин недоступен";}
+    catch(e){if(view===viewId&&rev===shopRevision&&shopOpen)shopStatus.textContent=e?.message||NoraI18n.t("Магазин недоступен");}
   }
   async function openShop(e){
     e?.stopPropagation();
     if(shopOpen||!(mode==="ready"||mode==="over"))return;
-    shopOpen=true;shopPanel.hidden=false;shopStatus.textContent="";shopBody.innerHTML="Загрузка…";shopBalance.textContent="…";
+    shopOpen=true;shopPanel.hidden=false;shopStatus.textContent="";shopBody.innerHTML=NoraI18n.t("Загрузка…");shopBalance.textContent="…";
     const view=viewId;
     if(resultRequest)await resultRequest.catch(()=>{});
     if(view===viewId&&shopOpen)await refreshShop();
@@ -78,7 +78,7 @@ window.NoraDot = (() => {
       const state=await api("dot/shop",life?{action:"buy_life",purchase_id:lifePurchaseId,currency:shopCurrency}:{action:shopState.owned.includes(id)?"equip":"buy",skin:id,currency:shopCurrency});
       if(life)lifePurchaseId=null;
       if(view===viewId&&root){applyShop(state);haptic("flap");}
-    }catch(e){if(view===viewId&&root){shopStatus.textContent=e?.message||"Не удалось выполнить покупку";}}
+    }catch(e){if(view===viewId&&root){shopStatus.textContent=e?.message||NoraI18n.t("Не удалось выполнить покупку");}}
     finally{if(view===viewId&&root){shopBusy=false;renderShop();}}
   }
   const motion=()=>window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches||false;
@@ -213,7 +213,7 @@ window.NoraDot = (() => {
   }
   function setMute(value){
     muted=value;soundButton.setAttribute("aria-pressed",String(muted));
-    soundButton.setAttribute("aria-label",muted?"Включить звук DOT":"Выключить звук DOT");
+    soundButton.setAttribute("aria-label",muted?NoraI18n.t("Включить звук DOT"):NoraI18n.t("Выключить звук DOT"));
     soundButton.classList.toggle("muted",muted);
     if(master&&audio)master.gain.setTargetAtTime(muted?0:.19,audio.currentTime,.015);
     try{localStorage.setItem("nora.dot.muted",muted?"1":"0");}catch{}
@@ -225,24 +225,24 @@ window.NoraDot = (() => {
     zoom=1;bank=cameraY=nearFlash=gravityPulse=0;nearIds.clear();lastPace=-1;lastSpeed="";acc=0;last=0;mode="ready";stageTimer=0;theme=STAGES[0].color.slice();updateStage(false);updateHud();showOverlay();
   }
   function updateStage(announce){
-    const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",gravityMode(run.passed)?"Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию.":"Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.");root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
+    const s=STAGES[run.stage];stageNode.textContent=s.name;canvas.setAttribute("aria-label",gravityMode(run.passed)?NoraI18n.t("Игровое поле DOT. Касание, пробел или стрелка вверх меняют гравитацию."):NoraI18n.t("Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."));root.style.setProperty("--dot-phase","rgb("+s.color.join(",")+")");root.dataset.dotPhase=String(run.stage);stageBanner.hidden=!announce;stageTimer=announce?1.85:0;
     if(announce){stageTitle.textContent=s.name;stageDescription.textContent=s.description;stageBanner.getAnimations?.().forEach(a=>a.cancel());if(!reduced)stageBanner.animate?.([{opacity:0,transform:"translateY(-8px) scale(.96)"},{opacity:1,transform:"none",offset:.15},{opacity:1,offset:.78},{opacity:0}],{duration:1850,easing:"ease-out"});}
   }
   function updateHud(){
     const value=String(run.cookies);if(score.textContent!==value){score.textContent=value;score.classList.remove("pop");score.classList.add("pop");if(score.animate&&!reduced)score.animate([{transform:"scale(.82)",color:"#ffe0ac"},{transform:"scale(1.22)",color:"#ffe0ac",offset:.55},{transform:"scale(1)"}],{duration:330,easing:"cubic-bezier(.16,1,.3,1)"});}
     progress.textContent=String(run.passed);
-    hud.setAttribute("aria-label","Крошки: "+run.cookies+", пройдено: "+run.passed);
+    hud.setAttribute("aria-label",NoraI18n.t("Крошки: ")+run.cookies+NoraI18n.t(", пройдено: ")+run.passed);
   }
   function showOverlay(){
     overlay.hidden=mode==="play"||mode==="crash"||mode==="over";results.hidden=mode!=="over";
     overlay.dataset.state=mode;root.dataset.dotState=mode;if(pauseButton){pauseButton.disabled=mode!=="play";pauseButton.setAttribute("aria-disabled",String(mode!=="play"));}
-    title.textContent=mode==="over"?"Полёт завершён":mode==="paused"?"Пауза":"DOT";
-    detail.innerHTML=mode==="over"?CRUMB+" "+run.cookies+"  ·  "+run.passed+" пройдено":mode==="paused"?"Продолжи, когда будешь готов":"Касайся экрана, чтобы взлететь";
-    button.textContent=mode==="over"?"Ещё раз":mode==="paused"?"Продолжить":"Играть";
+    title.textContent=mode==="over"?NoraI18n.t("Полёт завершён"):mode==="paused"?NoraI18n.t("Пауза"):"DOT";
+    detail.innerHTML=mode==="over"?CRUMB+" "+run.cookies+"  ·  "+run.passed+NoraI18n.t(" пройдено"):mode==="paused"?NoraI18n.t("Продолжи, когда будешь готов"):NoraI18n.t("Касайся экрана, чтобы взлететь");
+    button.textContent=mode==="over"?NoraI18n.t("Ещё раз"):mode==="paused"?NoraI18n.t("Продолжить"):NoraI18n.t("Играть");
     overlay.querySelector(".dot-shop-open").hidden=mode!=="ready";
     overlay.querySelector(".dot-start").hidden=mode==="revive";
     overlay.querySelector(".dot-revive-actions").hidden=mode!=="revive";
-    if(mode==="revive"){title.textContent="Вторая жизнь";detail.textContent="Продолжить этот полёт? В запасе: "+Number(shopState?.lives||0);}
+    if(mode==="revive"){title.textContent=NoraI18n.t("Вторая жизнь");detail.textContent=NoraI18n.t("Продолжить этот полёт? В запасе: ")+Number(shopState?.lives||0);}
   }
   function burst(x,y,count,color,velocity){
     for(let i=0;i<(reduced?Math.ceil(count/3):count);i++){
@@ -269,7 +269,7 @@ window.NoraDot = (() => {
     if(mode==="over"||mode==="ready"){
       if(!queuedTicket&&!ticketRequest)primeTicket();
       if(!queuedTicket&&ticketRequest){
-        initialStartPending=true;if(mode==="ready")button.textContent="Подключаемся…";const view=viewId;
+        initialStartPending=true;if(mode==="ready")button.textContent=NoraI18n.t("Подключаемся…");const view=viewId;
         const launch=()=>{if(view!==viewId||!initialStartPending||!root?.isConnected)return;initialStartPending=false;clearTimeout(connectTimer);connectTimer=0;startFlight();};
         connectTimer=setTimeout(launch,1000);ticketRequest.then(launch,launch);return;
       }
@@ -286,10 +286,10 @@ window.NoraDot = (() => {
     haptic("flap");
   }
   const INTRO_FRAMES=[
-    ["ПОБЕЙ","МИРОВОЙ","РЕКОРД"],
-    ["ЗАБЕРИ","ВСЕ","ПЕЧЕНЬКИ"],
-    ["КАЖДЫЙ","НОВЫЙ РЕКОРД","ПРИНОСИТ НАГРАДУ"],
-    ["СОБИРАЙ","КРОШКИ DOT","ОТКРЫВАЙ ЦВЕТА"]
+    [NoraI18n.t("ПОБЕЙ"),NoraI18n.t("МИРОВОЙ"),NoraI18n.t("РЕКОРД")],
+    [NoraI18n.t("ЗАБЕРИ"),NoraI18n.t("ВСЕ"),NoraI18n.t("ПЕЧЕНЬКИ")],
+    [NoraI18n.t("КАЖДЫЙ"),NoraI18n.t("НОВЫЙ РЕКОРД"),NoraI18n.t("ПРИНОСИТ НАГРАДУ")],
+    [NoraI18n.t("СОБИРАЙ"),NoraI18n.t("КРОШКИ DOT"),NoraI18n.t("ОТКРЫВАЙ ЦВЕТА")]
   ];
   function introStorageKey(){
     const id=typeof data!=="undefined"?data?.user?.user_id:null;
@@ -322,7 +322,7 @@ window.NoraDot = (() => {
     introKey=introStorageKey();
     try{if(localStorage.getItem(introKey)==="1")return;}catch{}
     intro=document.createElement("div");intro.className="dot-intro-screen";intro.setAttribute("role","dialog");intro.setAttribute("aria-modal","true");
-    intro.setAttribute("aria-label","Побей мировой рекорд. Забери все печеньки. Каждый новый рекорд приносит награду. Собирай крошки DOT и открывай цвета.");
+    intro.setAttribute("aria-label",NoraI18n.t("Побей мировой рекорд. Забери все печеньки. Каждый новый рекорд приносит награду. Собирай крошки DOT и открывай цвета."));
     intro.innerHTML='<div class="dot-intro-logo">D<span>O</span>T</div><div class="dot-intro-words" aria-hidden="true"></div><div class="dot-intro-line" aria-hidden="true"></div>';
     document.body.append(intro);root.inert=true;introActive=true;introStarted=false;
     introTimer=setTimeout(launchIntro,450);
@@ -346,7 +346,7 @@ window.NoraDot = (() => {
     run.flap();flaps.push(0);stretch=1;flapBurst(X-7,run.y+4);sfx("flap");haptic("flap");
   }
   function avatarHTML(person){
-    const id=Number(person.id),name=String(person.name||"Участник"),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
+    const id=Number(person.id),name=String(person.name||NoraI18n.t("Участник")),initial=(name.match(/[\p{L}\p{N}]/u)?.[0]||"?").toUpperCase();
     return '<span class="person-avatar dot-rank-avatar"'+(id>0?' data-person-avatar="'+id+'"'+(person.has_avatar?'':' data-avatar-unavailable'):'')+'>'+esc(initial)+'</span>';
   }
   function profileAttrs(person){
@@ -357,17 +357,17 @@ window.NoraDot = (() => {
     if(!root||!resultsBody)return;
     const leaders=payload?.top||[],mine=payload?.self,record=!!payload?.new_record;
     const reward=Number(payload?.reward||0),world=!!payload?.world_record;
-    const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+' 🍪 НА БАЛАНС</div>':'';
+    const rewardHTML=reward>0?'<div class="dot-reward-earned">+'+reward+(" " + NoraI18n.html("🍪 НА БАЛАНС") + "</div>"):'';
     const dotEarned=Number(payload?.dot_earned||0);
-    const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' '+CRUMB+' КРОШКИ · в магазин</div>':'';
+    const dotHTML=dotEarned>0?'<div class="dot-shop-earned">+'+dotEarned+' '+CRUMB+(" " + NoraI18n.html("КРОШКИ · в магазин") + "</div>"):'';
     const slots=[2,1,3].map(rank=>{
       const row=leaders.find(p=>p.rank===rank);
-      if(!row)return '<div class="dot-podium-slot rank-'+rank+' dot-podium-empty"><span class="dot-rank-avatar">·</span><span class="dot-rank-name">Свободно</span><span class="dot-rank-score">—</span><span class="dot-podium-step">'+rank+'</span></div>';
-      return '<button type="button" class="dot-podium-slot rank-'+rank+(row.self?' is-self':'')+'"'+profileAttrs(row)+' aria-label="'+esc(row.name)+', место '+rank+'">'+(rank===1?'<span class="dot-crown" aria-hidden="true">♛</span>':'')+avatarHTML(row)+'<span class="dot-rank-name">'+esc(row.name)+'</span>'+(row.prefix?'<span class="dot-rank-prefix">'+esc(row.prefix.emoji||"")+' '+esc(row.prefix.text||"")+'</span>':'')+'<span class="dot-rank-score">'+CRUMB+' '+row.cookies+'</span><span class="dot-podium-step">'+rank+'</span>'+(row.self?'<span class="dot-rank-you">ТЫ</span>':'')+'</button>';
+      if(!row)return '<div class="dot-podium-slot rank-'+rank+(" dot-podium-empty\"><span class=\"dot-rank-avatar\">·</span><span class=\"dot-rank-name\">" + NoraI18n.html("Свободно") + "</span><span class=\"dot-rank-score\">—</span><span class=\"dot-podium-step\">")+rank+'</span></div>';
+      return '<button type="button" class="dot-podium-slot rank-'+rank+(row.self?' is-self':'')+'"'+profileAttrs(row)+' aria-label="'+esc(row.name)+NoraI18n.t(", место ")+rank+'">'+(rank===1?'<span class="dot-crown" aria-hidden="true">♛</span>':'')+avatarHTML(row)+'<span class="dot-rank-name">'+esc(row.name)+'</span>'+(row.prefix?'<span class="dot-rank-prefix">'+esc(row.prefix.emoji||"")+' '+esc(row.prefix.text||"")+'</span>':'')+'<span class="dot-rank-score">'+CRUMB+' '+row.cookies+'</span><span class="dot-podium-step">'+rank+'</span>'+(row.self?("<span class=\"dot-rank-you\">" + NoraI18n.html("ТЫ") + "</span>"):'')+'</button>';
     }).join("");
-    const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+'<span><b>Ты на '+mine.rank+' месте</b><small>Личный рекорд</small></span><b>'+CRUMB+' '+mine.cookies+'</b></button>':(!mine&&payload?'<p class="dot-rank-status">У тебя пока нет сохранённого результата.</p>':'');
-    const podium=payload?'<div class="dot-podium">'+slots+'</div>': '<div class="dot-rank-loading">'+(message?esc(message):'<span class="dot-rank-spinner"></span> Обновляем топ…')+'</div>';
-    resultsBody.innerHTML='<div class="dot-result-heading"><span>ТВОЙ РЕЗУЛЬТАТ</span><strong>'+CRUMB+' '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+' пройдено</small>'+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+dotHTML+'</div><div class="dot-rank-caption">ТОП-3 <span>ЗА ВСЁ ВРЕМЯ</span></div>'+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
+    const personal=mine&&mine.rank>3?'<button type="button" class="dot-self-rank"'+profileAttrs(mine)+'><strong>#'+mine.rank+'</strong>'+avatarHTML(mine)+("<span><b>" + NoraI18n.html("Ты на") + " ")+mine.rank+(" " + NoraI18n.html("месте") + "</b><small>" + NoraI18n.html("Личный рекорд") + "</small></span><b>")+CRUMB+' '+mine.cookies+'</b></button>':(!mine&&payload?("<p class=\"dot-rank-status\">" + NoraI18n.html("У тебя пока нет сохранённого результата.") + "</p>"):'');
+    const podium=payload?'<div class="dot-podium">'+slots+'</div>': '<div class="dot-rank-loading">'+(message?esc(message):("<span class=\"dot-rank-spinner\"></span> " + NoraI18n.html("Обновляем топ…")))+'</div>';
+    resultsBody.innerHTML=("<div class=\"dot-result-heading\"><span>" + NoraI18n.html("ТВОЙ РЕЗУЛЬТАТ") + "</span><strong>")+CRUMB+' '+run.cookies+'</strong><small>'+STAGES[run.stage].name+' · '+run.passed+(" " + NoraI18n.html("пройдено") + "</small>")+(record?'<b class="dot-new-record">✦ '+(world?'WORLD RECORD':'NEW RECORD')+'</b>':'')+rewardHTML+dotHTML+("</div><div class=\"dot-rank-caption\">" + NoraI18n.html("ТОП-3") + " <span>" + NoraI18n.html("ЗА ВСЁ ВРЕМЯ") + "</span></div>")+podium+personal+(payload&&message?'<p class="dot-rank-status">'+esc(message)+'</p>':'');
     results.classList.toggle("has-record",record);
   }
   function endFlight(){
@@ -384,10 +384,10 @@ window.NoraDot = (() => {
       const state=await api("dot/revive",{token:flightTicket.token,ticks:tick,flaps:flaps.slice()});
       if(view!==viewId||id!==flightId||!root?.isConnected)return;
       ++shopRevision;applyShop(state);
-      if(!run.revive())throw Error("Не удалось восстановить полёт");
+      if(!run.revive())throw Error(NoraI18n.t("Не удалось восстановить полёт"));
       reviveTick=tick;particles=[];trail=[];rings=[];labels=[];impact=shake=stretch=0;
       mode="paused";last=acc=0;showOverlay();haptic("cookie");
-    }catch(e){if(view===viewId&&id===flightId&&root)detail.textContent=e?.message||"Не удалось использовать жизнь. Повтори попытку.";}
+    }catch(e){if(view===viewId&&id===flightId&&root)detail.textContent=e?.message||NoraI18n.t("Не удалось использовать жизнь. Повтори попытку.");}
     finally{if(view===viewId&&id===flightId&&root){reviveBusy=false;controls.querySelectorAll("button").forEach(b=>b.disabled=false);}}
   }
   function finishFlight(){
@@ -396,10 +396,10 @@ window.NoraDot = (() => {
     const still=()=>view===viewId&&id===flightId&&root?.isConnected&&mode==="over";
     const request=ticket?api("dot/finish",record):api("dot/top");
     resultRequest=request;
-    request.then(payload=>{if(payload?.reward>0&&typeof toast==="function")toast("DOT: +"+payload.reward+" 🍪 за мировой рекорд");if(still()){renderRanking(payload,ticket?"":"Тренировочная партия: результат не записан.");void refreshShop();}}).catch(async()=>{
+    request.then(payload=>{if(payload?.reward>0&&typeof toast==="function")toast("DOT: +"+payload.reward+NoraI18n.t(" 🍪 за мировой рекорд"));if(still()){renderRanking(payload,ticket?"":NoraI18n.t("Тренировочная партия: результат не записан."));void refreshShop();}}).catch(async()=>{
       if(!still())return;
-      try{const payload=await api("dot/top");if(still())renderRanking(payload,"Не удалось подтвердить результат этой партии.");}
-      catch{if(still())renderRanking(null,"Топ временно недоступен.");}
+      try{const payload=await api("dot/top");if(still())renderRanking(payload,NoraI18n.t("Не удалось подтвердить результат этой партии."));}
+      catch{if(still())renderRanking(null,NoraI18n.t("Топ временно недоступен."));}
     });
     primeTicket();
   }
@@ -690,17 +690,17 @@ window.NoraDot = (() => {
     raf=requestAnimationFrame(tick);
   }
   function screen(){
-    return '<section id="dot-root" class="dot-game" data-no-swipe><header class="dot-header"><button type="button" class="dot-back" data-tab="games" aria-label="Назад в игры"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><div class="dot-wordmark"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class="dot-tools"><button type="button" class="dot-pause" aria-label="Пауза" disabled><svg viewBox="0 0 24 24"><path d="M9 5v14m6-14v14"/></svg></button><button type="button" class="dot-sound" aria-label="Выключить звук DOT" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9Z"/><path class="dot-sound-waves" d="M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"/><path class="dot-sound-off" d="m16 9 5 6m0-6-5 6"/></svg></button></div></header><div class="dot-hud" aria-live="off"><div class="dot-stat"><span>КРОШКИ</span><strong>'+CRUMB+' <i data-dot-score>0</i></strong></div><div class="dot-stat dot-pace"><span>СКОРОСТЬ</span><strong data-dot-speed>1.0×</strong><i class="dot-meter" data-dot-meter></i></div><div class="dot-stat"><span>ПРОЙДЕНО</span><strong data-dot-passed>0</strong></div></div><div class="dot-field"><div class="dot-stage"><canvas width="360" height="500" tabindex="0" aria-label="Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка."></canvas><div class="dot-stage-banner" hidden aria-live="polite"><small>НОВАЯ СТАДИЯ</small><strong></strong><span></span></div><section class="dot-results" hidden aria-label="Результат и рейтинг DOT"><div class="dot-results-body" aria-live="polite"></div><button type="button" class="dot-start dot-restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 6M4 4v7h7"/></svg>Играть снова</button><button type="button" class="dot-shop-open dot-shop-result">Магазин DOT</button><button type="button" class="dot-results-exit" data-tab="games">Вернуться к играм</button></section><div class="dot-overlay"><div class="dot-overlay-card"><span class="dot-emblem" aria-hidden="true"></span><strong></strong><small></small><button type="button" class="dot-start"></button><button type="button" class="dot-shop-open">Магазин DOT</button><div class="dot-revive-actions" hidden><button type="button" class="dot-start" data-dot-revive>♥ Использовать жизнь</button><button type="button" class="dot-revive-decline" data-dot-decline>Завершить полёт</button></div></div></div><section class="dot-shop-panel" hidden aria-label="Магазин DOT"><div class="dot-shop-head"><button type="button" class="dot-shop-close" aria-label="Закрыть магазин">‹</button><b>МАГАЗИН</b><strong class="dot-shop-balance">…</strong></div><small>Крошки DOT или печеньки Норы</small><div class="dot-shop-items"></div><p class="dot-shop-status" role="status"></p></section></div></div></section>';
+    return ("<section id=\"dot-root\" class=\"dot-game\" data-no-swipe><header class=\"dot-header\"><button type=\"button\" class=\"dot-back\" data-tab=\"games\" aria-label=\"" + NoraI18n.html("Назад в игры") + "\"><svg viewBox=\"0 0 24 24\"><path d=\"m15 5-7 7 7 7\"/></svg></button><div class=\"dot-wordmark\"><b>D<span>O</span>T</b><small data-dot-phase>FLOW</small></div><div class=\"dot-tools\"><button type=\"button\" class=\"dot-pause\" aria-label=\"" + NoraI18n.html("Пауза") + "\" disabled><svg viewBox=\"0 0 24 24\"><path d=\"M9 5v14m6-14v14\"/></svg></button><button type=\"button\" class=\"dot-sound\" aria-label=\"" + NoraI18n.html("Выключить звук DOT") + "\" aria-pressed=\"false\"><svg viewBox=\"0 0 24 24\"><path d=\"M3 9v6h4l5 4V5L7 9Z\"/><path class=\"dot-sound-waves\" d=\"M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12\"/><path class=\"dot-sound-off\" d=\"m16 9 5 6m0-6-5 6\"/></svg></button></div></header><div class=\"dot-hud\" aria-live=\"off\"><div class=\"dot-stat\"><span>" + NoraI18n.html("КРОШКИ") + "</span><strong>")+CRUMB+(" <i data-dot-score>0</i></strong></div><div class=\"dot-stat dot-pace\"><span>" + NoraI18n.html("СКОРОСТЬ") + "</span><strong data-dot-speed>1.0×</strong><i class=\"dot-meter\" data-dot-meter></i></div><div class=\"dot-stat\"><span>" + NoraI18n.html("ПРОЙДЕНО") + "</span><strong data-dot-passed>0</strong></div></div><div class=\"dot-field\"><div class=\"dot-stage\"><canvas width=\"360\" height=\"500\" tabindex=\"0\" aria-label=\"" + NoraI18n.html("Игровое поле DOT. Касание, пробел или стрелка вверх для прыжка.") + "\"></canvas><div class=\"dot-stage-banner\" hidden aria-live=\"polite\"><small>" + NoraI18n.html("НОВАЯ СТАДИЯ") + "</small><strong></strong><span></span></div><section class=\"dot-results\" hidden aria-label=\"" + NoraI18n.html("Результат и рейтинг DOT") + "\"><div class=\"dot-results-body\" aria-live=\"polite\"></div><button type=\"button\" class=\"dot-start dot-restart\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 11a8 8 0 1 1 2 6M4 4v7h7\"/></svg>" + NoraI18n.html("Играть снова") + "</button><button type=\"button\" class=\"dot-shop-open dot-shop-result\">" + NoraI18n.html("Магазин DOT") + "</button><button type=\"button\" class=\"dot-results-exit\" data-tab=\"games\">" + NoraI18n.html("Вернуться к играм") + "</button></section><div class=\"dot-overlay\"><div class=\"dot-overlay-card\"><span class=\"dot-emblem\" aria-hidden=\"true\"></span><strong></strong><small></small><button type=\"button\" class=\"dot-start\"></button><button type=\"button\" class=\"dot-shop-open\">" + NoraI18n.html("Магазин DOT") + "</button><div class=\"dot-revive-actions\" hidden><button type=\"button\" class=\"dot-start\" data-dot-revive>" + NoraI18n.html("♥ Использовать жизнь") + "</button><button type=\"button\" class=\"dot-revive-decline\" data-dot-decline>" + NoraI18n.html("Завершить полёт") + "</button></div></div></div><section class=\"dot-shop-panel\" hidden aria-label=\"" + NoraI18n.html("Магазин DOT") + "\"><div class=\"dot-shop-head\"><button type=\"button\" class=\"dot-shop-close\" aria-label=\"" + NoraI18n.html("Закрыть магазин") + "\">‹</button><b>" + NoraI18n.html("МАГАЗИН") + "</b><strong class=\"dot-shop-balance\">…</strong></div><small>" + NoraI18n.html("Крошки DOT или печеньки Норы") + "</small><div class=\"dot-shop-items\"></div><p class=\"dot-shop-status\" role=\"status\"></p></section></div></div></section>");
   }
   function mount(next){
     if(root===next&&root)return;unmount();if(!next)return;
-    root=next;canvas=root.querySelector("canvas");renderDpr=Math.min(2,Math.max(1,window.devicePixelRatio||1));slowFrames=frameAverage=0;ctx=canvas.getContext("2d",{alpha:false});if(!ctx){root.textContent="Не удалось открыть игровое поле DOT";return;}
+    root=next;canvas=root.querySelector("canvas");renderDpr=Math.min(2,Math.max(1,window.devicePixelRatio||1));slowFrames=frameAverage=0;ctx=canvas.getContext("2d",{alpha:false});if(!ctx){root.textContent=NoraI18n.t("Не удалось открыть игровое поле DOT");return;}
     hud=root.querySelector(".dot-hud");score=root.querySelector("[data-dot-score]");progress=root.querySelector("[data-dot-passed]");
     overlay=root.querySelector(".dot-overlay");title=overlay.querySelector("strong");detail=overlay.querySelector("small");button=overlay.querySelector("button");soundButton=root.querySelector(".dot-sound");pauseButton=root.querySelector(".dot-pause");paceNode=root.querySelector("[data-dot-speed]");meterNode=root.querySelector("[data-dot-meter]");stageNode=root.querySelector("[data-dot-phase]");stageBanner=root.querySelector(".dot-stage-banner");stageTitle=stageBanner.querySelector("strong");stageDescription=stageBanner.querySelector("span");results=root.querySelector(".dot-results");resultsBody=root.querySelector(".dot-results-body");restart=root.querySelector(".dot-restart");
     shopPanel=root.querySelector(".dot-shop-panel");shopBody=root.querySelector(".dot-shop-items");shopBalance=root.querySelector(".dot-shop-balance");shopStatus=root.querySelector(".dot-shop-status");shopState=null;shopOpen=shopBusy=false;skinId="red";
     viewId++;queuedTicket=null;ticketRequest=null;abort=new AbortController();const options={signal:abort.signal};reduced=motion();visualTime=renderAt=0;
     try{muted=localStorage.getItem("nora.dot.muted")==="1";}catch{muted=false;}
-    soundButton.setAttribute("aria-pressed",String(muted));soundButton.setAttribute("aria-label",muted?"Включить звук DOT":"Выключить звук DOT");soundButton.classList.toggle("muted",muted);
+    soundButton.setAttribute("aria-pressed",String(muted));soundButton.setAttribute("aria-label",muted?NoraI18n.t("Включить звук DOT"):NoraI18n.t("Выключить звук DOT"));soundButton.classList.toggle("muted",muted);
     soundButton.addEventListener("click",()=>setMute(!muted),options);pauseButton.addEventListener("click",pause,options);
     canvas.addEventListener("pointerdown",e=>{if(e.isPrimary&&e.button===0){e.preventDefault();input();}},options);
     overlay.querySelector("[data-dot-revive]").addEventListener("click",e=>{e.stopPropagation();void useSecondLife();},options);

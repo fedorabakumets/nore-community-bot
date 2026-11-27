@@ -8,7 +8,7 @@ window.NoraLogo = (() => {
     + '<path fill="#fff3e2" fill-rule="evenodd" d="M658 529 L688 351 Q700 312 737 312 L822 312 Q883 312 891 366 C898 433 860 486 796 486 L770 486 Q763 486 762 492 L754 533 Q746 559 718 559 L694 559 Q664 559 658 529 Z M779 379 Q772 379 770 387 L765 410 Q762 419 770 419 L786 419 Q808 419 810 395 Q812 379 796 379 Z"/>'
     + '<path fill="#fff3e2" fill-rule="evenodd" d="M839 524 L947 348 Q970 311 1004 311 L1038 311 Q1072 311 1075 351 L1088 516 Q1091 557 1055 559 L1030 559 Q1001 559 1000 521 Q1000 516 995 516 L944 516 Q939 516 937 521 L925 544 Q916 559 896 559 L871 559 Q830 559 839 524 Z M966 440 Q962 450 973 450 L998 450 Q1005 450 1004 442 L1001 400 Q1001 393 996 393 Q990 393 987 399 Z"/>';
   function markup(home = false) {
-    return `<svg class="nora-logo${home ? ' nora-logo-home home-wordmark' : ''}" viewBox="100 280 1100 450" role="img" aria-label="Нора" xmlns="http://www.w3.org/2000/svg"><g stroke="#050407" stroke-width="12" stroke-linejoin="round"><path class="nora-logo-layer nora-logo-cyan" fill="#00c8ed" d="${outline}"/><path class="nora-logo-layer nora-logo-pink" fill="#ff09ae" d="${outline}"/><path class="nora-logo-layer nora-logo-yellow" fill="#ffd500" d="${outline}"/><path fill="#050407" d="${outline}"/></g><path fill="#050407" d="M820 300 H990 L855 495 H790 Z"/><g class="nora-logo-face" stroke="#050407" stroke-width="20" stroke-linejoin="round" paint-order="stroke fill">${letters}</g></svg>`;
+    return `<svg class="nora-logo${home ? ' nora-logo-home home-wordmark' : ''}" viewBox="100 280 1100 450" role="img" aria-label="${NoraI18n.html("Нора")}" xmlns="http://www.w3.org/2000/svg"><g stroke="#050407" stroke-width="12" stroke-linejoin="round"><path class="nora-logo-layer nora-logo-cyan" fill="#00c8ed" d="${outline}"/><path class="nora-logo-layer nora-logo-pink" fill="#ff09ae" d="${outline}"/><path class="nora-logo-layer nora-logo-yellow" fill="#ffd500" d="${outline}"/><path fill="#050407" d="${outline}"/></g><path fill="#050407" d="M820 300 H990 L855 495 H790 Z"/><g class="nora-logo-face" stroke="#050407" stroke-width="20" stroke-linejoin="round" paint-order="stroke fill">${letters}</g></svg>`;
   }
   function impact(style) {
     if (document.hidden) return;
@@ -21,7 +21,7 @@ window.NoraLogo = (() => {
     return `<svg class="nora-quick-brand nora-quick-telegram" viewBox="0 0 48 48" aria-hidden="true">
       <circle cx="24" cy="24" r="23" fill="#007daf"/>
       <path fill="#fff" d="m10 22 27-10c1.1-.4 2 .4 1.7 1.7l-4.3 22c-.3 1.3-1.3 1.6-2.3.9l-8-6.2-3.9 3.7c-.6.6-1 .7-1.3-.3l.7-7.2 13-11c.6-.5.1-.8-.5-.5L16 24.9l-6-1.9c-.9-.3-.9-.7 0-1z"/>
-    </svg><strong class="nora-quick-label">Быстрая игра</strong>
+    </svg><strong class="nora-quick-label">${NoraI18n.html("Быстрая игра")}</strong>
     <svg class="nora-quick-brand nora-quick-mark" viewBox="0 0 48 48" aria-hidden="true">
       <circle cx="24" cy="24" r="23" fill="#fff3e2"/>
       <g transform="translate(12 12) scale(.08) translate(-388 -301)" stroke="#170813" stroke-width="8" stroke-linejoin="round">

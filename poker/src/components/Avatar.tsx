@@ -1,3 +1,4 @@
+import { copy } from "../i18n";
 import styles from "./Avatar.module.css";
 
 export function Avatar({ index, size = "md", selected = false }: { index: number; size?: "sm" | "md" | "lg"; selected?: boolean }) {
@@ -8,7 +9,7 @@ export function Avatar({ index, size = "md", selected = false }: { index: number
       className={`${styles.avatar} ${styles[size]} ${selected ? styles.selected : ""}`}
       style={{ backgroundPosition: `${column * 33.333}% ${row * 50}%` }}
       role="img"
-      aria-label={`Аватар ${index + 1}`}
+      aria-label={`${copy("Аватар")} ${index + 1}`}
     />
   );
 }

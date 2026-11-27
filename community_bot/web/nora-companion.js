@@ -76,7 +76,7 @@ window.NoraCompanion = (() => {
       if(!panel.open)return;
       const p=pet,away=!!p?.expedition_until;
       const disabled=!valid||pending||(!away&&(!p?.enabled||p.hunger<50||p.thirst<50));
-      content.innerHTML=p?`<h2>${esc(p.name)}</h2><p>${esc(p.species_label)}</p><label>Сытость: ${Number(p.hunger)||0} / 100<progress max="100" value="${Number(p.hunger)||0}"></progress></label><label>Вода: ${Number(p.thirst)||0} / 100<progress max="100" value="${Number(p.thirst)||0}"></progress></label><label>Настроение: ${Number(p.mood)||0} / 100<progress max="100" value="${Number(p.mood)||0}"></progress></label><p>${p.expedition_until?'В походе до '+esc(new Date(p.expedition_until).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}))+' МСК. Можно вернуть раньше без награды и возврата ухода.':'Поход длится 24 часа. Сытость и вода должны быть не ниже 50; расход: 60 сытости, 60 воды и 40 настроения; находка зависит от настроения.'}</p>${!p.enabled?'<p>Походы временно отключены.</p>':''}<button type="button" class="nora-pet-expedition" ${disabled?'disabled':''}>${pending?'Подождите…':away?'Вернуть из похода':'Отправить в поход'}</button>`:'<p>Питомец пока не появился. Завести его можно в магазине.</p>';
+      content.innerHTML=p?`<h2>${esc(p.name)}</h2><p>${esc(NoraI18n.t(p.species_label))}</p><label>${NoraI18n.html("Сытость:")} ${Number(p.hunger)||0} / 100<progress max="100" value="${Number(p.hunger)||0}"></progress></label><label>${NoraI18n.html("Вода:")} ${Number(p.thirst)||0} / 100<progress max="100" value="${Number(p.thirst)||0}"></progress></label><label>${NoraI18n.html("Настроение:")} ${Number(p.mood)||0} / 100<progress max="100" value="${Number(p.mood)||0}"></progress></label><p>${p.expedition_until?NoraI18n.t("В походе до ")+esc(new Date(p.expedition_until).toLocaleString(NoraI18n.locale,{timeZone:'Europe/Moscow'}))+NoraI18n.t(" МСК. Можно вернуть раньше без награды и возврата ухода."):NoraI18n.t("Поход длится 24 часа. Сытость и вода должны быть не ниже 50; расход: 60 сытости, 60 воды и 40 настроения; находка зависит от настроения.")}</p>${!p.enabled?("<p>" + NoraI18n.html("Походы временно отключены.") + "</p>"):''}<button type="button" class="nora-pet-expedition" ${disabled?'disabled':''}>${pending?NoraI18n.t("Подождите…"):away?NoraI18n.t("Вернуть из похода"):NoraI18n.t("Отправить в поход")}</button>`:("<p>" + NoraI18n.html("Питомец пока не появился. Завести его можно в магазине.") + "</p>");
     }
     async function refresh(){
       if(flight)return flight;
@@ -98,8 +98,8 @@ window.NoraCompanion = (() => {
       catch(error){if(!disposed)toast(error.message);}finally{pending=false;}
     }
     const actions=[
-      {id:'stroke',text:'Погладить',run:stroke},
-      {id:'pet',text:'Открыть питомца',run:openPanel},
+      {id:'stroke',text:NoraI18n.t("Погладить"),run:stroke},
+      {id:'pet',text:NoraI18n.t("Открыть питомца"),run:openPanel},
     ];
     on(content,'click',async event=>{
       if(!event.target.closest('.nora-pet-expedition')||pending||!valid||!pet)return;
@@ -111,7 +111,7 @@ window.NoraCompanion = (() => {
         if(flight)await flight;if(disposed)return;
         const prepared=await api('pet/prepare',action);if(disposed)return;
         const result=await api('pet/action',{token:prepared.token});if(disposed)return;
-        if(!result.ok)throw Error(result.message||'Не удалось обновить поход');
+        if(!result.ok)throw Error(result.message||NoraI18n.t("Не удалось обновить поход"));
         valid=false;
         message.textContent=result.message;await refresh();
       }catch(error){if(!disposed){message.textContent=error.message;await refresh();}}
@@ -126,10 +126,10 @@ window.NoraCompanion = (() => {
       hint = document.createElement('dialog');
       hint.className = 'nora-pet-panel nora-pet-hint';
       hint.setAttribute('aria-labelledby', 'nora-pet-hint-title');
-      hint.innerHTML = '<h2 id="nora-pet-hint-title">Питомец</h2><p></p><button type="button">Понятно</button>';
-      hint.querySelector('p').textContent = !valid ? 'Не удалось узнать, где питомец.'
-        : pet?.expedition_until ? 'До питомца сейчас не дотянуться. Он в походе где-то далеко.'
-        : pet ? 'Погладь питомца. Он скучал по тебе всё это время 😢' : 'Питомец пока не появился.';
+      hint.innerHTML = ("<h2 id=\"nora-pet-hint-title\">" + NoraI18n.html("Питомец") + "</h2><p></p><button type=\"button\">" + NoraI18n.html("Понятно") + "</button>");
+      hint.querySelector('p').textContent = !valid ? NoraI18n.t("Не удалось узнать, где питомец.")
+        : pet?.expedition_until ? NoraI18n.t("До питомца сейчас не дотянуться. Он в походе где-то далеко.")
+        : pet ? NoraI18n.t("Погладь питомца. Он скучал по тебе всё это время 😢") : NoraI18n.t("Питомец пока не появился.");
       on(hint.querySelector('button'), 'click', () => hint.close());
       on(hint, 'cancel', event => event.stopPropagation());
       on(hint, 'close', () => { resetInput(); hint.remove(); hint = null; });

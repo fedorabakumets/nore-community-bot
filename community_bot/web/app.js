@@ -14,7 +14,7 @@ const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>
 function tgkLink(url){
   const href=String(url||'');
   if(!/^https:\/\/t\.me\/(?:[A-Za-z0-9_]{5,32}|\+[A-Za-z0-9_-]{8,128}|joinchat\/[A-Za-z0-9_-]{8,128})$/.test(href))return '';
-  return `<a class="tgk-link" data-tgk href="${esc(href)}" aria-label="Открыть ТГК в Telegram" title="Telegram-канал"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.6 3.3 2.7 10.7c-1.1.4-1.1 1.1-.2 1.4l4.9 1.6 1.9 5.7c.3.8.6.9 1.2.3l2.7-2.6 5.1 3.8c1 .6 1.6.3 1.8-.8l3.1-15c.3-1.3-.4-2-1.6-1.8ZM9 13.5l10.4-6.7-8 8.7-.4 3-2-5Z"/></svg></a>`;
+  return `<a class="tgk-link" data-tgk href="${esc(href)}" aria-label="${NoraI18n.html("Открыть ТГК в Telegram")}" title="${NoraI18n.html("Telegram-канал")}"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.6 3.3 2.7 10.7c-1.1.4-1.1 1.1-.2 1.4l4.9 1.6 1.9 5.7c.3.8.6.9 1.2.3l2.7-2.6 5.1 3.8c1 .6 1.6.3 1.8-.8l3.1-15c.3-1.3-.4-2-1.6-1.8ZM9 13.5l10.4-6.7-8 8.7-.4 3-2-5Z"/></svg></a>`;
 }
 document.addEventListener('click',event=>{
   const link=event.target.closest('a[data-tgk]');
@@ -24,9 +24,9 @@ function profileTabLocked(target) {
   return data.profile.fill_percent < 100 && !['home','commands','lk','notices','admin','reputation','staffchat'].includes(target)
     && !(target==='events'&&data.events_admin);
 }
-const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
+const number=n=>new Intl.NumberFormat(NoraI18n.locale).format(Number(n||0));
 const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
-const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
+const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));if(NoraI18n.language==='en')return n===1?one:many;return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
 const gameWrites = new Map();
 function api(path, body, signal, keepalive = false) {
@@ -35,8 +35,13 @@ function api(path, body, signal, keepalive = false) {
       Authorization:'tma '+auth, ...(body?{'Content-Type':'application/json'}:{})
     }, body:body?JSON.stringify(body):undefined});
     let j;
-    try {j=await r.json()} catch {throw Error('Сервис пока недоступен. Попробуй ещё раз')}
-    if(!r.ok)throw Object.assign(Error(j.error||j.message||'Не удалось выполнить действие'),{status:r.status});
+    try {j=await r.json()} catch {throw Error(NoraI18n.t("Сервис пока недоступен. Попробуй ещё раз"))}
+    if (!r.ok) {
+      const serverMessage = j.error || j.message;
+      throw Object.assign(Error(NoraI18n.server(serverMessage) || NoraI18n.t("Не удалось выполнить действие")),
+        {status: r.status, serverMessage});
+    }
+    if (typeof j?.message === 'string') j.message = NoraI18n.server(j.message);
     return j;
   })();
   const game = path.split('/')[0];
@@ -61,17 +66,17 @@ function requestGameExit(onExit) {
   const exit = $('#game-exit-confirm'), stay = $('#game-exit-stay'), error = $('#game-exit-error');
   error.textContent = '';
   $('#game-exit-details').textContent = {
-    world: 'Ты покинешь мир Норы.',
-    dot: 'Текущий полёт завершится.',
-    poker: 'Место и печеньки сохранятся за столом. Забрать их можно после раздачи. При закрытии неактивного стола остаток вернётся на баланс.',
-    rocket: 'Текущий полёт завершится. Ставка будет проиграна.',
-    mafia: 'Ты выйдешь из лобби или сдашься в начавшейся партии.',
-  }[game] || 'Поиск отменится. Если партия уже началась, тебе засчитается поражение.';
+    world: NoraI18n.t("Ты покинешь мир Норы."),
+    dot: NoraI18n.t("Текущий полёт завершится."),
+    poker: NoraI18n.t("Место и печеньки сохранятся за столом. Забрать их можно после раздачи. При закрытии неактивного стола остаток вернётся на баланс."),
+    rocket: NoraI18n.t("Текущий полёт завершится. Ставка будет проиграна."),
+    mafia: NoraI18n.t("Ты выйдешь из лобби или сдашься в начавшейся партии."),
+  }[game] || NoraI18n.t("Поиск отменится. Если партия уже началась, тебе засчитается поражение.");
   stay.onclick = () => dialog.close();
   dialog.oncancel = event => { if (exit.disabled) event.preventDefault(); };
   exit.onclick = async () => {
     exit.disabled = stay.disabled = true;
-    exit.textContent = 'Выходим…';
+    exit.textContent = NoraI18n.t("Выходим…");
     error.textContent = '';
     try {
       if (game !== 'world' && game !== 'dot' && game !== 'poker') {
@@ -86,7 +91,7 @@ function requestGameExit(onExit) {
       error.textContent = e.message;
     } finally {
       exit.disabled = stay.disabled = false;
-      exit.textContent = 'Выйти';
+      exit.textContent = NoraI18n.t("Выйти");
     }
   };
   dialog.showModal();
@@ -111,17 +116,17 @@ function showCitySetup() {
   const app = $('#app');
   app.dataset.screen = 'city';
   window.scrollTo(0, 0);
-  app.innerHTML = `<section class="application-panel card">
-    <span class="eyebrow">Нора · твой профиль</span>
-    <h1>Из какого ты города?</h1>
-    <p class="sub">Укажи город, чтобы открыть Нору и пользоваться командами в чате.</p>
+  app.innerHTML = `<section class="application-panel card"><div class="application-language">${NoraI18n.button()}</div>
+    <span class="eyebrow">${NoraI18n.html("Нора · твой профиль")}</span>
+    <h1>${NoraI18n.html("Из какого ты города?")}</h1>
+    <p class="sub">${NoraI18n.html("Укажи город, чтобы открыть Нору и пользоваться командами в чате.")}</p>
     <form id="city-setup-form">
-      <label>Город
+      <label>${NoraI18n.html("Город")}
         <input name="city" autocomplete="address-level2" minlength="2" maxlength="100"
-          placeholder="Например, Санкт-Петербург" required autofocus>
+          placeholder="${NoraI18n.html("Например, Санкт-Петербург")}" required autofocus>
       </label>
       <p class="application-error" id="city-setup-error" role="alert"></p>
-      <button type="submit" class="primary">Продолжить</button>
+      <button type="submit" class="primary">${NoraI18n.html("Продолжить")}</button>
     </form>
   </section>`;
   const form = $('#city-setup-form');
@@ -132,7 +137,7 @@ function showCitySetup() {
     const button = form.querySelector('[type="submit"]');
     const error = $('#city-setup-error');
     busy = button.disabled = true;
-    button.textContent = 'Сохраняем…';
+    button.textContent = NoraI18n.t("Сохраняем…");
     error.textContent = '';
     try {
       await api('city', {city_id: window.NoraCity.choice(form)});
@@ -141,7 +146,7 @@ function showCitySetup() {
       error.textContent = err.message;
     } finally {
       busy = button.disabled = false;
-      button.textContent = 'Продолжить';
+      button.textContent = NoraI18n.t("Продолжить");
     }
   };
 }
@@ -163,18 +168,18 @@ function showApplication(application) {
   if (application.status !== 'form') {
     const waiting = application.status === 'pending';
     const canAttach = waiting && application.application_id && !application.has_photo;
-    app.innerHTML = `<section class="application-panel card">
-      <h1>${waiting ? 'Анкета на проверке' : 'Анкета пока недоступна'}</h1>
-      <p>${waiting ? 'Нора сообщит решение в Telegram.'
-        : 'Ты сможешь подать анкету после разбана.'}</p>
+    app.innerHTML = `<section class="application-panel card"><div class="application-language">${NoraI18n.button()}</div>
+      <h1>${waiting ? NoraI18n.t("Анкета на проверке") : NoraI18n.t("Анкета пока недоступна")}</h1>
+      <p>${waiting ? NoraI18n.t("Нора сообщит решение в Telegram.")
+        : NoraI18n.t("Ты сможешь подать анкету после разбана.")}</p>
       ${canAttach ? `<form id="application-photo-form">
-        <label>Фото (необязательно)
+        <label>${NoraI18n.html("Фото (необязательно)")}
           <input type="file" name="photo" accept="${AVATAR_ACCEPT}" required>
         </label>
-        <button type="submit" class="primary">Прикрепить фото</button>
-      </form>` : application.has_photo ? '<p role="status">Фото прикреплено.</p>' : ''}
-      <button type="button" class="${canAttach ? 'secondary' : 'primary'}" id="application-close">${canAttach ? 'Пропустить фото' : 'Вернуться в чат'}</button>
-      <button type="button" class="secondary" id="application-check">Проверить статус</button>
+        <button type="submit" class="primary">${NoraI18n.html("Прикрепить фото")}</button>
+      </form>` : application.has_photo ? ("<p role=\"status\">" + NoraI18n.html("Фото прикреплено.") + "</p>") : ''}
+      <button type="button" class="${canAttach ? 'secondary' : 'primary'}" id="application-close">${canAttach ? NoraI18n.t("Пропустить фото") : NoraI18n.t("Вернуться в чат")}</button>
+      <button type="button" class="secondary" id="application-check">${NoraI18n.html("Проверить статус")}</button>
       <p class="application-error" id="application-error" role="status"></p>
     </section>`;
     $('#application-close').onclick = () => tg?.close?.();
@@ -183,23 +188,23 @@ function showApplication(application) {
     return;
   }
 
-  app.innerHTML = `<section class="application-panel card">
-    <h1>Анкета на вступление</h1>
+  app.innerHTML = `<section class="application-panel card"><div class="application-language">${NoraI18n.button()}</div>
+    <h1>${NoraI18n.html("Анкета на вступление")}</h1>
     <form id="application-form">
-      <label>Имя
+      <label>${NoraI18n.html("Имя")}
         <input name="name" autocomplete="given-name" maxlength="50" required value="${esc(application.name)}">
       </label>
-      <label>Возраст
+      <label>${NoraI18n.html("Возраст")}
         <input name="age" type="number" inputmode="numeric" min="14" max="120" step="1" required>
       </label>
-      <label>Город
+      <label>${NoraI18n.html("Город")}
         <input name="city" autocomplete="address-level2" maxlength="100" required>
       </label>
-      <label>О себе
+      <label>${NoraI18n.html("О себе")}
         <textarea name="bio" rows="3" maxlength="1000" required></textarea>
       </label>
       <p class="application-error" id="application-error" role="alert"></p>
-      <button type="submit" class="primary">Отправить анкету</button>
+      <button type="submit" class="primary">${NoraI18n.html("Отправить анкету")}</button>
     </form>
   </section>`;
   const form = $('#application-form');
@@ -211,7 +216,7 @@ function showApplication(application) {
     const error = $('#application-error');
     const answers = Object.fromEntries(new FormData(form));
     busy = submit.disabled = true;
-    submit.textContent = 'Отправляем…';
+    submit.textContent = NoraI18n.t("Отправляем…");
     error.textContent = '';
     try {
       answers.city_id = window.NoraCity.choice(form);
@@ -222,7 +227,7 @@ function showApplication(application) {
       error.textContent = err.message;
     } finally {
       busy = submit.disabled = false;
-      submit.textContent = 'Отправить анкету';
+      submit.textContent = NoraI18n.t("Отправить анкету");
     }
   };
 }
@@ -236,7 +241,7 @@ async function attachApplicationPhoto(event, application) {
   const submit = form.querySelector('[type="submit"]');
   const error = $('#application-error');
   busy = submit.disabled = true;
-  submit.textContent = 'Загружаем фото…';
+  submit.textContent = NoraI18n.t("Загружаем фото…");
   error.textContent = '';
   try {
     const result = await uploadPhoto(file, 'application/photo', {'X-Application-Id': application.application_id});
@@ -245,7 +250,7 @@ async function attachApplicationPhoto(event, application) {
     error.textContent = err.message;
   } finally {
     busy = submit.disabled = false;
-    submit.textContent = 'Прикрепить фото';
+    submit.textContent = NoraI18n.t("Прикрепить фото");
   }
 }
 
@@ -262,7 +267,7 @@ async function refreshApplication(button) {
     const next = result.onboarding;
     if (next?.status !== applicationScreen.status || next?.application_id !== applicationScreen.application_id
       || next?.has_photo !== applicationScreen.has_photo) await openApp(result);
-    else if (button) message.textContent = applicationScreen.status === 'pending' ? 'Модераторы ещё проверяют анкету.' : 'Анкета пока недоступна.';
+    else if (button) message.textContent = applicationScreen.status === 'pending' ? NoraI18n.t("Модераторы ещё проверяют анкету.") : NoraI18n.t("Анкета пока недоступна.");
   } catch (err) {
     if (button) message.textContent = err.message;
   } finally {
@@ -281,7 +286,7 @@ function toast(s){
   window.toastTimer=setTimeout(()=>notice.style.display='none',4000);
 }
 function products(list){return window.NoraShop?NoraShop.cards(list):''}
-function eventCard(e){return `<article class="card event"><span class="eyebrow"><i class="dot"></i>Собираемся вместе</span><h2>${esc(e.title)}</h2>${e.starts_at?`<p>📅 ${esc(new Date(e.starts_at).toLocaleString('ru-RU',{timeZone:data.profile.timezone}))}</p>`:''}${e.description?`<p>${esc(e.description)}</p>`:''}<p>${number(e.count)} в списке участников</p><div class="price">${e.price?number(e.price)+' 🍪':'Бесплатно'}</div><button class="primary" data-event="${esc(e.id)}" ${e.paid||(!e.price&&e.joined)?'disabled':''}>${e.paid?'Билет оплачен':!e.price&&e.joined?'Ты в списке ✓':e.price?'Купить билет':'Я буду'}</button></article>`}
+function eventCard(e){return `<article class="card event"><span class="eyebrow"><i class="dot"></i>${NoraI18n.html("Собираемся вместе")}</span><h2>${esc(e.title)}</h2>${e.starts_at?`<p>📅 ${esc(new Date(e.starts_at).toLocaleString(NoraI18n.locale,{timeZone:data.profile.timezone}))}</p>`:''}${e.description?`<p>${esc(e.description)}</p>`:''}<p>${number(e.count)} ${NoraI18n.html("в списке участников")}</p><div class="price">${e.price?number(e.price)+' 🍪':NoraI18n.t("Бесплатно")}</div><button class="primary" data-event="${esc(e.id)}" ${e.paid||(!e.price&&e.joined)?'disabled':''}>${e.paid?NoraI18n.t("Билет оплачен"):!e.price&&e.joined?NoraI18n.t("Ты в списке ✓"):e.price?NoraI18n.t("Купить билет"):NoraI18n.t("Я буду")}</button></article>`}
 function navIcon(id){if(id==='interactive')return window.NoraInteractive?.icon('game')||'';const paths={community:'M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0 M3 17c-5-1 1-7 9-10s15-2 9 3S4 19 3 17',home:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',shop:'M4 8h16v13H4z M8 8V5a4 4 0 0 1 8 0v3',events:'M4 5h16v16H4z M4 10h16 M8 2v5 M16 2v5',wallet:'M3 6h17v15H3z M3 6V3h14 M15 12h6v5h-6z',pet:'M8 11c-2 0-4 3-4 5s2 3 4 2c2-1 2-1 4-1s2 0 4 1c2 1 4 0 4-2s-2-5-4-5c-2 0-2 1-4 1s-2-1-4-1z M5 5v2 M10 3v3 M15 3v3 M20 5v2',lk:'M5 21v-2a7 7 0 0 1 14 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="${paths[id]}"/></svg>`}
 const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4Z"/><path d="M26 56V37a6 6 0 0 1 12 0v19"/>',shop:'<rect x="11" y="24" width="42" height="33" rx="6"/><path d="M22 26v-7a10 10 0 0 1 20 0v7"/>',community:'<circle cx="32" cy="32" r="17"/><path d="M13.2 37.2C3 43.4 4.5 48 10.8 48.3c7.7.4 22.5-5.7 33.4-12.2C54.7 29.9 60 24.4 57 20.9c-2.4-2.8-8-1.9-14.7.7"/>',events:'<rect x="12" y="17" width="40" height="39" rx="6"/><path d="M22 10v14M42 10v14M12 29h40"/><circle cx="23" cy="40" r="2.5" fill="currentColor" stroke="none"/>'};
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
@@ -296,7 +301,7 @@ function mountPoker() {
   if (!host || host === pokerHost) return;
   pokerHost = host;
   const code = pokerCode;
-  pokerModule ??= import('/poker-assets/table.js?v=nora-wallet-1').catch(error => {
+  pokerModule ??= import('/poker-assets/table.js?v=miniapp-english').catch(error => {
     pokerModule = null;
     throw error;
   });
@@ -310,13 +315,13 @@ function mountPoker() {
       exit: () => goToTab('games'),
       share: url => {
         const link = 'https://t.me/share/url?url=' + encodeURIComponent(url)
-          + '&text=' + encodeURIComponent('Сыграем в покер в Норе?');
+          + '&text=' + encodeURIComponent(NoraI18n.t("Сыграем в покер в Норе?"));
         if (tg?.openTelegramLink) tg.openTelegramLink(link);
         else window.open(link, '_blank', 'noopener');
       },
     });
   }).catch(() => {
-    if (host.isConnected) host.innerHTML = '<p class="sub">Покер пока недоступен.</p><button type="button" data-tab="games" class="secondary">К играм</button>';
+    if (host.isConnected) host.innerHTML = ("<p class=\"sub\">" + NoraI18n.html("Покер пока недоступен.") + "</p><button type=\"button\" data-tab=\"games\" class=\"secondary\">" + NoraI18n.html("К играм") + "</button>");
   });
 }
 
@@ -333,11 +338,11 @@ function mountDurak() {
     css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=quick-game';
     document.head.append(css);
   }
-  durakModule ??= import('/durak.js?v=chat-invite').catch(() => {
+  durakModule ??= import('/durak.js?v=miniapp-english').catch(() => {
     durakModule = null;
     if (tab === 'durak' && root.isConnected) {
       const retry = document.createElement('button');
-      retry.className = 'secondary'; retry.textContent = 'Загрузить стол ещё раз';
+      retry.className = 'secondary'; retry.textContent = NoraI18n.t("Загрузить стол ещё раз");
       retry.onclick = mountDurak; root.replaceChildren(retry);
     }
   });
@@ -357,11 +362,11 @@ function mountBarricade() {
     css.id = id; css.rel = 'stylesheet'; css.href = href;
     document.head.append(css);
   }
-  barricadeModule ??= import('/barricade.js?v=game-exit').catch(() => {
+  barricadeModule ??= import('/barricade.js?v=miniapp-english').catch(() => {
     barricadeModule = null;
     if (!root.isConnected || tab !== 'barricade') return;
     const retry = document.createElement('button');
-    retry.className = 'secondary'; retry.textContent = 'Загрузить Баррикаду ещё раз';
+    retry.className = 'secondary'; retry.textContent = NoraI18n.t("Загрузить Баррикаду ещё раз");
     retry.onclick = mountBarricade; root.replaceChildren(retry);
   });
   barricadeModule.then(view => {
@@ -379,19 +384,19 @@ const mainTabScreens = {
   events: () => window.NoraEvents?.screen(),
   lk: () => profileScreen(data.user)
 };
-const screenHTML = content => `${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;
+const screenHTML = content => `${demo?("<div class=\"demo\">" + NoraI18n.html("Демонстрация · пример данных, покупки отключены") + "</div>"):''}${content}`;
 let cancelPageSwipe, pageTouchInProgress;
 
-function render(swiped = false){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
+function render(swiped = false){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||NoraI18n.t("Друг");let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
 if(tab==='commands')content=NoraCommands.screen();
-if(tab==='staffchat')content=window.NoraStaffChat?.screen()||'<section class="nora-staff-chat"><h1>Чат Норы</h1><p class="sub">Экран чата не загрузился. Закрой и заново открой Нору.</p><button type="button" data-tab="community" class="secondary">Назад</button></section>';
-if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
+if(tab==='staffchat')content=window.NoraStaffChat?.screen()||("<section class=\"nora-staff-chat\"><h1>" + NoraI18n.html("Чат Норы") + "</h1><p class=\"sub\">" + NoraI18n.html("Экран чата не загрузился. Закрой и заново открой Нору.") + "</p><button type=\"button\" data-tab=\"community\" class=\"secondary\">" + NoraI18n.html("Назад") + "</button></section>");
+if(tab==='admin')content=window.NoraAdmin?.render()||("<p>" + NoraI18n.html("Открываем админ-панель…") + "</p>");
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
-if(tab==='barricade')content='<section id="barricade-root"><p class="sub">Открываем Баррикаду…</p></section>';
-if(tab==='dot')content=window.NoraDot?.screen()||'<p>DOT не загрузилась. Открой Нору заново.</p>';
-if(tab==='poker')content='<section id="poker-root"><p class="sub">Открываем стол…</p></section>';
-if(tab==='durak')content='<section id="durak-root"><p class="sub">Открываем карточный стол…</p></section>';
+if(tab==='barricade')content=("<section id=\"barricade-root\"><p class=\"sub\">" + NoraI18n.html("Открываем Баррикаду…") + "</p></section>");
+if(tab==='dot')content=window.NoraDot?.screen()||("<p>" + NoraI18n.html("DOT не загрузилась. Открой Нору заново.") + "</p>");
+if(tab==='poker')content=("<section id=\"poker-root\"><p class=\"sub\">" + NoraI18n.html("Открываем стол…") + "</p></section>");
+if(tab==='durak')content=("<section id=\"durak-root\"><p class=\"sub\">" + NoraI18n.html("Открываем карточный стол…") + "</p></section>");
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
@@ -475,7 +480,7 @@ function positionNavDrop(animate=false){
 function renderNav(selected,name){
   const nav=$('#nav');
   if(!nav.querySelector('.nav-drop')){
-    nav.innerHTML='<i class="nav-drop" aria-hidden="true"></i>'+[['home','Главная'],['shop','Магазин'],['community','Коммьюнити'],['events','События'],['lk','Профиль']].map(([id,label])=>`<button type="button" data-tab="${id}" aria-label="${label}" aria-current="false">${id==='lk'?'<span class="nav-profile-wrap"><span class="nav-profile-photo" data-own-avatar></span><i class="nav-unread-dot" aria-hidden="true"></i></span>':navTabIcon(id)}</button>`).join('');
+    nav.innerHTML='<i class="nav-drop" aria-hidden="true"></i>'+[['home',NoraI18n.t("Главная")],['shop',NoraI18n.t("Магазин")],['community',NoraI18n.t("Коммьюнити")],['events',NoraI18n.t("События")],['lk',NoraI18n.t("Профиль")]].map(([id,label])=>`<button type="button" data-tab="${id}" aria-label="${label}" aria-current="false">${id==='lk'?'<span class="nav-profile-wrap"><span class="nav-profile-photo" data-own-avatar></span><i class="nav-unread-dot" aria-hidden="true"></i></span>':navTabIcon(id)}</button>`).join('');
     navSelection='';
   }
   const photo=nav.querySelector('[data-own-avatar]');
@@ -521,27 +526,27 @@ async function perform(path,payload,b=$('#pay')){
   busy=true;if(b)b.disabled=true;
   try{
     const r=await api(path,payload);
-    $('#sheet').close();toast(r.message||'Готово');tg?.HapticFeedback?.notificationOccurred('success');
-    try{data=await api('me');render();loadAvatar()}catch{toast((r.message||'Готово')+' Данные обновятся при следующем открытии.')}
+    $('#sheet').close();toast(r.message||NoraI18n.t("Готово"));tg?.HapticFeedback?.notificationOccurred('success');
+    try{data=await api('me');render();loadAvatar()}catch{toast((r.message||NoraI18n.t("Готово"))+NoraI18n.t(" Данные обновятся при следующем открытии."))}
   }catch(e){toast(e.message);if(b)b.disabled=false}
   finally{busy=false}
 }
 function bookEvent(button) {
   const event = data.events.find(item => item.id === button.dataset.event);
   if (!event) return;
-  if (demo) { toast('Это демонстрация. Запись доступна при входе через Telegram'); return; }
+  if (demo) { toast(NoraI18n.t("Это демонстрация. Запись доступна при входе через Telegram")); return; }
   const payload = {event_id: event.id, price: event.price};
   if (event.registration_only) {
     void perform('events/join', payload, button);
     return;
   }
-  sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);
+  sheet(`<span class="eyebrow">${NoraI18n.html("Встретимся?")}</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?NoraI18n.t("Стоимость билета"):NoraI18n.t("Участие бесплатное")}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?NoraI18n.t("Подтвердить оплату"):NoraI18n.t("Подтвердить участие")}</button>`);
   $('#pay').onclick = () => perform('events/join', payload);
 }
 function goToTab(next, prepare, refreshAfter = false, {swiped = false} = {}) {
-  if(next==='staffchat'&&!data?.staff_chat_available){toast('Чат пока доступен только команде Норы');return;}
+  if(next==='staffchat'&&!data?.staff_chat_available){toast(NoraI18n.t("Чат пока доступен только команде Норы"));return;}
   if (profileTabLocked(next)) {
-    toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+    toast(NoraI18n.t("Заполни профиль на 100%, чтобы открыть этот раздел"));
     return;
   }
   NoraShop.leaveGameTo(next, () => {
@@ -566,7 +571,7 @@ document.addEventListener('click', e => {
   if (b.dataset.filter) {filter=b.dataset.filter;render()}
   if (b.dataset.product) product(b.dataset.product);
   if (b.dataset.event && data.profile.fill_percent<100) {
-    toast('Заполни профиль на 100% в ЛК');return;
+    toast(NoraI18n.t("Заполни профиль на 100% в ЛК"));return;
   }
   if (b.hasAttribute('data-reputation')) showReputation();
   if (b.dataset.event) bookEvent(b);
@@ -614,7 +619,7 @@ function botReplyRoute() {
 
 function openLobbyFromLink() {
   if (telegramStartParam() !== 'nora_lobby') return;
-  if (profileTabLocked('community')) {toast('Заполни профиль на 100%, чтобы открыть лобби');return}
+  if (profileTabLocked('community')) {toast(NoraI18n.t("Заполни профиль на 100%, чтобы открыть лобби"));return}
   window.NoraIntro?.finish(true);
   // The game script is deferred and may still be loading when /api/me returns.
   if (window.NoraGame) window.NoraGame.open();
@@ -628,7 +633,7 @@ async function openGameProfileFromLink() {
   try {
     await api('nora-game/chat/profile', {card:match[1]});
     if (tg?.close) tg.close();
-    else toast('Профиль отправлен в группу Норы.');
+    else toast(NoraI18n.t("Профиль отправлен в группу Норы."));
   } catch (error) {
     toast(error.message);
   }
@@ -657,11 +662,11 @@ async function openWidgetNoticeFromLink() {
       render();
       window.scrollTo(0, 0);
     }
-    const timestamp = new Date(notice.event_at).toLocaleString('ru-RU');
+    const timestamp = new Date(notice.event_at).toLocaleString(NoraI18n.locale);
     const details = esc(notice.details || notice.preview).replace(/\r?\n/g, '<br>');
-    sheet(`<span class="eyebrow">Уведомление от ${esc(notice.sender_label)}</span>
+    sheet(`<span class="eyebrow">${NoraI18n.html("Уведомление от")} ${esc(notice.sender_label)}</span>
       <h2>${esc(notice.title)}</h2><p class="sub">${esc(timestamp)}${notice.context ? ' · ' + esc(notice.context) : ''}</p>
-      <p>${details}</p>${blocked ? '<p class="sub">Заполни профиль на 100% в ЛК, чтобы открыть раздел.</p>' :
+      <p>${details}</p>${blocked ? ("<p class=\"sub\">" + NoraI18n.html("Заполни профиль на 100% в ЛК, чтобы открыть раздел.") + "</p>") :
         `<button type="button" class="primary" id="notice-target">${esc(notice.target_label)}</button>`}`);
     const button = $('#notice-target');
     if (button) button.onclick = () => {
@@ -692,8 +697,8 @@ async function openApp(result) {
   applicationScreen = null;
   data = result;
   tab = 'home';
-  const linked = botReplyRoute();
-  let view = linked?.view || window.NoraShop?.route()?.view || 'home';
+  const linked = NoraI18n.switched ? null : botReplyRoute();
+  let view = NoraI18n.switched ? 'home' : linked?.view || window.NoraShop?.route()?.view || 'home';
   const blockedLink = linked && profileTabLocked(view);
   const topupClosed = linked?.category === '__cookies' && !data.cookie_shop?.enabled;
   let inviteError;
@@ -732,19 +737,23 @@ async function openApp(result) {
   }
   render();
   loadAvatar();
+  if (NoraI18n.switched) {
+    window.NoraIntro?.finish(true);
+    return;
+  }
   if (telegramStartParam() === 'nora_home_screen') {
     window.NoraIntro?.finish(true);
     window.NoraHomeScreen?.open();
   }
-  if (blockedLink) toast('Заполни профиль на 100%, чтобы открыть этот раздел');
+  if (blockedLink) toast(NoraI18n.t("Заполни профиль на 100%, чтобы открыть этот раздел"));
   else if (inviteError) toast(inviteError);
-  else if (topupClosed) toast('Пополнение временно недоступно');
+  else if (topupClosed) toast(NoraI18n.t("Пополнение временно недоступно"));
   else if (linked?.eventId && !data.events?.some(event => event.id === linked.eventId)) {
-    toast('Мероприятие больше недоступно');
+    toast(NoraI18n.t("Мероприятие больше недоступно"));
   }
   if (tab === 'shop' && linked?.sku) {
     if (data.products.some(product => product.sku === linked.sku)) void product(linked.sku);
-    else toast('Товар больше недоступен');
+    else toast(NoraI18n.t("Товар больше недоступен"));
   }
   openLobbyFromLink();
   openPersonFromLink();
@@ -755,13 +764,13 @@ async function openApp(result) {
 async function startApp() {
   try {
     if (!auth) {
-      $('#app').innerHTML = '<div class="empty"><h1>Нора</h1><p>Открой миниапку из меню Норы в Telegram.</p></div>';
+      $('#app').innerHTML = ("<div class=\"empty\"><h1>" + NoraI18n.html("Нора") + "</h1><p>" + NoraI18n.html("Открой миниапку из меню Норы в Telegram.") + "</p></div>");
       return;
     }
     await openApp(await api('me'));
   } catch (e) {
     window.NoraIntro?.finish(true);
-    $('#app').innerHTML = `<div class="empty"><h1>Сейчас вернёмся.</h1><p>${esc(e.message)}</p><button class="primary" id="retry">Попробовать ещё раз</button></div>`;
+    $('#app').innerHTML = `<div class="empty"><h1>${NoraI18n.html("Сейчас вернёмся.")}</h1><p>${esc(e.message)}</p><button class="primary" id="retry">${NoraI18n.html("Попробовать ещё раз")}</button></div>`;
     $('#retry').onclick = () => location.reload();
   } finally {
     window.NoraIntro?.ready();
@@ -772,15 +781,15 @@ void startApp();
 function profileScreen(u){return window.NoraCabinet?.profileScreen(u)||''}
 function editProfile(){
   const u=data.user, revision=data.revision;
-  sheet(`<span class="eyebrow">Твой профиль</span><h2>Расскажи о себе</h2>
+  sheet(`<span class="eyebrow">${NoraI18n.html("Твой профиль")}</span><h2>${NoraI18n.html("Расскажи о себе")}</h2>
     <form id="profile-form">
-      <label>Имя<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label>
-      <label>Дата рождения<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label>
-      <label>Город<input name="city" minlength="2" maxlength="100" required value="${esc(u.city||'')}"></label>
-      <label>Увлечения<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label>
-      <label>Описание<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label>
-      <p class="sub">Для изменения города выбери вариант из подсказок. Возраст — от 14 до 120.</p>
-      <button class="primary" id="pay" type="submit">Сохранить профиль</button>
+      <label>${NoraI18n.html("Имя")}<input name="profile_name" maxlength="50" required value="${esc(u.profile_name||u.telegram_name||'')}"></label>
+      <label>${NoraI18n.html("Дата рождения")}<input name="birth_date" type="date" required value="${esc(u.birth_date||'')}"></label>
+      <label>${NoraI18n.html("Город")}<input name="city" minlength="2" maxlength="100" required value="${esc(u.city||'')}"></label>
+      <label>${NoraI18n.html("Увлечения")}<textarea name="hobbies" maxlength="500" required rows="3">${esc(u.hobbies||'')}</textarea></label>
+      <label>${NoraI18n.html("Описание")}<textarea name="profile_bio" maxlength="280" required rows="3">${esc(u.profile_bio||'')}</textarea></label>
+      <p class="sub">${NoraI18n.html("Для изменения города выбери вариант из подсказок. Возраст — от 14 до 120.")}</p>
+      <button class="primary" id="pay" type="submit">${NoraI18n.html("Сохранить профиль")}</button>
     </form>`);
   const form=$('#profile-form');
   window.NoraCity.mount(form,u.city||'');
@@ -796,22 +805,22 @@ function editProfile(){
 const AVATAR_MAX_MB = 64;
 const AVATAR_ACCEPT = 'image/*,.heic,.heif';
 async function uploadPhoto(file, endpoint, headers) {
-  if (!file.size) throw Error('Файл пустой. Выбери другое фото');
-  if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw Error(`Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
+  if (!file.size) throw Error(NoraI18n.t("Файл пустой. Выбери другое фото"));
+  if (file.size > AVATAR_MAX_MB * 1024 * 1024) throw Error(`${NoraI18n.t("Фото должно быть не больше")} ${AVATAR_MAX_MB} ${NoraI18n.t("МБ")}`);
   const response = await fetch('/api/' + endpoint, {
     method: 'POST',
     headers: {Authorization: 'tma ' + auth, 'Content-Type': 'application/octet-stream', ...headers},
     body: file,
   }).catch(() => {
-    throw Error('Не удалось отправить фото. Проверь интернет и попробуй ещё раз');
+    throw Error(NoraI18n.t("Не удалось отправить фото. Проверь интернет и попробуй ещё раз"));
   });
   const result = await response.json().catch(() => ({}));
-  if (response.status === 413) throw Error(result.error || `Фото должно быть не больше ${AVATAR_MAX_MB} МБ`);
-  if (!response.ok) throw Error(result.error || 'Не удалось загрузить фото');
+  if (response.status === 413) throw Error(NoraI18n.server(result.error) || `${NoraI18n.t("Фото должно быть не больше")} ${AVATAR_MAX_MB} ${NoraI18n.t("МБ")}`);
+  if (!response.ok) throw Error(NoraI18n.server(result.error) || NoraI18n.t("Не удалось загрузить фото"));
   return result;
 }
 let avatarURL=null,avatarKey='',avatarLoading=false;
-function paintOwnAvatar(root = document){if(!avatarURL)return;root.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="Фото профиля">`})}
+function paintOwnAvatar(root = document){if(!avatarURL)return;root.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="${NoraI18n.html("Фото профиля")}">`})}
 async function loadAvatar(){
   if(!data?.has_avatar||data.avatar_video){if(avatarURL)URL.revokeObjectURL(avatarURL);avatarURL=null;avatarKey='';return}
   const key=data.revision;
@@ -834,7 +843,7 @@ document.addEventListener('change', async e => {
   busy = true;
   if (button) button.disabled = true;
   try {
-    toast('Загружаем фото…');
+    toast(NoraI18n.t("Загружаем фото…"));
     const result = await uploadPhoto(file, 'profile/avatar', {'X-Profile-Revision': data.revision});
     toast(result.message);
     data = await api('me');
@@ -876,7 +885,7 @@ document.addEventListener('click', event => {
   tg?.HapticFeedback?.impactOccurred?.('light');
 }, {capture: true});
 
-function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebrow">Репутация в Норе</span><h2>Твой вклад —<br>твои возможности</h2><p class="sub">Сейчас у тебя ${number(data.user.reputation)} / 100. Поддержка участников даёт +5 репутации, отрицательная оценка — −5. Себе менять репутацию нельзя. Одного человека можно отметить до 10 раз в день в пределах общего лимита. Нора ИИ открывается со 2-го уровня питомца.</p>${levels.map(l=>`<section class="rep-level"><h3>${esc(l.label)} · ${esc(l.range)}</h3><p>Скидка ${number(l.discount)}% · ${number(l.daily_actions)} ${plural(l.daily_actions,"действие","действия","действий")} в день.<br>Нора ИИ · до ${number(l.ai_daily_requests)} запросов в день.<br>${l.can_minus?'Можно поддерживать и понижать репутацию.':'Можно только поддерживать участников.'}</p></section>`).join('')}<p class="sub">Серебро — от 70, золото — от 90. Чтобы расти выше 69, заполни все пять блоков профиля. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников. Ниже порога ограничений взаимодействия недоступны.</p><h2>Для твоей репутации</h2>${products(data.products.filter(p=>p.category==='reputation'))}`)}
+function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebrow">${NoraI18n.html("Репутация в Норе")}</span><h2>${NoraI18n.html("Твой вклад —")}<br>${NoraI18n.html("твои возможности")}</h2><p class="sub">${NoraI18n.html("Сейчас у тебя")} ${number(data.user.reputation)} ${NoraI18n.html("/ 100. Поддержка участников даёт +5 репутации, отрицательная оценка — −5. Себе менять репутацию нельзя. Одного человека можно отметить до 10 раз в день в пределах общего лимита. Нора ИИ открывается со 2-го уровня питомца.")}</p>${levels.map(l=>`<section class="rep-level"><h3>${esc(NoraI18n.t(l.label))} · ${esc(NoraI18n.t(l.range))}</h3><p>${NoraI18n.html("Скидка")} ${number(l.discount)}% · ${number(l.daily_actions)} ${plural(l.daily_actions,NoraI18n.t("действие"),NoraI18n.t("действия"),NoraI18n.t("действий"))} ${NoraI18n.html("в день.")}<br>${NoraI18n.html("Нора ИИ · до")} ${number(l.ai_daily_requests)} ${NoraI18n.html("запросов в день.")}<br>${l.can_minus?NoraI18n.t("Можно поддерживать и понижать репутацию."):NoraI18n.t("Можно только поддерживать участников.")}</p></section>`).join('')}<p class="sub">${NoraI18n.html("Серебро — от 70, золото — от 90. Чтобы расти выше 69, заполни все пять блоков профиля. Автоматический рост за активность ограничен 89; до золота помогает поддержка участников. Ниже порога ограничений взаимодействия недоступны.")}</p><h2>${NoraI18n.html("Для твоей репутации")}</h2>${products(data.products.filter(p=>p.category==='reputation'))}`)}
 // Floating scroll toggle: jumps to the very bottom of the page and back to the top.
 (() => {
   const btn = $('#scroll-jump');
@@ -888,7 +897,7 @@ function showReputation(){const levels=data.levels||[];sheet(`<span class="eyebr
     const down = !atBottom();
     btn.classList.toggle('visible', scrollable);
     btn.classList.toggle('show-up', !down);
-    btn.setAttribute('aria-label', down ? 'В самый низ' : 'В самый верх');
+    btn.setAttribute('aria-label', down ? NoraI18n.t("В самый низ") : NoraI18n.t("В самый верх"));
   }
   btn.addEventListener('click', () => {
     if ($('#app')?.dataset.screen === 'dot') return;

@@ -15,9 +15,9 @@ const document = {addEventListener() {}};
 const deliverySource=fs.readFileSync(
   path.join(__dirname, '..', 'community_bot', 'web', 'staff-chat-delivery.js'), 'utf8',
 );
-vm.runInNewContext(deliverySource, {window,document,console,setTimeout,clearTimeout});
+vm.runInNewContext(deliverySource, {window,document,NoraI18n:{t:String,html:String},console,setTimeout,clearTimeout});
 vm.runInNewContext(source, {
-  window, document, esc: value => String(value),
+  window, document, NoraI18n:{t:String,html:String}, esc: value => String(value),
   console, setTimeout, clearTimeout, setInterval, clearInterval,
 });
 assert.ok(window.NoraStaffChat, 'Chat script must initialize');

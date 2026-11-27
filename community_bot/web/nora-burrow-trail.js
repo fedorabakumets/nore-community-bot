@@ -2,7 +2,7 @@
 window.NoraBurrowTrail = (() => {
   async function load() {
     const response=await fetch('/nora-burrow-trail.json');
-    if(!response.ok)throw Error('Не удалось загрузить лесную дорожку.');
+    if(!response.ok)throw Error(NoraI18n.t("Не удалось загрузить лесную дорожку."));
     return response.json();
   }
 
@@ -17,7 +17,7 @@ window.NoraBurrowTrail = (() => {
       [start+.34,1_000_001,minZ-5,minZ-.34],
       [start+.34,1_000_001,maxZ+.34,maxZ+8],
     ];
-    const formatter=new Intl.NumberFormat('ru-RU');
+    const formatter=new Intl.NumberFormat(NoraI18n.locale);
     let houses=[],indices=new Map(),focus=-1;
 
     function blocksMesh(blocks,mat) {
@@ -63,9 +63,9 @@ window.NoraBurrowTrail = (() => {
       return [posts,sign];
     }
     const signs=[
-      ...board('НОРКИ  →',2.4,-1.9),
-      ...board('НОРКИ  →',14,-2),
-      ...board('←  ПОРТАЛЫ И ЛАВКА',-2.3,-1.9),
+      ...board(NoraI18n.t("НОРКИ  →"),2.4,-1.9),
+      ...board(NoraI18n.t("НОРКИ  →"),14,-2),
+      ...board(NoraI18n.t("←  ПОРТАЛЫ И ЛАВКА"),-2.3,-1.9),
     ];
     const entrance=blocksMesh(Array.from({length:16},(_,i)=>
       [i+.5,.016,1.12,.98,.032,2.16,['#79747e','#685f6d','#827980'][i%3]]),material);
@@ -96,9 +96,9 @@ window.NoraBurrowTrail = (() => {
         ctx.fillStyle='#736477';ctx.fillRect(128,113,512,2);
         if(likes===null){
           ctx.fillStyle='#e4d6cf';ctx.font='bold 37px sans-serif';
-          ctx.fillText('Счётчики скрыты',384,212);return;
+          ctx.fillText(NoraI18n.t("Счётчики скрыты"),384,212);return;
         }
-        [['Лайки',likes],['Печеньки',cookies],['Сообщения',messages]].forEach(([label,value],i)=>{
+        [[NoraI18n.t("Лайки"),likes],[NoraI18n.t("Печеньки"),cookies],[NoraI18n.t("Сообщения"),messages]].forEach(([label,value],i)=>{
           const y=154+i*54;
           ctx.textAlign='left';ctx.fillStyle='#ebd3b7';ctx.font='bold 38px sans-serif';
           ctx.fillText(label,145,y,238);

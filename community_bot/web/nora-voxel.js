@@ -6,13 +6,13 @@ window.NoraVoxel = (() => {
   const hairColors = {black:'#29252c',chestnut:'#633b30',brown:'#91634a',blonde:'#ddbc76',ginger:'#b75e35',ash:'#b0adb4',rose:'#bc758d',blue:'#536c9b'};
   const eyeColors = {brown:'#68412c',hazel:'#9b7939',green:'#4c8055',blue:'#538cbc',gray:'#8896a0',violet:'#8a65ad'};
   const choices = {
-    gender: [['male','Мужской персонаж'],['female','Женский персонаж']],
-    hairstyle: [['crop','Короткая'],['bob','Каре'],['ponytail','Хвост']],
-    hair_color: [['black','Чёрный'],['chestnut','Каштановый'],['brown','Русый'],['blonde','Блонд'],['ginger','Рыжий'],['ash','Пепельный'],['rose','Розовый'],['blue','Синий']],
-    eye_color: [['brown','Карие'],['hazel','Ореховые'],['green','Зелёные'],['blue','Голубые'],['gray','Серые'],['violet','Фиолетовые']],
-    shirt: [['white','Белая футболка'],['gray','Серая футболка'],['burgundy','Бордовая футболка']],
-    pants: [['blue_slim','Узкие синие джинсы'],['gray_slim','Узкие серые джинсы'],['burgundy_wide','Широкие бордовые джинсы']],
-    shoes: [['white_stripes','Белые кроссовки с чёрными полосками'],['black_stripes','Чёрные кроссовки с белыми полосками'],['red_air','Бордово-красные кроссовки с воздушной подошвой']],
+    gender: [['male',NoraI18n.t("Мужской персонаж")],['female',NoraI18n.t("Женский персонаж")]],
+    hairstyle: [['crop',NoraI18n.t("Короткая")],['bob',NoraI18n.t("Каре")],['ponytail',NoraI18n.t("Хвост")]],
+    hair_color: [['black',NoraI18n.t("Чёрный")],['chestnut',NoraI18n.t("Каштановый")],['brown',NoraI18n.t("Русый")],['blonde',NoraI18n.t("Блонд")],['ginger',NoraI18n.t("Рыжий")],['ash',NoraI18n.t("Пепельный")],['rose',NoraI18n.t("Розовый")],['blue',NoraI18n.t("Синий")]],
+    eye_color: [['brown',NoraI18n.t("Карие")],['hazel',NoraI18n.t("Ореховые")],['green',NoraI18n.t("Зелёные")],['blue',NoraI18n.t("Голубые")],['gray',NoraI18n.t("Серые")],['violet',NoraI18n.t("Фиолетовые")]],
+    shirt: [['white',NoraI18n.t("Белая футболка")],['gray',NoraI18n.t("Серая футболка")],['burgundy',NoraI18n.t("Бордовая футболка")]],
+    pants: [['blue_slim',NoraI18n.t("Узкие синие джинсы")],['gray_slim',NoraI18n.t("Узкие серые джинсы")],['burgundy_wide',NoraI18n.t("Широкие бордовые джинсы")]],
+    shoes: [['white_stripes',NoraI18n.t("Белые кроссовки с чёрными полосками")],['black_stripes',NoraI18n.t("Чёрные кроссовки с белыми полосками")],['red_air',NoraI18n.t("Бордово-красные кроссовки с воздушной подошвой")]],
   };
   // Small pixel silhouettes share the character's actual colours and item shapes.
   function icon(category, value, outfit = defaults) {

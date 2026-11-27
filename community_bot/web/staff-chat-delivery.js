@@ -32,14 +32,14 @@ window.NoraStaffDelivery = {
       if(pending){
         const check=document.createElement('button');
         check.type='button';check.dataset.chatCheckDelivery='';
-        check.textContent=checking?'Проверяем…':'Проверить';
+        check.textContent=checking?NoraI18n.t("Проверяем…"):NoraI18n.t("Проверить");
         check.disabled=checking;
         root.append(check);
       }
       if(pending&&state==='uncertain'){
         const reset=document.createElement('button');
         reset.type='button';reset.dataset.chatResetDelivery='';
-        reset.textContent=confirming?'Подтвердить риск дубля':'Начать новую отправку';
+        reset.textContent=confirming?NoraI18n.t("Подтвердить риск дубля"):NoraI18n.t("Начать новую отправку");
         reset.className=confirming?'is-confirming':'';
         root.append(reset);
       }
@@ -49,7 +49,7 @@ window.NoraStaffDelivery = {
       if(!current)return;
       pending=null;confirming=false;store();
       state=sent?'sent':'failed';
-      detail=sent?'✓ Отправлено в Telegram':error||'Не отправлено. Можно повторить.';
+      detail=sent?NoraI18n.t("✓ Отправлено в Telegram"):error||NoraI18n.t("Не отправлено. Можно повторить.");
       render();
       if(sent)onConfirmed?.(!!current.restored);
     }
@@ -65,18 +65,18 @@ window.NoraStaffDelivery = {
           headers:{Authorization:'tma '+getAuth()},cache:'no-store',signal:controller.signal
         });
         if(current!==pending)return;
-        if(!response.ok)throw new Error('Не получилось проверить отправку');
+        if(!response.ok)throw new Error(NoraI18n.t("Не получилось проверить отправку"));
         const data=await response.json();
         if(data.state==='sent'){finish(true);return;}
         if(data.state==='failed'){finish(false,data.error);return;}
         state=data.state==='sending'?'sending':'uncertain';
         detail=state==='sending'
-          ?'Отправка ещё обрабатывается. Не повторяй её вручную.'
-          :'Telegram мог получить сообщение. Проверь чат перед новой отправкой.';
+          ?NoraI18n.t("Отправка ещё обрабатывается. Не повторяй её вручную.")
+          :NoraI18n.t("Telegram мог получить сообщение. Проверь чат перед новой отправкой.");
       }catch{
         if(current!==pending)return;
         state='uncertain';
-        detail='Статус неизвестен. Проверь Telegram перед новой отправкой.';
+        detail=NoraI18n.t("Статус неизвестен. Проверь Telegram перед новой отправкой.");
       }finally{
         clearTimeout(timeout);checking=false;render();
       }
@@ -84,7 +84,7 @@ window.NoraStaffDelivery = {
     function begin(){
       if(pending)return null;
       pending={id:createId(),created:Date.now(),restored:false};
-      state='sending';detail='Отправляем сообщение…';
+      state='sending';detail=NoraI18n.t("Отправляем сообщение…");
       confirming=false;store();render();
       return pending.id;
     }
@@ -100,7 +100,7 @@ window.NoraStaffDelivery = {
           /^[a-f0-9-]{36}$/.test(value.id)&&
           Number.isFinite(value.created)&&Date.now()-value.created<7*86400000){
           pending={id:value.id,created:value.created,restored:true};
-          state='checking';detail='Проверяем последнюю отправку…';
+          state='checking';detail=NoraI18n.t("Проверяем последнюю отправку…");
         }else if(value)sessionStorage.removeItem(storageKey);
       }catch{}
       render();
@@ -110,11 +110,11 @@ window.NoraStaffDelivery = {
       if(!pending||state!=='uncertain')return false;
       if(!confirming){
         confirming=true;
-        detail='Telegram мог получить сообщение. Новая отправка может создать дубль.';
+        detail=NoraI18n.t("Telegram мог получить сообщение. Новая отправка может создать дубль.");
         render();return false;
       }
       pending=null;confirming=false;store();
-      state='failed';detail='Предыдущая попытка оставлена без подтверждения. Проверь Telegram.';
+      state='failed';detail=NoraI18n.t("Предыдущая попытка оставлена без подтверждения. Проверь Telegram.");
       render();return true;
     }
     return {

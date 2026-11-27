@@ -29,17 +29,17 @@ window.NoraInteractive = (() => {
     autoOn: true,
   };
   const roleNames = {
-    mafia: "Мафия",
-    detective: "Комиссар",
-    doctor: "Доктор",
-    civilian: "Мирный житель",
+    mafia: NoraI18n.t("Мафия"),
+    detective: NoraI18n.t("Комиссар"),
+    doctor: NoraI18n.t("Доктор"),
+    civilian: NoraI18n.t("Мирный житель"),
   };
   const phaseNames = {
-    lobby: "Собираемся",
-    night: "Город засыпает",
-    discussion: "Город просыпается",
-    vote: "Время решения",
-    finished: "Партия завершена",
+    lobby: NoraI18n.t("Собираемся"),
+    night: NoraI18n.t("Город засыпает"),
+    discussion: NoraI18n.t("Город просыпается"),
+    vote: NoraI18n.t("Время решения"),
+    finished: NoraI18n.t("Партия завершена"),
   };
   const glyphs = {
     game: "M6 7h12c3 0 4 4 4 8s-2 4-4 1l-2-2H8l-2 2c-2 3-4 3-4-1S3 7 6 7z M7 9v5 M4.5 11.5h5 M16 10h.01 M19 13h.01",
@@ -91,13 +91,13 @@ window.NoraInteractive = (() => {
   }
   function errorBox(view) {
     return errors[view]
-      ? `<div class="play-connection" role="status">${esc(errors[view])}<button class="text-btn" data-game-retry="${view}">Обновить</button></div>`
+      ? `<div class="play-connection" role="status">${esc(errors[view])}<button class="text-btn" data-game-retry="${view}">${NoraI18n.html("Обновить")}</button></div>`
       : "";
   }
   function interactiveScreen() {
-    return `${mafiaInvites()}<p class="eyebrow">У каждого свой способ</p><h1>Побудем<br><em>вместе</em></h1><p class="sub play-intro">Заботься, играй, собирай своих.</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">Твой маленький спутник</span><strong><em>Питомец</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + " ждёт тебя. Забота, походы и маленькие находки." : "Заведи питомца. Заботься о нём и отправляй за приключениями."}</span><span class="play-hero-cta">${data.pet ? "К питомцу" : "Знакомиться"} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">Один или всей компанией</span><strong><em>Игры</em></strong><span class="play-hero-description">У города есть тайны.<br>У ракеты — свой предел.</span><span class="play-hero-cta">Выбрать игру ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>Свои всегда рядом<small>Добавляй друзей и зови играть</small></span>${icon("arrow")}</button>`;
+    return `${mafiaInvites()}<p class="eyebrow">${NoraI18n.html("У каждого свой способ")}</p><h1>${NoraI18n.html("Побудем")}<br><em>${NoraI18n.html("вместе")}</em></h1><p class="sub play-intro">${NoraI18n.html("Заботься, играй, собирай своих.")}</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">${NoraI18n.html("Твой маленький спутник")}</span><strong><em>${NoraI18n.html("Питомец")}</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + NoraI18n.t(" ждёт тебя. Забота, походы и маленькие находки.") : NoraI18n.t("Заведи питомца. Заботься о нём и отправляй за приключениями.")}</span><span class="play-hero-cta">${data.pet ? NoraI18n.t("К питомцу") : NoraI18n.t("Знакомиться")} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">${NoraI18n.html("Один или всей компанией")}</span><strong><em>${NoraI18n.html("Игры")}</em></strong><span class="play-hero-description">${NoraI18n.html("У города есть тайны.")}<br>${NoraI18n.html("У ракеты — свой предел.")}</span><span class="play-hero-cta">${NoraI18n.html("Выбрать игру")} ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>${NoraI18n.html("Свои всегда рядом")}<small>${NoraI18n.html("Добавляй друзей и зови играть")}</small></span>${icon("arrow")}</button>`;
   }
-  const games = { durak: "Дурак", barricade: "Баррикада", sea: "Морской бой", mafia: "Мафия", dot: "DOT", rocket: "Ракетка", poker: "Покер" };
+  const games = { durak: NoraI18n.t("Дурак"), barricade: NoraI18n.t("Баррикада"), sea: NoraI18n.t("Морской бой"), mafia: NoraI18n.t("Мафия"), dot: "DOT", rocket: NoraI18n.t("Ракетка"), poker: NoraI18n.t("Покер") };
   const gameChoices = ["durak", "barricade", "poker", "dot", "rocket"];
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
@@ -121,7 +121,7 @@ window.NoraInteractive = (() => {
   }
 
   function noraGameCard() {
-    return `<button type="button" class="nora-game-card" id="nora-game-open" aria-label="НОРА — войти в воксельный мир">
+    return `<button type="button" class="nora-game-card" id="nora-game-open" aria-label="${NoraI18n.html("НОРА — войти в воксельный мир")}">
       <svg class="nora-game-card-art" viewBox="0 0 320 280" fill="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
         <path fill="#152b2a" d="M0 174h24v-18h32v18h24v-40h24v-20h32v20h24v-16h32v16h24v-34h24v-16h24v16h24v36h32v144H0z"/>
         <path fill="#213d36" d="M0 214h36v-16h48v12h32v-22h56v12h40v-24h48v20h60v84H0z"/>
@@ -156,15 +156,15 @@ window.NoraInteractive = (() => {
         </g>
       </svg>
       <span class="nora-game-logo">N<span>O</span>RA</span>
-      <span class="nora-game-card-bottom"><span>Войти в Нору</span><b aria-hidden="true">→</b></span>
+      <span class="nora-game-card-bottom"><span>${NoraI18n.html("Войти в Нору")}</span><b aria-hidden="true">→</b></span>
     </button>`;
   }
 
   function lobbyRow(room) {
     const { id, game, action, locked } = room;
     const roomId = esc(id);
-    const title = game === "durak" ? "Стол " + room.title : room.title;
-    const detail = action === "invite" ? "Приглашение" : action === "resume" ? "Моё лобби" : "";
+    const title = game === "durak" ? NoraI18n.t("Стол ") + room.title : room.title;
+    const detail = action === "invite" ? NoraI18n.t("Приглашение") : action === "resume" ? NoraI18n.t("Моё лобби") : "";
     const name = games[game];
     const attributes = game === "barricade" ? `data-barricade-lobby="${roomId}"`
       : action === "invite" ? `data-${game}-respond="yes" data-room-id="${roomId}"`
@@ -174,24 +174,24 @@ window.NoraInteractive = (() => {
       : game === "durak" ? `data-durak-lobby="${roomId}"` : "";
     const contents = `<span class="lobby-icon" aria-hidden="true"></span>
       <span class="lobby-copy"><b>${esc(title)}</b><small>${name}${detail ? " · " + detail : ""}${room.stake ? " · " + number(room.stake) + " 🍪" : ""}</small></span>
-      <span class="lobby-count"><span class="sr-only">${room.players} из ${room.capacity} игроков</span><span aria-hidden="true">${room.players}/${room.capacity}</span></span>
-      <span class="lobby-lock" role="img" aria-label="${locked ? "Закрытое лобби" : "Открытое лобби"}">${icon(locked ? "locked" : "unlocked")}</span>`;
+      <span class="lobby-count"><span class="sr-only">${room.players} ${NoraI18n.html("из")} ${room.capacity} ${NoraI18n.html("игроков")}</span><span aria-hidden="true">${room.players}/${room.capacity}</span></span>
+      <span class="lobby-lock" role="img" aria-label="${locked ? NoraI18n.t("Закрытое лобби") : NoraI18n.t("Открытое лобби")}">${icon(locked ? "locked" : "unlocked")}</span>`;
     return `<li class="game-lobby-row game-${game}">
       ${attributes ? `<button type="button" class="lobby-entry" id="lobby-${game}-${roomId}" ${attributes}>${contents}</button>`
         : `<div class="lobby-entry">${contents}</div>`}
-      ${action === "invite" && game !== "barricade" ? `<button type="button" class="lobby-side-action" data-${game}-respond="no" data-room-id="${roomId}" aria-label="Отклонить приглашение в ${esc(title)}">×</button>` : ""}
-      ${room.admin ? `<button type="button" class="lobby-side-action" data-sea-admin-close="${roomId}" aria-label="Закрыть лобби ${esc(title)}">×</button>` : ""}
+      ${action === "invite" && game !== "barricade" ? `<button type="button" class="lobby-side-action" data-${game}-respond="no" data-room-id="${roomId}" aria-label="${NoraI18n.html("Отклонить приглашение в")} ${esc(title)}">×</button>` : ""}
+      ${room.admin ? `<button type="button" class="lobby-side-action" data-sea-admin-close="${roomId}" aria-label="${NoraI18n.html("Закрыть лобби")} ${esc(title)}">×</button>` : ""}
     </li>`;
   }
 
   function lobbyList() {
-    const status = lobbyError ? '<p class="lobby-status" role="status">Не удалось обновить лобби.</p>'
-      : !lobbyRooms ? '<p class="lobby-status">Загружаем лобби…</p>'
-      : !lobbyRooms.length ? '<p class="lobby-status">Пока нет лобби</p>' : "";
+    const status = lobbyError ? ("<p class=\"lobby-status\" role=\"status\">" + NoraI18n.html("Не удалось обновить лобби.") + "</p>")
+      : !lobbyRooms ? ("<p class=\"lobby-status\">" + NoraI18n.html("Загружаем лобби…") + "</p>")
+      : !lobbyRooms.length ? ("<p class=\"lobby-status\">" + NoraI18n.html("Пока нет лобби") + "</p>") : "";
     const visible = showAllLobbies ? lobbyRooms : lobbyRooms?.slice(0, lobbyLimit);
     const more = (lobbyRooms?.length || 0) - lobbyLimit;
     return status + (visible?.length ? `<ul class="game-lobby-list" id="game-lobby-list">${visible.map(lobbyRow).join("")}</ul>` : "")
-      + (more > 0 ? `<button type="button" class="lobby-more" id="games-show-all" aria-expanded="${showAllLobbies}" aria-controls="game-lobby-list">${showAllLobbies ? "Свернуть" : `Ещё ${more}`}</button>` : "");
+      + (more > 0 ? `<button type="button" class="lobby-more" id="games-show-all" aria-expanded="${showAllLobbies}" aria-controls="game-lobby-list">${showAllLobbies ? NoraI18n.t("Свернуть") : `${NoraI18n.t("Ещё")} ${more}`}</button>` : "");
   }
 
   function patchLobbies() {
@@ -212,7 +212,7 @@ window.NoraInteractive = (() => {
       lobbyRooms = (await api("community/lobbies")).rooms.filter(room => room.game !== "sea" && room.game !== "mafia");
       lobbyError = "";
     } catch (error) {
-      lobbyError = error.message || "Связь прервалась";
+      lobbyError = error.message || NoraI18n.t("Связь прервалась");
     } finally {
       lobbyLoading = false;
       refresh?.removeAttribute("aria-busy");
@@ -221,39 +221,39 @@ window.NoraInteractive = (() => {
   }
 
   function gamesScreen() {
-    return `<section class="games-screen-fit"><div class="games-heading nora-page-heading">${back(parent("games"), "Коммьюнити")}<h1>Игры</h1></div>
+    return `<section class="games-screen-fit"><div class="games-heading nora-page-heading">${back(parent("games"), NoraI18n.t("Коммьюнити"))}<h1>${NoraI18n.html("Игры")}</h1></div>
       <div class="games-catalog">
-        <div class="game-shortcuts" role="group" aria-label="Выбор игры">${gameChoices.map(game => gameShortcut(game)).join("")}</div>
+        <div class="game-shortcuts" role="group" aria-label="${NoraI18n.html("Выбор игры")}">${gameChoices.map(game => gameShortcut(game)).join("")}</div>
         ${noraGameCard()}
       </div>
       <section class="game-lobbies" aria-labelledby="game-lobbies-title">
-        <div class="game-lobbies-head"><h2 id="game-lobbies-title">Лобби</h2>
-          <button type="button" id="games-refresh" class="lobby-tool" aria-label="Обновить лобби">${icon("refresh")}</button>
-          <button type="button" id="games-create" class="lobby-tool" aria-label="Создать матч" aria-haspopup="dialog">${icon("plus")}</button>
+        <div class="game-lobbies-head"><h2 id="game-lobbies-title">${NoraI18n.html("Лобби")}</h2>
+          <button type="button" id="games-refresh" class="lobby-tool" aria-label="${NoraI18n.html("Обновить лобби")}">${icon("refresh")}</button>
+          <button type="button" id="games-create" class="lobby-tool" aria-label="${NoraI18n.html("Создать матч")}" aria-haspopup="dialog">${icon("plus")}</button>
         </div>
         <div id="games-lobbies">${lobbyList()}</div>
       </section></section>`;
   }
 
   function chooseMatch() {
-    sheet(`<div class="game-create-menu"><h2>Новый матч</h2>${gameChoices.filter(game => game !== "dot").map(game => gameShortcut(game, true)).join("")}</div>`);
+    sheet(`<div class="game-create-menu"><h2>${NoraI18n.html("Новый матч")}</h2>${gameChoices.filter(game => game !== "dot").map(game => gameShortcut(game, true)).join("")}</div>`);
     $("#sheet-content button")?.focus();
   }
   function friendRow(person, section) {
     const actions = {
       friends: [
-        ["remove", "Удалить"],
-        ["block", "Заблокировать"],
+        ["remove", NoraI18n.t("Удалить")],
+        ["block", NoraI18n.t("Заблокировать")],
       ],
       incoming: [
-        ["accept", "Принять"],
-        ["decline", "Отклонить"],
-        ["block", "Заблокировать"],
+        ["accept", NoraI18n.t("Принять")],
+        ["decline", NoraI18n.t("Отклонить")],
+        ["block", NoraI18n.t("Заблокировать")],
       ],
-      outgoing: [["cancel", "Отозвать"]],
-      blocked: [["unblock", "Разблокировать"]],
+      outgoing: [["cancel", NoraI18n.t("Отозвать")]],
+      blocked: [["unblock", NoraI18n.t("Разблокировать")]],
     }[section];
-    return `<article class="friend-row"><div class="friend-person"><button class="person-visit" data-person-view="${person.id}" aria-label="Открыть профиль ${esc(person.name)}"><span class="person-avatar" data-person-avatar="${person.id}" ${person.has_avatar===false?"data-avatar-unavailable":""}>${initials(person.name)}</span><span><b>${NoraPrefix(person.prefix)}${esc(person.name)}</b><small>${person.username ? "@" + esc(person.username) : "Участник Норы"}</small>${section==='friends'?`<small class="person-presence ${person.presence?.online?'online':''}">${esc(window.NoraPeople?.presenceLine(person.presence)||'')}</small>`:''}</span></button>${section === "friends" && person.available !== false ? `<button class="icon-button" data-friend-play="${person.id}" aria-label="Пригласить ${esc(person.name)} в игру">${icon("game")}</button>` : ""}</div><div class="friend-row-actions">${section==='friends'?`<button class="text-btn" data-friend-transfer="${person.id}" data-friend-name="${esc(person.name)}">Перевести 🍪</button>`:''}${actions.map(([action, label]) => `<button class="${action === "accept" ? "friend-accept" : "text-btn"}" data-friend-action="${action}" data-person-id="${person.id}" ${pending ? "disabled" : ""}>${label}</button>`).join("")}</div></article>`;
+    return `<article class="friend-row"><div class="friend-person"><button class="person-visit" data-person-view="${person.id}" aria-label="${NoraI18n.html("Открыть профиль")} ${esc(person.name)}"><span class="person-avatar" data-person-avatar="${person.id}" ${person.has_avatar===false?"data-avatar-unavailable":""}>${initials(person.name)}</span><span><b>${NoraPrefix(person.prefix)}${esc(person.name)}</b><small>${person.username ? "@" + esc(person.username) : NoraI18n.t("Участник Норы")}</small>${section==='friends'?`<small class="person-presence ${person.presence?.online?'online':''}">${esc(window.NoraPeople?.presenceLine(person.presence)||'')}</small>`:''}</span></button>${section === "friends" && person.available !== false ? `<button class="icon-button" data-friend-play="${person.id}" aria-label="${NoraI18n.html("Пригласить")} ${esc(person.name)} ${NoraI18n.html("в игру")}">${icon("game")}</button>` : ""}</div><div class="friend-row-actions">${section==='friends'?`<button class="text-btn" data-friend-transfer="${person.id}" data-friend-name="${esc(person.name)}">${NoraI18n.html("Перевести 🍪")}</button>`:''}${actions.map(([action, label]) => `<button class="${action === "accept" ? "friend-accept" : "text-btn"}" data-friend-action="${action}" data-person-id="${person.id}" ${pending ? "disabled" : ""}>${label}</button>`).join("")}</div></article>`;
   }
   function friendsScreen() {
     const f = state.friends;
@@ -261,50 +261,50 @@ window.NoraInteractive = (() => {
     const online = f?.friends?.filter((p) => p.presence?.online).length || 0;
     const incoming = f?.incoming?.length || 0;
     const embedded = tab === "community";
-    const search = '<button class="secondary community-find" data-community-search>⌕ Найти участников</button>';
+    const search = ("<button class=\"secondary community-find\" data-community-search>" + NoraI18n.html("⌕ Найти участников") + "</button>");
     const list = `${errorBox("friends")}${search}
-      ${!f ? '<div class="empty">Загружаем друзей…</div>' : ""}
-      ${incoming ? `<section class="friend-section"><h2>Зовут дружить ${badge(incoming, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}
-      ${f ? `<section class="friend-section">${embedded && !incoming ? "" : `<h2>${embedded ? "В списке" : "Друзья"} ${badge(count)}</h2>`}
-        ${count ? f.friends.map((p) => friendRow(p, "friends")).join("") : '<div class="card empty">Список пока пуст.<br>Начни с одного знакомого имени.</div>'}
+      ${!f ? ("<div class=\"empty\">" + NoraI18n.html("Загружаем друзей…") + "</div>") : ""}
+      ${incoming ? `<section class="friend-section"><h2>${NoraI18n.html("Зовут дружить")} ${badge(incoming, true)}</h2>${f.incoming.map((p) => friendRow(p, "incoming")).join("")}</section>` : ""}
+      ${f ? `<section class="friend-section">${embedded && !incoming ? "" : `<h2>${embedded ? NoraI18n.t("В списке") : NoraI18n.t("Друзья")} ${badge(count)}</h2>`}
+        ${count ? f.friends.map((p) => friendRow(p, "friends")).join("") : ("<div class=\"card empty\">" + NoraI18n.html("Список пока пуст.") + "<br>" + NoraI18n.html("Начни с одного знакомого имени.") + "</div>")}
       </section>` : ""}
-      ${f?.outgoing?.length ? `<section class="friend-section"><h2>Ждём ответа</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}
-      ${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>Заблокированные · ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
+      ${f?.outgoing?.length ? `<section class="friend-section"><h2>${NoraI18n.html("Ждём ответа")}</h2>${f.outgoing.map((p) => friendRow(p, "outgoing")).join("")}</section>` : ""}
+      ${f?.blocked?.length ? `<details class="play-details" data-detail="blocked"><summary>${NoraI18n.html("Заблокированные ·")} ${f.blocked.length}</summary>${f.blocked.map((p) => friendRow(p, "blocked")).join("")}</details>` : ""}`;
     if (embedded) {
       return `<details class="community-table community-friends" data-detail="community-friends" data-retain-open="community-friends">
-        <summary id="community-friends-summary"><span class="community-friends-label">Друзья ${f ? `<span class="community-friends-online" aria-label="Онлайн ${online} из ${count} друзей">${online}/${count}</span>` : ""}${incoming ? ` ${badge("+" + incoming, true)}` : ""}</span><span class="community-chevron" aria-hidden="true">⌄</span></summary>
+        <summary id="community-friends-summary"><span class="community-friends-label">${NoraI18n.html("Друзья")} ${f ? `<span class="community-friends-online" aria-label="${NoraI18n.html("Онлайн")} ${online} ${NoraI18n.html("из")} ${count} ${NoraI18n.html("друзей")}">${online}/${count}</span>` : ""}${incoming ? ` ${badge("+" + incoming, true)}` : ""}</span><span class="community-chevron" aria-hidden="true">⌄</span></summary>
         <div class="community-table-body">${list}</div>
       </details>`;
     }
-    return `${back("community", "Коммьюнити")}<div class="play-title-row"><div><p class="eyebrow">Близкие по духу</p><h2><em>Друзья</em></h2></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.</p>${list}`;
+    return `${back("community", NoraI18n.t("Коммьюнити"))}<div class="play-title-row"><div><p class="eyebrow">${NoraI18n.html("Близкие по духу")}</p><h2><em>${NoraI18n.html("Друзья")}</em></h2></div><span class="play-title-icon">${icon("friends")}</span></div><p class="sub">${NoraI18n.html("Добавь участника Норы. Когда он примет заявку, сможете взаимодействовать друг с другом.")}</p>${list}`;
   }
   function roleExplanation(role) {
     return (
       state.mafia?.rules?.roles?.find((r) => r.id === role)?.description ||
       {
         civilian:
-          "Слушай, сопоставляй и голосуй. Найдите всю мафию, пока она не сравнялась числом с городом.",
+          NoraI18n.t("Слушай, сопоставляй и голосуй. Найдите всю мафию, пока она не сравнялась числом с городом."),
         mafia:
-          "Вы знакомы с союзниками. Ночью договоритесь о цели, днём не выдавайте себя.",
+          NoraI18n.t("Вы знакомы с союзниками. Ночью договоритесь о цели, днём не выдавайте себя."),
         doctor:
-          "Ночью защити одного игрока. Себя можно спасти один раз; одну цель нельзя лечить две ночи подряд.",
+          NoraI18n.t("Ночью защити одного игрока. Себя можно спасти один раз; одну цель нельзя лечить две ночи подряд."),
         detective:
-          "Каждую ночь проверяй одного игрока. Результат проверки увидишь только ты.",
+          NoraI18n.t("Каждую ночь проверяй одного игрока. Результат проверки увидишь только ты."),
       }[role] ||
       ""
     );
   }
   function mafiaRules() {
     const rules = state.mafia?.rules;
-    return `<details class="play-details" data-detail="mafia-rules"><summary>Как устроена «Мафия» ${icon("shield")}</summary><p class="sub">${rules?.min_players || 5}–${rules?.max_players || 12} человек. Участие бесплатное — печеньки не списываются и не разыгрываются.</p>${(rules?.roles || Object.keys(roleNames).map((id) => ({ id, name: roleNames[id], description: roleExplanation(id) }))).map((r) => `<div class="rule-row"><b>${esc(r.name)}</b><p>${esc(r.description)}</p></div>`).join("")}${(
+    return `<details class="play-details" data-detail="mafia-rules"><summary>${NoraI18n.html("Как устроена «Мафия»")} ${icon("shield")}</summary><p class="sub">${rules?.min_players || 5}–${rules?.max_players || 12} ${NoraI18n.html("человек. Участие бесплатное — печеньки не списываются и не разыгрываются.")}</p>${(rules?.roles || Object.keys(roleNames).map((id) => ({ id, name: roleNames[id], description: roleExplanation(id) }))).map((r) => `<div class="rule-row"><b>${esc(r.name)}</b><p>${esc(r.description)}</p></div>`).join("")}${(
       rules?.sections || [
         {
-          title: "Ночь → обсуждение → голосование",
-          text: "На ночь отводится 60 секунд, на обсуждение — 90, на голосование — 45. Таймер работает на сервере, даже если миниапка закрыта.",
+          title: NoraI18n.t("Ночь → обсуждение → голосование"),
+          text: NoraI18n.t("На ночь отводится 60 секунд, на обсуждение — 90, на голосование — 45. Таймер работает на сервере, даже если миниапка закрыта."),
         },
         {
-          title: "Победа",
-          text: "Город побеждает, когда мафии не осталось. Мафия побеждает, когда сравнялась с городом по числу живых игроков.",
+          title: NoraI18n.t("Победа"),
+          text: NoraI18n.t("Город побеждает, когда мафии не осталось. Мафия побеждает, когда сравнялась с городом по числу живых игроков."),
         },
       ]
     ).map(
@@ -313,11 +313,11 @@ window.NoraInteractive = (() => {
     )}</details>`;
   }
   function invitationCard(i) {
-    return `<section class="card mafia-invite"><span class="eyebrow">Друг приглашает в «Мафию»</span><h3>${esc(i.title)}</h3><p class="sub">${NoraPrefix(i.sender_prefix)}${esc(i.sender_name)} зовёт тебя в комнату · ${number(i.players_count)} за столом</p><div class="pet-action-row"><button class="primary" data-mafia-respond="yes" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>Принять</button><button class="secondary" data-mafia-respond="no" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>Отклонить</button></div></section>`;
+    return `<section class="card mafia-invite"><span class="eyebrow">${NoraI18n.html("Друг приглашает в «Мафию»")}</span><h3>${esc(i.title)}</h3><p class="sub">${NoraPrefix(i.sender_prefix)}${esc(i.sender_name)} ${NoraI18n.html("зовёт тебя в комнату ·")} ${number(i.players_count)} ${NoraI18n.html("за столом")}</p><div class="pet-action-row"><button class="primary" data-mafia-respond="yes" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>${NoraI18n.html("Принять")}</button><button class="secondary" data-mafia-respond="no" data-room-id="${esc(i.room_id)}" ${pending ? "disabled" : ""}>${NoraI18n.html("Отклонить")}</button></div></section>`;
   }
   function roomControls(r) {
     if (!['lobby','active'].includes(r.status) || r.self.left) return '';
-    return `<section class="card mafia-room-controls"><button class="secondary" data-mafia-action="leave">${r.host_id === r.self.id ? "Выйти и удалить комнату" : "Выйти из комнаты"}</button></section>`;
+    return `<section class="card mafia-room-controls"><button class="secondary" data-mafia-action="leave">${r.host_id === r.self.id ? NoraI18n.t("Выйти и удалить комнату") : NoraI18n.t("Выйти из комнаты")}</button></section>`;
   }
   function mafiaInvites() {
     return (state.mafia?.invites || []).map(invitationCard).join('');
@@ -325,40 +325,40 @@ window.NoraInteractive = (() => {
 
   function mafiaHome() {
     const m = state.mafia;
-    return `${back("games", "Игры")}<div class="play-title-row"><div><p class="eyebrow">Бесплатно · 5–12 человек</p><h1>В городе<br><em>неспокойно</em></h1></div><span class="play-title-icon">${icon("mafia")}</span></div><p class="sub">Кто-то уже знает больше, чем говорит.<br>Собери друзей и проверь свою интуицию.</p>${errorBox("mafia")}${m && !m.enabled ? '<p class="game-restricted">Новые игры временно выключены администрацией.</p>' : ""}${mafiaInvites()}<section class="card mafia-create"><span class="eyebrow">Твой стол, твоя компания</span><h2>Начнём с приглашения.</h2><p class="sub">Создай комнату, позови друзей. Партия начнётся, когда все будут готовы.</p><button class="primary" id="mafia-create" ${pending || !m || !m.enabled ? "disabled" : ""}>Создать комнату</button><button class="secondary" data-tab="friends">Найти своих</button></section>${mafiaRules()}${m?.recent?.length ? `<details class="play-details" data-detail="mafia-recent"><summary>Прошлые партии · ${m.recent.length}</summary>${m.recent.map((r) => `<button class="mafia-recent" data-mafia-history="${esc(r.id)}"><span><b>${esc(r.title)}</b><small>${winnerLabel(r.winner, r.status)}</small></span>${icon("arrow")}</button>`).join("")}</details>` : ""}`;
+    return `${back("games", NoraI18n.t("Игры"))}<div class="play-title-row"><div><p class="eyebrow">${NoraI18n.html("Бесплатно · 5–12 человек")}</p><h1>${NoraI18n.html("В городе")}<br><em>${NoraI18n.html("неспокойно")}</em></h1></div><span class="play-title-icon">${icon("mafia")}</span></div><p class="sub">${NoraI18n.html("Кто-то уже знает больше, чем говорит.")}<br>${NoraI18n.html("Собери друзей и проверь свою интуицию.")}</p>${errorBox("mafia")}${m && !m.enabled ? ("<p class=\"game-restricted\">" + NoraI18n.html("Новые игры временно выключены администрацией.") + "</p>") : ""}${mafiaInvites()}<section class="card mafia-create"><span class="eyebrow">${NoraI18n.html("Твой стол, твоя компания")}</span><h2>${NoraI18n.html("Начнём с приглашения.")}</h2><p class="sub">${NoraI18n.html("Создай комнату, позови друзей. Партия начнётся, когда все будут готовы.")}</p><button class="primary" id="mafia-create" ${pending || !m || !m.enabled ? "disabled" : ""}>${NoraI18n.html("Создать комнату")}</button><button class="secondary" data-tab="friends">${NoraI18n.html("Найти своих")}</button></section>${mafiaRules()}${m?.recent?.length ? `<details class="play-details" data-detail="mafia-recent"><summary>${NoraI18n.html("Прошлые партии ·")} ${m.recent.length}</summary>${m.recent.map((r) => `<button class="mafia-recent" data-mafia-history="${esc(r.id)}"><span><b>${esc(r.title)}</b><small>${winnerLabel(r.winner, r.status)}</small></span>${icon("arrow")}</button>`).join("")}</details>` : ""}`;
   }
   function winnerLabel(winner, status) {
-    if (status === "cancelled") return "Комната закрыта";
+    if (status === "cancelled") return NoraI18n.t("Комната закрыта");
     return (
       {
-        town: "Победил город",
-        civilian: "Победил город",
-        civilians: "Победил город",
-        mafia: "Победила мафия",
-        draw: "Ничья",
-      }[winner] || "Партия завершена"
+        town: NoraI18n.t("Победил город"),
+        civilian: NoraI18n.t("Победил город"),
+        civilians: NoraI18n.t("Победил город"),
+        mafia: NoraI18n.t("Победила мафия"),
+        draw: NoraI18n.t("Ничья"),
+      }[winner] || NoraI18n.t("Партия завершена")
     );
   }
   function players(room) {
-    return `<div class="mafia-players">${room.players.map((p) => `<div class="mafia-player ${!p.alive && room.status !== "lobby" ? "out" : ""} ${p.id === room.self.id ? "you" : ""}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}${p.id === room.host_id ? '<i class="host-dot" title="Создатель комнаты"></i>' : ""}</span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>${p.left ? "Вышел" : room.status === "lobby" ? (p.ready ? "Готов" : "Собирается") : p.role ? esc(roleNames[p.role] || p.role) : p.alive ? "В игре" : "Выбыл"}${p.id === room.self.id ? " · ты" : ""}</small>${p.voted && room.phase === "vote" ? '<span class="player-voted" aria-label="Голос принят">✓</span>' : ""}</div>`).join("")}</div>`;
+    return `<div class="mafia-players">${room.players.map((p) => `<div class="mafia-player ${!p.alive && room.status !== "lobby" ? "out" : ""} ${p.id === room.self.id ? "you" : ""}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}${p.id === room.host_id ? ("<i class=\"host-dot\" title=\"" + NoraI18n.html("Создатель комнаты") + "\"></i>") : ""}</span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>${p.left ? NoraI18n.t("Вышел") : room.status === "lobby" ? (p.ready ? NoraI18n.t("Готов") : NoraI18n.t("Собирается")) : p.role ? esc(roleNames[p.role] || p.role) : p.alive ? NoraI18n.t("В игре") : NoraI18n.t("Выбыл")}${p.id === room.self.id ? NoraI18n.t(" · ты") : ""}</small>${p.voted && room.phase === "vote" ? ("<span class=\"player-voted\" aria-label=\"" + NoraI18n.html("Голос принят") + "\">✓</span>") : ""}</div>`).join("")}</div>`;
   }
   function roleCard(room) {
     if (!room.self.role) return "";
-    return `<button class="mafia-role ${roleOpen ? "revealed" : ""}" id="mafia-role" aria-expanded="${roleOpen}"><span class="role-symbol">${icon(roleOpen && room.self.role === "doctor" ? "shield" : "eye")}</span><span><small>${roleOpen ? "Твоя тайная роль" : "Только для тебя"}</small><b>${roleOpen ? esc(roleNames[room.self.role] || room.self.role) : "Нажми, чтобы узнать роль"}</b>${roleOpen ? `<span>${esc(roleExplanation(room.self.role))}</span>` : "<span>Не показывай экран другим игрокам</span>"}</span></button>`;
+    return `<button class="mafia-role ${roleOpen ? "revealed" : ""}" id="mafia-role" aria-expanded="${roleOpen}"><span class="role-symbol">${icon(roleOpen && room.self.role === "doctor" ? "shield" : "eye")}</span><span><small>${roleOpen ? NoraI18n.t("Твоя тайная роль") : NoraI18n.t("Только для тебя")}</small><b>${roleOpen ? esc(roleNames[room.self.role] || room.self.role) : NoraI18n.t("Нажми, чтобы узнать роль")}</b>${roleOpen ? `<span>${esc(roleExplanation(room.self.role))}</span>` : ("<span>" + NoraI18n.html("Не показывай экран другим игрокам") + "</span>")}</span></button>`;
   }
   function actionPanel(room) {
     if (room.self.left)
-      return '<p class="phase-hint">Ты покинул эту комнату. Вернись к списку, чтобы создать новую.</p>';
+      return ("<p class=\"phase-hint\">" + NoraI18n.html("Ты покинул эту комнату. Вернись к списку, чтобы создать новую.") + "</p>");
     if (room.status === "lobby")
-      return `<div class="mafia-lobby-actions"><button class="${room.self.ready ? "secondary" : "primary"}" data-mafia-action="ready" ${pending ? "disabled" : ""}>${room.self.ready ? "Я пока не готов" : "Я готов"}</button>${room.inviteable ? '<button class="secondary" id="mafia-invite">Пригласить друзей</button>' : ""}${room.host_id === room.self.id ? `<button class="primary mafia-start" data-mafia-action="start" ${pending || room.players.filter((p) => !p.left).length < (state.mafia.rules.min_players || 5) || room.players.some((p) => !p.left && !p.ready) ? "disabled" : ""}>Начать партию</button><p class="footer-note">Нужно минимум ${state.mafia.rules.min_players || 5} ${plural(state.mafia.rules.min_players || 5, "игрок", "игрока", "игроков")}. Каждый нажимает «Я готов».</p>` : ""}</div>`;
+      return `<div class="mafia-lobby-actions"><button class="${room.self.ready ? "secondary" : "primary"}" data-mafia-action="ready" ${pending ? "disabled" : ""}>${room.self.ready ? NoraI18n.t("Я пока не готов") : NoraI18n.t("Я готов")}</button>${room.inviteable ? ("<button class=\"secondary\" id=\"mafia-invite\">" + NoraI18n.html("Пригласить друзей") + "</button>") : ""}${room.host_id === room.self.id ? `<button class="primary mafia-start" data-mafia-action="start" ${pending || room.players.filter((p) => !p.left).length < (state.mafia.rules.min_players || 5) || room.players.some((p) => !p.left && !p.ready) ? "disabled" : ""}>${NoraI18n.html("Начать партию")}</button><p class="footer-note">${NoraI18n.html("Нужно минимум")} ${state.mafia.rules.min_players || 5} ${plural(state.mafia.rules.min_players || 5, NoraI18n.t("игрок"), NoraI18n.t("игрока"), NoraI18n.t("игроков"))}${NoraI18n.html(". Каждый нажимает «Я готов».")}</p>` : ""}</div>`;
     if (room.status !== "active") return "";
     if (!room.self.alive)
-      return '<section class="card game-observer"><b>Ты наблюдаешь за городом.</b><p class="sub">Роли ещё скрыты. Обсуждать партию можно с другими выбывшими в отдельном чате.</p></section>';
+      return ("<section class=\"card game-observer\"><b>" + NoraI18n.html("Ты наблюдаешь за городом.") + "</b><p class=\"sub\">" + NoraI18n.html("Роли ещё скрыты. Обсуждать партию можно с другими выбывшими в отдельном чате.") + "</p></section>");
     const available = room.available_targets || [];
     if (room.phase === "discussion")
-      return '<p class="phase-hint">Время слушать и убеждать. Голосование откроется после обсуждения.</p>';
+      return ("<p class=\"phase-hint\">" + NoraI18n.html("Время слушать и убеждать. Голосование откроется после обсуждения.") + "</p>");
     if (room.phase === "night" && !available.length)
-      return `<p class="phase-hint">${room.self.role === "civilian" ? "Город спит. Твой ход — на дневном обсуждении." : "Сейчас нет доступных целей. Ждём рассвета."}</p>`;
+      return `<p class="phase-hint">${room.self.role === "civilian" ? NoraI18n.t("Город спит. Твой ход — на дневном обсуждении.") : NoraI18n.t("Сейчас нет доступных целей. Ждём рассвета.")}</p>`;
     if (!["night", "vote"].includes(room.phase)) return "";
     const target =
       room.phase === "vote" ? room.self.vote_target : room.self.night_target;
@@ -366,21 +366,21 @@ window.NoraInteractive = (() => {
       room.phase === "vote" ? room.self.voted : room.self.night_target !== null;
     const verb =
       room.phase === "vote"
-        ? "Кого подозреваешь?"
+        ? NoraI18n.t("Кого подозреваешь?")
         : {
-            mafia: "Цель этой ночи",
-            doctor: "Кого защитить?",
-            detective: "Кого проверить?",
-          }[room.self.role] || "Ночной ход";
-    return `<section class="card mafia-targets"><span class="eyebrow">${selected ? "Твой выбор принят" : "Твой ход"}</span><h3>${verb}</h3><div class="target-grid">${room.players
+            mafia: NoraI18n.t("Цель этой ночи"),
+            doctor: NoraI18n.t("Кого защитить?"),
+            detective: NoraI18n.t("Кого проверить?"),
+          }[room.self.role] || NoraI18n.t("Ночной ход");
+    return `<section class="card mafia-targets"><span class="eyebrow">${selected ? NoraI18n.t("Твой выбор принят") : NoraI18n.t("Твой ход")}</span><h3>${verb}</h3><div class="target-grid">${room.players
       .filter((p) => available.includes(p.id))
       .map(
         (p) =>
-          `<button class="target-button ${selected && target === p.id ? "chosen" : ""}" data-mafia-target="${p.id}" data-target-action="${room.phase === "vote" ? "vote" : "night"}" ${pending ? "disabled" : ""}><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span>${esc(p.name)}${p.id === room.self.id ? " · ты" : ""}</span>${selected && target === p.id ? "<b>✓</b>" : ""}</button>`,
+          `<button class="target-button ${selected && target === p.id ? "chosen" : ""}" data-mafia-target="${p.id}" data-target-action="${room.phase === "vote" ? "vote" : "night"}" ${pending ? "disabled" : ""}><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span>${esc(p.name)}${p.id === room.self.id ? NoraI18n.t(" · ты") : ""}</span>${selected && target === p.id ? "<b>✓</b>" : ""}</button>`,
       )
       .join(
         "",
-      )}${room.phase === "vote" ? `<button class="target-button target-skip ${room.self.voted && target === null ? "chosen" : ""}" data-mafia-target="skip" data-target-action="vote" ${pending ? "disabled" : ""}>Никого не исключать ${room.self.voted && target === null ? "✓" : ""}</button>` : ""}</div><p class="sub">${room.phase === "vote" ? "Выбор можно изменить до конца голосования." : "Выбор можно изменить до рассвета."}</p></section>`;
+      )}${room.phase === "vote" ? `<button class="target-button target-skip ${room.self.voted && target === null ? "chosen" : ""}" data-mafia-target="skip" data-target-action="vote" ${pending ? "disabled" : ""}>${NoraI18n.html("Никого не исключать")} ${room.self.voted && target === null ? "✓" : ""}</button>` : ""}</div><p class="sub">${room.phase === "vote" ? NoraI18n.t("Выбор можно изменить до конца голосования.") : NoraI18n.t("Выбор можно изменить до рассвета.")}</p></section>`;
   }
   function chatOptions(room) {
     if (room.self.left) return [];
@@ -396,13 +396,13 @@ window.NoraInteractive = (() => {
     if (options.length && !options.includes(chatChannel))
       chatChannel = options[0];
     const shown = room.messages.filter((m) => m.channel === chatChannel);
-    return `<section class="card mafia-chat"><div class="row"><h3>${chatChannel === "mafia" ? "Тайный чат мафии" : chatChannel === "ghost" ? "Чат выбывших" : "Голос города"}</h3><span class="chat-privacy">${chatChannel === "public" ? "Участники комнаты" : "Только своя команда"}</span></div>${!options.length && room.status === "active" ? '<p class="sub">Ночью общий чат молчит. Вернёмся к обсуждению на рассвете.</p>' : ""}<div class="mafia-chat-log" id="mafia-chat-log" role="log" aria-live="polite">${shown.length ? shown.map((m) => `<article class="chat-message ${m.user_id === room.self.id ? "mine" : ""}"><span><b>${NoraPrefix(m.prefix)}${esc(m.name)}</b><time>${esc(new Date(m.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }))}</time></span><p>${esc(m.text)}</p></article>`).join("") : '<p class="chat-empty">Здесь пока тихо.</p>'}</div>${options.length && room.status !== "finished" && room.status !== "cancelled" ? `<form id="mafia-chat-form"><label class="sr-only" for="mafia-chat-input">Сообщение в ${chatChannel === "mafia" ? "тайный чат" : chatChannel === "ghost" ? "чат выбывших" : "общий чат"}</label><div class="inline-form"><input id="mafia-chat-input" name="message" maxlength="500" autocomplete="off" placeholder="Слово тебе…" required value="${esc(drafts.chat)}"><button class="primary" type="submit" aria-label="Отправить сообщение" ${pending ? "disabled" : ""}>↑</button></div></form>` : ""}</section>`;
+    return `<section class="card mafia-chat"><div class="row"><h3>${chatChannel === "mafia" ? NoraI18n.t("Тайный чат мафии") : chatChannel === "ghost" ? NoraI18n.t("Чат выбывших") : NoraI18n.t("Голос города")}</h3><span class="chat-privacy">${chatChannel === "public" ? NoraI18n.t("Участники комнаты") : NoraI18n.t("Только своя команда")}</span></div>${!options.length && room.status === "active" ? ("<p class=\"sub\">" + NoraI18n.html("Ночью общий чат молчит. Вернёмся к обсуждению на рассвете.") + "</p>") : ""}<div class="mafia-chat-log" id="mafia-chat-log" role="log" aria-live="polite">${shown.length ? shown.map((m) => `<article class="chat-message ${m.user_id === room.self.id ? "mine" : ""}"><span><b>${NoraPrefix(m.prefix)}${esc(m.name)}</b><time>${esc(new Date(m.at).toLocaleTimeString(NoraI18n.locale, { hour: "2-digit", minute: "2-digit" }))}</time></span><p>${esc(m.text)}</p></article>`).join("") : ("<p class=\"chat-empty\">" + NoraI18n.html("Здесь пока тихо.") + "</p>")}</div>${options.length && room.status !== "finished" && room.status !== "cancelled" ? `<form id="mafia-chat-form"><label class="sr-only" for="mafia-chat-input">${NoraI18n.html("Сообщение в")} ${chatChannel === "mafia" ? NoraI18n.t("тайный чат") : chatChannel === "ghost" ? NoraI18n.t("чат выбывших") : NoraI18n.t("общий чат")}</label><div class="inline-form"><input id="mafia-chat-input" name="message" maxlength="500" autocomplete="off" placeholder="${NoraI18n.html("Слово тебе…")}" required value="${esc(drafts.chat)}"><button class="primary" type="submit" aria-label="${NoraI18n.html("Отправить сообщение")}" ${pending ? "disabled" : ""}>↑</button></div></form>` : ""}</section>`;
   }
   function mafiaRoom() {
     const r = state.mafia.room;
     const isDone = ["finished", "cancelled"].includes(r.status);
     const alive = r.players.filter((p) => p.alive && !p.left).length;
-    return `${back("games", "Игры")}<div class="mafia-room-heading"><div><p class="eyebrow">Мафия · бесплатно</p><h1>${esc(r.title)}</h1></div><button class="icon-button" id="mafia-rules" aria-label="Правила мафии">?</button></div>${errorBox("mafia")}<section class="phase-banner phase-${esc(r.phase)}"><span class="phase-symbol">${icon(r.phase === "night" ? "moon" : isDone ? "shield" : "sun")}</span><div><span class="eyebrow">${r.phase === "lobby" ? `${r.players.filter((p) => !p.left).length} / ${state.mafia.rules.max_players || 12} за столом` : isDone ? "До следующей встречи" : `Круг ${number(r.round)} · живы ${alive} / ${r.players.length}`}</span><h2>${isDone ? winnerLabel(r.winner, r.status) : phaseNames[r.phase] || esc(r.phase)}</h2></div>${!isDone && r.deadline ? '<span class="phase-timer" id="mafia-timer" aria-label="Оставшееся время">—</span>' : ""}</section>${roomControls(r)}${roleCard(r)}${players(r)}${actionPanel(r)}${r.self.investigations?.length ? `<details class="play-details private-results" data-detail="investigations"><summary>Твои проверки · ${r.self.investigations.length}</summary>${r.self.investigations.map((p) => `<p><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b> — ${p.mafia ? "мафия" : "не мафия"}<small>Ночь ${number(p.round)}</small></p>`).join("")}</details>` : ""}${chat(r)}${r.timeline?.length ? `<details class="play-details" data-detail="timeline"><summary>Что случилось в городе</summary><ol class="mafia-timeline">${r.timeline.map((item) => `<li>${esc(item.text)}</li>`).join("")}</ol></details>` : ""}${isDone ? `<button class="primary" id="mafia-new">Собрать новую партию</button><button class="secondary" id="mafia-current">К текущей комнате</button>` : ""}`;
+    return `${back("games", NoraI18n.t("Игры"))}<div class="mafia-room-heading"><div><p class="eyebrow">${NoraI18n.html("Мафия · бесплатно")}</p><h1>${esc(r.title)}</h1></div><button class="icon-button" id="mafia-rules" aria-label="${NoraI18n.html("Правила мафии")}">?</button></div>${errorBox("mafia")}<section class="phase-banner phase-${esc(r.phase)}"><span class="phase-symbol">${icon(r.phase === "night" ? "moon" : isDone ? "shield" : "sun")}</span><div><span class="eyebrow">${r.phase === "lobby" ? `${r.players.filter((p) => !p.left).length} / ${state.mafia.rules.max_players || 12} ${NoraI18n.t("за столом")}` : isDone ? NoraI18n.t("До следующей встречи") : `${NoraI18n.t("Круг")} ${number(r.round)} ${NoraI18n.t("· живы")} ${alive} / ${r.players.length}`}</span><h2>${isDone ? winnerLabel(r.winner, r.status) : phaseNames[r.phase] || esc(r.phase)}</h2></div>${!isDone && r.deadline ? ("<span class=\"phase-timer\" id=\"mafia-timer\" aria-label=\"" + NoraI18n.html("Оставшееся время") + "\">—</span>") : ""}</section>${roomControls(r)}${roleCard(r)}${players(r)}${actionPanel(r)}${r.self.investigations?.length ? `<details class="play-details private-results" data-detail="investigations"><summary>${NoraI18n.html("Твои проверки ·")} ${r.self.investigations.length}</summary>${r.self.investigations.map((p) => `<p><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b> — ${p.mafia ? NoraI18n.t("мафия") : NoraI18n.t("не мафия")}<small>${NoraI18n.html("Ночь")} ${number(p.round)}</small></p>`).join("")}</details>` : ""}${chat(r)}${r.timeline?.length ? `<details class="play-details" data-detail="timeline"><summary>${NoraI18n.html("Что случилось в городе")}</summary><ol class="mafia-timeline">${r.timeline.map((item) => `<li>${esc(item.text)}</li>`).join("")}</ol></details>` : ""}${isDone ? `<button class="primary" id="mafia-new">${NoraI18n.html("Собрать новую партию")}</button><button class="secondary" id="mafia-current">${NoraI18n.html("К текущей комнате")}</button>` : ""}`;
   }
   function mafiaScreen() {
     return state.mafia?.room ? mafiaRoom() : mafiaHome();
@@ -410,23 +410,23 @@ window.NoraInteractive = (() => {
   function rocketBoard(round) {
     const flying = round && ["countdown", "flying"].includes(round.status);
     const final = round && !flying;
-    return `<section class="rocket-board ${final && round.status !== "cashed_out" ? "rocket-crashed" : ""}" aria-label="Полёт ракеты"><div class="flight-grid"></div><div class="flight-heading"><span class="eyebrow" id="rocket-flight-label">${!round ? "Готовность к запуску" : round.status === "countdown" ? "Обратный отсчёт" : round.status === "flying" ? "В полёте" : round.status !== "cashed_out" ? "Полёт окончен" : "Печеньки забраны"}</span><strong id="rocket-multiplier">${final ? "×" + Number(round.cashout_multiplier || round.current_multiplier || 1).toFixed(2) : "×1.00"}</strong><span class="flight-caption" id="rocket-flight-caption">${!round ? "Твой момент где-то впереди." : flying ? "Успей забрать до срыва." : round.status !== "cashed_out" ? "Ставка не вернулась." : "Выплата уже в общем кошельке."}</span></div><svg class="rocket-graph" viewBox="0 0 340 200" aria-hidden="true"><defs><linearGradient id="flight-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f32843" stop-opacity=".28"/><stop offset="100%" stop-color="#f32843" stop-opacity="0"/></linearGradient></defs><path id="rocket-area" fill="url(#flight-fill)" d="M22 176H318V176Z"/><path id="rocket-path" d="M22 176Q70 176 90 165" fill="none" stroke="#f32843" stroke-width="3" stroke-linecap="round"/><g id="rocket-ship" transform="translate(90 165)"><circle r="17" fill="#f3284318"/><path d="M-9 7-5-6 9-13 9 1-4 9z" fill="#f7f5f1"/><circle cx="3" cy="-5" r="3" fill="#f32843"/><path d="m-8 9-5 5 7-2" stroke="#f32843" stroke-width="3" stroke-linecap="round"/></g><text x="22" y="196">СТАРТ</text><text x="290" y="196">×10</text></svg><span class="rocket-server-note">Расчёт на сервере</span></section>`;
+    return `<section class="rocket-board ${final && round.status !== "cashed_out" ? "rocket-crashed" : ""}" aria-label="${NoraI18n.html("Полёт ракеты")}"><div class="flight-grid"></div><div class="flight-heading"><span class="eyebrow" id="rocket-flight-label">${!round ? NoraI18n.t("Готовность к запуску") : round.status === "countdown" ? NoraI18n.t("Обратный отсчёт") : round.status === "flying" ? NoraI18n.t("В полёте") : round.status !== "cashed_out" ? NoraI18n.t("Полёт окончен") : NoraI18n.t("Печеньки забраны")}</span><strong id="rocket-multiplier">${final ? "×" + Number(round.cashout_multiplier || round.current_multiplier || 1).toFixed(2) : "×1.00"}</strong><span class="flight-caption" id="rocket-flight-caption">${!round ? NoraI18n.t("Твой момент где-то впереди.") : flying ? NoraI18n.t("Успей забрать до срыва.") : round.status !== "cashed_out" ? NoraI18n.t("Ставка не вернулась.") : NoraI18n.t("Выплата уже в общем кошельке.")}</span></div><svg class="rocket-graph" viewBox="0 0 340 200" aria-hidden="true"><defs><linearGradient id="flight-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f32843" stop-opacity=".28"/><stop offset="100%" stop-color="#f32843" stop-opacity="0"/></linearGradient></defs><path id="rocket-area" fill="url(#flight-fill)" d="M22 176H318V176Z"/><path id="rocket-path" d="M22 176Q70 176 90 165" fill="none" stroke="#f32843" stroke-width="3" stroke-linecap="round"/><g id="rocket-ship" transform="translate(90 165)"><circle r="17" fill="#f3284318"/><path d="M-9 7-5-6 9-13 9 1-4 9z" fill="#f7f5f1"/><circle cx="3" cy="-5" r="3" fill="#f32843"/><path d="m-8 9-5 5 7-2" stroke="#f32843" stroke-width="3" stroke-linecap="round"/></g><text x="22" y="196">${NoraI18n.html("СТАРТ")}</text><text x="290" y="196">×10</text></svg><span class="rocket-server-note">${NoraI18n.html("Расчёт на сервере")}</span></section>`;
   }
   function rocketScreen() {
     const s = state.rocket,
       r = s?.round || lastRocketResult,
       live = r && ["countdown", "flying"].includes(r.status);
-    return `${back("games", "Игры")}<div class="play-title-row"><div><p class="eyebrow">Соло · 18+</p><h1><em>Ракетка</em></h1></div><span class="rocket-balance"><small>В кошельке</small><b>${number(s?.balance ?? data.user.cookies)} 🍪</b></span></div>${errorBox("rocket")}${rocketBoard(r)}${live ? `<section class="card flight-controls"><div class="flight-stake"><span>В полёте <b>${number(r.bet)} 🍪</b></span><span>Автовыход <b>${r.auto_cashout ? "×" + Number(r.auto_cashout).toFixed(2) : "выключен"}</b></span></div><button class="primary rocket-cashout" id="rocket-cashout" ${pending || r.status === "countdown" ? "disabled" : ""}>${r.status === "countdown" ? "Готовимся к запуску…" : "Забрать"}</button><p class="footer-note">Выплата включает ставку. Сумма определяется в момент получения запроса сервером.</p></section>` : `${r ? `<section class="rocket-result ${r.status !== "cashed_out" ? "lost" : "won"}" role="status"><div><small>${r.status === "surrendered" ? "Полёт завершён досрочно" : r.status === "crashed" ? "Срыв на ×" + Number(r.proof?.crash_multiplier || r.current_multiplier || 1).toFixed(2) : "Выход на ×" + Number(r.cashout_multiplier || 1).toFixed(2)}</small><b>${r.status !== "cashed_out" ? "−" + number(r.bet) : "+" + number((r.payout || 0) - r.bet)} 🍪</b></div><p>Ставка ${number(r.bet)} 🍪 · выплата ${number(r.payout || 0)} 🍪</p></section>` : ""}<form id="rocket-bet-form" class="card rocket-form"><div class="row"><h3>Твой запуск</h3><span class="sub">1–100 🍪</span></div><label for="rocket-bet">Ставка в печеньках</label><input id="rocket-bet" name="bet" type="number" inputmode="numeric" min="1" max="100" step="1" value="${esc(drafts.bet)}" required><div class="stake-chips">${[5, 10, 25, 50, 100].map((n) => `<button type="button" data-rocket-stake="${n}" class="${Number(drafts.bet) === n ? "selected" : ""}">${n}</button>`).join("")}</div><label class="auto-toggle" for="rocket-auto-on"><span>Забрать автоматически<small>Сработает во время полёта</small></span><input id="rocket-auto-on" type="checkbox" ${drafts.autoOn ? "checked" : ""}></label><label for="rocket-auto" ${drafts.autoOn ? "" : "hidden"} id="rocket-auto-label">На множителе<input id="rocket-auto" name="auto" type="number" inputmode="decimal" min="1.1" max="10" step="0.01" value="${esc(drafts.auto)}" ${drafts.autoOn ? "required" : "disabled"}></label>${s && !s.eligible ? `<p class="game-restricted">${esc(s.reason || "Ставки сейчас недоступны")}</p>` : ""}<button class="primary" type="submit" ${pending || !s?.eligible ? "disabled" : ""}>Проверить запуск</button><p class="footer-note">Списание — после подтверждения.<br>Срыв раньше твоего выхода означает потерю ставки.</p></form>`}<details class="play-details" data-detail="rocket-rules"><summary>Как летит ракета</summary><div class="rule-row"><b>Одна ставка — один полёт</b><p>Ставка от 1 до 100 печенек. После трёхсекундного отсчёта множитель растёт. Нажми «Забрать» до срыва: выплата = ставка × множитель, с округлением вниз.</p></div><div class="rule-row"><b>Автовыход — до запуска</b><p>Можно заранее выбрать множитель от ×1.10 до ×10.00. Он сохраняется на сервере и сработает без открытой миниапки. При достижении ×10 выплата автоматическая, если ракета не сорвалась раньше.</p></div><div class="rule-row"><b>Понятные условия</b><p>Точка срыва случайна и фиксируется до полёта. Теоретический возврат — не выше 97%, округление выплат его уменьшает. Каждый полёт независим. Предыдущие результаты ничего не предсказывают.</p></div><div class="rule-row"><b>Связь и результат</b><p>Анимация показывает приблизительный текущий множитель. Ручной выход принимается по времени сервера. При потере связи полёт продолжается; без автовыхода ставка может быть потеряна. Доступно с 18 лет, при заполненном профиле, без открытого стартер-пака и просроченного долга.</p></div></details>${rocketHistory()}${r ? `<details class="play-details" data-detail="rocket-proof"><summary>Проверка этого полёта</summary><p class="sub">SHA-256 фиксируется до запуска. После завершения открывается исходное значение для проверки результата.</p><label class="proof-label">Отпечаток<code>${esc(r.commitment || "—")}</code></label>${r.proof ? `<label class="proof-label">Исходное значение<code>${esc(r.proof.seed)}</code></label><p class="sub">Точка срыва: ×${Number(r.proof.crash_multiplier).toFixed(2)}<br>${esc(r.proof.algorithm || "")}</p>` : '<p class="sub">Исходное значение скрыто до завершения полёта.</p>'}</details>` : ""}`;
+    return `${back("games", NoraI18n.t("Игры"))}<div class="play-title-row"><div><p class="eyebrow">${NoraI18n.html("Соло · 18+")}</p><h1><em>${NoraI18n.html("Ракетка")}</em></h1></div><span class="rocket-balance"><small>${NoraI18n.html("В кошельке")}</small><b>${number(s?.balance ?? data.user.cookies)} 🍪</b></span></div>${errorBox("rocket")}${rocketBoard(r)}${live ? `<section class="card flight-controls"><div class="flight-stake"><span>${NoraI18n.html("В полёте")} <b>${number(r.bet)} 🍪</b></span><span>${NoraI18n.html("Автовыход")} <b>${r.auto_cashout ? "×" + Number(r.auto_cashout).toFixed(2) : NoraI18n.t("выключен")}</b></span></div><button class="primary rocket-cashout" id="rocket-cashout" ${pending || r.status === "countdown" ? "disabled" : ""}>${r.status === "countdown" ? NoraI18n.t("Готовимся к запуску…") : NoraI18n.t("Забрать")}</button><p class="footer-note">${NoraI18n.html("Выплата включает ставку. Сумма определяется в момент получения запроса сервером.")}</p></section>` : `${r ? `<section class="rocket-result ${r.status !== "cashed_out" ? "lost" : "won"}" role="status"><div><small>${r.status === "surrendered" ? NoraI18n.t("Полёт завершён досрочно") : r.status === "crashed" ? NoraI18n.t("Срыв на ×") + Number(r.proof?.crash_multiplier || r.current_multiplier || 1).toFixed(2) : NoraI18n.t("Выход на ×") + Number(r.cashout_multiplier || 1).toFixed(2)}</small><b>${r.status !== "cashed_out" ? "−" + number(r.bet) : "+" + number((r.payout || 0) - r.bet)} 🍪</b></div><p>${NoraI18n.html("Ставка")} ${number(r.bet)} ${NoraI18n.html("🍪 · выплата")} ${number(r.payout || 0)} 🍪</p></section>` : ""}<form id="rocket-bet-form" class="card rocket-form"><div class="row"><h3>${NoraI18n.html("Твой запуск")}</h3><span class="sub">1–100 🍪</span></div><label for="rocket-bet">${NoraI18n.html("Ставка в печеньках")}</label><input id="rocket-bet" name="bet" type="number" inputmode="numeric" min="1" max="100" step="1" value="${esc(drafts.bet)}" required><div class="stake-chips">${[5, 10, 25, 50, 100].map((n) => `<button type="button" data-rocket-stake="${n}" class="${Number(drafts.bet) === n ? "selected" : ""}">${n}</button>`).join("")}</div><label class="auto-toggle" for="rocket-auto-on"><span>${NoraI18n.html("Забрать автоматически")}<small>${NoraI18n.html("Сработает во время полёта")}</small></span><input id="rocket-auto-on" type="checkbox" ${drafts.autoOn ? "checked" : ""}></label><label for="rocket-auto" ${drafts.autoOn ? "" : "hidden"} id="rocket-auto-label">${NoraI18n.html("На множителе")}<input id="rocket-auto" name="auto" type="number" inputmode="decimal" min="1.1" max="10" step="0.01" value="${esc(drafts.auto)}" ${drafts.autoOn ? "required" : "disabled"}></label>${s && !s.eligible ? `<p class="game-restricted">${esc(s.reason || NoraI18n.t("Ставки сейчас недоступны"))}</p>` : ""}<button class="primary" type="submit" ${pending || !s?.eligible ? "disabled" : ""}>${NoraI18n.html("Проверить запуск")}</button><p class="footer-note">${NoraI18n.html("Списание — после подтверждения.")}<br>${NoraI18n.html("Срыв раньше твоего выхода означает потерю ставки.")}</p></form>`}<details class="play-details" data-detail="rocket-rules"><summary>${NoraI18n.html("Как летит ракета")}</summary><div class="rule-row"><b>${NoraI18n.html("Одна ставка — один полёт")}</b><p>${NoraI18n.html("Ставка от 1 до 100 печенек. После трёхсекундного отсчёта множитель растёт. Нажми «Забрать» до срыва: выплата = ставка × множитель, с округлением вниз.")}</p></div><div class="rule-row"><b>${NoraI18n.html("Автовыход — до запуска")}</b><p>${NoraI18n.html("Можно заранее выбрать множитель от ×1.10 до ×10.00. Он сохраняется на сервере и сработает без открытой миниапки. При достижении ×10 выплата автоматическая, если ракета не сорвалась раньше.")}</p></div><div class="rule-row"><b>${NoraI18n.html("Понятные условия")}</b><p>${NoraI18n.html("Точка срыва случайна и фиксируется до полёта. Теоретический возврат — не выше 97%, округление выплат его уменьшает. Каждый полёт независим. Предыдущие результаты ничего не предсказывают.")}</p></div><div class="rule-row"><b>${NoraI18n.html("Связь и результат")}</b><p>${NoraI18n.html("Анимация показывает приблизительный текущий множитель. Ручной выход принимается по времени сервера. При потере связи полёт продолжается; без автовыхода ставка может быть потеряна. Доступно с 18 лет, при заполненном профиле, без открытого стартер-пака и просроченного долга.")}</p></div></details>${rocketHistory()}${r ? `<details class="play-details" data-detail="rocket-proof"><summary>${NoraI18n.html("Проверка этого полёта")}</summary><p class="sub">${NoraI18n.html("SHA-256 фиксируется до запуска. После завершения открывается исходное значение для проверки результата.")}</p><label class="proof-label">${NoraI18n.html("Отпечаток")}<code>${esc(r.commitment || "—")}</code></label>${r.proof ? `<label class="proof-label">${NoraI18n.html("Исходное значение")}<code>${esc(r.proof.seed)}</code></label><p class="sub">${NoraI18n.html("Точка срыва: ×")}${Number(r.proof.crash_multiplier).toFixed(2)}<br>${esc(r.proof.algorithm || "")}</p>` : ("<p class=\"sub\">" + NoraI18n.html("Исходное значение скрыто до завершения полёта.") + "</p>")}</details>` : ""}`;
   }
   function rocketHistory() {
     const h = state.rocket?.history || [];
     const rows = h.map((r) => {
       const won = r.status === "cashed_out";
       const multiplier = r.cashout_multiplier ?? r.current_multiplier;
-      const label = {crashed: "Срыв", surrendered: "Сдался", cashed_out: "Забрано"}[r.status];
-      return `<div class="flight-history"><span><b>×${Number(multiplier || 1).toFixed(2)}</b><small>${label} · ставка ${number(r.bet)}</small></span><strong class="${won ? "" : "red-number"}">${won ? "+" + number(r.payout - r.bet) : "−" + number(r.bet)} 🍪</strong></div>`;
+      const label = {crashed: NoraI18n.t("Срыв"), surrendered: NoraI18n.t("Сдался"), cashed_out: NoraI18n.t("Забрано")}[r.status];
+      return `<div class="flight-history"><span><b>×${Number(multiplier || 1).toFixed(2)}</b><small>${label} ${NoraI18n.html("· ставка")} ${number(r.bet)}</small></span><strong class="${won ? "" : "red-number"}">${won ? "+" + number(r.payout - r.bet) : "−" + number(r.bet)} 🍪</strong></div>`;
     }).join("");
-    return `<details class="play-details" data-detail="rocket-history"><summary>Твои последние полёты · ${h.length}</summary>${rows || '<p class="sub">Первый полёт ещё впереди.</p>'}</details>`;
+    return `<details class="play-details" data-detail="rocket-history"><summary>${NoraI18n.html("Твои последние полёты ·")} ${h.length}</summary>${rows || ("<p class=\"sub\">" + NoraI18n.html("Первый полёт ещё впереди.") + "</p>")}</details>`;
   }
   function screen(view) {
     const body = {
@@ -539,7 +539,7 @@ window.NoraInteractive = (() => {
         if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && tab === "interactive")) patch();
       } catch (e) {
         if (epoch !== (epochs[view] || 0)) return;
-        errors[view] = "Связь прервалась. " + e.message;
+        errors[view] = NoraI18n.t("Связь прервалась. ") + e.message;
         if (tab === view || (view === "friends" && tab === "community") || (view === "mafia" && tab === "interactive")) patch();
       }
     })();
@@ -564,7 +564,7 @@ window.NoraInteractive = (() => {
             ? Math.floor(seconds / 60) +
               ":" +
               String(seconds % 60).padStart(2, "0")
-            : String(seconds) + "с";
+            : String(seconds) + NoraI18n.t("с");
         t.classList.toggle("urgent", seconds < 10);
       }
     }
@@ -589,8 +589,8 @@ window.NoraInteractive = (() => {
         );
         if ($("#rocket-flight-label"))
           $("#rocket-flight-label").textContent = countdown
-            ? "До старта " + countdown + "…"
-            : "В полёте";
+            ? NoraI18n.t("До старта ") + countdown + "…"
+            : NoraI18n.t("В полёте");
         if ($("#rocket-multiplier"))
           $("#rocket-multiplier").textContent = countdown
             ? String(countdown)
@@ -600,8 +600,8 @@ window.NoraInteractive = (() => {
           button.disabled =
             pending || countdown > 0 || r.status === "countdown";
           button.textContent = countdown
-            ? "До старта " + countdown + "…"
-            : "Забрать ≈ " + number(Math.floor(r.bet * multiplier)) + " 🍪";
+            ? NoraI18n.t("До старта ") + countdown + "…"
+            : NoraI18n.t("Забрать ≈ ") + number(Math.floor(r.bet * multiplier)) + " 🍪";
         }
       } else {
         const crash = Number(r.proof?.crash_multiplier || 0);
@@ -618,18 +618,18 @@ window.NoraInteractive = (() => {
           const cashedAt = Number(r.cashout_multiplier || 1);
           if ($("#rocket-flight-label"))
             $("#rocket-flight-label").textContent = done
-              ? "Дальше ракета не улетела"
-              : "Ракета летит дальше";
+              ? NoraI18n.t("Дальше ракета не улетела")
+              : NoraI18n.t("Ракета летит дальше");
           if ($("#rocket-multiplier"))
             $("#rocket-multiplier").textContent = "×" + multiplier.toFixed(2);
           if ($("#rocket-flight-caption"))
             $("#rocket-flight-caption").textContent = done
               ? crash >= 10
-                ? "Без забора ракета улетела бы в лимит ×10"
-                : "Без забора срыв случился бы на ×" + crash.toFixed(2)
-              : "Забрано на ×" +
+                ? NoraI18n.t("Без забора ракета улетела бы в лимит ×10")
+                : NoraI18n.t("Без забора срыв случился бы на ×") + crash.toFixed(2)
+              : NoraI18n.t("Забрано на ×") +
                 cashedAt.toFixed(2) +
-                " — смотрим, куда бы она долетела";
+                NoraI18n.t(" — смотрим, куда бы она долетела");
           if ($("#rocket-ship"))
             $("#rocket-ship").style.opacity = done ? ".2" : "";
           $(".rocket-board")?.classList.toggle("rocket-crashed", done);
@@ -785,18 +785,18 @@ window.NoraInteractive = (() => {
       );
     if (["remove", "block"].includes(action)) {
       sheet(
-        `<h2>${action === "block" ? "Заблокировать" : "Удалить из друзей"}?</h2><p class="sub">${esc(person.name)}${action === "block" ? " не сможет присылать заявки и приглашения. Разблокировать можно в этом разделе." : " исчезнет из списка. Чтобы снова дружить, понадобится новая заявка."}</p><button class="primary" id="friend-confirm">${action === "block" ? "Заблокировать" : "Удалить"}</button>`,
+        `<h2>${action === "block" ? NoraI18n.t("Заблокировать") : NoraI18n.t("Удалить из друзей")}?</h2><p class="sub">${esc(person.name)}${action === "block" ? NoraI18n.t(" не сможет присылать заявки и приглашения. Разблокировать можно в этом разделе.") : NoraI18n.t(" исчезнет из списка. Чтобы снова дружить, понадобится новая заявка.")}</p><button class="primary" id="friend-confirm">${action === "block" ? NoraI18n.t("Заблокировать") : NoraI18n.t("Удалить")}</button>`,
       );
       $("#friend-confirm").onclick = send;
     } else send();
   }
   function createRoom() {
-    sheet(`<h2 id="mafia-create-heading" tabindex="-1">Новая игра в Мафию</h2><form id="mafia-create-form">
-      <label for="mafia-room-title">Название</label>
-      <input id="mafia-room-title" name="title" maxlength="60" placeholder="Вечер в Норе" value="${esc(drafts.room)}">
-      <label class="game-visibility"><input type="checkbox" name="public" checked>Открытое лобби</label>
-      <p class="sub">5–12 игроков · без ставок</p>
-      <button class="primary" type="submit">Создать лобби</button>
+    sheet(`<h2 id="mafia-create-heading" tabindex="-1">${NoraI18n.html("Новая игра в Мафию")}</h2><form id="mafia-create-form">
+      <label for="mafia-room-title">${NoraI18n.html("Название")}</label>
+      <input id="mafia-room-title" name="title" maxlength="60" placeholder="${NoraI18n.html("Вечер в Норе")}" value="${esc(drafts.room)}">
+      <label class="game-visibility"><input type="checkbox" name="public" checked>${NoraI18n.html("Открытое лобби")}</label>
+      <p class="sub">${NoraI18n.html("5–12 игроков · без ставок")}</p>
+      <button class="primary" type="submit">${NoraI18n.html("Создать лобби")}</button>
     </form>`);
     $("#mafia-create-heading").focus();
   }
@@ -804,7 +804,7 @@ window.NoraInteractive = (() => {
     await load("friends", true);
     const r = state.mafia?.room;
     if (!r || r.status !== "lobby") {
-      toast("Сначала создай комнату «Мафии»");
+      toast(NoraI18n.t("Сначала создай комнату «Мафии»"));
       go("mafia");
       return;
     }
@@ -812,7 +812,7 @@ window.NoraInteractive = (() => {
       (p) => p.available !== false && !r.players.some((x) => x.id === p.id),
     );
     sheet(
-      `<span class="eyebrow">Собираем своих</span><h2>Позвать в «Мафию»</h2><p class="sub">${esc(r.title)} · ${r.players.length} / 12 игроков</p>${list.length ? list.map((p) => `<button class="invite-person ${p.id === preselect ? "preselected" : ""}" data-invite-person="${p.id}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>Пригласить в комнату</small></span>${icon("arrow")}</button>`).join("") : '<p class="sub">Все доступные друзья уже за столом или список пока пуст.</p>'}<button class="secondary" id="friends-from-invite">Добавить друзей</button>`,
+      `<span class="eyebrow">${NoraI18n.html("Собираем своих")}</span><h2>${NoraI18n.html("Позвать в «Мафию»")}</h2><p class="sub">${esc(r.title)} · ${r.players.length} ${NoraI18n.html("/ 12 игроков")}</p>${list.length ? list.map((p) => `<button class="invite-person ${p.id === preselect ? "preselected" : ""}" data-invite-person="${p.id}"><span class="person-avatar" data-person-avatar="${p.id}" ${p.has_avatar===false?"data-avatar-unavailable":""}>${initials(p.name)}</span><span><b>${NoraPrefix(p.prefix)}${esc(p.name)}</b><small>${NoraI18n.html("Пригласить в комнату")}</small></span>${icon("arrow")}</button>`).join("") : ("<p class=\"sub\">" + NoraI18n.html("Все доступные друзья уже за столом или список пока пуст.") + "</p>")}<button class="secondary" id="friends-from-invite">${NoraI18n.html("Добавить друзей")}</button>`,
     );
   }
   async function rocketPrepare(form) {
@@ -826,7 +826,7 @@ window.NoraInteractive = (() => {
         auto_cashout: drafts.autoOn ? Number(drafts.auto) : null,
       });
       sheet(
-        `<span class="eyebrow">До запуска — одно решение</span><h2>Отправляем<br>ракету?</h2><div class="amount">${number(q.bet)} 🍪</div><p class="sub">Эта сумма спишется из кошелька при запуске. Срыв до выхода — потеря всей ставки.</p><div class="quote-facts"><span>Автовыход<b>${q.auto_cashout ? "×" + Number(q.auto_cashout).toFixed(2) : "Выключен"}</b></span><span>Отсчёт<b>3 секунды</b></span></div><button class="primary" id="rocket-confirm">Списать ${number(q.bet)} 🍪 и запустить</button>`,
+        `<span class="eyebrow">${NoraI18n.html("До запуска — одно решение")}</span><h2>${NoraI18n.html("Отправляем")}<br>${NoraI18n.html("ракету?")}</h2><div class="amount">${number(q.bet)} 🍪</div><p class="sub">${NoraI18n.html("Эта сумма спишется из кошелька при запуске. Срыв до выхода — потеря всей ставки.")}</p><div class="quote-facts"><span>${NoraI18n.html("Автовыход")}<b>${q.auto_cashout ? "×" + Number(q.auto_cashout).toFixed(2) : NoraI18n.t("Выключен")}</b></span><span>${NoraI18n.html("Отсчёт")}<b>${NoraI18n.html("3 секунды")}</b></span></div><button class="primary" id="rocket-confirm">${NoraI18n.html("Списать")} ${number(q.bet)} ${NoraI18n.html("🍪 и запустить")}</button>`,
       );
       $("#rocket-confirm").onclick = () =>
         performAction(
@@ -883,7 +883,7 @@ window.NoraInteractive = (() => {
     if (id === "mafia-create-form") {
       const result = await mafiaAction(
         "create",
-        { title: drafts.room.trim() || "Вечер в Норе", public: e.target.elements.public.checked },
+        { title: drafts.room.trim() || NoraI18n.t("Вечер в Норе"), public: e.target.elements.public.checked },
         { close: true },
       );
       if (result) {
@@ -946,7 +946,7 @@ window.NoraInteractive = (() => {
       if (state.mafia?.room?.status === "lobby")
         inviteFriends(Number(b.dataset.friendPlay));
       else if (!state.mafia?.room) createRoom();
-      else toast("Заверши текущую партию, чтобы пригласить друзей");
+      else toast(NoraI18n.t("Заверши текущую партию, чтобы пригласить друзей"));
     }
     if (b.id === "mafia-create" || b.id === "mafia-new") createRoom();
     if (b.id === "mafia-current") {
@@ -968,7 +968,7 @@ window.NoraInteractive = (() => {
       });
       if (result && b.isConnected) {
         b.disabled = true;
-        b.innerHTML = "<span>Приглашение отправлено ✓</span>";
+        b.innerHTML = ("<span>" + NoraI18n.html("Приглашение отправлено ✓") + "</span>");
       }
     }
     if (b.dataset.mafiaRespond) {
@@ -996,7 +996,7 @@ window.NoraInteractive = (() => {
     }
     if (b.id === "mafia-rules")
       sheet(
-        "<h2>Город живёт по правилам</h2>" +
+        ("<h2>" + NoraI18n.html("Город живёт по правилам") + "</h2>") +
           mafiaRules().replace("<details ", "<details open "),
       );
     if (b.dataset.rocketStake) {

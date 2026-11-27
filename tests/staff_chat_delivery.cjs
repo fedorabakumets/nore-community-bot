@@ -23,7 +23,7 @@ const fetch=async()=>{
   calls++;
   return {ok:true,json:async()=>next};
 };
-const context={window,document,sessionStorage,fetch,AbortController,setTimeout,clearTimeout,Uint8Array,Date,JSON,Math};
+const context={window,document,NoraI18n:{t:String,html:String},sessionStorage,fetch,AbortController,setTimeout,clearTimeout,Uint8Array,Date,JSON,Math};
 vm.runInNewContext(source,context);
 const make=()=>window.NoraStaffDelivery.create({
   getAuth:()=> 'SIGNED',

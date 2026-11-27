@@ -407,14 +407,14 @@ window.NoraScenery = (() => {
       sprite.name='nora-portal-label';sprite.scale.set(1.64,.38,1);
       sprite.position.set(x,2.46,z);area.add(sprite);gateLabels.push(sprite);
     }
-    if(window.NoraBurrowModels){const {x,z}=window.NoraBurrowModels.stall;addSign(lobby,'ЛАВКА',x,z+1.12);}
-    if(memoryPortal)lobbyGate(memoryPortal,'ВОСПОМИНАНИЕ','nora-observatory-portal',{
+    if(window.NoraBurrowModels){const {x,z}=window.NoraBurrowModels.stall;addSign(lobby,NoraI18n.t("ЛАВКА"),x,z+1.12);}
+    if(memoryPortal)lobbyGate(memoryPortal,NoraI18n.t("ВОСПОМИНАНИЕ"),'nora-observatory-portal',{
       palette:['#332239','#66476f','#c7a0d3','#936cac','#e5c3e6'],
     });
     if(cinemaHall){
       const palette=['#513034','#996043','#ffcb8e','#e99d73','#ffe1b5'];
-      lobbyGate(cinemaLayout.portal,'КИНОТЕАТР','nora-cinema-portal',{palette});
-      lobbyGate(cinemaLayout.exit,'В ЛОББИ','nora-cinema-exit',{area:cinemaHall,zone:cinemaZone,palette,direction:-1});
+      lobbyGate(cinemaLayout.portal,NoraI18n.t("КИНОТЕАТР"),'nora-cinema-portal',{palette});
+      lobbyGate(cinemaLayout.exit,NoraI18n.t("В ЛОББИ"),'nora-cinema-exit',{area:cinemaHall,zone:cinemaZone,palette,direction:-1});
     }
     portal.add(portalStone);portal.position.z=portalZ.home;outdoor.add(portal);
     addCollider(outdoorZone,0,portalZ.home);
