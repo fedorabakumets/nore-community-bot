@@ -31,7 +31,7 @@ export function PokerTable({ state }: { state: RoomSnapshot }) {
   const openSeats = Array.from({ length: 5 }, (_, seat) => seat).filter((seat) => !state.players.some((player) => player.seat === seat));
   const streetLabel = state.hand ? STREETS[state.hand.street] ?? state.hand.street : "";
   const message = state.hand?.message ?? "Ждём игроков";
-  const showMessage = !state.hand || message !== streetLabel;
+  const showMessage = !state.hand || message !== streetLabel && !["Префлоп", "Флоп", "Тёрн", "Ривер"].includes(message);
   const visible = [...(viewer?.hole ?? []), ...(state.hand?.board ?? [])].filter((card): card is PokerCard => Boolean(card));
   const hand = viewer && !viewer.folded && viewer.hole.every(Boolean) && viewer.hole.length === 2 ? combination(visible) : { name: "", cards: new Set<string>() };
   return (
