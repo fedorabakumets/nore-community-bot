@@ -22,7 +22,7 @@ function combination(cards: PokerCard[]) {
 
 function BetAmount({ amount }: { amount: number }) {
   if (!amount) return null;
-  return <span className={styles.bet}><b>{amount.toLocaleString()}</b></span>;
+  return <span className={styles.bet}><b>🍪 {amount.toLocaleString()}</b></span>;
 }
 
 export function PokerTable({ state }: { state: RoomSnapshot }) {
@@ -41,7 +41,7 @@ export function PokerTable({ state }: { state: RoomSnapshot }) {
         <div className={styles.rail} />
         <div className={styles.feltTexture} />
         <div className={styles.center}>
-          <div className={styles.pot} data-poker-pot><span>Банк</span><strong key={state.pot}>{state.pot.toLocaleString()}</strong></div>
+          <div className={styles.pot} data-poker-pot><span>Банк</span><strong key={state.pot}>🍪 {state.pot.toLocaleString()}</strong></div>
           <div className={styles.board} data-poker-board>
             {Array.from({ length: 5 }, (_, index) => <Card key={`${state.hand?.id ?? "empty"}-${index}`} card={state.hand?.board[index] ?? null} delay={index * 70} placeholder={!state.hand?.board[index]} highlighted={hand.cards.has(state.hand?.board[index] ?? "")} />)}
           </div>
@@ -56,10 +56,10 @@ export function PokerTable({ state }: { state: RoomSnapshot }) {
               <div className={styles.identity} data-poker-seat={relative(player.seat)}>
                 <Avatar index={player.avatar} size={relative(player.seat) === 0 ? "lg" : "md"} />
                 {isActor && state.hand?.deadlineAt ? <span className={styles.timer} style={{ animationDuration: `${Math.max(1, (state.hand.deadlineAt - state.serverTime) / 1000)}s` }} /> : null}
-                <div><span>{player.name}{player.isBot || !player.connected ? <em>{player.isBot ? "БОТ" : "ОТОШЁЛ"}</em> : null}</span><strong key={player.stack} className={styles.stack}>{player.stack.toLocaleString()}</strong></div>
+                <div><span>{player.name}{player.isBot || !player.connected ? <em>{player.isBot ? "БОТ" : "ОТОШЁЛ"}</em> : null}</span><strong key={player.stack} className={styles.stack}>🍪 {player.stack.toLocaleString()}</strong></div>
               </div>
               <div className={styles.hole}>{player.hole.map((card, index) => <Card key={`${state.hand?.id ?? "waiting"}-${index}`} card={card} small={player.id !== state.viewerId} deal delay={index * 85} highlighted={player.id === state.viewerId && hand.cards.has(card ?? "")} />)}</div>
-              {state.hand?.street === "complete" && isWinner ? <span key={`${state.hand.id}-${player.id}`} className={styles.winAmount}>+{state.hand.winners.filter(winner => winner.playerId === player.id).reduce((sum, winner) => sum + winner.amount, 0).toLocaleString()}</span> : null}
+              {state.hand?.street === "complete" && isWinner ? <span key={`${state.hand.id}-${player.id}`} className={styles.winAmount}>+🍪 {state.hand.winners.filter(winner => winner.playerId === player.id).reduce((sum, winner) => sum + winner.amount, 0).toLocaleString()}</span> : null}
               {player.lastAction ? <span key={`${state.hand?.id}-${player.lastAction}-${player.bet}-${player.committed}`} className={styles.action}>{player.lastAction}</span> : null}
               {player.sittingOut ? <span className={styles.sitting}>Пропускает</span> : null}
               <BetAmount key={`${state.hand?.id}-${state.hand?.street}-${player.bet}`} amount={state.hand?.street === "complete" ? 0 : player.bet} />
