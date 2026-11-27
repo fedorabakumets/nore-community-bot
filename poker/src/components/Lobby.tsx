@@ -34,11 +34,11 @@ export function Lobby({ api, enter, saved, exit }: {
       <div className={styles.pitch}>
         <h1>Покер</h1>
         <p>Техасский холдем на 2–5 мест. Позови друзей за стол или потренируйся с ботами.</p>
-        <div className={styles.features}><span>Игровые фишки</span></div>
+        <div className={styles.features}><span>Тренировочный стол · без списания печенек</span></div>
       </div>
       <div className={styles.entry}>
         <button className={styles.primary} onClick={create} disabled={busy}>
-          {busy ? "Открываем стол…" : "Создать приватный стол"}
+          {busy ? "Открываем стол…" : "Создать стол"}
         </button>
         {saved && <button type="button" className="poker-back" disabled={busy} onClick={() => enter(saved)}>Вернуться к столу</button>}
         <form className={styles.joinRow} onSubmit={(event) => { event.preventDefault(); if (code.length === 8) enter(code); }}>
