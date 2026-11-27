@@ -144,6 +144,7 @@ function showCitySetup() {
 }
 
 function showApplication(application) {
+  cancelPageSwipe?.();
   applicationScreen = application;
   barricadeView?.unmount();
   data = null;
@@ -331,13 +332,18 @@ function mountBarricade() {
   });
 }
 
-function render(){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content='';
-if(tab==='home')content=window.NoraHome?.screen()||'';
+const mainTabScreens = {
+  home: () => window.NoraHome?.screen(),
+  shop: () => window.NoraShop?.screen(),
+  community: () => window.NoraCommunity?.screen(),
+  events: () => window.NoraEvents?.screen(),
+  lk: () => profileScreen(data.user)
+};
+const screenHTML = content => `${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;
+let cancelPageSwipe, pageTouchInProgress;
+
+function render(swiped = false){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||'Друг';let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
 if(tab==='commands')content=NoraCommands.screen();
-if(tab==='shop')content=window.NoraShop?.screen()||'';
-if(tab==='events')content=window.NoraEvents?.screen()||'';
-if(tab==='lk')content=profileScreen(u);
-if(tab==='community')content=window.NoraCommunity?.screen()||'';
 if(tab==='staffchat')content=window.NoraStaffChat?.screen()||'<section class="nora-staff-chat"><h1>Чат Норы</h1><p class="sub">Экран чата не загрузился. Закрой и заново открой Нору.</p><button type="button" data-tab="community" class="secondary">Назад</button></section>';
 if(tab==='admin')content=window.NoraAdmin?.render()||'<p>Открываем админ-панель…</p>';
 if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
@@ -348,7 +354,7 @@ if(tab==='durak')content='<section id="durak-root"><p class="sub">Открыва
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
 if(window.NoraSea?.handles(tab))content=NoraSea.screen(tab);else if(window.NoraInteractive?.handles(tab))content=NoraInteractive.screen(tab);
-const app=$('#app'), html=`${demo?'<div class="demo">Демонстрация · пример данных, покупки отключены</div>':''}${content}`;
+const app=$('#app'), html=screenHTML(content);
 const expanded=app.dataset.screen===tab
   ?new Set([...app.querySelectorAll('details[open][data-retain-open]')].map(el=>el.dataset.retainOpen))
   :null;
@@ -365,25 +371,26 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected)}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected,swiped === true)}
 
 
 // Animate route changes only. Refreshes and game-internal renders should remain still.
 const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
-const routeMotionOrder = ['home', 'shop', 'community', 'events', 'lk'];
-let previousRouteKey = null, previousRouteSection = null, routeMotion = null, swipeRouteDirection = 0;
-function animateRouteChange(app, selected) {
+const routeMotionOrder = Object.keys(mainTabScreens);
+let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
+function animateRouteChange(app, selected, swiped) {
   const category = tab === 'shop' ? (window.NoraShop?.route()?.category || '') : '';
   const key = tab + ':' + category;
   if (key === previousRouteKey) return;
+  cancelPageSwipe?.();
   const oldKey = previousRouteKey, oldSection = previousRouteSection;
   previousRouteKey = key;
   previousRouteSection = selected;
   routeMotion?.cancel();
   routeMotion = null;
-  if (!oldKey || routeMotionExcluded.has(tab) || navReducedMotion.matches || typeof app.animate !== 'function') return;
+  if (swiped || !oldKey || routeMotionExcluded.has(tab) || navReducedMotion.matches || typeof app.animate !== 'function') return;
   const from = routeMotionOrder.indexOf(oldSection), to = routeMotionOrder.indexOf(selected);
-  const distance = swipeRouteDirection ? swipeRouteDirection * Math.min(innerWidth, app.clientWidth || innerWidth) : from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
+  const distance = from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
   const rise = distance ? 2 : 10;
   // Six steps create a smooth acceleration/deceleration profile on fast displays.
   const frame = (offset, remaining, opacity) => ({
@@ -488,18 +495,19 @@ function bookEvent(button) {
   sheet(`<span class="eyebrow">Встретимся?</span><h2>${esc(event.title)}</h2><p class="sub">${event.price?'Стоимость билета':'Участие бесплатное'}</p><div class="amount">${event.price?number(event.price)+' 🍪':'0 🍪'}</div><button class="primary" id="pay">${event.price?'Подтвердить оплату':'Подтвердить участие'}</button>`);
   $('#pay').onclick = () => perform('events/join', payload);
 }
-function goToTab(next, prepare, refreshAfter = false) {
+function goToTab(next, prepare, refreshAfter = false, {swiped = false} = {}) {
   if(next==='staffchat'&&!data?.staff_chat_available){toast('Чат пока доступен только команде Норы');return;}
   if (profileTabLocked(next)) {
     toast('Заполни профиль на 100%, чтобы открыть этот раздел');
     return;
   }
   NoraShop.leaveGameTo(next, () => {
+    cancelPageSwipe?.();
     prepare?.();
     const from = tab;
     tab = next;
     NoraShop.tabChanged(tab, from);
-    render();
+    render(swiped);
     window.scrollTo(0, 0);
     if (refreshAfter && tab !== 'admin') refresh();
   });
@@ -757,7 +765,7 @@ async function uploadPhoto(file, endpoint, headers) {
   return result;
 }
 let avatarURL=null,avatarKey='',avatarLoading=false;
-function paintOwnAvatar(){if(!avatarURL)return;document.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="Фото профиля">`})}
+function paintOwnAvatar(root = document){if(!avatarURL)return;root.querySelectorAll('#profile-photo,[data-own-avatar]').forEach(el=>{el.innerHTML=`<img src="${avatarURL}" alt="Фото профиля">`})}
 async function loadAvatar(){
   if(!data?.has_avatar||data.avatar_video){if(avatarURL)URL.revokeObjectURL(avatarURL);avatarURL=null;avatarKey='';return}
   const key=data.revision;
@@ -792,7 +800,26 @@ document.addEventListener('change', async e => {
     busy = false;
   }
 });
-async function refresh(){if(!auth||busy||document.hidden)return;if(applicationScreen&&applicationScreen.status!=='form'){await refreshApplication();return}if(!data||tab==='admin'||tab==='staffchat'||$('#sheet').open)return;if(window.NoraEvents?.editorOpen())return;if(tab==='durak'||tab==='barricade'||tab==='dot')return;if(window.NoraSea?.refreshCurrent())return;if(window.NoraInteractive?.refreshCurrent())return;try{data=await api('me');render();if(data)window.NoraCabinet?.refreshCurrent()}catch(e){toast(e.message)}}
+async function refresh() {
+  if (!auth || busy || document.hidden || pageTouchInProgress?.()) return;
+  if (applicationScreen && applicationScreen.status !== 'form') {
+    await refreshApplication();
+    return;
+  }
+  if (!data || tab === 'admin' || tab === 'staffchat' || $('#sheet').open) return;
+  if (window.NoraEvents?.editorOpen()) return;
+  if (tab === 'durak' || tab === 'barricade' || tab === 'dot') return;
+  if (window.NoraSea?.refreshCurrent() || window.NoraInteractive?.refreshCurrent()) return;
+  try {
+    const fresh = await api('me');
+    if (pageTouchInProgress?.()) return;
+    data = fresh;
+    render();
+    if (data) window.NoraCabinet?.refreshCurrent();
+  } catch (e) {
+    toast(e.message);
+  }
+}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});setInterval(refresh,30000);
 
 // Capture the activation before a button handler replaces its screen.
@@ -857,12 +884,12 @@ window.NoraPrefix = p => {
   const app = $('#app'), player = $('#sheet'), mini = $('#nora-mini-player');
   const excluded = 'input,textarea,select,video,audio,canvas,[contenteditable="true"],[data-no-swipe]';
   const curve = 'cubic-bezier(.18,.82,.24,1)';
-  let touch = null, settling = false, suppressUntil = 0;
+  let touch = null, settling = false, suppressUntil = 0, pageSwipe = null;
   const full = () => player.open && !!player.querySelector('#nora-now-playing');
   const blocked = () => !data?.profile || app.inert || $('#nav').inert ||
     currentGame() || document.body.classList.contains('intro-playing');
   const pageReady = () => !blocked() && !document.querySelector('dialog[open]') &&
-    routeMotionOrder.includes(tab);
+    routeMotionOrder.includes(tab) && !window.NoraEvents?.editorOpen();
   const neighbor = (dx) => {
     const index = routeMotionOrder.indexOf(tab) + (dx < 0 ? 1 : -1);
     const next = routeMotionOrder[index];
@@ -879,6 +906,88 @@ window.NoraPrefix = p => {
   const shift = (el, x, y) => {
     if (!navReducedMotion.matches) el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
   };
+  // Build the neighbour from the same screen markup while keeping the active route mounted.
+  const previewViewport = document.createElement('div');
+  previewViewport.className = 'nora-swipe-viewport';
+  previewViewport.inert = true;
+  previewViewport.setAttribute('aria-hidden', 'true');
+  const preview = document.createElement('main');
+  preview.id = 'nora-swipe-preview';
+  previewViewport.append(preview);
+
+  // A refresh can replace the original touch target, so keep it mounted during the gesture.
+  pageTouchInProgress = () => touch?.kind === 'page' || Boolean(pageSwipe);
+  cancelPageSwipe = () => {
+    if (touch?.kind === 'page') touch = null;
+    if (!pageSwipe) return;
+    pageSwipe.animations?.forEach(animation => animation.cancel());
+    pageSwipe = null;
+    previewViewport.remove();
+    preview.replaceChildren();
+    preview.dataset.screen = '';
+    app.style.removeProperty('transform');
+    document.documentElement.classList.remove('nora-page-swiping');
+    settling = false;
+  };
+
+  function movePage(t, dx) {
+    const direction = Math.sign(dx);
+    const next = direction && neighbor(dx);
+    t.offset = next ? direction * Math.min(t.width, Math.abs(dx))
+      : direction * (t.width * .16) * (1 - Math.exp(-Math.abs(dx) / (t.width * .55)));
+    if (navReducedMotion.matches) return;
+
+    if (next && preview.dataset.screen !== next) {
+      preview.dataset.screen = next;
+      preview.innerHTML = screenHTML(mainTabScreens[next]() || '');
+      paintOwnAvatar(preview);
+      if (!previewViewport.isConnected) app.after(previewViewport);
+    }
+    previewViewport.hidden = !next;
+    shift(preview, t.offset - direction * t.width, 0);
+    shift(app, t.offset, 0);
+  }
+
+  function settlePage(t, cancelled) {
+    // Give recent motion weight without letting an old flick count after a pause.
+    const velocity = performance.now() - t.sampleAt < 85 ? t.velocity : 0;
+    const distance = Math.abs(t.dx);
+    const projected = (t.dx + velocity * 160) * Math.sign(t.dx);
+    const commit = distance >= t.width * .42 ||
+      (distance >= 24 && velocity * Math.sign(t.dx) > .25 && projected >= t.width * .28);
+    const next = !cancelled && commit && pageReady() && t.from === tab ? neighbor(t.dx) : null;
+    const direction = Math.sign(t.dx);
+    const end = next ? direction * t.width : 0;
+    const complete = () => {
+      if (pageSwipe !== t) return;
+      cancelPageSwipe();
+      if (next && pageReady() && t.from === tab && neighbor(t.dx) === next) {
+        goToTab(next, undefined, true, {swiped: true});
+      }
+    };
+    if (navReducedMotion.matches || typeof app.animate !== 'function' || end === t.offset) {
+      complete();
+      return;
+    }
+    const remaining = Math.abs(end - t.offset);
+    const duration = Math.min(340, Math.max(180, 160 + remaining * .45));
+    const slide = (el, from, to) => el.animate([
+      {transform: `translate3d(${from}px,0,0)`},
+      {transform: `translate3d(${to}px,0,0)`}
+    ], {duration, easing: 'cubic-bezier(.22,.72,.28,1)', fill: 'forwards'});
+    t.animations = [slide(app, t.offset, end)];
+    if (!previewViewport.hidden && previewViewport.isConnected) {
+      const base = -direction * t.width;
+      t.animations.push(slide(preview, base + t.offset, base + end));
+    }
+    Promise.all(t.animations.map(animation => animation.finished)).then(complete, complete);
+  }
+
+  window.addEventListener('resize', () => {
+    if (pageSwipe && document.documentElement.clientWidth !== pageSwipe.width) cancelPageSwipe();
+  });
+  navReducedMotion.addEventListener?.('change', () => cancelPageSwipe());
+
   const shade = (y, height) => {
     player.style.setProperty('--nora-drag-shade', String(.5 * (1 - Math.min(1, y / height))));
   };
@@ -905,6 +1014,7 @@ window.NoraPrefix = p => {
     shade(t.offset, t.height);
   }
   function start(event) {
+    if (touch?.kind === 'page' && event.touches.length > 1) finish(null, true);
     if (settling || touch || event.touches.length !== 1) return;
     suppressUntil = 0;
     const p = event.touches[0], target = event.target;
@@ -939,6 +1049,13 @@ window.NoraPrefix = p => {
       t.locked = true;
       if (t.kind === 'page') {
         routeMotion?.cancel(); routeMotion = null;
+        app.classList.remove('app-enter');
+        pageSwipe = t;
+        t.width = Math.max(1, document.documentElement.clientWidth);
+        t.sampleX = t.x;
+        t.sampleAt = t.start;
+        t.velocity = 0;
+        if (!navReducedMotion.matches) document.documentElement.classList.add('nora-page-swiping');
       } else {
         player.classList.add('nora-player-dragging');
         if (t.kind === 'open') {
@@ -953,8 +1070,15 @@ window.NoraPrefix = p => {
     }
     if (event.cancelable) event.preventDefault();
     if (t.kind === 'page') {
-      t.offset = Math.sign(dx) * Math.min(innerWidth * .9, Math.abs(dx) * (neighbor(dx) ? .85 : .16));
-      shift(app, t.offset, 0);
+      if (!pageReady() || tab !== t.from) { finish(null, true); return; }
+      const now = performance.now();
+      if (now > t.sampleAt) {
+        const speed = (p.clientX - t.sampleX) / (now - t.sampleAt);
+        t.velocity = now - t.sampleAt > 85 ? speed : t.velocity * .25 + speed * .75;
+        t.sampleAt = now;
+        t.sampleX = p.clientX;
+      }
+      movePage(t, dx);
     } else if (full()) movePlayer(t, dy);
   }
   function finish(event, cancelled = false) {
@@ -971,17 +1095,7 @@ window.NoraPrefix = p => {
       (distance >= limit || (distance > 30 && distance / elapsed > .5));
     const done = () => { settling = false; };
     if (t.kind === 'page') {
-      const next = pageReady() && t.from === tab && passed(Math.abs(t.dx), Math.min(105, innerWidth * .25))
-        ? neighbor(t.dx) : null;
-      animate(app, t.offset, 0, next ? Math.sign(t.dx) * innerWidth : 0, 0, next ? 200 : 240, () => {
-        app.style.removeProperty('transform');
-        if (next && pageReady() && t.from === tab) {
-          swipeRouteDirection = t.dx < 0 ? 1 : -1;
-          goToTab(next, undefined, true);
-          swipeRouteDirection = 0;
-        }
-        done();
-      });
+      settlePage(t, cancelled);
     } else {
       const close = t.kind === 'close'
         ? passed(t.dy, Math.min(130,t.height * .22))
