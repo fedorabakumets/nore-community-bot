@@ -50,7 +50,7 @@ export function legalActions(room: RoomState, playerId: string): LegalActions | 
   const maxRaiseTo = player.bet + player.stack;
   return {
     actorId: playerId,
-    toCall,
+    toCall: Math.min(toCall, player.stack),
     canFold: true,
     canCheck: toCall === 0,
     canCall: toCall > 0 && player.stack > 0,
