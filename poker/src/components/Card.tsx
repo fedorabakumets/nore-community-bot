@@ -14,14 +14,14 @@ const PIPS: Record<string, Array<[number, number]>> = {
   "10": [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1], [0, 3], [1, 3], [2, 3], [0, 4], [2, 4]],
 };
 
-export function Card({ card, small = false, delay = 0, deal = false, placeholder = false }: { card: string | null; small?: boolean; delay?: number; deal?: boolean; placeholder?: boolean }) {
+export function Card({ card, small = false, delay = 0, deal = false, placeholder = false, highlighted = false }: { card: string | null; small?: boolean; delay?: number; deal?: boolean; placeholder?: boolean; highlighted?: boolean }) {
   const revealed = Boolean(card);
   const rank = card ? (card[0] === "T" ? "10" : card[0]) : "";
   const suit = card ? SUIT[card[1]] : "";
   const red = Boolean(card && (card[1] === "h" || card[1] === "d"));
   const style = { "--card-delay": `${delay}ms` } as CSSProperties;
   return (
-    <span className={`${styles.slot} ${small ? styles.small : ""} ${placeholder ? styles.placeholder : ""}`} style={style} aria-label={placeholder ? "Место для общей карты" : revealed ? `${rank} ${suit}` : "Закрытая карта"}>
+    <span className={`${styles.slot} ${small ? styles.small : ""} ${placeholder ? styles.placeholder : ""} ${highlighted ? styles.highlighted : ""}`} style={style} aria-label={placeholder ? "Место для общей карты" : revealed ? `${rank} ${suit}` : "Закрытая карта"}>
       <span className={`${styles.motion} ${deal ? styles.dealt : ""}`}>
         <span className={`${styles.card} ${revealed ? styles.revealed : styles.concealed} ${red ? styles.red : ""}`}>
           <span className={`${styles.face} ${styles.front}`} aria-hidden="true">
