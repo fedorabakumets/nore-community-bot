@@ -747,7 +747,8 @@ class Database:
             if not shield_reset:
                 await db.execute("DELETE FROM reputation_shields")
                 await db.execute("UPDATE users SET hate_shields=0, hate_immunity_until=NULL")
-                await db.execute("UPDATE wallet_intents SET status='cancelled' WHERE status='pending' AND item IN ('rep_shield','immunity_24h','immunity','season_pack')")
+                await db.execute("UPDATE wallet_intents SET status='cancelled' WHERE status='pending' "
+                    "AND item IN ('rep_shield','immunity_24h','immunity','season_pack')")
                 await db.execute("INSERT INTO bot_state(key,value) VALUES ('one_use_shield_reset_v2', ?)", (utcnow(),))
             if "moderator_note" not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN moderator_note TEXT NOT NULL DEFAULT ''")
@@ -1176,7 +1177,8 @@ class Database:
             )).fetchone()
             if not rollout:
                 await db.execute(
-                    "UPDATE shop_items SET title=?,description=?,price=20,enabled=1,updated_at=? WHERE sku='rep_shield'",
+                    "UPDATE shop_items SET title=?,description=?,price=20,enabled=1,updated_at=? "
+                    "WHERE sku='rep_shield'",
                     ("Щит от −реп · 1 раз", "Поглощает один −реп. Действует до использования, без срока.", now),
                 )
                 await db.execute(
