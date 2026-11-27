@@ -39,7 +39,7 @@ export function mount(host: HTMLElement, options: PokerOptions) {
   const shadow = host.attachShadow({ mode: "open" });
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
-  stylesheet.href = "/poker-assets/table.css?v=booth-1";
+  stylesheet.href = "/poker-assets/table.css?v=nora-ui-1";
   const container = document.createElement("div");
   container.hidden = true;
   const root = createRoot(container);
