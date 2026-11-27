@@ -56,3 +56,20 @@
 @media (max-width: 600px) { .topbar { grid-template-columns: auto 1fr auto; min-height: 56px; }.wordmark { font-size: 1rem; }.roomMeta > span { display: none; }.roomMeta button { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.headerActions button { padding: 7px; font-size: 0; }.headerActions button:nth-child(1), .headerActions button:nth-child(2) { display: none; }.headerActions button:last-child::after { content: "Log"; font-size: .7rem; }.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 108px; border-radius: 13px; } .waitingControls, .raise { grid-column: 1 / -1; } .controls kbd { display: none; }.controls > button { min-width: 0; font-size: .85rem; }.raise { flex: 1.6; grid-template-columns: 60px 1fr; gap: 0 7px; padding: 8px; }.raise strong { font-size: .95rem; }.presets { gap: 3px; }.presets button { padding: 0 5px; font-size: .51rem; }.presets .raiseButton { padding-inline: 8px; }.waitingControls { font-size: .7rem; }.botButtons { flex-wrap: wrap; justify-content: center; }.tableStage { min-height: 320px; } .botButtons button { padding-inline: 7px; }.joinCard { padding: 25px 20px; }.joinAvatars { gap: 5px; }.joinAvatars span { width: 42px; height: 42px; } }
 @media (max-width: 600px) { .headerActions button:last-child { font-size: .7rem; }.headerActions button:last-child::after { content: none; } }
 @media (prefers-reduced-motion: reduce) { .reactionBurst, .toast, .loader::before, .loader::after, .joinCard, .roomMeta > span::before, .roomMeta .copied, .processing::after, .controls > button, .raise, .waitingControls { animation: none; } .drawer, .drawerScrim, .controls button, .presets button, .joinButton, .joinAvatars button { transition-duration: 80ms; } }
+
+.room { position: relative; background: #09090b; min-height: var(--poker-height); }
+.backdrop, .joinBackdrop { background: #09090b; }
+.room::after { display: none; }
+.topbar { background: #09090b; border-color: #ffffff0d; }
+.headerActions button { color: #bdbdc2; background: #ffffff0a; border-radius: 12px; }
+.controls { background: #151518; border-color: #ffffff12; border-radius: 18px; box-shadow: none; }
+.controls > button { border-color: #ffffff12; }
+.fold { color: #b8b8bd !important; }
+.call { background: #252529 !important; }
+.presets .raiseButton, .deal, .joinButton, .drawer form button { background: #d93649 !important; border-color: #ed5668 !important; color: white; }
+.raise > input::-webkit-slider-runnable-track { background: #424247; }
+.raise > input::-webkit-slider-thumb { background: #ef4657; box-shadow: none; }
+.waitingControls button, .presets button, .reactions button { background: #202024; border-color: #ffffff12; color: #ccc; }
+.roomMeta > span::before { animation: none; }
+.drawer { background: #151518; }
+@media(max-width:600px) { .topbar { min-height: 45px; padding: 0 8px; } .tableStage { min-height: 320px; } .controls > button { min-width: 0; font-size: .82rem; } .controls { margin-bottom: 8px; } .reactions { margin-bottom: 5px; } .headerActions button:nth-child(2) { display: none; } }
