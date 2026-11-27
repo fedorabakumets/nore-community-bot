@@ -126,7 +126,7 @@ async def protection(request, handler):
     except ValueError as error:
         if request.path.startswith(('/api/shop/', '/api/pet/', '/api/wallet/', '/api/notices',
                                     '/api/nora-game', '/api/friends', '/api/mafia', '/api/rocket',
-                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/',
+                                    '/api/sea', '/api/durak', '/api/barricade', '/api/dot/', '/api/poker/',
                                     '/api/games/', '/api/seasonal',
                                     '/api/people', '/api/presence', '/api/community', '/api/story/')):
             return web.json_response({'error': str(error) or 'Проверь данные покупки'}, status=400,
@@ -743,11 +743,12 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/nora-game/outfit', nora_game_api.save_outfit)
     app.router.add_get('/api/mafia', mafia_api.status)
     app.router.add_post('/api/mafia/action', mafia_api.action)
-    from community_bot import barricade_api, dot_api, durak_api
+    from community_bot import barricade_api, dot_api, durak_api, poker_api
 
     durak_api.register(app)
     barricade_api.register(app)
     dot_api.register(app)
+    poker_api.register(app)
     app.router.add_get('/api/rocket', rocket_api.status)
     app.router.add_post('/api/rocket/prepare', rocket_api.prepare)
     app.router.add_post('/api/rocket/launch', rocket_api.launch)

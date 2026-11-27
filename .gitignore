@@ -8,3 +8,5 @@ data/*.db
 data/*.db-*
 assets/menu-covers/
 
+poker/node_modules/
+poker/dist/

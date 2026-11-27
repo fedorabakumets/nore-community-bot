@@ -9,3 +9,5 @@ __pycache__
 *.sqlite*
 !data/community.db
 tests
+poker/node_modules
+poker/dist

@@ -5116,12 +5116,13 @@ body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-scre
   grid-template-rows:minmax(0,1fr) clamp(76px,29%,144px);
 }
 #app[data-screen="games"] .game-shortcuts{
-  max-width:none;min-height:0;margin:0;
+  max-width:none;min-height:0;margin:0;grid-template-columns:repeat(6,minmax(0,1fr));
   grid-template-rows:repeat(2,minmax(0,1fr));
 }
 #app[data-screen="games"] .game-shortcut{
-  aspect-ratio:auto;min-height:0;height:100%;width:100%;border-radius:14px;
+  grid-column:span 2;aspect-ratio:auto;min-height:0;height:100%;width:100%;border-radius:14px;
 }
+#app[data-screen="games"] .game-shortcut:nth-child(n+4){grid-column:span 3}
 #app[data-screen="games"] .game-shortcut-art{padding:3% 12% 0}
 #app[data-screen="games"] .game-shortcut-art svg{max-width:104px;max-height:96px}
 #app[data-screen="games"] .game-shortcut-name{padding:2px 4px 9px;font-size:clamp(11px,3.2vw,15px)}
@@ -5140,9 +5141,6 @@ body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-scre
 }
 #app[data-screen="games"] .lobby-status{padding:8px 6px 6px}
 #app[data-screen="games"] .lobby-entry{min-height:44px}
-@media (min-width:580px){
-  #app[data-screen="games"] .game-shortcuts{grid-template-rows:minmax(0,1fr)}
-}
 @media (max-height:570px){
   #app[data-screen="games"] .games-screen-fit{grid-template-rows:auto minmax(0,1fr) 94px;gap:5px}
   #app[data-screen="games"] .games-catalog{--game-gap:5px;grid-template-rows:minmax(0,1fr) clamp(62px,27%,90px)}
@@ -5152,8 +5150,11 @@ body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-scre
   #app[data-screen="games"] .nora-game-card .nora-game-logo{font-size:30px}
   #app[data-screen="games"] .nora-game-card{gap:3px;padding-block:4px}
 }
-@media (max-height:570px) and (min-width:460px){
-  #app[data-screen="games"] .game-shortcuts{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:minmax(0,1fr)}
+@media (min-width:580px), (max-height:570px) and (min-width:460px){
+  #app[data-screen="games"] .game-shortcuts{
+    grid-template-columns:repeat(5,minmax(0,1fr));grid-template-rows:minmax(0,1fr)
+  }
+  #app[data-screen="games"] .game-shortcut:nth-child(n){grid-column:auto}
 }
 
 
@@ -5223,3 +5224,13 @@ body.nora-mini-player-active:has(#nora-mini-player:not([hidden])) #app[data-scre
 html.nora-page-swiping { overflow-x: clip; }
 .nora-swipe-viewport { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
 #nora-swipe-preview { position: absolute; inset: 0 0 auto; will-change: transform; }
+
+html:has(#app[data-screen="poker"]){overflow-x:hidden}
+body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){display:none!important}
+#app[data-screen="poker"],body.nora-mini-player-active #app[data-screen="poker"]{
+  width:100%;max-width:none;min-height:100dvh;margin:0;
+  padding:max(var(--safe-top,0px),calc(var(--device-top,0px) + 48px))
+    var(--safe-right,0px) var(--safe-bottom,0px) var(--safe-left,0px);
+  background:#1a1012;overflow-x:clip;
+}
+#poker-root{min-width:0}

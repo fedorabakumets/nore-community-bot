@@ -27,7 +27,7 @@ function profileTabLocked(target) {
 const number=n=>new Intl.NumberFormat('ru-RU').format(Number(n||0));
 const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
-const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
+const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
 const gameWrites = new Map();
 function api(path, body, signal, keepalive = false) {
   const request = (async () => {
@@ -63,6 +63,7 @@ function requestGameExit(onExit) {
   $('#game-exit-details').textContent = {
     world: 'Ты покинешь мир Норы.',
     dot: 'Текущий полёт завершится.',
+    poker: 'Место за столом сохранится. Если время хода истечёт, сервер сделает чек или пас.',
     rocket: 'Текущий полёт завершится. Ставка будет проиграна.',
     mafia: 'Ты выйдешь из лобби или сдашься в начавшейся партии.',
   }[game] || 'Поиск отменится. Если партия уже началась, тебе засчитается поражение.';
@@ -73,7 +74,7 @@ function requestGameExit(onExit) {
     exit.textContent = 'Выходим…';
     error.textContent = '';
     try {
-      if (game !== 'world' && game !== 'dot') {
+      if (game !== 'world' && game !== 'dot' && game !== 'poker') {
         await Promise.allSettled(gameWrites.get(game) || []);
         await api('games/exit/' + game, {});
         if (game === 'durak') window.NoraDurak?.clearRoom?.();
@@ -94,13 +95,15 @@ function requestGameExit(onExit) {
 window.addEventListener('pagehide', () => {
   const game = currentGame();
   if (game === 'world') window.NoraGame.close();
-  else if (game && game !== 'dot' && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
+  else if (game && game !== 'dot' && game !== 'poker' && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
 });
 let applicationScreen = null;
 
 function showCitySetup() {
   applicationScreen = null;
   barricadeView?.unmount();
+  unmountPoker?.();
+  unmountPoker = pokerHost = pokerCode = null;
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -147,6 +150,8 @@ function showApplication(application) {
   cancelPageSwipe?.();
   applicationScreen = application;
   barricadeView?.unmount();
+  unmountPoker?.();
+  unmountPoker = pokerHost = pokerCode = null;
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -280,6 +285,41 @@ function eventCard(e){return `<article class="card event"><span class="eyebrow">
 function navIcon(id){if(id==='interactive')return window.NoraInteractive?.icon('game')||'';const paths={community:'M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0 M3 17c-5-1 1-7 9-10s15-2 9 3S4 19 3 17',home:'M3 10 12 3l9 7v11h-6v-7H9v7H3z',shop:'M4 8h16v13H4z M8 8V5a4 4 0 0 1 8 0v3',events:'M4 5h16v16H4z M4 10h16 M8 2v5 M16 2v5',wallet:'M3 6h17v15H3z M3 6V3h14 M15 12h6v5h-6z',pet:'M8 11c-2 0-4 3-4 5s2 3 4 2c2-1 2-1 4-1s2 0 4 1c2 1 4 0 4-2s-2-5-4-5c-2 0-2 1-4 1s-2-1-4-1z M5 5v2 M10 3v3 M15 3v3 M20 5v2',lk:'M5 21v-2a7 7 0 0 1 14 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="${paths[id]}"/></svg>`}
 const navTabShapes={home:'<path d="M10 27.5 32 9l22 18.5V52a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4Z"/><path d="M26 56V37a6 6 0 0 1 12 0v19"/>',shop:'<rect x="11" y="24" width="42" height="33" rx="6"/><path d="M22 26v-7a10 10 0 0 1 20 0v7"/>',community:'<circle cx="32" cy="32" r="17"/><path d="M13.2 37.2C3 43.4 4.5 48 10.8 48.3c7.7.4 22.5-5.7 33.4-12.2C54.7 29.9 60 24.4 57 20.9c-2.4-2.8-8-1.9-14.7.7"/>',events:'<rect x="12" y="17" width="40" height="39" rx="6"/><path d="M22 10v14M42 10v14M12 29h40"/><circle cx="23" cy="40" r="2.5" fill="currentColor" stroke="none"/>'};
 function navTabIcon(id){return navTabShapes[id]?`<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${navTabShapes[id]}</svg>`:navIcon(id)}
+let pokerModule, pokerHost, unmountPoker, pokerCode;
+function mountPoker() {
+  if (tab !== 'poker') {
+    unmountPoker?.();
+    unmountPoker = pokerHost = pokerCode = null;
+    return;
+  }
+  const host = $('#poker-root');
+  if (!host || host === pokerHost) return;
+  pokerHost = host;
+  const code = pokerCode;
+  pokerModule ??= import('/poker-assets/table.js?v=booth-1').catch(error => {
+    pokerModule = null;
+    throw error;
+  });
+  pokerModule.then(module => {
+    if (tab !== 'poker' || !host.isConnected) return;
+    host.replaceChildren();
+    unmountPoker = module.mount(host, {
+      api,
+      code,
+      playerId: String(tg?.initDataUnsafe?.user?.id ?? data.user.user_id),
+      exit: () => goToTab('games'),
+      share: url => {
+        const link = 'https://t.me/share/url?url=' + encodeURIComponent(url)
+          + '&text=' + encodeURIComponent('Сыграем в покер в Норе?');
+        if (tg?.openTelegramLink) tg.openTelegramLink(link);
+        else window.open(link, '_blank', 'noopener');
+      },
+    });
+  }).catch(() => {
+    if (host.isConnected) host.innerHTML = '<p class="sub">Покер пока недоступен.</p><button type="button" data-tab="games" class="secondary">К играм</button>';
+  });
+}
+
 let durakModule, durakInboxRoom, durakEntry;
 function openDurak(entry) {
   goToTab('durak', () => { durakEntry = entry; });
@@ -350,6 +390,7 @@ if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
 if(tab==='barricade')content='<section id="barricade-root"><p class="sub">Открываем Баррикаду…</p></section>';
 if(tab==='dot')content=window.NoraDot?.screen()||'<p>DOT не загрузилась. Открой Нору заново.</p>';
+if(tab==='poker')content='<section id="poker-root"><p class="sub">Открываем стол…</p></section>';
 if(tab==='durak')content='<section id="durak-root"><p class="sub">Открываем карточный стол…</p></section>';
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
 if(tab==='notices')content=window.NoraCabinet?.noticesScreen()||'';
@@ -363,7 +404,9 @@ if(tab==='dot'&&!expanded)window.scrollTo(0,0);
 if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
 else if (!(tab === 'durak' && app.querySelector('#durak-root')) &&
          !(tab === 'barricade' && app.querySelector('#barricade-root')) &&
-         !(tab === 'dot' && app.querySelector('#dot-root'))) app.innerHTML=html;
+         !(tab === 'dot' && app.querySelector('#dot-root')) &&
+         !(tab === 'poker' && app.querySelector('#poker-root'))) app.innerHTML=html;
+mountPoker();
 mountDurak();
 mountBarricade();
 if(tab==='dot')window.NoraDot?.mount(app.querySelector('#dot-root'));else window.NoraDot?.unmount();
@@ -371,11 +414,11 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected,swiped === true)}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected,swiped === true)}
 
 
 // Animate route changes only. Refreshes and game-internal renders should remain still.
-const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot']);
+const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
 const routeMotionOrder = Object.keys(mainTabScreens);
 let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
 function animateRouteChange(app, selected, swiped) {
@@ -548,6 +591,8 @@ function telegramStartParam() {
 function botReplyRoute() {
   if (history.state?.noraView) return null;
   const param = telegramStartParam();
+  const poker = /^nora_poker_([A-HJ-NP-Z2-9]{8})$/.exec(param);
+  if (poker) return {view: 'poker', pokerCode: poker[1]};
   const quick = /^nora_q_(durak|barricade)_([a-f0-9]{16})$/.exec(param);
   if (quick) return {view: quick[1], quickRoom: quick[2]};
   const invite = /^nora_inv_(mafia|sea|durak|barricade)_([1-9][0-9]{0,15})_([A-Za-z0-9_-]{16,22})$/.exec(param);
@@ -666,11 +711,12 @@ async function openApp(result) {
     if (view === 'durak') durakEntry = {quick: linked.quickRoom};
     if (view === 'barricade') barricadeEntry = {quick: linked.quickRoom};
   }
+  if (linked?.pokerCode && !blockedLink) pokerCode = linked.pokerCode;
   if (linked?.code && !blockedLink) barricadeEntry = {code: linked.code};
-  if (linked?.invite || linked?.code || linked?.quickRoom || linked?.view === 'dot') window.NoraIntro?.finish(true);
+  if (linked?.invite || linked?.code || linked?.pokerCode || linked?.quickRoom || linked?.view === 'dot') window.NoraIntro?.finish(true);
   if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
-  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','friends','community','events'].includes(view)) tab = view;
+  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','friends','community','events'].includes(view)) tab = view;
   else if (view === 'shop' && data.profile.fill_percent === 100) {
     tab = 'shop';
     window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
@@ -808,7 +854,7 @@ async function refresh() {
   }
   if (!data || tab === 'admin' || tab === 'staffchat' || $('#sheet').open) return;
   if (window.NoraEvents?.editorOpen()) return;
-  if (tab === 'durak' || tab === 'barricade' || tab === 'dot') return;
+  if (tab === 'durak' || tab === 'barricade' || tab === 'dot' || tab === 'poker') return;
   if (window.NoraSea?.refreshCurrent() || window.NoraInteractive?.refreshCurrent()) return;
   try {
     const fresh = await api('me');

@@ -1,0 +1,40 @@
+:host {
+  display: block;
+  --poker-height: calc(100dvh - max(var(--safe-top, 0px), var(--device-top, 0px) + 48px) - var(--safe-bottom, 0px));
+  --font-ui: system-ui;
+  --font-display: Monocraft, system-ui;
+  --ink: oklch(11% 0.022 22);
+  --panel: oklch(16% 0.03 24);
+  --panel-raised: oklch(21% 0.036 27);
+  --felt: oklch(31% 0.105 22);
+  --felt-light: oklch(38% 0.12 23);
+  --oxblood-light: oklch(59% 0.17 25);
+  --parchment: oklch(92% 0.03 72);
+  --muted: oklch(65% 0.026 64);
+  --signal: oklch(66% 0.18 253);
+  --success: oklch(72% 0.12 148);
+  --danger: oklch(61% 0.18 25);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+* { box-sizing: border-box; }
+:host { min-height: 100%; color: var(--parchment); background: var(--ink); font-family: var(--font-ui), system-ui, sans-serif; }
+button, input { font: inherit; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+::selection { color: var(--parchment); background: oklch(48% .16 25); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+.poker-back {
+  width: max-content;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #ffffff36;
+  border-radius: 8px;
+  color: var(--parchment);
+  background: #1c171b;
+  cursor: pointer;
+}

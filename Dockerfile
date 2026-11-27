@@ -1,4 +1,13 @@
 FROM denoland/deno:bin-2.6.10 AS deno
+FROM node:24-bookworm-slim AS poker
+WORKDIR /poker
+COPY poker/package*.json ./
+RUN npm ci
+COPY poker/build.mjs poker/LICENSE ./
+COPY poker/src ./src
+COPY poker/art ./art
+RUN npm run build
+
 FROM python:3.12-slim AS whisper
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates cmake curl g++ make \
@@ -26,6 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY --from=deno /deno /usr/bin/deno
+COPY --from=poker /poker/dist /app/poker/dist
 COPY --from=whisper /opt/nora/whisper /opt/nora/whisper
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
