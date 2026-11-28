@@ -1,6 +1,7 @@
 'use strict';
 // English UI and trusted server copy. Keys are the original Russian strings.
 window.NoraEnglish = Object.freeze({
+  "Сейчас слушает": "Listening now",
   "Топ Норы": "Nora charts",
   "Популярная музыка": "Popular music",
   "Музыка друзей": "Friends' music",
