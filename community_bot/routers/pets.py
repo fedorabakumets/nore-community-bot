@@ -52,37 +52,42 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
     mood = int(pet["mood"])
     sleeping = bool(int(pet["sleeping"]))
     status = f"💤 {words['sleep_status']}" if sleeping else f"✨ {words['awake']}"
-    notice = ("🔒 Нужен уход: для доступа к возможностям питомца сытость и вода "
-              "должны быть не ниже 50. Кормление и поилка доступны.\n\n") if needs_care(pet) else ""
+    notice = "🔒 Нужен уход: сытость и вода ≥ 50.\n" if needs_care(pet) else ""
+    until = str(pet.get("expedition_until") or "")
+    expedition = (
+        f"🗺 В экспедиции · {remaining_label(until, timezone)}"
+        if until else "🗺 Экспедиция · 24 часа"
+    )
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
-        "Питомец найдёт для вас редкие вещи!\n"
-        "Через него в сообществе появляются сезонные находки, коллекционные награды "
-        "и особые призы с мероприятий.\n\n"
-        f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
-        f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"
-        f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
-        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n\n"
-        f"{notice}"
-        f"{_expedition_line(pet, words, timezone)}"
+        f"🍗 <code>{_bar(hunger)}</code> <b>{hunger}/100</b>\n"
+        f"💧 <code>{_bar(thirst)}</code> <b>{thirst}/100</b>\n"
+        f"😊 <code>{_bar(mood)}</code> <b>{mood}/100</b>\n"
+        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
+        f"{notice}{expedition}\n"
+        "<blockquote expandable>Как это работает?\n"
+        "Питомец находит сезонные вещи, коллекционные награды и призы с мероприятий.\n"
+        "Для доступа к возможностям сытость и вода должны быть не ниже 50. "
+        "Кормление и поилка доступны всегда.\n"
+        f"{_expedition_line(pet, words, timezone)}\n"
         "Печеньки питомец приносит только из экспедиции — сам по себе он их не фармит."
+        "</blockquote>"
     )
 
 
 def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: str) -> str:
-    until = str(pet.get("expedition_until") or "")
-    if until:
-        left = remaining_label(until, timezone)
+    if pet.get("expedition_until"):
         return (
-            f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} — "
-            "одно сообщение в чат и в личку. Можно вернуть питомца раньше без находки. "
-            "Потраченные сытость, вода и настроение не возвращаются.\n\n"
+            f"{words['returned'].capitalize()} — одно сообщение в чат и в личку. "
+            "Можно вернуть питомца раньше без находки. "
+            "Потраченные сытость, вода и настроение не возвращаются."
         )
-    return ("🗺 Поход длится 24 часа. Сытость и вода должны быть не ниже 50. "
-            "При отправке расходуется 60 сытости, 60 воды и 40 настроения. "
-            "Настроение влияет на шанс и размер находки; возможна неудача.\n\n")
-
+    return (
+        "Поход длится 24 часа. Сытость и вода должны быть не ниже 50. "
+        "При отправке расходуется 60 сытости, 60 воды и 40 настроения. "
+        "Настроение влияет на шанс и размер находки; возможна неудача."
+    )
 
 async def _maybe_announce(message: Message, db: Database, settings: Settings, pet: dict[str, object]) -> None:
     sent = pet.get("expedition_notice_sent")
