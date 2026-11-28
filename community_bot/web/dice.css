@@ -128,3 +128,17 @@ body:has(#app[data-screen="dice"])::after{background:#090a10;pointer-events:none
   #dice-root[data-dice-screen="battle"] .dice-stage.duel{min-height:225px}
   #dice-root[data-dice-screen="battle"] .dice-top small{display:none}
 }
+
+/* Mini ability arena: only the selected inventory card animates. */
+#dice-root[data-dice-screen="detail"] .dice-detail{padding:4px 0 6px}
+#dice-root[data-dice-screen="detail"] .dice-hero-art{width:clamp(78px,27vw,110px)}
+#dice-root[data-dice-screen="detail"] .dice-detail h2{margin:2px 0;font-size:23px}
+#dice-root[data-dice-screen="detail"] .dice-detail p{margin:2px 0 7px}
+#dice-root .dice-preview{border:1px solid color-mix(in srgb,var(--dc) 26%,transparent);border-radius:18px;background:radial-gradient(ellipse at 15% 0%,color-mix(in srgb,var(--dc) 11%,transparent),transparent 70%),#10121a;overflow:hidden;padding:10px;margin:3px 0 12px}
+#dice-root .dice-preview header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+#dice-root .dice-preview header small{font-size:9px;letter-spacing:1.2px;color:var(--dc)}
+#dice-root .dice-preview header b{font-size:13px;display:block;margin-top:3px;line-height:1.25}
+#dice-root .dice-preview-buttons{display:flex;gap:5px;flex:none}
+#dice-root .dice-preview-buttons button{font-size:15px;width:34px;height:34px;padding:0;display:grid;place-items:center}
+#dice-root .dice-preview canvas{display:block;width:100%;height:auto;aspect-ratio:360/222;border:1px solid #ffffff12;border-radius:12px;background:#090b12;pointer-events:none}
+#dice-root .dice-preview [data-preview-status]{margin:8px 2px 1px;min-height:2.7em;font-size:11px;color:var(--dc);line-height:1.35;text-align:center}
