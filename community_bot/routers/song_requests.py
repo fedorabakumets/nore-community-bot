@@ -62,6 +62,7 @@ class Song:
     title: str
     artist: str
     duration: int
+    cover: str | None = None
 
     @property
     def url(self) -> str:
@@ -182,7 +183,14 @@ def parse_search_results(data: dict) -> list[Song]:
             duration = max(0, int(duration_ms) // 1000)
         except (TypeError, ValueError):
             duration = 0
-        songs.append(Song(track_id, album_id, title[:180], artist[:180], duration))
+        cover = item.get("coverUri")
+        if isinstance(cover, str):
+            cover = "https://" + cover.removeprefix("https://").replace("%%", "200x200")
+            if not re.fullmatch(r"https://avatars(?:\.mds)?\.yandex\.net/[A-Za-z0-9_./-]+", cover):
+                cover = None
+        else:
+            cover = None
+        songs.append(Song(track_id, album_id, title[:180], artist[:180], duration, cover))
         seen.add(track_id)
         if len(songs) == MAX_RESULTS:
             break
