@@ -15,35 +15,35 @@
 .incognito-lobby p{font-size:15px;line-height:1.55;color:#aaa5ad;margin:0 0 32px}
 .incognito-lobby small{font-size:11px;color:#847f88;margin-top:14px}
 .incognito-orbit{position:relative;width:170px;height:170px;display:grid;place-items:center;isolation:isolate;flex:none}
-.incognito-orbit i{position:absolute;width:94px;height:94px;border:1px solid #f64e5d42;border-radius:50%;opacity:.6;transform:scale(1.25)}
+.incognito-orbit i{position:absolute;width:94px;height:94px;border:1px solid color-mix(in srgb,var(--red) 26%,transparent);border-radius:50%;opacity:.6;transform:scale(1.25)}
 .incognito-orbit i:nth-child(2){transform:scale(1.55);opacity:.35}
 .incognito-orbit i:nth-child(3){transform:scale(1.8);opacity:.16}
-.incognito-symbol{display:grid;place-items:center;width:94px;height:94px;border-radius:50%;background:radial-gradient(circle at 50% 25%,#452027,#22161b 70%);border:1px solid #f04b5e55;color:#fb6879;box-shadow:0 0 45px #f0314420}
+.incognito-symbol{display:grid;place-items:center;width:94px;height:94px;border-radius:50%;background:radial-gradient(circle at 50% 25%,color-mix(in srgb,var(--red) 22%,#22161b),#22161b 70%);border:1px solid color-mix(in srgb,var(--red) 33%,transparent);color:var(--red);box-shadow:0 0 45px color-mix(in srgb,var(--red) 13%,transparent)}
 .incognito-symbol svg{width:52px;height:52px}
 [data-state="searching"] .incognito-orbit i{animation:inc-radar 2.7s ease-out infinite}
 [data-state="searching"] .incognito-orbit i:nth-child(2){animation-delay:.9s}
 [data-state="searching"] .incognito-orbit i:nth-child(3){animation-delay:1.8s}
 [data-state="searching"] .incognito-symbol{animation:inc-breathe 2.7s ease-in-out infinite}
-#nora-incognito .incognito-primary{background:#db374a;border-radius:22px;width:min(100%,320px);padding:16px 24px;font-weight:620;min-height:54px}
+#nora-incognito .incognito-primary{background:var(--red);color:var(--on-red);border-radius:22px;width:min(100%,320px);padding:16px 24px;font-weight:620;min-height:54px}
 [data-state="searching"] .incognito-primary{background:#262329!important;color:#d9d4dc!important}
 .incognito-feed{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:5px;padding:12px max(14px,calc(var(--safe-right,0px) + 10px)) 10px max(14px,calc(var(--safe-left,0px) + 10px));overscroll-behavior:contain;overflow-anchor:none}
 .incognito-note{align-self:center;font-size:11px;color:#aaa5ad;background:#ffffff07;padding:5px 10px;border-radius:20px;margin:3px 0 9px;flex:none}
 .incognito-bubble{align-self:flex-start;max-width:82%;background:#252329;border-radius:16px 16px 16px 5px;padding:9px 12px 6px;display:grid;gap:2px;flex:none;overflow-wrap:anywhere;white-space:pre-wrap;font-size:15px;line-height:1.4;animation:inc-message .18s ease-out both}
-.incognito-bubble.mine{align-self:flex-end;background:#71303c;border-radius:16px 16px 5px 16px}
+.incognito-bubble.mine{align-self:flex-end;background:color-mix(in srgb,var(--red) 32%,#252329);border-radius:16px 16px 5px 16px}
 .incognito-bubble time{justify-self:end;font-size:10px;color:#ffffff70;line-height:1.2}
 .incognito-compose{flex:none;display:flex;align-items:flex-end;gap:8px;padding:8px max(12px,var(--safe-right,0px)) 0 max(12px,var(--safe-left,0px));margin:0}
 #nora-incognito .incognito-compose textarea{flex:1;min-width:0;resize:none;height:44px;min-height:44px;max-height:105px;padding:11px 15px;border:1px solid transparent!important;outline:none!important;box-shadow:none!important;border-radius:23px;background:#242227;color:#fff;font:inherit;font-size:16px;line-height:20px;box-sizing:border-box;margin:0}#nora-incognito .incognito-compose textarea:focus-visible{border-color:#ffffff24!important}
-#nora-incognito .incognito-compose button{height:42px;width:42px;border-radius:50%;background:#d34053;display:grid;place-items:center;flex:none}
+#nora-incognito .incognito-compose button{height:42px;width:42px;border-radius:50%;background:var(--red);color:var(--on-red);display:grid;place-items:center;flex:none}
 .incognito-compose button svg{width:23px;height:23px}
 .incognito-tools{flex:none;display:flex;gap:8px;padding:10px max(12px,var(--safe-right,0px)) calc(10px + var(--safe-bottom,0px)) max(12px,var(--safe-left,0px))}#nora-incognito[data-keyboard="true"] .incognito-tools{padding-bottom:8px}
 #nora-incognito .incognito-tools button{flex:1;border-radius:13px;background:#ffffff0b;padding:9px 6px;min-height:38px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:7px}
 .incognito-tools button svg{width:17px;height:17px}
-.incognito-error{flex:none;font-size:12px;color:#ff8290;text-align:center;padding:8px 16px}
+.incognito-error{flex:none;font-size:12px;color:var(--red-text-on-dark);text-align:center;padding:8px 16px}
 .incognito-menu{position:absolute;z-index:2;top:calc(var(--inc-top) + 60px);right:12px;display:grid;background:#2a272f;border:1px solid #ffffff1a;border-radius:20px;padding:5px;box-shadow:0 15px 40px #0008}
 #nora-incognito .incognito-menu button{padding:14px 16px;background:transparent;text-align:left;font-size:14px;border-radius:14px}
-#nora-incognito .incognito-menu button:not(:last-child){color:#ff8290}
-.incognito-entry-icon{width:24px;height:24px;display:grid;place-content:center;color:#f16b78;font-size:18px}
-.staff-chat-header .incognito-entry{display:grid;place-items:center;width:35px;height:35px;flex:none;background:#ffffff0c;color:#f16b78;border:0;border-radius:50%;padding:7px}
+#nora-incognito .incognito-menu button:not(:last-child){color:var(--red-text-on-dark)}
+.incognito-entry-icon{width:24px;height:24px;display:grid;place-content:center;color:var(--red);font-size:18px}
+.staff-chat-header .incognito-entry{display:grid;place-items:center;width:35px;height:35px;flex:none;background:#ffffff0c;color:var(--red);border:0;border-radius:50%;padding:7px}
 .incognito-entry svg,.incognito-entry-icon svg{width:22px;height:22px;display:block}
 @keyframes inc-enter{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes inc-radar{0%{transform:scale(1);opacity:.65}100%{transform:scale(1.9);opacity:0}}
@@ -52,14 +52,14 @@
 @media(prefers-reduced-motion:reduce){#nora-incognito,#nora-incognito *{animation:none!important;transition:none!important}}
 #nora-incognito .incognito-tools [data-inc="end"]{color:#b4aab4;background:transparent}
 #nora-incognito .incognito-compose button:disabled{opacity:.35;cursor:default}
-#nora-incognito .incognito-recent{font-size:12px;background:transparent;color:#d0a1a8;padding:12px 4px}
+#nora-incognito .incognito-recent{font-size:12px;background:transparent;color:var(--red-text-on-dark);padding:12px 4px}
 .incognito-confirm{position:absolute;inset:0;z-index:5;display:grid;place-items:center;background:#0008;padding:20px}
 .incognito-confirm-card{width:min(100%,340px);box-sizing:border-box;background:#29262d;border:1px solid #ffffff13;border-radius:24px;padding:20px;box-shadow:0 18px 50px #0005}
 .incognito-confirm-card strong{display:block;font-size:18px;margin-bottom:8px}
 .incognito-confirm-card p{font-size:14px;line-height:1.45;color:#bbb5bf;margin:0 0 18px}
 .incognito-confirm-card div{display:flex;gap:8px}
 #nora-incognito .incognito-confirm-card button{flex:1;background:#ffffff0c;border-radius:14px;min-height:42px;font-size:14px;padding:8px}
-#nora-incognito .incognito-confirm-card [data-inc-confirm="yes"]{background:#bf3548}
+#nora-incognito .incognito-confirm-card [data-inc-confirm="yes"]{background:var(--red);color:var(--on-red)}
 .incognito-message-menu{position:absolute;z-index:4;bottom:calc(var(--safe-bottom,0px) + 100px);left:14px;right:14px;display:flex;justify-content:center;gap:6px;flex-wrap:wrap;background:#29262d;border:1px solid #ffffff15;border-radius:18px;padding:7px;box-shadow:0 8px 28px #0006}
 #nora-incognito .incognito-message-menu button{padding:10px;background:#ffffff09;border-radius:12px;font-size:13px}
 @media(max-height:420px){.incognito-lobby{justify-content:flex-start}.incognito-orbit{width:100px;height:100px}.incognito-orbit i{width:50px;height:50px}.incognito-symbol{width:62px;height:62px}.incognito-symbol svg{width:36px;height:36px}.incognito-lobby h1{margin-top:12px}.incognito-lobby p{margin-bottom:14px}}

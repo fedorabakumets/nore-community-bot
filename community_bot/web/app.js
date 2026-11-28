@@ -364,7 +364,7 @@ function mountDurak() {
   if (window.NoraDurak) { window.NoraDurak.mount(root); return; }
   if (!document.getElementById('durak-style')) {
     const css = document.createElement('link');
-    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=quick-game';
+    css.id = 'durak-style'; css.rel = 'stylesheet'; css.href = '/durak.css?v=logo-accent';
     document.head.append(css);
   }
   durakModule ??= import('/durak.js?v=miniapp-english').catch(() => {
@@ -385,7 +385,7 @@ function openBarricade(entry) {
 function mountBarricade() {
   if (tab !== 'barricade') { barricadeEntry = null; barricadeView?.unmount(); return; }
   const root = document.getElementById('barricade-root');
-  for (const [id, href] of [['durak-style', '/durak.css?v=quick-game'], ['barricade-style', '/barricade.css?v=quick-game']]) {
+  for (const [id, href] of [['durak-style', '/durak.css?v=logo-accent'], ['barricade-style', '/barricade.css?v=logo-accent']]) {
     if (document.getElementById(id)) continue;
     const css = document.createElement('link');
     css.id = id; css.rel = 'stylesheet'; css.href = href;

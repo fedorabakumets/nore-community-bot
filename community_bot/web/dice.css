@@ -1,7 +1,7 @@
 /* DICE beta tiles and isolated game shell */
 #app[data-screen="games"] .game-shortcut:nth-child(n+4){grid-column:span 2}
 .game-shortcut-art{position:relative}
-.game-shortcut-art .game-soon{position:absolute;z-index:3;left:50%;top:51%;transform:translate(-50%,-50%) rotate(-9deg);padding:4px 11px;border-radius:6px;background:#d52945;color:#fff;font:800 12px/1.1 system-ui,sans-serif;letter-spacing:1.2px;box-shadow:0 4px 14px #09060a99;pointer-events:none;white-space:nowrap}
+.game-shortcut-art .game-soon{position:absolute;z-index:3;left:50%;top:51%;transform:translate(-50%,-50%) rotate(-9deg);padding:4px 11px;border-radius:6px;background:var(--red);color:var(--on-red);font:800 12px/1.1 system-ui,sans-serif;letter-spacing:1.2px;box-shadow:0 4px 14px #09060a99;pointer-events:none;white-space:nowrap}
 #dice-root{--dc:#f4f6ff;color:#f0f1f5;background:#090a10;border-radius:22px;overflow:hidden;max-width:460px;margin:0 auto;min-width:0;box-sizing:border-box}
 #dice-root *{box-sizing:border-box}
 #dice-root button,#dice-root select{font:inherit;color:inherit;min-width:0;-webkit-tap-highlight-color:transparent}
@@ -11,7 +11,7 @@
 #dice-root .dice-top{display:flex;align-items:center;justify-content:space-between;padding:16px 14px 10px}
 #dice-root .dice-top>div:last-child{display:flex;gap:6px}
 #dice-root .dice-top strong{display:block;font-size:24px;font-weight:800;letter-spacing:5px}
-#dice-root .dice-top strong span{color:#ff5375}
+#dice-root .dice-top strong span{color:var(--red)}
 #dice-root small{display:block;color:#9b9dab;font-size:10px;line-height:1.45}
 #dice-root .dice-top small{letter-spacing:1.3px;font-size:9px}
 #dice-root .dice-body{padding:0 12px 14px}
@@ -19,12 +19,12 @@
 #dice-root h3{font-size:14px;margin:15px 0 9px}
 #dice-root p{color:#a4a7b6;font-size:12px;line-height:1.5;margin:8px 0}
 #dice-root .dice-primary,#dice-root .dice-secondary,#dice-root .dice-tab,#dice-root .dice-mode{border:1px solid #ffffff18;border-radius:13px;background:#ffffff09;padding:10px 12px;font-size:12px;font-weight:650}
-#dice-root .dice-primary{display:block;width:100%;background:linear-gradient(115deg,#a72b47,#ee4c6c);padding:15px;border-radius:16px;border-color:#ff95b222}
+#dice-root .dice-primary{display:block;width:100%;background:var(--red);color:var(--on-red);padding:15px;border-radius:16px;border-color:#ffffff22}
 #dice-root .dice-panel{background:#ffffff04;border:1px solid #ffffff13;border-radius:15px;padding:12px;margin:9px 0}
 #dice-root .dice-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;margin:0 10px 12px;background:#191b25;border:1px solid #ffffff15;border-radius:20px;padding:5px}
 #dice-root .dice-tab{font-size:10px;padding:12px 1px;background:none;border:0}
-#dice-root .chosen{border-color:#ff7895!important;background:#ff688717!important}
-#dice-root .dice-tab.chosen{color:#ff91a8}
+#dice-root .chosen{border-color:var(--red)!important;background:color-mix(in srgb,var(--red) 9%,transparent)!important}
+#dice-root .dice-tab.chosen{color:var(--red-text-on-dark)}
 #dice-root .dice-deck,#dice-root .dice-collection{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:9px 0}
 #dice-root .dice-collection{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 #dice-root .dice-card{border:1px solid color-mix(in srgb,var(--edge) 35%,transparent);border-radius:12px;background:radial-gradient(ellipse at 50% 25%,color-mix(in srgb,var(--dc) 15%,transparent),transparent 85%),#11131b;padding:6px 2px;text-align:center;overflow:hidden}
@@ -34,7 +34,7 @@
 #dice-root .dice-card small{font-size:9px;margin-top:4px}
 #dice-root .dice-small svg{max-width:50px}
 #dice-root .dice-small small{font-size:8px}
-#dice-root .dice-detail{text-align:center;background:radial-gradient(ellipse at center,#ff5a7520,transparent 70%);padding:12px 0}
+#dice-root .dice-detail{text-align:center;background:radial-gradient(ellipse at center,color-mix(in srgb,var(--red) 13%,transparent),transparent 70%);padding:12px 0}
 #dice-root .dice-hero-art{width:145px;margin:auto}
 #dice-root .dice-hero-art svg{display:block;width:100%;animation:dice-hover 4s ease-in-out infinite}
 @keyframes dice-hover{50%{transform:translateY(-4px) scale(1.025)}}
