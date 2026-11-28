@@ -5550,20 +5550,43 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
 @keyframes music-equalizer-pulse {from{transform:scaleY(.35)}to{transform:scaleY(1)}}
 @media(prefers-reduced-motion:reduce){.music-equalizer i{animation:none;}}
 
-/* Music library lives in a top-layer dialog: keep the same player inside it. */
-#sheet[open].music-mini-docked:has(#music-library-profile) {
-  overflow:hidden; padding-bottom:max(10px,var(--safe-bottom,0px));
+/* A permanent viewport overlay, never a footer in the scroll flow. */
+#sheet[open]:has(#music-library-profile) {
+  inset:0; width:100%; height:100dvh; max-height:none; overflow:hidden;
+  padding-bottom:0; display:flex; flex-direction:column;
 }
-#sheet[open].music-mini-docked #sheet-content {
-  flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden;
+#sheet[open]:has(#music-library-profile) > #sheet-content {
+  flex:1 1 0; min-height:0; height:100%; max-height:100%;
+  overflow-y:auto; overflow-x:hidden;
   overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
+#sheet[open]:has(#music-library-profile) > #dismiss {
+  position:absolute; top:calc(max(var(--safe-top,0px),var(--device-top,0px) + 48px) + 8px);
 }
 #sheet[open].music-mini-docked > #nora-mini-player:not([hidden]) {
-  position:relative; inset:auto; width:calc(100% - 20px); max-width:520px;
-  flex:0 0 auto; margin:7px auto 0; box-sizing:border-box;
+  position:absolute; z-index:20; top:auto;
+  left:calc(10px + var(--safe-left,0px)); right:calc(10px + var(--safe-right,0px));
+  bottom:calc(10px + var(--safe-bottom,0px)); width:auto; max-width:520px;
+  margin:0 auto; box-sizing:border-box; touch-action:none;
 }
-#sheet.music-mini-docked #music-library-profile {padding-bottom:14px;}
-#sheet.music-mini-docked > #dismiss {position:absolute; top:calc(max(var(--safe-top,0px),var(--device-top,0px) + 48px) + 8px);}
+#sheet.music-mini-docked #music-library-profile {
+  padding-bottom:calc(94px + var(--safe-bottom,0px));
+}
+#sheet:has(#music-library-profile):not(.music-mini-docked) #music-library-profile {
+  padding-bottom:calc(24px + var(--safe-bottom,0px));
+}
+#sheet:has(#nora-now-playing) > #nora-mini-player:not([hidden]) {
+  position:absolute; bottom:0; opacity:0!important; pointer-events:none; animation:none;
+}
+/* Dragging the full player must not trigger a native scroll before JS locks. */
+#sheet:has(#nora-now-playing) {touch-action:pan-x;}
+#sheet:has(#nora-now-playing) input[type="range"] {touch-action:pan-x;}
+@media(max-height:560px) {
+  #sheet:has(#nora-now-playing) {touch-action:auto;}
+  #nora-now-playing .nora-now-playing-label {touch-action:none;}
+  #nora-now-playing .nora-now-playing-art {width:min(100%,25dvh,180px);margin-bottom:12px;}
+}
 .nora-mini-art {position:relative;overflow:hidden;}
 .nora-mini-art .music-mini-cover {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;}
 /* A single search outline: neutralize generic sheet input styling on this input only. */

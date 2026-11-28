@@ -113,7 +113,7 @@ test('append failure falls back to complete blob without a second request', asyn
 test('music mini player moves into modal, preserves scrolling and returns the same element', () => {
   const code = script.slice(script.indexOf('  function syncMiniHost()'),script.indexOf('  function paintMini()'));
   const classes = new Set(), panel = {focus() {}};
-  const content = {scrollTop:0,replaceChildren(node){assert.equal(node,panel); dialog.library=panel;dialog.full=null;}};
+  const content = {scrollTop:125,replaceChildren(node){assert.equal(node,panel); dialog.library=panel;dialog.full=null;}};
   const mini = {parentElement:null, hidden:true,animate() {}};
   const home = {insertBefore(node){node.parentElement=this;}};
   mini.parentElement=home;
@@ -130,7 +130,7 @@ test('music mini player moves into modal, preserves scrolling and returns the sa
   context.playerReturn={panel,libraryReturn:7,scrollTop:88};
   dialog.library=null;dialog.full={};
   assert.equal(context.sync(),false);
-  assert.equal(mini.parentElement,home);
+  assert.equal(mini.parentElement,dialog); // preserve the touch target during the swipe
   assert.equal(context.closeFull(),true);
   assert.equal(dialog.library,panel);
   assert.equal(content.scrollTop,88);
@@ -139,4 +139,25 @@ test('music mini player moves into modal, preserves scrolling and returns the sa
   dialog.open=false;
   context.sync();
   assert.equal(mini.parentElement,home);
+});
+
+test('music mini is a viewport overlay and modal gestures do not depend on main nav', () => {
+  const css = readFileSync(new URL('../community_bot/web/style.css', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../community_bot/web/app.js', import.meta.url), 'utf8');
+  const rule = css.match(/#sheet\[open\]\.music-mini-docked > #nora-mini-player:not\(\[hidden\]\) \{([^}]+)\}/)?.[1];
+  assert.ok(rule);
+  assert.match(rule, /position:absolute/);
+  assert.match(rule, /bottom:calc\(/);
+  assert.match(rule, /z-index:20/);
+  assert.match(rule, /touch-action:none/);
+  const ready = app.slice(app.indexOf('  const miniReady ='), app.indexOf('  const pageReady ='));
+  const player = {open:true,classList:{contains:()=>true}};
+  const mini = {hidden:false,parentElement:player};
+  const context = vm.createContext({player,mini,blocked:()=>true,document:{querySelector:()=>player}});
+  vm.runInContext(ready + '\nthis.ready=miniReady;',context);
+  assert.equal(context.ready(),true);
+  mini.hidden=true;
+  assert.equal(context.ready(),false);
+  mini.hidden=false; player.open=false;
+  assert.equal(context.ready(),false);
 });
