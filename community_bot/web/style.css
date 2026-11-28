@@ -5541,3 +5541,11 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
 .music-discovery .music-catalog-glyph {position:relative;z-index:1;text-shadow:0 1px 6px #000,0 1px 8px #000;}
 .nora-now-playing-art {position:relative;overflow:hidden;}
 .nora-now-playing-art .music-full-cover {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;}
+
+
+.music-equalizer {display:inline-flex;align-items:center;gap:2px;height:12px;vertical-align:middle;color:#82c9a0;}
+.music-equalizer i {width:2px;height:9px;border-radius:2px;background:currentColor;animation:music-equalizer-pulse .9s ease-in-out infinite alternate;}
+.music-equalizer i:nth-child(2) {animation-delay:-.5s;}
+.music-equalizer i:nth-child(3) {animation-delay:-.25s;}
+@keyframes music-equalizer-pulse {from{transform:scaleY(.35)}to{transform:scaleY(1)}}
+@media(prefers-reduced-motion:reduce){.music-equalizer i{animation:none;}}
