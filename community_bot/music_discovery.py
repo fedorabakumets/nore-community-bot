@@ -286,5 +286,10 @@ async def listened(request):
                                       payload.get("source"), payload.get("revision"))
     if not track:
         raise web.HTTPNotFound()
+    # A borrowed track must not become a permanent private audio grant after
+    # its owner withdraws access. Explicitly saving remains the existing action.
+    source = payload.get("source", "")
+    if source.startswith("/api/people/") or source.startswith("/api/music-library/social/"):
+        return web.json_response({"ok": True, "recorded": False})
     await remember(db, uid, track, listened=True)
     return web.json_response({"ok": True})
