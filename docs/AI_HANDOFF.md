@@ -1,3 +1,7 @@
+## Music Mini App polish — 28.11.2026
+
+- The original mini player is moved into the modal music library while a track is active, instead of creating another player or Audio instance. Footer slides in; content scrolls independently. The full player restores the same library DOM (tab, search, list and scroll) when dismissed via Back or swipe. Outside the library the player returns to its original location. Search input scoped CSS removes generic dialog borders/focus outlines and uses a single grid-aligned frame. Asset versions bumped. Added docking regression test; actual iOS appearance still requires visual check.
+
 # AI_HANDOFF — NORA
 ## Музыка / этап 2 — 28 ноября 2026
 
