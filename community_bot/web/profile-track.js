@@ -585,7 +585,7 @@ window.NoraProfileTrack = (() => {
       try {
         const response = await api('music-library/search?' + new URLSearchParams({q}), null, controller.signal);
         if (!alive() || version !== generation) return;
-        remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Слушай без добавления. Первая загрузка использует обычный лимит треков и может отправить песню в личку.") + '</p>' +
+        remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
           response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">▶</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
             esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></button><button type="button" data-music-import="' +
             esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
