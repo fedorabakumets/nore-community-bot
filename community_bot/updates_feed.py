@@ -6,16 +6,34 @@ import logging
 import os
 
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
-from aiogram.types import InputRichMessage
+from aiogram.types import InputRichMessage, BufferedInputFile, InputMediaPhoto, InputRichBlockPhoto, InputRichBlockButtons, RichMessageButton, InlineKeyboardMarkup, InlineKeyboardButton
+from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
+import io
+import re
 
 from community_bot.ephemeral import keep_in_chat
-from community_bot.group_message_close import without_group_close
+from community_bot.group_message_close import without_group_close, HOME_SCREEN_PARAM
 
 logger = logging.getLogger(__name__)
 _lock = asyncio.Lock()
 
 # Only the repository-controlled release list can publish. Keep IDs immutable.
 POSTS = (
+    {
+        "id": "nora-intro-20261128",
+        "revision": "1",
+        "pin": True,
+        "intro": True,
+        "blocks": [
+            {"type": "heading", "text": "НОРА", "size": 1},
+            {"type": "paragraph", "text": "Больше, чем чат. Место, где хочется остаться."},
+            {"type": "paragraph", "text": "🎮 Играй в DOT, покер, Дурака и Баррикаду. Собирай печеньки и соревнуйся с друзьями."},
+            {"type": "paragraph", "text": "❤️ Знакомься, общайся, слушай музыку и развивай своего питомца."},
+            {"type": "paragraph", "text": "🎉 Участвуй в мероприятиях, конкурсах и встречах сообщества."},
+            {"type": "blockquote", "blocks": [{"type": "paragraph", "text": "Твоя история начинается в Норе."}]},
+        ],
+    },
     {
         "id": "delivery-test-20261128",
         "revision": "1",
@@ -25,7 +43,7 @@ POSTS = (
     {
         "id": "welcome-20261128",
         "revision": "1",
-        "pin": True,
+        "pin": False,
         "blocks": [
             {"type": "heading", "text": "НОРА / ОБНОВЛЕНИЯ", "size": 1},
             {"type": "paragraph", "text": "У Норы теперь есть отдельное место для новостей."},
@@ -63,11 +81,45 @@ def is_production():
     )
 
 
+def intro_cover():
+    root = Path(__file__).resolve().parent.parent / "assets"
+    image = Image.new("RGB", (1200, 720), "#101014")
+    draw = ImageDraw.Draw(image)
+    font = root / "fonts" / "Inter-Bold.ttf"
+    big = ImageFont.truetype(str(font), 172)
+    small = ImageFont.truetype(str(font), 29)
+    svg = (root / "branding" / "nora-home-icon.svg").read_text(encoding="utf-8")
+    path = re.search(r'<path[^>]*\bd="([^"]+)"', svg)
+    coords = re.findall(r"[ML](\d+),(\d+)", path.group(1))
+    if len(coords) < 20:
+        raise ValueError("Original NORA mark not found")
+    draw.text((350, 335), "Н", font=big, anchor="mm", fill="#ffffff")
+    draw.polygon([(430 + int(x)*.335, 250 + int(y)*.335) for x,y in coords], fill="#ff164d")
+    draw.text((700, 335), "РА", font=big, anchor="mm", fill="#ffffff")
+    draw.text((600, 500), "ИГРЫ  ·  ЛЮДИ  ·  СОБЫТИЯ", font=small, anchor="mm", fill="#aaa9b2")
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
 async def publish_post(db, bot, chat_id, post):
     key = f"updates_feed:{chat_id}:{post['id']}"
     message_id = await db.get_bot_state(key)
     revision_key = key + ":revision"
-    rich = InputRichMessage(blocks=post["blocks"], skip_entity_detection=True)
+    if post.get("intro") and message_id and await db.get_bot_state(revision_key) == post["revision"]:
+        if post.get("pin") and await db.get_bot_state(key + ":pinned") != "1":
+            await bot.pin_chat_message(chat_id, int(message_id), disable_notification=True)
+            await db.set_bot_state(key + ":pinned", "1")
+        return
+    blocks = list(post["blocks"])
+    kwargs = {}
+    if post.get("intro"):
+        url = "https://t.me/nora_community_bot?startapp"
+        blocks.insert(1, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(intro_cover(), filename="nora.png"))))
+        blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Открыть Нору", url=url, style="primary")]))
+        blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Добавить Нору на экран", url=url+"="+HOME_SCREEN_PARAM, style="primary")]))
+        kwargs["reply_markup"] = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url)]])
+    rich = InputRichMessage(blocks=blocks, skip_entity_detection=True)
     if not message_id:
         if await db.get_bot_state(key + ":sending"):
             logger.warning("Updates feed delivery uncertain; duplicate suppressed: %s", post["id"])
@@ -75,7 +127,7 @@ async def publish_post(db, bot, chat_id, post):
         await db.set_bot_state(key + ":sending", "1")
         try:
             with keep_in_chat(), without_group_close():
-                sent = await bot.send_rich_message(chat_id, rich_message=rich)
+                sent = await bot.send_rich_message(chat_id, rich_message=rich, **kwargs)
         except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter):
             await db.execute("DELETE FROM bot_state WHERE key=?", (key + ":sending",))
             raise
@@ -86,7 +138,7 @@ async def publish_post(db, bot, chat_id, post):
         try:
             with keep_in_chat(), without_group_close():
                 await bot.edit_message_text(
-                    chat_id=chat_id, message_id=int(message_id), rich_message=rich, parse_mode=None,
+                    chat_id=chat_id, message_id=int(message_id), rich_message=rich, parse_mode=None, **kwargs,
                 )
         except TelegramBadRequest as error:
             if "not modified" not in error.message.casefold():
