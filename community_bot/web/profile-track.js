@@ -516,16 +516,19 @@ window.NoraProfileTrack = (() => {
     }
 
     function socialRow(track, label = '') {
-      return '<div class="music-social-item">' + (label ? '<p class="music-social-label">' + esc(label) + '</p>' : '') +
+      const live = track.playing ? '<span class="music-equalizer" aria-hidden="true"><i></i><i></i><i></i></span> ' + t("Сейчас слушает") : '';
+      return '<div class="music-social-item">' + (label ? '<p class="music-social-label">' + esc(label) + (live ? ' · ' + live : '') + '</p>' : '') +
         html(track, track.source, true, true) + '</div>';
     }
-    async function loadSocial() {
+    let friendsRefresh = 0;
+    async function loadSocial(quiet = false) {
+      clearTimeout(friendsRefresh);
       const version = ++socialGeneration;
       const kind = mode;
       content.querySelector('[data-music-social-title]').textContent = NoraI18n.t({top:"Топ Норы",friends:"Музыка друзей",history:"История"}[kind]);
       content.querySelector('[data-music-period]').hidden = kind !== 'top';
       for (const item of content.querySelectorAll('[data-period]')) item.setAttribute('aria-pressed', String(item.dataset.period === period));
-      socialResults.innerHTML = '<p class="music-catalog-note">' + t("Загрузка…") + '</p>';
+      if (!quiet) socialResults.innerHTML = '<p class="music-catalog-note">' + t("Загрузка…") + '</p>';
       try {
         const response = await api(kind === 'history' ? 'music-library/history' : 'music-library/social?' + new URLSearchParams({period}));
         if (!alive() || version !== socialGeneration) return;
@@ -534,7 +537,11 @@ window.NoraProfileTrack = (() => {
           tracks.map((track, i) => socialRow(track, kind === 'top' ? (i+1) + ' · ' + track.listeners + ' ' + NoraI18n.t("слушателей") : kind === 'friends' ? track.name : '')).join('') + '</div>' :
           '<div class="profile-library-empty">' + t("Здесь пока тихо") + '</div>';
       } catch (error) {
-        if (alive() && version === socialGeneration) socialResults.textContent = error.message;
+        if (alive() && version === socialGeneration && !quiet) socialResults.textContent = error.message;
+      } finally {
+        if (kind === 'friends' && alive() && version === socialGeneration) friendsRefresh = setTimeout(() => {
+          if (alive() && mode === 'friends') void loadSocial(true);
+        }, 20000);
       }
     }
     void api('music-library/history').then(value => {
@@ -955,6 +962,7 @@ window.NoraProfileTrack = (() => {
     const state = active;
     if (!state) return;
     active = null;
+    void api('music-library/playing', {...trackReference(state), playing:false}).catch(() => {});
     state.controller.abort();
     state.blob=null;state.envelope=null;state.beats=null;state.hits=null;state.hitOrdinals=null;
     state.audio.pause();
@@ -1143,11 +1151,18 @@ window.NoraProfileTrack = (() => {
     const audio = new Audio();
     active = {audio, element:null, src:item.src, controller:new AbortController(), loading:true, track:item.track};
     const state = active;
-    let listened = 0, last = 0;
+    let listened = 0, last = 0, lastPresence = 0;
+    const presence = (playing) => {
+      lastPresence = Date.now();
+      void api('music-library/playing', {...trackReference(state), playing}).catch(() => {});
+    };
     for (const name of ['loadedmetadata','timeupdate','play','playing','pause','ended']) {
       audio.addEventListener(name, () => {
         if (active !== state) return;
+        if (name === 'playing') presence(true);
+        if (name === 'pause' || name === 'ended') presence(false);
         if (name === 'timeupdate') {
+          if (!audio.paused && Date.now() - lastPresence >= 15000) presence(true);
           const delta = audio.currentTime - last;
           if (!audio.paused && delta > 0 && delta < 2) listened += delta;
           last = audio.currentTime;
