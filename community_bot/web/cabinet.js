@@ -34,12 +34,9 @@ window.NoraCabinet=(()=>{
   function reputationSheet(){const u=data.user,p=data.profile;sheet(`${sheetHeading(NoraI18n.t("Репутация и лимиты"))}<section class="lk-reputation"><div class="lk-rep-overview"><span class="lk-medal" aria-hidden="true">${medal()}</span><div><b class="lk-tier">${esc(NoraI18n.t(p.tier))}</b><strong>${number(u.reputation)} / 100</strong><small>${NoraI18n.html("Скидка в магазине")} ${number(p.discount)}%</small></div><progress max="100" value="${Math.min(100,Math.max(0,Number(u.reputation)))}" aria-label="${NoraI18n.html("Репутация")}"></progress></div><div class="lk-limit-list">${statRow(NoraI18n.t("Действий осталось сегодня"),number(p.actions_left)+' / '+number(p.daily_actions),'daily')}${statRow(NoraI18n.t("Запросов к Норе ИИ в день"),number(p.ai_daily_requests),'ai')}${statRow(NoraI18n.t("Потолок репутации"),number(p.reputation_cap),'cap')}${statRow(NoraI18n.t("Предупреждения"),number(u.warnings),'warnings')}${statRow(NoraI18n.t("Щиты от −реп"),number(u.hate_shields),'shields')}${statRow(NoraI18n.t("Можно ставить −реп"),p.can_minus?NoraI18n.t("Да"):NoraI18n.t("Нет"),'minus')}</div><div class="lk-fill"><div><b>${NoraI18n.html("Заполнение профиля")} ${q('fill')}</b><strong>${number(p.fill_percent)}%</strong></div><div class="lk-fill-checks">${p.blocks.map(x=>`<span class="${x.filled?'filled':''}"><i>${x.filled?'✓':'○'}</i> ${esc(NoraI18n.t(x.title))}</span>`).join('')}</div>${p.fill_percent<100?("<button class=\"lk-edit\" id=\"edit-profile\">" + NoraI18n.html("Заполнить профиль") + "</button>"):''}</div><button class="text-btn lk-levels" data-lk-levels>${NoraI18n.html("Все уровни и возможности ›")}</button><p class="footer-note lk-reset">${NoraI18n.html("↻ Обновление лимитов ·")} ${esc(p.timezone==='Europe/Moscow'?NoraI18n.t("Москва"):p.timezone)}</p></section>`)}
   function themePicker() {
     const title = NoraI18n.html("Цвет оформления");
-    if (data.profile.likes < PROFILE_THEME_LIKES) {
-      return `<section class="lk-theme-picker"><h3>${title}</h3><p class="sub">${NoraI18n.html("Цвет оформления открывается с 50 лайков")} · ${number(data.profile.likes)} / ${PROFILE_THEME_LIKES}</p></section>`;
-    }
-    const selected = profileTheme(data.profile) || 'default';
-    const options = Object.entries({...profileThemes, default: 'Обычный'}).map(([theme, label]) =>
-      `<button type="button" data-lk-theme="${theme}" aria-pressed="${theme === selected}"${themePending?' disabled':''}><span aria-hidden="true"></span>${NoraI18n.html(label)}</button>`
+    const selected = profileTheme(data.profile) || 'black';
+    const options = Object.entries(profileThemes).map(([theme, label]) =>
+      `<button type="button" data-lk-theme="${theme}" aria-pressed="${theme === selected}"${themePending?' disabled':''}><span class="lk-theme-swatch" aria-hidden="true"></span>${NoraI18n.html(label)}</button>`
     ).join('');
     return `<section class="lk-theme-picker"><h3>${title}</h3><p class="sub">${NoraI18n.html("Один цвет для приложения и твоей карточки профиля.")}</p><div class="lk-theme-options" role="group" aria-label="${title}">${options}</div><p class="lk-theme-status" role="status" hidden></p></section>`;
   }
@@ -48,7 +45,7 @@ window.NoraCabinet=(()=>{
     if (!button || themePending || button.getAttribute('aria-pressed') === 'true') return;
     const status = button.closest('.lk-theme-picker').querySelector('.lk-theme-status');
     const paint = () => {
-      const selected = profileTheme(data.profile) || 'default';
+      const selected = profileTheme(data.profile) || 'black';
       document.querySelectorAll('[data-lk-theme]').forEach(option => {
         option.disabled = themePending;
         option.setAttribute('aria-pressed', String(option.dataset.lkTheme === selected));

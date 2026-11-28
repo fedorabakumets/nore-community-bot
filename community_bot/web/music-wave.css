@@ -261,13 +261,13 @@
 }
 .music-wave-artist-search input::placeholder { color:var(--wave-muted); }
 #sheet .music-wave-artist-search button { width:44px; flex:none; background:rgb(var(--wave-glass) / .042); }
-:root[data-app-theme="white"] .music-wave {
-  --wave-ink:#2b2330;
-  --wave-muted:#55495d;
+:root:is([data-app-theme="white"],[data-app-theme="blue"],[data-app-theme="yellow"],[data-app-theme="mint"]) .music-wave {
+  --wave-ink:var(--nora-text);
+  --wave-muted:var(--nora-secondary);
   --wave-glass:51 32 61;
   --wave-scrim:255 255 255;
 }
-:root[data-app-theme="white"] .music-wave::before { opacity:.47; }
+:root:is([data-app-theme="white"],[data-app-theme="blue"],[data-app-theme="yellow"],[data-app-theme="mint"]) .music-wave::before { opacity:.47; }
 @media(prefers-reduced-motion:reduce) {
   .music-wave-fluid { animation:none; }
   .music-wave-fluid img { animation:none; }

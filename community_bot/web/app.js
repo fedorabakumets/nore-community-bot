@@ -36,19 +36,18 @@ function profileTabLocked(target) {
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat(NoraI18n.locale).format(Number(n||0));
-const PROFILE_THEME_LIKES = 50;
-const profileLikeText=likes=>`${likes>=PROFILE_THEME_LIKES?'💜':'❤️'} ${number(likes)}`;
+const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
 const profileThemes = Object.freeze({
-  red: 'Красный', black: 'Чёрный', white: 'Белый', purple: 'Фиолетовый', pink: 'Розовый'
+  black: 'Чёрный', white: 'Белый', blue: 'Нежно-голубой', yellow: 'Жёлтый',
+  mint: 'Мятный', pink: 'Розовый', purple: 'Фиолетовый', red: 'Красный'
 });
 function profileTheme(profile) {
-  return profile?.likes >= PROFILE_THEME_LIKES && Object.hasOwn(profileThemes, profile.theme) ? profile.theme : '';
+  return Object.hasOwn(profileThemes, profile?.theme) ? profile.theme : '';
 }
 function applyProfileTheme(profile) {
-  const root = document.documentElement, theme = profileTheme(profile);
-  if ((root.dataset.appTheme || '') === theme) return;
-  if (theme) root.dataset.appTheme = theme;
-  else delete root.dataset.appTheme;
+  const root = document.documentElement, theme = profileTheme(profile) || 'black';
+  if (root.dataset.appTheme === theme) return;
+  root.dataset.appTheme = theme;
   syncTelegramPalette();
 }
 syncTelegramPalette();

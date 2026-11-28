@@ -1,28 +1,17 @@
-"""Account-wide Mini App appearance unlocked by received profile likes."""
+"""Account-wide Mini App appearance and public profile palette."""
 
-from community_bot.social_likes import COUNT_PREFIX, count
+from community_bot.social_likes import count
 
-MIN_LIKES = 50
+DEFAULT_THEME = "black"
 THEME_PREFIX = "profile_theme:"
-THEMES = frozenset({"black", "red", "white", "purple", "pink"})
+THEMES = frozenset({DEFAULT_THEME, "white", "blue", "yellow", "mint", "pink", "purple", "red"})
 
 
-async def appearance(db, user_id: int) -> tuple[int, str | None]:
+async def appearance(db, user_id: int) -> tuple[int, str]:
     likes = await count(db, user_id)
-    theme = await db.get_bot_state(f"{THEME_PREFIX}{user_id}") if likes >= MIN_LIKES else None
-    return likes, theme if theme in THEMES else None
+    theme = await db.get_bot_state(f"{THEME_PREFIX}{user_id}")
+    return likes, theme if theme in THEMES else DEFAULT_THEME
 
 
-async def set_theme(db, user_id: int, theme: str) -> bool:
-    # A moderator may adjust likes concurrently. Check the threshold in the same write.
-    async with db.connect() as conn:
-        cursor = await conn.execute(
-            """
-            INSERT INTO bot_state(key, value)
-            SELECT ?, ? FROM bot_state WHERE key=? AND CAST(value AS INTEGER)>=?
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value
-            """,
-            (f"{THEME_PREFIX}{user_id}", theme, f"{COUNT_PREFIX}{user_id}", MIN_LIKES),
-        )
-        await conn.commit()
-        return cursor.rowcount == 1
+async def set_theme(db, user_id: int, theme: str) -> None:
+    await db.set_bot_state(f"{THEME_PREFIX}{user_id}", theme)

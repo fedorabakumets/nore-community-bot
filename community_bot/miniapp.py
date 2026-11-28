@@ -479,15 +479,16 @@ async def profile_privacy(request):
 
 
 async def save_profile_theme(request):
-    from community_bot.profile_theme import THEMES, set_theme
+    from community_bot.profile_theme import DEFAULT_THEME, THEMES, set_theme
 
     payload = await request.json()
     theme = payload.get('theme') if isinstance(payload, dict) and set(payload) == {'theme'} else None
-    if not isinstance(theme, str) or (theme != 'default' and theme not in THEMES):
+    if theme == 'default':
+        theme = DEFAULT_THEME  # Previously opened Mini Apps can still send this choice.
+    if not isinstance(theme, str) or theme not in THEMES:
         return web.json_response({'error': 'Выбери цвет из палитры'}, status=400)
-    if not await set_theme(request.app['db'], request['actor']['id'], theme):
-        return web.json_response({'error': 'Цвет оформления открывается с 50 лайков'}, status=403)
-    return web.json_response({'theme': None if theme == 'default' else theme})
+    await set_theme(request.app['db'], request['actor']['id'], theme)
+    return web.json_response({'theme': theme})
 
 
 async def save_profile(request):
