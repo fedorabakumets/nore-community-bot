@@ -258,6 +258,12 @@ async def action(request):
     kind = request.match_info.get("kind", "create" if request.method == "POST" else "state")
     if request.path.endswith("/me"):
         kind = "me"
+    # Existing escrow can still be recovered by leave or normal room expiry.
+    if kind not in {"me", "leave"}:
+        from community_bot.beta_games import allowed
+
+        if not await allowed(request.app["db"], request.app["settings"], int(actor["id"])):
+            return web.json_response({"error": "SOON"}, status=403)
     code = request.match_info.get("code")
     body = {}
     if kind in {"create", "command"}:

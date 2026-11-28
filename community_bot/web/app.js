@@ -53,7 +53,7 @@ function applyProfileTheme(profile) {
 }
 syncTelegramPalette();
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));if(NoraI18n.language==='en')return n===1?one:many;return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
-const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
+const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker', 'dice']);
 const gameWrites = new Map();
 function api(path, body, signal, keepalive = false) {
   const request = (async () => {
@@ -94,6 +94,7 @@ function requestGameExit(onExit) {
   $('#game-exit-details').textContent = {
     world: NoraI18n.t("Ты покинешь мир Норы."),
     dot: NoraI18n.t("Текущий полёт завершится."),
+    dice: NoraI18n.t("Текущий тестовый бой завершится."),
     poker: NoraI18n.t("Место и печеньки сохранятся за столом. Забрать их можно после раздачи. При закрытии неактивного стола остаток вернётся на баланс."),
     rocket: NoraI18n.t("Текущий полёт завершится. Ставка будет проиграна."),
     mafia: NoraI18n.t("Ты выйдешь из лобби или сдашься в начавшейся партии."),
@@ -105,7 +106,7 @@ function requestGameExit(onExit) {
     exit.textContent = NoraI18n.t("Выходим…");
     error.textContent = '';
     try {
-      if (game !== 'world' && game !== 'dot' && game !== 'poker') {
+      if (game !== 'world' && game !== 'dot' && game !== 'poker' && game !== 'dice') {
         await Promise.allSettled(gameWrites.get(game) || []);
         await api('games/exit/' + game, {});
         if (game === 'durak') window.NoraDurak?.clearRoom?.();
@@ -126,7 +127,7 @@ function requestGameExit(onExit) {
 window.addEventListener('pagehide', () => {
   const game = currentGame();
   if (game === 'world') window.NoraGame.close();
-  else if (game && game !== 'dot' && game !== 'poker' && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
+  else if (game && game !== 'dot' && game !== 'poker' && game !== 'dice' && auth) api('games/exit/' + game, {}, undefined, true).catch(() => {});
 });
 let applicationScreen = null;
 
@@ -135,6 +136,7 @@ function showCitySetup() {
   barricadeView?.unmount();
   unmountPoker?.();
   unmountPoker = pokerHost = pokerCode = null;
+  window.NoraDice?.unmount();
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -183,6 +185,7 @@ function showApplication(application) {
   barricadeView?.unmount();
   unmountPoker?.();
   unmountPoker = pokerHost = pokerCode = null;
+  window.NoraDice?.unmount();
   data = null;
   $('#nav').replaceChildren();
   if ($('#sheet').open) $('#sheet').close();
@@ -413,7 +416,7 @@ const mainTabScreens = {
 const screenHTML = content => `${demo?("<div class=\"demo\">" + NoraI18n.html("Демонстрация · пример данных, покупки отключены") + "</div>"):''}${content}`;
 let cancelPageSwipe, pageTouchInProgress;
 
-function render(swiped = false){if(!data)return;applyProfileTheme(data.profile);if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||NoraI18n.t("Друг");let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
+function render(swiped = false){if(!data)return;applyProfileTheme(data.profile);if(data.onboarding){showApplication(data.onboarding);return}if (['dice','poker'].includes(tab) && data.beta_games_available !== true) tab='games';if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||NoraI18n.t("Друг");let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
 if(tab==='commands')content=NoraCommands.screen();
 if(tab==='staffchat')content=window.NoraStaffChat?.screen()||("<section class=\"nora-staff-chat\"><h1>" + NoraI18n.html("Чат Норы") + "</h1><p class=\"sub\">" + NoraI18n.html("Экран чата не загрузился. Закрой и заново открой Нору.") + "</p><button type=\"button\" data-tab=\"community\" class=\"secondary\">" + NoraI18n.html("Назад") + "</button></section>");
 if(tab==='admin')content=window.NoraAdmin?.render()||("<p>" + NoraI18n.html("Открываем админ-панель…") + "</p>");
@@ -421,6 +424,7 @@ if(tab==='wallet')content=window.NoraCabinet?.walletScreen()||'';
 if(tab==='pet')content=window.NoraPet?.screen()||'';
 if(tab==='barricade')content=("<section id=\"barricade-root\"><p class=\"sub\">" + NoraI18n.html("Открываем Баррикаду…") + "</p></section>");
 if(tab==='dot')content=window.NoraDot?.screen()||("<p>" + NoraI18n.html("DOT не загрузилась. Открой Нору заново.") + "</p>");
+if(tab==='dice')content='<section id="dice-root"><p class="sub">DICE…</p></section>';
 if(tab==='poker')content=("<section id=\"poker-root\"><p class=\"sub\">" + NoraI18n.html("Открываем стол…") + "</p></section>");
 if(tab==='durak')content=("<section id=\"durak-root\"><p class=\"sub\">" + NoraI18n.html("Открываем карточный стол…") + "</p></section>");
 if(tab==='history')content=window.NoraCabinet?.historyScreen()||'';
@@ -436,8 +440,10 @@ if(tab==='home'&&window.NoraHome)NoraHome.render(app,html);
 else if (!(tab === 'durak' && app.querySelector('#durak-root')) &&
          !(tab === 'barricade' && app.querySelector('#barricade-root')) &&
          !(tab === 'dot' && app.querySelector('#dot-root')) &&
-         !(tab === 'poker' && app.querySelector('#poker-root'))) app.innerHTML=html;
+         !(tab === 'poker' && app.querySelector('#poker-root')) &&
+         !(tab === 'dice' && app.querySelector('#dice-root'))) app.innerHTML=html;
 mountPoker();
+if(tab==='dice')window.NoraDice?.mount(app.querySelector('#dice-root'), {api,tg,exit:()=>goToTab('games')});else window.NoraDice?.unmount();
 mountDurak();
 mountBarricade();
 if(tab==='dot')window.NoraDot?.mount(app.querySelector('#dot-root'));else window.NoraDot?.unmount();
@@ -445,11 +451,11 @@ if(expanded?.size)for(const el of app.querySelectorAll('details[data-retain-open
   if(expanded.has(el.dataset.retainOpen))el.open=true;
 }
 if(tab==='admin')window.NoraAdmin?.mount();
-const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected,swiped === true)}
+const selected=tab==='commands'?'home':['interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','dice','friends','pet','staffchat'].includes(tab)?'community':['wallet','history','notices','admin'].includes(tab)?'lk':tab;renderNav(selected,name);window.NoraShop?.syncBack();window.NoraInteractive?.mount();window.NoraSea?.mount?.();window.NoraCommunity?.mount();window.NoraStaffChat?.mount();window.NoraEvents?.mount();loadAvatar();animateRouteChange(app,selected,swiped === true)}
 
 
 // Animate route changes only. Refreshes and game-internal renders should remain still.
-const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
+const routeMotionExcluded = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker', 'dice']);
 const routeMotionOrder = Object.keys(mainTabScreens);
 let previousRouteKey = null, previousRouteSection = null, routeMotion = null;
 function animateRouteChange(app, selected, swiped) {
@@ -570,6 +576,7 @@ function bookEvent(button) {
   $('#pay').onclick = () => perform('events/join', payload);
 }
 function goToTab(next, prepare, refreshAfter = false, {swiped = false} = {}) {
+  if (['dice','poker'].includes(next) && data?.beta_games_available !== true) {toast('SOON');return;}
   if(next==='staffchat'&&!data?.staff_chat_available){toast(NoraI18n.t("Чат пока доступен только команде Норы"));return;}
   if (profileTabLocked(next)) {
     toast(NoraI18n.t("Заполни профиль на 100%, чтобы открыть этот раздел"));
@@ -745,9 +752,10 @@ async function openApp(result) {
   if (linked?.pokerCode && !blockedLink) pokerCode = linked.pokerCode;
   if (linked?.code && !blockedLink) barricadeEntry = {code: linked.code};
   if (linked?.invite || linked?.code || linked?.pokerCode || linked?.quickRoom || linked?.view === 'dot') window.NoraIntro?.finish(true);
-  if (blockedLink) tab = 'lk';
+  if (['dice','poker'].includes(view) && data.beta_games_available !== true) tab = 'games';
+  else if (blockedLink) tab = 'lk';
   else if (view === 'admin' && data.admin_available) tab = 'admin';
-  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','friends','community','events'].includes(view)) tab = view;
+  else if (['commands','pet','lk','wallet','history','notices','interactive','games','mafia','rocket','sea','durak','barricade','dot','poker','dice','friends','community','events'].includes(view)) tab = view;
   else if (view === 'shop' && data.profile.fill_percent === 100) {
     tab = 'shop';
     window.NoraShop?.resume(linked ? (topupClosed ? null : linked.category ?? null) : undefined);
@@ -889,7 +897,7 @@ async function refresh() {
   }
   if (!data || tab === 'admin' || tab === 'staffchat' || $('#sheet').open) return;
   if (window.NoraEvents?.editorOpen()) return;
-  if (tab === 'durak' || tab === 'barricade' || tab === 'dot' || tab === 'poker') return;
+  if (tab === 'durak' || tab === 'barricade' || tab === 'dot' || tab === 'poker' || tab === 'dice') return;
   if (window.NoraSea?.refreshCurrent() || window.NoraInteractive?.refreshCurrent()) return;
   try {
     const current = data, theme = data.profile?.theme;

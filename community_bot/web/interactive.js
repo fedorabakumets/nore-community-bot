@@ -97,12 +97,13 @@ window.NoraInteractive = (() => {
   function interactiveScreen() {
     return `${mafiaInvites()}<p class="eyebrow">${NoraI18n.html("У каждого свой способ")}</p><h1>${NoraI18n.html("Побудем")}<br><em>${NoraI18n.html("вместе")}</em></h1><p class="sub play-intro">${NoraI18n.html("Заботься, играй, собирай своих.")}</p><button class="play-hero pet-hero" data-tab="pet"><span class="play-hero-copy"><span class="eyebrow">${NoraI18n.html("Твой маленький спутник")}</span><strong><em>${NoraI18n.html("Питомец")}</em></strong><span class="play-hero-description">${data.pet ? esc(data.pet.name) + NoraI18n.t(" ждёт тебя. Забота, походы и маленькие находки.") : NoraI18n.t("Заведи питомца. Заботься о нём и отправляй за приключениями.")}</span><span class="play-hero-cta">${data.pet ? NoraI18n.t("К питомцу") : NoraI18n.t("Знакомиться")} ${icon("arrow")}</span></span><span class="play-hero-art pet-orbit">${NoraShop.svg("pets")}<i></i><i></i><i></i></span></button><button class="play-hero games-hero" data-tab="games"><span class="play-hero-copy"><span class="eyebrow">${NoraI18n.html("Один или всей компанией")}</span><strong><em>${NoraI18n.html("Игры")}</em></strong><span class="play-hero-description">${NoraI18n.html("У города есть тайны.")}<br>${NoraI18n.html("У ракеты — свой предел.")}</span><span class="play-hero-cta">${NoraI18n.html("Выбрать игру")} ${icon("arrow")}</span></span><span class="play-hero-art">${icon("game")}<span class="art-plus">+</span></span></button><button class="play-friends-link" data-tab="friends">${icon("friends")}<span>${NoraI18n.html("Свои всегда рядом")}<small>${NoraI18n.html("Добавляй друзей и зови играть")}</small></span>${icon("arrow")}</button>`;
   }
-  const games = { durak: NoraI18n.t("Дурак"), barricade: NoraI18n.t("Баррикада"), sea: NoraI18n.t("Морской бой"), mafia: NoraI18n.t("Мафия"), dot: "DOT", rocket: NoraI18n.t("Ракетка"), poker: NoraI18n.t("Покер") };
-  const gameChoices = ["durak", "barricade", "poker", "dot", "rocket"];
+  const games = { durak: NoraI18n.t("Дурак"), barricade: NoraI18n.t("Баррикада"), sea: NoraI18n.t("Морской бой"), mafia: NoraI18n.t("Мафия"), dot: "DOT", rocket: NoraI18n.t("Ракетка"), poker: NoraI18n.t("Покер"), dice: "DICE" };
+  const gameChoices = ["durak", "barricade", "poker", "dot", "dice", "rocket"];
   const lobbyLimit = 5;
   let lobbyRooms = null, lobbyLoading = false, lobbyError = "", showAllLobbies = false;
 
   const gameGlyphs = {
+    dice: `<g transform="rotate(-12 45 46)"><rect x="18" y="19" width="54" height="54" rx="11" fill="#2d303d" stroke="currentColor"/><rect x="22" y="23" width="46" height="46" rx="8" stroke="#ffffff" opacity=".25"/><g fill="#f1edf6" stroke="none"><circle cx="31" cy="32" r="4"/><circle cx="45" cy="46" r="4"/><circle cx="59" cy="60" r="4"/></g></g><g transform="rotate(15 76 64)"><rect x="58" y="46" width="34" height="34" rx="7" fill="#4b2633" stroke="#ff7895"/><circle cx="75" cy="63" r="5" fill="#ff9ab0" stroke="none"/></g>`,
     poker: `<g transform="rotate(12 61 45)"><rect x="44" y="15" width="37" height="54" rx="5" fill="#37333a"/><path d="M64 32c-4 4-9 7-9 12a4.7 4.7 0 0 0 9 2 4.7 4.7 0 0 0 9-2c0-5-5-8-9-12Z" fill="currentColor" stroke="none"/><path d="m62 52 2-5 2 5"/></g><circle cx="36" cy="70" r="18" fill="#702538" stroke="#f19a9d" stroke-width="3" stroke-dasharray="10 4"/><circle cx="36" cy="70" r="11" stroke="#e9979e"/>`,
     durak: `<g transform="rotate(13 65 47)"><rect x="51" y="19" width="37" height="56" rx="6" fill="#303035" stroke="currentColor"/><path d="M69.5 39c-3.8 5-9 7-9 12a4.8 4.8 0 0 0 9 2.1 4.8 4.8 0 0 0 9-2.1c0-5-5.2-7-9-12Z" fill="currentColor" stroke="none"/><path d="m67 58 2.5-5 2.5 5" fill="currentColor" stroke="none"/></g>
       <g transform="rotate(-12 44 48)"><rect x="25" y="20" width="38" height="57" rx="6" fill="#47474d" stroke="currentColor"/><path d="M44 57c-3-2.5-10-7-10-12.2a5.7 5.7 0 0 1 10-3.9 5.7 5.7 0 0 1 10 3.9C54 50 47 54.5 44 57Z" fill="var(--game-accent)" stroke="none"/><path d="M32 29h5m14 40h5" opacity=".55"/></g>`,
@@ -114,8 +115,9 @@ window.NoraInteractive = (() => {
   function gameShortcut(game, create = false) {
     const action = create ? "data-create-match" : "data-tab";
     const glyph = gameGlyphs[game];
+    const soon = game === "dice" || game === "poker";
     return `<button type="button" class="game-shortcut game-${game}${glyph ? " game-shortcut-mono" : ""}" ${action}="${game}">
-      ${glyph ? `<span class="game-shortcut-art" aria-hidden="true"><svg viewBox="0 0 104 96" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" focusable="false">${glyph}</svg></span>` : ""}
+      ${glyph ? `<span class="game-shortcut-art" aria-hidden="true"><svg viewBox="0 0 104 96" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" focusable="false">${glyph}</svg>${soon ? '<span class="game-soon">SOON</span>' : ""}</span>` : ""}
       <span class="game-shortcut-name">${games[game]}</span>
     </button>`;
   }
@@ -236,7 +238,7 @@ window.NoraInteractive = (() => {
   }
 
   function chooseMatch() {
-    sheet(`<div class="game-create-menu"><h2>${NoraI18n.html("Новый матч")}</h2>${gameChoices.filter(game => game !== "dot").map(game => gameShortcut(game, true)).join("")}</div>`);
+    sheet(`<div class="game-create-menu"><h2>${NoraI18n.html("Новый матч")}</h2>${gameChoices.filter(game => game !== "dot" && game !== "dice" && (game !== "poker" || data.beta_games_available === true)).map(game => gameShortcut(game, true)).join("")}</div>`);
     $("#sheet-content button")?.focus();
   }
   function friendRow(person, section) {
@@ -922,6 +924,7 @@ window.NoraInteractive = (() => {
         $("#sheet").close();
         if (game === "durak") openDurak({ create: true });
         else if (game === "barricade") openBarricade({ create: true });
+        else if (game === "poker") goToTab(game);
         else go(game);
       }
     }
