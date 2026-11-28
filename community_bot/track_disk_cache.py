@@ -4,11 +4,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import re
 import shutil
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from aiohttp import payload, web
@@ -18,6 +20,7 @@ from community_bot.profile_track import MAX_TRACK_BYTES
 CACHE_BYTES = 128 * 1024 * 1024
 DOWNLOADS = 2
 MAX_PENDING = 8
+START_BYTES = 128 * 1024
 
 
 class _BoundedFile(io.BufferedWriter):
@@ -32,6 +35,7 @@ class _Entry:
     path: Path
     size: int
     readers: int = 0
+    etag: str = field(default_factory=lambda: f'"{uuid4().hex}"')
 
 
 class TrackLease:
@@ -128,6 +132,29 @@ class TrackDiskCache:
                 raise OSError('Catalog audio is unavailable') from exc
         return await self._open(track['file_id'], download)
 
+    async def cached_start(self, track):
+        if track["mime"] != "audio/mpeg":
+            return web.Response(status=204)
+        file_id = track["file_id"]
+        identity = file_id if file_id.startswith("catalog:") else "telegram:" + file_id
+        lease = self._hit(hashlib.sha256(identity.encode()).hexdigest())
+        if lease is None:
+            return web.Response(status=204)
+        try:
+            entry = lease._entry
+            if entry.size <= START_BYTES:
+                return web.Response(status=204)
+            data = await asyncio.to_thread(lease.file.read, START_BYTES)
+            if len(data) != START_BYTES:
+                return web.Response(status=204)
+            return web.Response(
+                status=206, body=data, content_type="audio/mpeg",
+                headers={"Cache-Control": "no-store", "ETag": entry.etag,
+                         "Content-Range": f"bytes 0-{START_BYTES - 1}/{entry.size}"},
+            )
+        finally:
+            lease.close()
+
     async def _open(self, identity, download):
         key = hashlib.sha256(identity.encode()).hexdigest()
         lease = self._hit(key)
@@ -176,11 +203,23 @@ class TrackDiskCache:
 class TrackResponse(web.Response):
     """Send a file in aiohttp chunks without changing the existing authenticated API."""
 
-    def __init__(self, lease, mime):
+    def __init__(self, lease, mime, request_headers=None):
         self.lease = lease
+        entry = lease._entry
+        headers = {"Cache-Control": "no-store", "Content-Length": str(entry.size), "ETag": entry.etag}
+        status = 200
+        if request_headers and mime == "audio/mpeg" and request_headers.get("If-Range") == entry.etag:
+            match = re.fullmatch(r"bytes=([0-9]{1,6})-", request_headers.get("Range", ""))
+            start = int(match[1]) if match else 0
+            # The only partial response these routes provide is the rest of a prefetched MP3.
+            if start == START_BYTES and start < entry.size:
+                lease.file.seek(start)
+                headers.update({"Content-Range": f"bytes {start}-{entry.size - 1}/{entry.size}",
+                                "Content-Length": str(entry.size - start)})
+                status = 206
         super().__init__(
-            body=payload.BufferedReaderPayload(lease.file, content_type=mime, disposition=None),
-            headers={"Cache-Control": "no-store", "Content-Length": str(lease._entry.size)},
+            status=status, body=payload.BufferedReaderPayload(lease.file, content_type=mime, disposition=None),
+            headers=headers,
         )
 
     async def prepare(self, request):

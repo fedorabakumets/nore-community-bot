@@ -6,7 +6,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from community_bot import track_disk_cache
-from community_bot.track_disk_cache import TrackDiskCache, TrackResponse
+from community_bot.track_disk_cache import START_BYTES, TrackDiskCache, TrackResponse
 
 
 async def test_shared_download_and_lru(tmp_path):
@@ -102,8 +102,53 @@ async def test_http_response_sends_complete_audio_and_releases_lease(tmp_path):
     cache.close()
 
 
+async def test_cached_start_and_resume_do_not_download_or_reuse_stale_bytes(tmp_path):
+    audio = b"A" * START_BYTES + b"end"
+
+    async def download(file_id, *, destination, **kwargs):
+        destination.write(audio)
+
+    bot = AsyncMock()
+    bot.download.side_effect = download
+    cache = TrackDiskCache(tmp_path, max_bytes=len(audio))
+    track = {"file_id": "track", "mime": "audio/mpeg"}
+
+    async def handler(request):
+        lease = await cache.open_track(bot, track)
+        return TrackResponse(lease, track["mime"], request.headers)
+
+    assert (await cache.cached_start(track)).status == 204
+    bot.download.assert_not_awaited()
+
+    app = web.Application()
+    app.router.add_get("/track", handler)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/track")
+        assert await response.read() == audio
+        prefix = await cache.cached_start(track)
+        assert prefix.status == 206
+        assert prefix.body == audio[:START_BYTES]
+        assert prefix.headers["Content-Range"] == f"bytes 0-{START_BYTES - 1}/{len(audio)}"
+        resume = {"Range": f"bytes={START_BYTES}-", "If-Range": prefix.headers["ETag"]}
+        response = await client.get("/track", headers=resume)
+        assert response.status == 206
+        assert response.headers["Content-Range"] == f"bytes {START_BYTES}-{len(audio) - 1}/{len(audio)}"
+        assert await response.read() == audio[START_BYTES:]
+        assert bot.download.await_count == 1
+
+        other = await cache.open(bot, "another")
+        other.close()
+        response = await client.get("/track", headers=resume)
+        assert response.status == 200
+        assert response.headers["ETag"] != resume["If-Range"]
+        assert await response.read() == audio
+        assert bot.download.await_count == 3
+    cache.close()
+
+
 async def test_catalog_download_is_shared_and_does_not_use_telegram(tmp_path, monkeypatch):
     from pathlib import Path
+
     from community_bot.routers import song_requests
 
     calls = []

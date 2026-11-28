@@ -2,11 +2,13 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from aiohttp import web
 
 from community_bot import music_discovery as discovery
 from community_bot.database import Database
 from community_bot.music_library import get_collection
 from community_bot.routers import song_requests as songs
+from community_bot.track_disk_cache import START_BYTES
 
 
 class Request(dict):
@@ -14,6 +16,7 @@ class Request(dict):
         super().__init__(actor={"id": uid})
         self.app = {"db": db, "bot": bot}
         self.query = query or {}
+        self.headers = {}
         self.payload = payload
 
     async def json(self):
@@ -222,3 +225,34 @@ async def test_wave_uses_external_metadata_and_personal_taste_without_audio(tmp_
     assert any(track["artist"] == "Favorite" for track in response["tracks"])
     assert find.await_count == 4
     delivery.assert_not_awaited()
+
+
+async def test_wave_prefix_checks_offer_and_pet_without_preparing_or_downloading(tmp_path, monkeypatch):
+    db = Database(tmp_path / "wave-prefix.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="One")
+    cache = AsyncMock()
+    cache.cached_start.return_value = web.Response(status=204)
+    gate = AsyncMock(return_value=None)
+    monkeypatch.setattr(songs, "enabled", lambda: True)
+    monkeypatch.setattr(songs, "song_care_error", gate)
+    offer = {"123": songs.Song("123", None, "Test", "Artist", 120)}
+    discovery._WAVES[1] = (discovery.time.monotonic() + 30, offer)
+
+    async def buffer_for(uid):
+        request = Request(uid, db, None, {"wave": "123"})
+        request.app["track_disk_cache"] = cache
+        request.headers["Range"] = f"bytes=0-{START_BYTES - 1}"
+        return await discovery.buffer_start(request)
+
+    with pytest.raises(web.HTTPNotFound):
+        await buffer_for(2)
+    cache.cached_start.assert_not_called()
+    assert (await buffer_for(1)).status == 204
+    cache.cached_start.assert_awaited_once_with({"file_id": "catalog:123", "mime": "audio/mpeg"})
+    assert not await discovery.read_history(db, 1)
+    assert not await get_collection(db, 1)
+    gate.return_value = "Pet gate"
+    with pytest.raises(web.HTTPNotFound):
+        await buffer_for(1)
+    assert cache.cached_start.await_count == 1

@@ -264,7 +264,7 @@ async def track_audio(request):
         latest = await get_track(db, fresh["user_id"])
         if not latest or latest["revision"] != track["revision"] or latest["file_id"] != track["file_id"]:
             raise web.HTTPNotFound()
-        return TrackResponse(lease, track["mime"])
+        return TrackResponse(lease, track["mime"], request.headers)
     except BaseException:
         lease.close()
         raise
@@ -333,7 +333,7 @@ async def library_audio(request):
         if (not latest or latest["revision"] != track["revision"] or latest["file_id"] != track["file_id"]
                 or not await can_read_library(db, request.app["settings"], uid, owner)):
             raise web.HTTPNotFound()
-        return TrackResponse(lease, track["mime"])
+        return TrackResponse(lease, track["mime"], request.headers)
     except BaseException:
         lease.close()
         raise

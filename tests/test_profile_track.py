@@ -64,7 +64,7 @@ async def test_reply_replaces_profile_audio_and_uses_same_file_in_both_profiles(
     cache = TrackDiskCache(directory=tmp_path / "audio")
     request = SimpleNamespace(
         app={"db": db, "bot": bot, "settings": settings, "track_disk_cache": cache}, path="/api/people/7/track",
-        match_info={"user_id": "7"}, query={"v": track["revision"]},
+        match_info={"user_id": "7"}, query={"v": track["revision"]}, headers={},
     )
 
     class Request(dict):

@@ -25,20 +25,22 @@ function harness({progressive = false, failAppend = false} = {}) {
     endOfStream() { this.readyState = 'ended'; }
   }
   const context = vm.createContext({
-    auth: 'session-1', active: null, Date, Blob, setTimeout, clearTimeout,
+    auth: 'session-1', active: null, Date, Blob, setTimeout, clearTimeout, URLSearchParams, AbortController,
+    document:{hidden:false}, navigator:{connection:{}}, queue:[], queueIndex:0, shuffle:false, repeat:false,
     window: progressive ? {MediaSource:Media} : {},
     URL: {
       createObjectURL(value) { const url = 'blob:' + (++urlId); urls.set(url,value); return url; },
       revokeObjectURL(url) { urls.delete(url); }
     },
     fetch: async (src, options) => {
-      requests.push({src,options});
-      return context.respond(src);
+      requests.push({src,options:{...options,headers:{...options.headers}}});
+      return context.respond(src, options);
     },
     paint() {},
     async toggleActive(state) { plays++; state.wantsPlayback = true; state.audio.paused = false; }
   });
-  vm.runInContext(cache + playback + '\nthis.load = loadTrack; this.remember = rememberTrack; this.cached = cachedTrack;', context);
+  vm.runInContext(cache + playback + '\nthis.load = loadTrack; this.remember = rememberTrack; this.cached = cachedTrack;' +
+    'this.buffer = bufferQueueStarts; this.cancelBuffer = cancelQueueStarts; this.starts = queueStarts;', context);
   function state(src = '/api/profile/track?v=one') {
     const audio = new EventTarget();
     audio.paused = true;
@@ -121,6 +123,95 @@ test('append failure falls back to complete blob without a second request', asyn
   assert.equal(state.loading,false);
   assert.equal(h.requests.length,1);
   assert.equal(h.plays(),1);
+});
+
+const prefixSize = 128 * 1024;
+const marker = '"' + 'a'.repeat(32) + '"';
+const warmHeaders = {
+  'Content-Type':'audio/mpeg', 'Content-Length':String(prefixSize), ETag:marker,
+  'Content-Range':'bytes 0-' + (prefixSize - 1) + '/' + (prefixSize + 2),
+};
+const resumeHeaders = {...warmHeaders, 'Content-Length':'2',
+  'Content-Range':'bytes ' + prefixSize + '-' + (prefixSize + 1) + '/' + (prefixSize + 2)};
+
+test('the playing track is ready before buffering up to three starts in order', async () => {
+  const h = harness({progressive:true});
+  const state = h.state();
+  state.audio.paused = false;
+  h.context.queue = [state, {src:'/api/music-library/next?v=three'}, {wave:true,catalogId:'42'},
+    {src:'/api/music-library/third?v=two'}, {src:'/api/music-library/fourth?v=one'}];
+  let outstanding = 0;
+  h.context.respond = async () => {
+    assert.equal(++outstanding, 1);
+    await new Promise(resolve => setImmediate(resolve));
+    outstanding--;
+    return new Response(new Uint8Array(prefixSize), {status:206,headers:warmHeaders});
+  };
+  await h.context.buffer(state);
+  assert.equal(h.requests.length, 0);
+  state.bytesReady = true;
+  h.context.navigator.connection.saveData = true;
+  await h.context.buffer(state);
+  assert.equal(h.requests.length, 0);
+  h.context.navigator.connection.saveData = false;
+  await h.context.buffer(state);
+  assert.deepEqual(h.requests.map(request => new URLSearchParams(request.src.split('?')[1]).get('source') ||
+    new URLSearchParams(request.src.split('?')[1]).get('wave')), [
+    '/api/music-library/next', '42', '/api/music-library/third',
+  ]);
+  assert.ok(h.requests.every(request => request.options.headers.Range === 'bytes=0-131071'));
+  assert.equal(h.context.starts.size, 3);
+  await h.context.buffer(state);
+  assert.equal(h.requests.length, 3);
+});
+
+test('a verified start plays before the remaining MP3 bytes arrive', async () => {
+  const h = harness({progressive:true});
+  const state = h.state();
+  const head = new Uint8Array(prefixSize);
+  head[0] = 7;
+  h.context.cached(state.src); // Initialize the session before storing its bytes.
+  h.context.starts.set(state.src, {data:head.buffer,marker,size:prefixSize + 2,expires:Date.now() + 5000});
+  let controller;
+  const body = new ReadableStream({start(value){controller=value;}});
+  h.context.respond = () => new Response(body, {status:206,headers:resumeHeaders});
+  const loading = h.context.load(state);
+  try {
+    for (let i=0;i<30 && h.plays()===0;i++) await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(h.plays(),1);
+    assert.equal(h.requests[0].options.headers.Range,'bytes=131072-');
+    assert.equal(h.requests[0].options.headers['If-Range'],marker);
+  } finally {
+    controller.enqueue(new Uint8Array([8,9]));
+    controller.close();
+    await loading;
+  }
+  const bytes = new Uint8Array(await state.blob.arrayBuffer());
+  assert.equal(bytes.length,prefixSize + 2);
+  assert.equal(bytes[0],7);
+  assert.deepEqual([...bytes.slice(-2)],[8,9]);
+});
+
+test('a full response after eviction does not prepend old audio', async () => {
+  const h = harness({progressive:true});
+  const state = h.state();
+  h.context.cached(state.src); // Initialize the session before storing its bytes.
+  h.context.starts.set(state.src, {data:new ArrayBuffer(prefixSize),marker,size:prefixSize+2,expires:Date.now()+5000});
+  h.context.respond = () => new Response(new Uint8Array([5,6,7]), {headers:{'Content-Type':'audio/mpeg'}});
+  await h.context.load(state);
+  assert.deepEqual([...new Uint8Array(await state.blob.arrayBuffer())],[5,6,7]);
+  assert.equal(h.requests.length,1);
+  assert.equal(h.context.starts.size,0);
+});
+
+test('denied access never plays the locally buffered start', async () => {
+  const h = harness({progressive:true});
+  const state = h.state();
+  h.context.cached(state.src); // Initialize the session before storing its bytes.
+  h.context.starts.set(state.src, {data:new ArrayBuffer(prefixSize),marker,size:prefixSize+2,expires:Date.now()+5000});
+  h.context.respond = () => new Response(null,{status:404});
+  await assert.rejects(h.context.load(state));
+  assert.equal(h.plays(),0);
 });
 
 test('music mini player moves into modal, preserves scrolling and returns the same element', () => {

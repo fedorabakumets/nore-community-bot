@@ -269,10 +269,15 @@ window.NoraProfileTrack = (() => {
   }
   // Session-only LRU: never persist private profile music on a shared device.
   const musicCache = new Map();
+  const queueStarts = new Map();
+  const startBytes = 128 * 1024;
+  let startTimer = 0, startRequest = null;
   const musicCacheLimit = 64 * 1024 * 1024, musicCacheCount = 8, musicCacheTTL = 20 * 60 * 1000;
   let musicCacheBytes = 0, musicCacheAuth = null;
   function clearMusicCache() {
     musicCache.clear(); musicCacheBytes = 0; musicCacheAuth = null;
+    queueStarts.clear();
+    cancelQueueStarts();
   }
   function removeCachedTrack(key) {
     const item = musicCache.get(key);
@@ -298,6 +303,90 @@ window.NoraProfileTrack = (() => {
     }
     musicCache.set(key, {blob, expires: Date.now() + musicCacheTTL});
     musicCacheBytes += blob.size;
+  }
+
+  function cacheKey(item) {
+    const version = item.src?.split('?v=')[1];
+    return version && /^[a-f0-9]{64}$/.test(item.track?.id) ? item.track.id + ':' + version : item.src;
+  }
+
+  function startKey(item) {
+    return item.wave && item.catalogId ? 'wave:' + item.catalogId : cacheKey(item);
+  }
+
+  function mp3MediaSource() {
+    return [window.ManagedMediaSource, window.MediaSource].find(
+      candidate => candidate?.isTypeSupported?.('audio/mpeg'));
+  }
+
+  function bufferedStart(key) {
+    const entry = queueStarts.get(key);
+    if (entry && entry.expires > Date.now()) return entry;
+    queueStarts.delete(key);
+    return null;
+  }
+
+  function cancelQueueStarts() {
+    clearTimeout(startTimer);
+    startRequest?.abort();
+    startRequest = null;
+  }
+
+  function canBufferQueue(state) {
+    const network = navigator.connection;
+    return active === state && state?.bytesReady && !state.audio.paused && !state.audio.ended &&
+      !document.hidden && !shuffle && !repeat && queueIndex >= 0 && !network?.saveData &&
+      !['slow-2g','2g','3g'].includes(network?.effectiveType) && Boolean(mp3MediaSource());
+  }
+
+  function scheduleQueueStarts() {
+    const state = active;
+    if (startRequest || !canBufferQueue(state)) return;
+    clearTimeout(startTimer);
+    startTimer = setTimeout(() => void bufferQueueStarts(state), 800);
+  }
+
+  async function bufferQueueStarts(state) {
+    if (startRequest || !canBufferQueue(state)) return;
+    syncMusicCache();
+    const request = startRequest = new AbortController();
+    const upcoming = queue.slice(queueIndex + 1, queueIndex + 4);
+    try {
+      for (const item of upcoming) {
+        if (request.signal.aborted || !canBufferQueue(state)) break;
+        const key = startKey(item);
+        if (!key || bufferedStart(key) || (item.src && cachedTrack(cacheKey(item)))) continue;
+        const [source, version] = item.src?.split('?v=') || [];
+        // Public chart references require scanning opted-in histories. Leave them on demand.
+        if (source?.startsWith('/api/music-library/social/')) continue;
+        const params = source && version ? {source, revision:decodeURIComponent(version)} : {wave:item.catalogId};
+        try {
+          const response = await fetch('/api/music-library/buffer?' + new URLSearchParams(params), {
+            headers:{Authorization:'tma ' + auth, Range:'bytes=0-' + (startBytes - 1)},
+            signal:request.signal, cache:'no-store', priority:'low'
+          });
+          const marker = response.headers.get('ETag');
+          const bounds = /^bytes 0-([0-9]{1,6})\/([0-9]{1,8})$/.exec(response.headers.get('Content-Range') || '');
+          const size = Number(bounds?.[2]);
+          let data = null;
+          if (response.status === 206 && /^"[a-f0-9]{32}"$/.test(marker) && size > startBytes &&
+              size <= 20 * 1024 * 1024 && Number(bounds?.[1]) === startBytes - 1 &&
+              Number(response.headers.get('Content-Length')) === startBytes) {
+            const bytes = await response.arrayBuffer();
+            if (bytes.byteLength === startBytes) data = bytes;
+          } else {
+            await response.body?.cancel().catch(() => {});
+          }
+          if (request.signal.aborted) break;
+          while (queueStarts.size >= 6) queueStarts.delete(queueStarts.keys().next().value);
+          queueStarts.set(key, {data, marker, size, expires:Date.now() + (data ? musicCacheTTL : 60000)});
+        } catch {
+          // A missed or interrupted prefix must never affect playback.
+        }
+      }
+    } finally {
+      if (startRequest === request) startRequest = null;
+    }
   }
 
   // Analyse the already downloaded track separately. Never route playback through
@@ -730,6 +819,7 @@ window.NoraProfileTrack = (() => {
         }
         if (importPending) return;
         const intent = ++playIntent;
+        cancelQueueStarts();
         const version = generation;
         importPending = true;
         row.dataset.musicState = 'loading';
@@ -1102,9 +1192,8 @@ window.NoraProfileTrack = (() => {
   async function loadTrack(state) {
     const signal = state.controller.signal;
     const headers = {Authorization: 'tma ' + auth};
-    const version = state.src.split('?v=')[1];
     // Profile, library and history can reference the same authorized media.
-    const key = version && /^[a-f0-9]{64}$/.test(state.track?.id) ? state.track.id + ':' + version : state.src;
+    const key = cacheKey(state);
     let blob = cachedTrack(key);
     if (blob) {
       // A cached file must never bypass profile privacy, bans, or revision checks.
@@ -1117,15 +1206,34 @@ window.NoraProfileTrack = (() => {
       return;
     }
 
-    const response = await fetch(state.src, {headers, signal, cache:'no-store'});
-    if (!response.ok) throw Error('Track unavailable');
+    const Media = mp3MediaSource();
+    const start = Media ? bufferedStart(startKey(state)) : null;
+    if (start?.data) {
+      headers.Range = 'bytes=' + startBytes + '-';
+      headers['If-Range'] = start.marker;
+    }
+    let response = await fetch(state.src, {headers, signal, cache:'no-store'});
+    let firstChunk = null;
+    if (response.status === 206) {
+      const matches = start?.data &&
+        response.headers.get('ETag') === start.marker &&
+        response.headers.get('Content-Range') === 'bytes ' + startBytes + '-' + (start.size - 1) + '/' + start.size &&
+        response.headers.get('Content-Type')?.split(';')[0].trim() === 'audio/mpeg';
+      if (matches) firstChunk = start.data;
+      else {
+        await response.body?.cancel().catch(() => {});
+        delete headers.Range;
+        delete headers['If-Range'];
+        response = await fetch(state.src, {headers, signal, cache:'no-store'});
+      }
+    }
+    if (start?.data) queueStarts.delete(startKey(state));
+    if (!response.ok || (response.status !== 200 && !firstChunk)) throw Error('Track unavailable');
     const mime = (response.headers.get('Content-Type') || '').split(';')[0].trim();
-    // Only enable MSE for supported MP3 streams. Ordinary M4A files are not
-    // necessarily fragmented; native blob playback is the compatibility path.
-    const Media = [window.ManagedMediaSource, window.MediaSource].find(
-      candidate => candidate?.isTypeSupported?.(mime));
+    // Ordinary M4A files are not necessarily fragmented; use native blob playback.
     if (mime !== 'audio/mpeg' || !Media || !response.body?.getReader) {
       blob = await response.blob();
+      if (firstChunk) blob = new Blob([firstChunk, blob], {type:mime});
       if (active !== state) return;
       rememberTrack(key, blob); installBlob(state, blob);
       state.loading = false; paint(state);
@@ -1134,7 +1242,7 @@ window.NoraProfileTrack = (() => {
     }
 
     const reader = response.body.getReader(), chunks = [];
-    let media, buffer, started = false, total = 0;
+    let media, buffer, started = false, total = 0, readComplete = false;
     state.progressive = true;
     try {
       media = new Media();
@@ -1146,9 +1254,11 @@ window.NoraProfileTrack = (() => {
 
     try {
       while (true) {
-        const {done, value} = await reader.read();
+        const chunk = firstChunk ? {value:firstChunk} : await reader.read();
+        firstChunk = null;
         if (active !== state || signal.aborted) return;
-        if (done) break;
+        if (chunk.done) { readComplete = true; break; }
+        const {value} = chunk;
         total += value.byteLength;
         if (total > 20 * 1024 * 1024) throw Error('Track too large');
         chunks.push(value);
@@ -1166,14 +1276,14 @@ window.NoraProfileTrack = (() => {
         }
       }
     } finally {
-      if (signal.aborted || active !== state) {
+      if (!readComplete) {
         try { await reader.cancel(); } catch {}
       }
       reader.releaseLock();
     }
     if (active !== state) return;
     blob = new Blob(chunks, {type:mime});
-    if (!blob.size) throw Error('Empty track');
+    if (!blob.size || (response.status === 206 && blob.size !== start.size)) throw Error('Incomplete track');
     rememberTrack(key, blob);
     if (!state.progressiveFailed) {
       try { if (media.readyState === 'open') media.endOfStream(); }
@@ -1199,6 +1309,7 @@ window.NoraProfileTrack = (() => {
   }
 
   function stop() {
+    cancelQueueStarts();
     const state = active;
     if (!state) return;
     active = null;
@@ -1432,12 +1543,18 @@ window.NoraProfileTrack = (() => {
     const shuffleButton = event.target.closest('[data-queue-shuffle]');
     if (shuffleButton) {
       shuffle = !shuffle;
+      if (shuffle) cancelQueueStarts(); else scheduleQueueStarts();
       shuffleButton.setAttribute('aria-pressed',String(shuffle));
       paintQueue();
       return;
     }
     const repeatButton = event.target.closest('[data-queue-repeat]');
-    if (repeatButton) { repeat = !repeat; repeatButton.setAttribute('aria-pressed',String(repeat)); return; }
+    if (repeatButton) {
+      repeat = !repeat;
+      if (repeat) cancelQueueStarts(); else scheduleQueueStarts();
+      repeatButton.setAttribute('aria-pressed',String(repeat));
+      return;
+    }
     if (event.target.closest('[data-now-save]')) { void addNowTrack(); return; }
     if (event.target.closest('[data-now-profile]')) { void addNowTrack('profile'); return; }
     if (event.target.closest('[data-now-share]')) { void shareCurrent(); return; }
@@ -1454,6 +1571,7 @@ window.NoraProfileTrack = (() => {
 
   async function startTrack(item) {
     if (!item) return;
+    cancelQueueStarts();
     if (!item.src && item.wave && item.catalogId) {
       const intent = ++playIntent;
       queueLoading = true;
@@ -1479,14 +1597,21 @@ window.NoraProfileTrack = (() => {
     const full = $('#sheet').open && Boolean($('#nora-now-playing'));
     stop();
     const audio = new Audio();
-    active = {audio, element:null, src:item.src, catalogId:item.catalogId, controller:new AbortController(), loading:true, track:item.track};
+    active = {audio, element:null, src:item.src, catalogId:item.catalogId, wave:item.wave,
+      controller:new AbortController(), loading:true, track:item.track};
     const state = active;
     let listened = 0, last = 0;
     for (const name of ['loadedmetadata','timeupdate','play','playing','pause','ended']) {
       audio.addEventListener(name, () => {
         if (active !== state) return;
-        if (name === 'playing' && !state.presenceAnnounced) announcePresence(state, true);
-        if (name === 'pause' || name === 'ended') announcePresence(state, false);
+        if (name === 'playing') {
+          if (!state.presenceAnnounced) announcePresence(state, true);
+          scheduleQueueStarts();
+        }
+        if (name === 'pause' || name === 'ended') {
+          announcePresence(state, false);
+          cancelQueueStarts();
+        }
         if (name === 'timeupdate') {
           if (!audio.paused && state.lastPresence && Date.now() - state.lastPresence >= 25000) announcePresence(state, true);
           const delta = audio.currentTime - last;
@@ -1520,8 +1645,15 @@ window.NoraProfileTrack = (() => {
     });
     if (full && !closeMotion) openNowPlaying({trackChanged:true});
     paint(state);
-    try { await loadTrack(state); }
-    catch { if (active === state) { stop(); toast(NoraI18n.t("Трек сейчас недоступен")); } }
+    try {
+      await loadTrack(state);
+      if (active === state) {
+        state.bytesReady = true;
+        scheduleQueueStarts();
+      }
+    } catch {
+      if (active === state) { stop(); toast(NoraI18n.t("Трек сейчас недоступен")); }
+    }
   }
 
   function canStep(direction) {
@@ -1631,7 +1763,10 @@ window.NoraProfileTrack = (() => {
     observer.observe(document.getElementById(id), {childList:true, subtree:true});
   }
   observer.observe($('#sheet'), {attributes:true, attributeFilter:['open']});
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && active) paint(active); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) cancelQueueStarts();
+    else if (active) { paint(active); scheduleQueueStarts(); }
+  });
   window.addEventListener('pagehide', () => { stop(); clearMusicCache(); });
   return {html, libraryButton, back, closeNowPlaying, openNowPlaying, stepQueue, icon};
 })();

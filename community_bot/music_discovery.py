@@ -14,7 +14,7 @@ from aiohttp import ClientError, web
 
 from community_bot.music_library import add_resolved_track, get_collection, public_track, track_id
 from community_bot.routers import song_requests as songs
-from community_bot.track_disk_cache import TrackResponse
+from community_bot.track_disk_cache import START_BYTES, TrackResponse
 
 _SEARCHES = {}
 _LAST = {}
@@ -296,10 +296,37 @@ async def audio(request):
     try:
         if not await resolve(db, uid, request.path, revision):
             raise web.HTTPNotFound()
-        return TrackResponse(lease, track["mime"])
+        return TrackResponse(lease, track["mime"], request.headers)
     except BaseException:
         lease.close()
         raise
+
+
+async def buffer_start(request):
+    """Serve only an already cached MP3 prefix for an authorized track or Wave choice."""
+    from community_bot.social_profiles import _share_track_source
+
+    if request.headers.get("Range") != f"bytes=0-{START_BYTES - 1}":
+        raise web.HTTPBadRequest()
+    uid, db = request["actor"]["id"], request.app["db"]
+    catalog_id = request.query.get("wave")
+    if catalog_id is not None:
+        entry = _WAVES.get(uid)
+        if not entry or time.monotonic() >= entry[0] or catalog_id not in entry[1]:
+            raise web.HTTPNotFound()
+        if not songs.enabled() or await songs.song_care_error(db, uid):
+            raise web.HTTPNotFound()
+        track = {"file_id": "catalog:" + catalog_id, "mime": "audio/mpeg"}
+    else:
+        source = request.query.get("source")
+        revision = request.query.get("revision")
+        if source and source.startswith("/api/music-library/social/"):
+            return web.Response(status=204)
+        track = await _share_track_source(db, request.app["settings"], uid, source, revision)
+        if not track:
+            raise web.HTTPNotFound()
+
+    return await request.app["track_disk_cache"].cached_start(track)
 
 
 async def listened(request):
