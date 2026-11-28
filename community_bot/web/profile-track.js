@@ -689,6 +689,7 @@ window.NoraProfileTrack = (() => {
     const panel = $('#music-library-profile');
     panel.focus({preventScroll:true});
     $('#sheet').scrollTop = 0;
+    $('#sheet-content').scrollTop = 0;
     try {
       const result = await api(path);
       if (!panel.isConnected || !$('#sheet').open) return;
@@ -790,19 +791,19 @@ window.NoraProfileTrack = (() => {
   function syncMiniHost() {
     const dialog = $('#sheet');
     const library = dialog.open && dialog.querySelector('#music-library-profile');
+    const full = dialog.open && dialog.querySelector('#nora-now-playing');
     const docked = Boolean(library && active);
     const wasDocked = dialog.classList.contains('music-mini-docked');
-    const content = $('#sheet-content');
-    const scrollTop = library ? (wasDocked ? content.scrollTop : dialog.scrollTop) : 0;
+    // Keep the actual touched element mounted throughout a swipe into the
+    // full player. Moving it during a touch sequence cancels gestures on iOS.
     if (docked && mini.parentElement !== dialog) {
       dialog.append(mini);
       mini.hidden = false;
       if (!miniMotion.matches) mini.animate?.([{opacity:0,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(.2,.8,.2,1)'});
-    } else if (!docked && mini.parentElement !== miniHome) {
+    } else if (!docked && !full && mini.parentElement !== miniHome) {
       miniHome.insertBefore(mini, miniNext?.parentElement === miniHome ? miniNext : dialog);
     }
-    dialog.classList.toggle('music-mini-docked', docked);
-    if (library && docked !== wasDocked) (docked ? content : dialog).scrollTop = scrollTop;
+    if (docked !== wasDocked) dialog.classList.toggle('music-mini-docked', docked);
     return docked;
   }
 
@@ -815,8 +816,7 @@ window.NoraProfileTrack = (() => {
     $('#sheet-content').replaceChildren(saved.panel);
     libraryReturn = saved.libraryReturn;
     syncMiniHost();
-    const scroll = dialog.classList.contains('music-mini-docked') ? $('#sheet-content') : dialog;
-    scroll.scrollTop = saved.scrollTop;
+    $('#sheet-content').scrollTop = saved.scrollTop;
     saved.panel.focus({preventScroll:true});
     window.NoraShop?.syncBack();
     if (active) paint(active);
@@ -1147,7 +1147,7 @@ window.NoraProfileTrack = (() => {
     if (!state) return;
     const dialog = $('#sheet'), library = dialog.querySelector('#music-library-profile');
     if (dialog.open && library) {
-      playerReturn = {panel:library, libraryReturn, scrollTop:dialog.classList.contains('music-mini-docked') ? $('#sheet-content').scrollTop : dialog.scrollTop};
+      playerReturn = {panel:library, libraryReturn, scrollTop:$('#sheet-content').scrollTop};
     }
     libraryReturn = null;
     const svg = (path, cls='') => '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
@@ -1162,6 +1162,7 @@ window.NoraProfileTrack = (() => {
       ("<button type=\"button\" class=\"nora-now-play\" data-track-toggle aria-label=\"" + NoraI18n.html("Воспроизвести") + "\"><svg class=\"nora-now-play-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 4.5v15l12-7.5z\"/></svg><svg class=\"nora-now-pause-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/><rect x=\"14\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/></svg></button>") +
       ("<button type=\"button\" class=\"nora-now-secondary nora-mini-share\" data-now-share aria-label=\"" + NoraI18n.html("Поделиться треком в чате") + "\">") + svg('m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13','nora-mini-send') + svg('m5 12 4 4L19 6','nora-mini-sent') + '</button></div><div class="music-queue-controls"><button type="button" data-queue-prev aria-label="' + NoraI18n.html("Предыдущий трек") + '">⏮</button><button type="button" data-queue-shuffle aria-pressed="' + shuffle + '" aria-label="' + NoraI18n.html("Перемешать") + '">⤨</button><button type="button" data-queue-repeat aria-pressed="' + repeat + '" aria-label="' + NoraI18n.html("Повтор трека") + '">↻</button><button type="button" data-queue-next aria-label="' + NoraI18n.html("Следующий трек") + '">⏭</button></div></section>');
     $('#sheet').scrollTop = 0;
+    $('#sheet-content').scrollTop = 0;
     $('#nora-now-playing')?.focus({preventScroll:true});
     window.NoraShop?.syncBack();
     paint(state);
@@ -1231,7 +1232,7 @@ window.NoraProfileTrack = (() => {
       } catch (error) { if (intent === playIntent) toast(error.message); return; }
     }
     if (active?.src === item.src) { await toggleActive(active); return; }
-    const full = Boolean($('#nora-now-playing'));
+    const full = $('#sheet').open && Boolean($('#nora-now-playing'));
     stop();
     const audio = new Audio();
     active = {audio, element:null, src:item.src, controller:new AbortController(), loading:true, track:item.track};
