@@ -220,7 +220,7 @@ window.NoraShop=(()=>{
         window.removeEventListener('beforeunload',confirmUnload);
       }
     }
-    if(profileBack||game||category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide();
+    if(window.NoraStories?.isOpen()||profileBack||game||category&&tab==='shop'||parent())tg?.BackButton?.show();else tg?.BackButton?.hide();
   }
   function exitGameView(onExit){
     requestGameExit(()=>{
@@ -326,6 +326,7 @@ window.NoraShop=(()=>{
     applyHistoryRoute();
   });
   function goBack(){
+    if(window.NoraStories?.back())return;
     if(!data||backPending||afterGameBack||$('#game-exit').open)return;
     if(profileOpen()&&$('.avatar-viewer[open]')){$('.avatar-viewer[open]').close();return}
     if(window.NoraProfileTrack?.back?.())return;

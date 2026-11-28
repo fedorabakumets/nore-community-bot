@@ -1989,34 +1989,44 @@ nav button.active .nav-profile-photo:has(img){border:0;box-shadow:none}
 .durak-hero-art i { position:absolute; width:62px; height:86px; display:grid; place-items:center; font:44px Georgia,serif; background:#f1dfcf; color:#281c24; border-radius:8px; transform:translateX(-13px) rotate(-17deg); }
 .durak-hero-art i+i { color:#b51f42; transform:translate(17px,6px) rotate(15deg); }
 
-/* One tap opens the latest NORA update in a portrait story. */
+/* Home stories share a ring, playback controls, and a single portrait stage. */
 .home-stories {
+  --story-ring: conic-gradient(from 25deg, #ff476b, #e92472 48%, #53e3ff 75%, #ff476b);
   display: flex;
   gap: 12px;
   margin: 0 0 16px;
   padding: 2px;
 }
 :is(#app,#nora-swipe-preview) .home-story-trigger {
-  display: inline-grid;
-  place-items: center;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   flex: 0 0 auto;
   width: 62px;
   height: 62px;
   padding: 3px;
+  border: 0;
   border-radius: 50%;
-  background: conic-gradient(from 25deg, #ff476b, #e92472 48%, #53e3ff 75%, #ff476b);
+  background: var(--story-ring);
   box-shadow: 0 0 13px #ff315655;
 }
 .home-story-trigger img {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   border: 2px solid var(--poster-bg);
   border-radius: 50%;
   object-fit: cover;
 }
+.home-story-trigger[data-home-story="install"] img {
+  padding: 4px;
+  background: var(--poster-bg);
+  object-fit: contain;
+}
+
 body:has(#home-story-viewer[open]) { overflow: hidden; }
 #home-story-viewer {
+  position: fixed;
   inset: 0;
   width: 100%;
   max-width: none;
@@ -2026,69 +2036,150 @@ body:has(#home-story-viewer[open]) { overflow: hidden; }
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: #000;
+  background: transparent;
+  color: #faf8f9;
   overflow: hidden;
   overscroll-behavior: contain;
 }
-#home-story-viewer::backdrop { background: #000; }
+#home-story-viewer::backdrop { background: transparent; }
+.home-story-shade {
+  position: absolute;
+  inset: 0;
+  background: #09070bea;
+  touch-action: none;
+}
 .home-story-stage {
+  --story-top: max(var(--safe-top, 0px), calc(var(--device-top, 0px) + var(--story-client-header, 0px)));
   position: relative;
-  width: 100%;
-  max-width: 540px;
+  isolation: isolate;
+  width: min(100%, 520px);
   height: 100%;
   margin-inline: auto;
+  border-radius: clamp(0px, calc((100vw - 520px) / 2), 18px);
+  overflow: hidden;
+  background: #0e0e11;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.home-story-stage video {
+.home-story-stage[data-client-header] { --story-client-header: 48px; }
+.home-story-deck, .home-story-card {
+  position: absolute;
+  inset: 0;
+}
+.home-story-card[inert] { pointer-events: none; }
+.home-story-card video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  touch-action: none;
 }
 .home-story-toolbar {
   position: absolute;
-  z-index: 1;
+  z-index: 4;
   inset: 0 0 auto;
+  padding: calc(var(--story-top) + 10px) max(12px, var(--safe-right, 0px)) 12px max(12px, var(--safe-left, 0px));
+  background: linear-gradient(180deg, #0a080ee8, #0a080e80 74%, transparent);
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+.home-story-stage.is-holding :is(.home-story-toolbar, .home-story-action) { opacity: 0; }
+.home-story-stage.is-holding .home-story-toolbar button { pointer-events: none; }
+.home-story-progress {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.home-story-progress span {
+  flex: 1;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: #ffffff44;
+}
+.home-story-progress .is-current { background: #ffffff66; }
+.home-story-progress i {
+  display: block;
+  height: 100%;
+  transform-origin: left;
+  background: #fff;
+}
+.home-story-toolbar-row, .home-story-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: calc(var(--safe-top, 0px) + 8px) max(12px, var(--safe-right, 0px)) 12px max(12px, var(--safe-left, 0px));
-  background: linear-gradient(180deg, #000b, transparent);
 }
-.home-story-toolbar progress {
+.home-story-toolbar-row { gap: 2px; }
+.home-story-heading {
   flex: 1;
   min-width: 0;
-  height: 3px;
-  appearance: none;
-  border: 0;
-  border-radius: 3px;
-  overflow: hidden;
-  background: #ffffff4d;
-  accent-color: #fff;
+  gap: 8px;
 }
-.home-story-toolbar progress::-webkit-progress-bar { background: #ffffff4d; }
-.home-story-toolbar progress::-webkit-progress-value { background: #fff; }
-.home-story-toolbar progress::-moz-progress-bar { background: #fff; }
+.home-story-avatar {
+  flex: none;
+  border-radius: 50%;
+  background: #25141e;
+  object-fit: cover;
+}
+.home-story-heading h2 {
+  margin: 0;
+  color: #fff;
+  font: 700 clamp(12px, 3.6vw, 16px)/1.2 system-ui, sans-serif;
+}
 .home-story-toolbar button {
   display: grid;
   place-items: center;
+  flex: 0 0 44px;
   width: 44px;
   height: 44px;
   padding: 10px;
   border-radius: 50%;
   background: #18141bd9;
   color: #fff;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
-.home-story-toolbar svg { width: 24px; height: 24px; }
+.home-story-toolbar svg { width: 22px; height: 22px; pointer-events: none; }
+.home-story-toolbar button[hidden],
 .home-story-sound[aria-pressed="false"] .story-sound-muted,
-.home-story-sound[aria-pressed="true"] .story-sound-waves { display: none; }
+.home-story-sound[aria-pressed="true"] .story-sound-waves,
+.home-story-pause[aria-pressed="false"] .story-icon-play,
+.home-story-pause[aria-pressed="true"] .story-icon-pause { display: none; }
+.home-story-key-nav:focus-visible {
+  z-index: 4;
+  top: 50%;
+  width: auto;
+  height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  clip: auto;
+  border-radius: 22px;
+  background: #18141b;
+  color: #fff;
+}
+.home-story-key-nav[data-story-step="-1"] { left: max(12px, var(--safe-left, 0px)); }
+.home-story-key-nav[data-story-step="1"] { right: max(12px, var(--safe-right, 0px)); }
+#home-story-viewer :is(button, [data-story-scroll]):focus-visible {
+  outline: 2px solid #ff8595;
+  outline-offset: 2px;
+}
 .home-story-error {
   position: absolute;
   top: 50%;
   left: 50%;
   translate: -50% -50%;
+  width: min(260px, 80%);
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #18141be8;
+  text-align: center;
+  color: #fff;
+  pointer-events: none;
 }
-.home-story-error { width: min(260px, 80%); text-align: center; color: #fff; }
 .home-story-error[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .home-story-toolbar { transition: none; }
+}
 
 /* Community game entrances */
 :is(#app,#nora-swipe-preview) .community-tiles {
@@ -2442,50 +2533,31 @@ button.lobby-entry:active { background: #ffffff13; }
 .profile-track :is(button, input):focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 
 
-/* Telegram native home-screen shortcut: lightweight three-step NORA story. */
-:is(#app,#nora-swipe-preview) .nora-home-install-trigger {
-  background: conic-gradient(from 15deg, #f32843, #681b31 55%, #f32843);
-  box-shadow: 0 0 0 1px #f3284344;
-}
-.nora-home-install-trigger img { object-fit: contain; background: transparent; padding: 4px; }
-body:has(.nora-install-story[open]) { overflow: hidden; }
-.nora-install-story {
-  inset: 0;
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  height: 100dvh;
-  max-height: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  overflow: hidden;
-  background: #0e0e11;
-  color: #faf8f9;
-}
-.nora-install-story::backdrop { background: #060608; }
+/* The shortcut instructions are slides in the same story viewer. */
 .nora-install-panel {
   box-sizing: border-box;
-  position: relative;
-  isolation: isolate;
   display: flex;
   flex-direction: column;
-  width: 100%;
-  max-width: 520px;
-  min-height: 100%;
-  margin: 0 auto;
-  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  height: 100%;
+  touch-action: pan-y;
+  padding: calc(var(--story-top) + 68px) max(18px, var(--safe-right, 0px)) max(16px, var(--safe-bottom, 0px)) max(18px, var(--safe-left, 0px));
   background: radial-gradient(ellipse at 55% 35%, #39101e 0, #150e13 38%, #0e0e11 78%);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: system-ui, sans-serif;
 }
-.nora-install-top { display: flex; justify-content: space-between; align-items: center; color: #bcb5bc; font-size: 11px; font-weight: 700; letter-spacing: .17em; }
-.nora-install-top i { color: #f32843; font-style: normal; }
-.nora-install-x { width: 36px; height: 36px; border: 1px solid #ffffff25; border-radius: 50%; background: #ffffff0d; font: inherit; font-size: 16px; }
-.nora-install-progress { display: flex; gap: 6px; margin-top: 14px; }
-.nora-install-progress b { height: 3px; flex: 1; border-radius: 4px; background: #ffffff28; transition: background .2s ease; }
-.nora-install-progress b.active { background: #f32843; }
-.nora-install-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; padding: 15px 0; text-align: center; }
+.nora-install-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 3px;
+  text-align: center;
+  touch-action: none;
+}
+.nora-install-content > * { flex-shrink: 0; }
+.nora-install-content[data-story-scroll] { touch-action: pan-y; }
 .nora-install-icon {
   display: grid;
   place-items: center;
@@ -2501,7 +2573,6 @@ body:has(.nora-install-story[open]) { overflow: hidden; }
 }
 .nora-install-icon img { width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
 .nora-install-icon-small { width: 100px; margin-bottom: 24px; }
-.nora-install-kicker { color: #ff7487; font-size: 11px; font-weight: 800; letter-spacing: .20em; }
 .nora-install-content h2 {
   margin: 16px 0 18px;
   font-family: NoraCraft, monospace;
@@ -2514,10 +2585,10 @@ body:has(.nora-install-story[open]) { overflow: hidden; }
 .nora-install-footnote { max-width: 340px; margin: 26px auto 0; color: #938a94; font-size: 12px; line-height: 1.6; }
 .nora-install-steps { width: min(100%, 365px); margin: 15px auto; display: grid; gap: 15px; text-align: left; }
 .nora-install-steps > div { display: flex; gap: 14px; padding: 14px; background: #ffffff0b; border: 1px solid #ffffff18; border-radius: 17px; }
-.nora-install-steps b { color: #ff6479; font-size: 15px; font-weight: 800; }
+.nora-install-steps b { flex: 0 0 2.2ch; white-space: nowrap; color: #ff6479; font-size: 15px; font-weight: 800; }
 .nora-install-steps span { color: #e4dce1; font-size: 13px; line-height: 1.48; }
 .nora-install-content .nora-install-hint { font-size: 12px; color: #aa9da8; }
-.nora-install-actions { width: 100%; padding: 0 0 6px; }
+.nora-install-actions { width: 100%; padding-top: 8px; touch-action: none; }
 .nora-install-cta {
   display: block;
   width: 100%;
@@ -2530,16 +2601,14 @@ body:has(.nora-install-story[open]) { overflow: hidden; }
   box-shadow: 0 10px 34px #e923432f;
 }
 .nora-install-cta:disabled { opacity: .65; }
-.nora-install-back { display: block; width: 100%; margin-top: 11px; padding: 10px; color: #b6aab3; font-size: 13px; background: transparent; }
 @media (max-height: 650px) {
-  .nora-install-panel { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .nora-install-icon { width: 94px; margin: 5px auto 12px; }
+  .nora-install-icon-small { width: 64px; padding: 8px; margin-bottom: 3px; }
   .nora-install-content h2 { margin: 9px 0; }
   .nora-install-steps { gap: 7px; margin: 8px auto; }
   .nora-install-steps > div { padding: 9px; }
   .nora-install-footnote { margin-top: 10px; }
 }
-@media (prefers-reduced-motion: reduce) { .nora-install-progress b { transition: none; } }
 
 /* Bottom sheets share one slide-up motion, without affecting full-screen stories or game HUD. */
 @media (prefers-reduced-motion: no-preference) {
@@ -4098,30 +4167,7 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
 .person-name-line h2{margin:0;min-width:0;overflow-wrap:anywhere}
 
 
-/* Dedzytwo story: one calm, centered touch target, morphed entirely in the UI. */
-:is(#app,#nora-swipe-preview) .home-story-trigger-dj {
-  background: linear-gradient(145deg, #c73c67, #383139 55%, #5b2b45);
-  box-shadow: none;
-}
-/* Keep the supplied DJ poster completely inside the round story thumbnail. */
-:is(#app,#nora-swipe-preview) .home-story-trigger-dj {
-  overflow: hidden;
-  isolation: isolate;
-}
-:is(#app,#nora-swipe-preview) .home-story-trigger-dj > img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  border: 0;
-  border-radius: 50%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  object-position: center;
-  clip-path: circle(50% at 50% 50%);
-}
-
+/* The Dedzytwo action keeps its heart-to-Telegram motion. */
 #home-story-viewer .home-story-action {
   position: absolute;
   z-index: 3;
@@ -4143,7 +4189,6 @@ body:has(#staff-chat-draft:focus) #app[data-screen="staffchat"] .staff-chat-comp
   cursor: pointer;
   transition: background .35s ease, border-color .35s ease, transform .35s ease;
 }
-#home-story-viewer .home-story-action[hidden] { display: none; }
 #home-story-viewer .home-story-action:disabled { opacity: .8; cursor: wait; }
 #home-story-viewer .home-story-action:active { transform: scale(.94); }
 #home-story-viewer .home-story-action.is-telegram {

@@ -7,9 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_install_story_and_tile_share_transparent_logo():
     story = (ROOT / "community_bot/web/home-screen.js").read_text(encoding="utf-8")
-    home = (ROOT / "community_bot/web/home.js").read_text(encoding="utf-8")
+    viewer = (ROOT / "community_bot/web/home-stories.js").read_text(encoding="utf-8")
     assert "const icon = '/intro/nora-home-icon.svg';" in story
-    assert 'src="/intro/nora-home-icon.svg" alt="${NoraI18n.html("Установить Нору")}"' in home
+    assert "cover: NoraHomeScreen.icon," in viewer
     assert "nora-logo-ru.jpg" not in story
 
 
