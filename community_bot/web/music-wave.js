@@ -34,10 +34,10 @@ window.NoraMusicWave = (() => {
         </button>
       </div>
       <div class="music-wave-meta">
-        <div><strong data-wave-title></strong><small data-wave-artist></small></div>
+        <div><strong data-wave-title></strong><small data-wave-artist></small>
+          <p class="music-wave-status" role="status" hidden></p></div>
         <button type="button" data-wave-next aria-label="${html('Следующий трек')}" disabled>${icon('next')}</button>
       </div>
-      <p class="music-wave-status" role="status" hidden></p>
       <div class="music-wave-picker">
         <div class="music-wave-tabs" role="group" aria-label="${html('Настроить волну')}">
           <button type="button" data-wave-personal>${html('Для тебя')}</button>
@@ -65,7 +65,8 @@ window.NoraMusicWave = (() => {
     const input = form.querySelector('input');
     const motion = matchMedia('(prefers-reduced-motion: reduce)');
     let station = personal, tab = 'genres', artists = featured, choices = [];
-    let cover = '', texture = null, frame = 0, last = 0, elapsed = 0, energy = 0;
+    let cover = '', texture = null, pendingTexture = null, frame = 0, last = 0, elapsed = 0, energy = 0;
+    let lobes = personal.lobes, targetHue = personal.hue;
     let state = null;
 
     function paintChoices() {
@@ -110,63 +111,92 @@ window.NoraMusicWave = (() => {
 
     function setStation(value) {
       station = value;
-      root.style.setProperty('--wave-hue', value.hue);
-      root.style.setProperty('--wave-shape', shape(0, 0));
+      // Take the shorter route around the hue wheel on station changes.
+      targetHue += ((value.hue - targetHue) % 360 + 540) % 360 - 180;
+      root.style.setProperty('--wave-hue', targetHue);
+      if (!frame) {
+        lobes = value.lobes;
+        orb.style.setProperty('--wave-shape', shape(elapsed, 0));
+      }
       for (const [index, button] of Array.from(options.children).entries()) {
         button.setAttribute('aria-pressed', String(choices[index].key === value.key));
       }
       root.querySelector('[data-wave-personal]').setAttribute('aria-pressed', String(station.key === personal.key));
     }
 
+    function swapTexture(image) {
+      for (const old of [...fluid.children]) {
+        if (old !== texture) old.remove();
+      }
+      if (texture) {
+        const previous = texture;
+        previous.classList.add('music-wave-cover-out');
+        previous.addEventListener('animationend', () => previous.remove(), {once:true});
+        if (motion.matches) previous.remove();
+      }
+      texture = image;
+      if (image) fluid.append(image);
+    }
+
     function setCover(url) {
       if (cover === url) return;
       cover = url;
-      texture?.remove();
-      texture = null;
-      if (!url) return;
-      // The image is a refracted color layer. It needs neither canvas readback nor a proxy.
+      pendingTexture = null;
+      if (!url) { swapTexture(null); return; }
       const image = new Image();
       image.alt = '';
       image.referrerPolicy = 'no-referrer';
       image.decoding = 'async';
       image.addEventListener('load', () => {
-        if (texture === image) fluid.append(image);
+        if (pendingTexture !== image) return;
+        pendingTexture = null;
+        swapTexture(image);
       }, {once:true});
-      texture = image;
+      image.addEventListener('error', () => {
+        if (pendingTexture !== image) return;
+        pendingTexture = null;
+        swapTexture(null);
+      }, {once:true});
+      pendingTexture = image;
       image.src = url;
     }
 
     const visible = () => !root.hidden && root.isConnected && root.closest('dialog[open]') && !document.hidden;
     const playing = () => Boolean(state && !state.audio.paused && !state.audio.ended && !state.loading);
     function shape(time, pulse) {
-      const radii = Array.from({length:8}, (_, i) => Math.round(50 +
-        (6 + 10 * pulse) * Math.sin(time + i * station.lobes * .83) +
-        3 * Math.cos(time * .6 - i * 1.29)) + '%');
-      return radii.slice(0, 4).join(' ') + ' / ' + radii.slice(4).join(' ');
+      const offset = phase => 50 + (3.4 + 4.3 * pulse) * Math.sin(time + phase * lobes * .63) +
+        2.2 * Math.cos(time * .52 - phase * 1.39);
+      const [top, bottom, left, right] = [0, 1, 2, 3].map(offset);
+      const percentages = (...values) => values.map(value => value.toFixed(1) + '%').join(' ');
+      // Opposing radii meet at the tangent, keeping all sides curved as they move.
+      return percentages(top, 100 - top, bottom, 100 - bottom) + ' / ' +
+        percentages(left, right, 100 - right, 100 - left);
     }
 
     function draw(now) {
       frame = 0;
       if (!visible() || motion.matches || !playing()) { suspend(); return; }
       frame = requestAnimationFrame(draw);
-      if (now - last < 32) return;
-      elapsed += Math.min(64, now - last) / 1000;
+      const delta = now - last;
+      if (delta < 31) return;
+      const seconds = Math.min(64, delta) / 1000;
       last = now;
+      lobes += (station.lobes - lobes) * (1 - Math.exp(-seconds * 3));
       const index = Math.floor(state.audio.currentTime * 40);
-      const drive = (state.beats?.[index] || 0) * .72 + (state.envelope?.[index] || 0) * .28;
-      energy += (drive - energy) * (drive > energy ? .58 : .24);
-      const rate = .8 + station.lobes * .14;
-      orb.style.borderRadius = shape(elapsed * rate, energy);
-      orb.style.transform = 'scale(' + (1 + .11 * energy).toFixed(3) + ')';
+      const drive = (state.beats?.[index] || 0) * .64 + (state.envelope?.[index] || 0) * .36;
+      energy += (drive - energy) * (1 - Math.exp(-seconds * (drive > energy ? 17 : 5)));
+      elapsed += seconds * (.65 + lobes * .09 + energy * .15);
+      orb.style.setProperty('--wave-shape', shape(elapsed, energy));
+      orb.style.transform = 'scale(' + (1 + .052 * energy).toFixed(3) + ')';
     }
 
     function suspend() {
       cancelAnimationFrame(frame);
       frame = 0;
       energy = 0;
-      orb.style.removeProperty('border-radius');
-      orb.style.removeProperty('transform');
       delete root.dataset.waveMoving;
+      orb.style.setProperty('--wave-shape', shape(elapsed, 0));
+      orb.style.removeProperty('transform');
     }
 
     function sync(current, {loading = false, canAdvance = false, cover = '', message = ''} = {}) {
@@ -175,12 +205,18 @@ window.NoraMusicWave = (() => {
       const track = current?.track;
       const text = track?.title || (station.artist ? station.title : station.display || t(station.title));
       const artist = track?.artist || '';
-      if (title.textContent !== text) title.textContent = text;
-      if (byline.textContent !== artist) byline.textContent = artist;
+      if (title.textContent !== text || byline.textContent !== artist) {
+        title.textContent = text;
+        byline.textContent = artist;
+        if (visible() && !motion.matches) title.parentElement.animate?.([
+          {opacity:.55, transform:'translateY(3px)'}, {opacity:1, transform:'translateY(0)'}
+        ], {duration:260, easing:'ease-out'});
+      }
+      byline.hidden = Boolean(message);
       status.hidden = !message;
       const localized = t(message);
       if (status.textContent !== localized) status.textContent = localized;
-      setCover(cover);
+      if (!busy || cover) setCover(cover);
       const playState = busy ? 'loading' : playing() ? 'playing' : 'idle';
       play.dataset.wavePlayState = playState;
       play.disabled = busy;
@@ -202,6 +238,9 @@ window.NoraMusicWave = (() => {
       if (button.dataset.waveTab && tab !== button.dataset.waveTab) {
         tab = button.dataset.waveTab;
         paintChoices();
+        if (!motion.matches) options.animate?.([
+          {opacity:.35, transform:'translateY(4px)'}, {opacity:1, transform:'translateY(0)'}
+        ], {duration:245, easing:'cubic-bezier(.2,.65,.3,1)'});
       }
       const choice = choices[Number(button.dataset.waveChoice)];
       if (choice) select(choice);
