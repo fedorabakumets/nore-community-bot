@@ -225,8 +225,9 @@ const NoraProfileWaves = (() => {
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
   let queue = [], queueIndex = -1, shuffle = false, repeat = false;
-  let playIntent = 0;
+  let playIntent = 0, playerReturn = null;
   const mini = document.getElementById('nora-mini-player');
+  const miniHome = mini.parentElement, miniNext = mini.nextSibling;
   const miniOpen = mini.querySelector('[data-mini-open]');
   const miniToggle = mini.querySelector('[data-mini-toggle]');
   const miniTitle = mini.querySelector('[data-mini-title]');
@@ -430,7 +431,7 @@ window.NoraProfileTrack = (() => {
   function back() {
     const dialog = $('#sheet');
     if (!dialog.open) return false;
-    if ($('#nora-now-playing')) { dialog.close(); return true; }
+    if ($('#nora-now-playing')) { closeNowPlaying(); return true; }
     if (!$('#music-library-profile')) return false;
     const origin = libraryReturn;
     libraryReturn = null;
@@ -678,7 +679,7 @@ window.NoraProfileTrack = (() => {
   }
 
   document.addEventListener('close', event => {
-    if (event.target === $('#sheet')) libraryReturn = null;
+    if (event.target === $('#sheet')) { libraryReturn = null; playerReturn = null; syncMiniHost(); }
   }, true);
 
   document.addEventListener('cancel', event => {
@@ -758,7 +759,39 @@ window.NoraProfileTrack = (() => {
     return rows.find(element => element.closest('dialog[open]')) || rows[0] || null;
   }
 
+  function syncMiniHost() {
+    const dialog = $('#sheet');
+    const library = dialog.open && dialog.querySelector('#music-library-profile');
+    const docked = Boolean(library && active);
+    if (docked && mini.parentElement !== dialog) {
+      dialog.append(mini);
+      if (!miniMotion.matches) mini.animate?.([{opacity:0,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(.2,.8,.2,1)'});
+    } else if (!docked && mini.parentElement !== miniHome) {
+      miniHome.insertBefore(mini, miniNext);
+    }
+    dialog.classList.toggle('music-mini-docked', docked);
+    return docked;
+  }
+
+  function closeNowPlaying() {
+    const dialog = $('#sheet');
+    if (!dialog.querySelector('#nora-now-playing')) return false;
+    if (!playerReturn) { dialog.close(); return true; }
+    const saved = playerReturn;
+    playerReturn = null;
+    $('#sheet-content').replaceChildren(saved.panel);
+    libraryReturn = saved.libraryReturn;
+    syncMiniHost();
+    const scroll = dialog.classList.contains('music-mini-docked') ? $('#sheet-content') : dialog;
+    scroll.scrollTop = saved.scrollTop;
+    saved.panel.focus({preventScroll:true});
+    window.NoraShop?.syncBack();
+    if (active) paint(active);
+    return true;
+  }
+
   function paintMini() {
+    syncMiniHost();
     const state = active;
     const visible = Boolean(state && document.querySelector('#nav .nav-drop'));
     mini.hidden = !visible;
@@ -774,6 +807,9 @@ window.NoraProfileTrack = (() => {
     if (miniArtist.textContent !== artist) miniArtist.textContent = artist;
     if (miniSource !== state.src) {
       miniSource = state.src;
+      const artwork = mini.querySelector('.nora-mini-art');
+      artwork.querySelector('img')?.remove();
+      artwork.insertAdjacentHTML('beforeend', coverImage(track, 'music-mini-cover'));
       if (!miniMotion.matches) mini.querySelector('.nora-mini-copy').animate?.([
         {opacity: .25, transform: 'translateY(5px)'}, {opacity: 1, transform: 'translateY(0)'}
       ], {duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)'});
@@ -1076,6 +1112,10 @@ window.NoraProfileTrack = (() => {
   function openNowPlaying() {
     const state = active;
     if (!state) return;
+    const dialog = $('#sheet'), library = dialog.querySelector('#music-library-profile');
+    if (dialog.open && library) {
+      playerReturn = {panel:library, libraryReturn, scrollTop:dialog.classList.contains('music-mini-docked') ? $('#sheet-content').scrollTop : dialog.scrollTop};
+    }
     libraryReturn = null;
     const svg = (path, cls='') => '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
     sheet('<section id="nora-now-playing" aria-label="' + NoraI18n.html("Музыкальный плеер") + '" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
@@ -1228,6 +1268,7 @@ window.NoraProfileTrack = (() => {
   // In-memory audio is cleared when the authenticated navigation is removed.
   function rebind() {
     if (!document.querySelector('#nav .nav-drop')) { stop(); clearMusicCache(); return; }
+    syncMiniHost();
     if (!active) return;
     const replacement = currentRow(active);
     if (active.element !== replacement) {
@@ -1242,5 +1283,5 @@ window.NoraProfileTrack = (() => {
   observer.observe($('#sheet'), { attributes: true, attributeFilter: ['open'] });
   document.addEventListener('close', rebind, true);
   window.addEventListener('pagehide', () => { stop(); clearMusicCache(); });
-  return { html, libraryButton, back };
+  return { html, libraryButton, back, closeNowPlaying };
 })();
