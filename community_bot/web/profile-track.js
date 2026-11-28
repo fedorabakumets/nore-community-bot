@@ -457,7 +457,7 @@ window.NoraProfileTrack = (() => {
       '<button type="button" data-music-tab="mine" aria-pressed="false">' + t("Мои треки") + '</button>' +
       '<button type="button" data-music-tab="search" aria-pressed="false">' + t("Поиск") + '</button></div>' +
       '<div class="music-discovery-cards" data-music-cards>' +
-      '<button type="button" class="music-feature music-feature-purple" data-music-go="search"><small>NORA / MUSIC</small><strong>' + t("Найди свой звук") + '</strong><span>' + t("Музыкальный каталог") + ' ↗</span></button>' +
+      '<button type="button" class="music-feature music-feature-purple" data-music-go="wave"><small>NORA / WAVE</small><strong>' + t("Моя волна") + '</strong><span>' + t("Музыка в твоём вкусе") + ' ↗</span></button>' +
       '<button type="button" class="music-feature music-feature-red" data-music-go="top"><small>NORA / TOP</small><strong>' + t("Топ Норы") + '</strong><span>' + t("Популярная музыка") + ' ↗</span></button>' +
       '<button type="button" class="music-feature music-feature-blue" data-music-go="friends"><small>FRIENDS</small><strong>' + t("Музыка друзей") + '</strong><span>' + t("На одной волне") + ' ↗</span></button>' +
       '<button type="button" class="music-feature music-feature-history" data-music-go="history"><small>RECENT</small><strong>' + t("История") + '</strong><span>' + t("Недавно слушал") + ' ↗</span></button></div>' +
@@ -466,7 +466,7 @@ window.NoraProfileTrack = (() => {
       '<div class="music-discovery-heading"><h3 data-music-heading>' + t("Недавно добавлено") + '</h3></div>' +
       '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>' +
       '<div data-music-local-empty hidden>' + libraryEmpty() + '</div>' +
-      '<section data-music-catalog hidden><h3>' + t("Яндекс Музыка") + '</h3><div data-music-results aria-live="polite"></div></section>' +
+      '<section data-music-catalog hidden><div class="music-wave-head"><h3 data-catalog-heading>' + t("Яндекс Музыка") + '</h3><button type="button" data-wave-refresh hidden>' + t("Обновить") + ' ↻</button></div><div data-music-results aria-live="polite"></div></section>' +
       '<div data-music-visibility>' + visibility + '</div>';
     const form = content.querySelector('[data-music-search]');
     const input = content.querySelector('[data-music-query]');
@@ -476,7 +476,7 @@ window.NoraProfileTrack = (() => {
     const social = content.querySelector('[data-music-social]');
     const socialResults = content.querySelector('[data-music-social-results]');
     const activity = content.querySelector('[data-music-activity]');
-    let mode = 'home', generation = 0, controller = null, importPending = false, socialGeneration = 0, period = 'week';
+    let mode = 'home', generation = 0, controller = null, importPending = false, socialGeneration = 0, period = 'week', waveTracks = [];
     const alive = () => panel.isConnected && $('#sheet').open;
     const normalize = value => value.toLocaleLowerCase().trim();
     function filter() {
@@ -492,15 +492,18 @@ window.NoraProfileTrack = (() => {
         if (!saved && button.textContent === '✓') { button.disabled = false; button.textContent = '+'; }
       }
       const socialMode = ['top','friends','history'].includes(mode);
-      list.hidden = count === 0 || socialMode;
+      const waveMode = mode === 'wave';
+      list.hidden = count === 0 || socialMode || waveMode;
       const empty = content.querySelector('[data-music-local-empty]');
-      empty.hidden = count > 0 || socialMode;
+      empty.hidden = count > 0 || socialMode || waveMode;
       empty.innerHTML = q ? '<div class="profile-library-empty">' + t("В коллекции ничего не найдено") + '</div>' : libraryEmpty();
       content.querySelector('[data-music-cards]').hidden = mode !== 'home';
-      content.querySelector('[data-music-visibility]').hidden = mode === 'search';
+      content.querySelector('[data-music-visibility]').hidden = mode === 'search' || mode === 'wave';
       content.querySelector('[data-music-heading]').textContent = NoraI18n.t(mode === 'home' ? "Недавно добавлено" : mode === 'search' ? "В твоей коллекции" : "Мои треки");
-      catalog.hidden = mode !== 'search';
-      content.querySelector('.music-discovery-heading').hidden = socialMode;
+      catalog.hidden = mode !== 'search' && !waveMode;
+      content.querySelector('[data-catalog-heading]').textContent = NoraI18n.t(waveMode ? 'Моя волна' : 'Яндекс Музыка');
+      content.querySelector('[data-wave-refresh]').hidden = !waveMode;
+      content.querySelector('.music-discovery-heading').hidden = socialMode || waveMode;
       social.hidden = !socialMode;
       content.querySelector('[data-music-activity-wrap]').hidden = mode === 'search';
       panel.querySelector('[data-library-count]').textContent = libraryCount(list.querySelectorAll('[data-track-src]').length);
@@ -511,6 +514,7 @@ window.NoraProfileTrack = (() => {
       if (mode !== 'search') { input.value = ''; generation++; controller?.abort(); remote.innerHTML = ''; }
       else if (!remote.innerHTML) remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
       filter();
+      if (mode === 'wave') void loadWave();
       if (['top','friends','history'].includes(mode)) void loadSocial();
       else socialGeneration++;
       if (focus) input.focus();
@@ -572,6 +576,29 @@ window.NoraProfileTrack = (() => {
       remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
       filter();
     });
+    function renderCatalog(response, wave = false) {
+      remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t(wave ? (response.personalized ? "Подборка по твоему вкусу и новые открытия" : "Случайная музыка из каталога") : "Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
+          response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">▶</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
+            esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></button><button type="button" data-music-import="' +
+            esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
+          '<p class="music-catalog-note">' + t("Треки не найдены") + '</p>';
+    }
+    async function loadWave() {
+      if (importPending) return;
+      const version = ++generation;
+      const refresh = content.querySelector('[data-wave-refresh]');
+      refresh.disabled = true;
+      remote.innerHTML = '<p class="music-catalog-note" role="status">' + t("Собираем твою волну…") + '</p>';
+      try {
+        const response = await api('music-library/wave');
+        if (!alive() || version !== generation || mode !== 'wave') return;
+        waveTracks = response.tracks;
+        renderCatalog(response, true);
+      } catch (error) {
+        if (alive() && version === generation) remote.textContent = error.message;
+      } finally { refresh.disabled = false; }
+    }
+    content.querySelector('[data-wave-refresh]').addEventListener('click', () => void loadWave());
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (importPending) return;
@@ -586,11 +613,7 @@ window.NoraProfileTrack = (() => {
       try {
         const response = await api('music-library/search?' + new URLSearchParams({q}), null, controller.signal);
         if (!alive() || version !== generation) return;
-        remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
-          response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">▶</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
-            esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></button><button type="button" data-music-import="' +
-            esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
-          '<p class="music-catalog-note">' + t("Треки не найдены") + '</p>';
+        renderCatalog(response);
       } catch (error) {
         if (alive() && version === generation) remote.textContent = error.message;
       }
@@ -610,12 +633,16 @@ window.NoraProfileTrack = (() => {
         const art = row.querySelector('.music-catalog-glyph');
         art.textContent = '…';
         try {
-          const response = await api('music-library/play', {id:playButton.dataset.musicPlay});
+          const isWave = mode === 'wave';
+          const response = await api('music-library/play', {id:playButton.dataset.musicPlay, wave:isWave});
           if (!alive() || version !== generation || intent !== playIntent) return;
           const track = response.track;
           const item = {src: response.source + '?v=' + encodeURIComponent(track.revision), track};
           row.dataset.playSource = item.src;
-          queue = [item]; queueIndex = 0;
+          if (isWave) {
+            queue = waveTracks.map(t => t.id === playButton.dataset.musicPlay ? {...item,wave:true,catalogId:t.id} : {wave:true,catalogId:t.id,track:t});
+            queueIndex = queue.findIndex(t=>t.catalogId === playButton.dataset.musicPlay);
+          } else { queue = [item]; queueIndex = 0; }
           void startTrack(item);
         } catch (error) { if (alive()) toast(error.message); }
         finally { importPending = false; if (art.textContent === '…') art.textContent = '▶'; }
@@ -628,7 +655,7 @@ window.NoraProfileTrack = (() => {
       button.disabled = true;
       button.textContent = '…';
       try {
-        const response = await api('music-library/import', {id: button.dataset.musicImport});
+        const response = await api('music-library/import', {id: button.dataset.musicImport, wave:mode === 'wave'});
         if (!alive()) return;
         const track = response.track;
         if (!Array.from(list.querySelectorAll('[data-track-id]')).some(row => row.dataset.trackId === String(track.id))) {
@@ -1190,6 +1217,18 @@ window.NoraProfileTrack = (() => {
 
   async function startTrack(item) {
     if (!item) return;
+    if (!item.src && item.wave && item.catalogId) {
+      const intent = ++playIntent;
+      try {
+        const response = await api('music-library/play', {id:item.catalogId,wave:true});
+        if (intent !== playIntent) return;
+        item.src = response.source + '?v=' + encodeURIComponent(response.track.revision);
+        item.track = response.track;
+        for (const row of document.querySelectorAll('.music-catalog-row')) {
+          if (row.querySelector('[data-music-play]')?.dataset.musicPlay === item.catalogId) row.dataset.playSource = item.src;
+        }
+      } catch (error) { if (intent === playIntent) toast(error.message); return; }
+    }
     if (active?.src === item.src) { await toggleActive(active); return; }
     const full = Boolean($('#nora-now-playing'));
     stop();
@@ -1240,6 +1279,17 @@ window.NoraProfileTrack = (() => {
     let next = queueIndex + direction;
     if (shuffle && direction > 0 && queue.length > 1) {
       next = (queueIndex + 1 + Math.floor(Math.random() * (queue.length-1))) % queue.length;
+    }
+    if (next >= queue.length && direction > 0 && queue[queueIndex]?.wave) {
+      const intent = ++playIntent;
+      try {
+        const response = await api('music-library/wave');
+        if (intent !== playIntent || !response.tracks.length) return;
+        const previous = new Set(queue.map(item=>item.catalogId));
+        const fresh = response.tracks.filter(track=>!previous.has(track.id));
+        queue = (fresh.length ? fresh : response.tracks).map(track=>({wave:true,catalogId:track.id,track}));
+        next = 0;
+      } catch (error) { if (intent === playIntent) toast(error.message); return; }
     }
     if (next < 0 || next >= queue.length) return;
     queueIndex = next;
