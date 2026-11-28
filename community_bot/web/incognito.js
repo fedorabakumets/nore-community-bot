@@ -2,7 +2,7 @@
 window.NoraIncognito = (() => {
   let panel, feed, form, input, error, title, subtitle, lobby, tools, finder;
   let state = 'idle', session = null, cursor = 0, timer = null, busy = false, epoch = 0;
-  let lastTyping = 0, pending = null, previousFocus = null;
+  let lastTyping = 0, pending = null, previousFocus = null, recent = null;
   const icons = {
     mask: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 20c4-9 10-11 18-6 8-5 14-3 18 6l-4 10c-3 7-10 5-14-1-4 6-11 8-14 1z"/><path d="M12 23q5-5 10 0m4 0q5-5 10 0"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>',
@@ -18,7 +18,7 @@ window.NoraIncognito = (() => {
     panel.className = 'incognito-panel';
     panel.setAttribute('aria-label','Инкогнито');
     panel.innerHTML = `<header class="incognito-header"><button type="button" class="incognito-round" data-inc="close" aria-label="Назад">‹</button><div class="incognito-heading"><strong>Инкогнито</strong><small data-inc-status>Анонимный чат · 18+</small></div><button type="button" class="incognito-round" data-inc="menu" aria-label="Действия" hidden>···</button></header>
-      <section class="incognito-lobby"><div class="incognito-orbit"><i></i><i></i><i></i><div class="incognito-symbol">${icons.mask}</div></div><h1 data-inc-title>Кто-то незнакомый.</h1><p data-inc-copy>Ни имён, ни профилей.<br>Только вы и разговор.</p><button class="incognito-primary" data-inc="find">Найти собеседника</button><small>Только текст. Не отправляй личные данные.</small></section>
+      <section class="incognito-lobby"><div class="incognito-orbit"><i></i><i></i><i></i><div class="incognito-symbol">${icons.mask}</div></div><h1 data-inc-title>Кто-то незнакомый.</h1><p data-inc-copy>Ни имён, ни профилей.<br>Только вы и разговор.</p><button class="incognito-primary" data-inc="find">Найти собеседника</button><small>Только текст. Не отправляй личные данные.<br>После завершения последние сообщения доступны для жалобы 15 минут.</small><button type="button" class="incognito-recent" data-inc="recent-report" hidden>Пожаловаться на последнего собеседника</button></section>
       <div class="incognito-feed" role="log" aria-live="polite" hidden></div>
       <div class="incognito-error" role="status" hidden></div>
       <form class="incognito-compose" hidden><textarea rows="1" maxlength="2000" placeholder="Сообщение" aria-label="Сообщение"></textarea><button type="submit" aria-label="Отправить">${icons.send}</button></form>
@@ -51,6 +51,7 @@ window.NoraIncognito = (() => {
     lobby.hidden=matched;feed.hidden=!matched;form.hidden=!matched;tools.hidden=!matched;
     $i('[data-inc="menu"]').hidden=!matched;
     if(!matched) $i('.incognito-menu').hidden=true;
+    $i('[data-inc="recent-report"]').hidden=!recent||matched;
     finder.textContent=searching?'Отменить поиск':'Найти собеседника';
     title.textContent=searching?'Ищем собеседника…':old==='matched'?'Диалог завершён.':'Кто-то незнакомый.';
     $i('[data-inc-copy]').textContent=searching?'Кто-то тоже ищет разговор.':old==='matched'?'Можно начать новый разговор.':'Ни имён, ни профилей. Только вы и разговор.';
@@ -62,7 +63,7 @@ window.NoraIncognito = (() => {
     if(result.session!==session) {
       session=result.session;cursor=0;feed.replaceChildren();input.value='';input.style.height='auto';pending=null;
     }
-    state=result.state;refreshView(old);
+    state=result.state;recent=result.recent||null;refreshView(old);
     if(state==='matched') {
       subtitle.textContent=result.typing?'печатает…':result.online?'Незнакомец · в сети':'Незнакомец';
       const nearEnd=feed.scrollHeight-feed.scrollTop-feed.clientHeight<100;
@@ -107,7 +108,7 @@ window.NoraIncognito = (() => {
       pending={session, text, client_id:Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')};
     }
     const result=await request('send',{...pending,after:cursor});
-    if(result){input.value='';input.style.height='auto';pending=null;haptic();}
+    if(result){if(input.value.trim()===text){input.value='';input.style.height='auto';}pending=null;haptic();}
   }
   async function action(name) {
     if(name==='menu'){$i('.incognito-menu').hidden=!$i('.incognito-menu').hidden;return;}
@@ -118,6 +119,12 @@ window.NoraIncognito = (() => {
       panel.close();return;
     }
     if(name==='find'){haptic();await request(state==='searching'?'end':'join',{session,after:cursor});return;}
+    if(name==='recent-report'){
+      if(recent && window.confirm('Передать последние сообщения модераторам и заблокировать собеседника?')){
+        await request('report',{session:recent});
+      }
+      return;
+    }
     if(name==='report'&&!window.confirm('Отправить последние 12 сообщений модераторам и заблокировать собеседника?'))return;
     if(name==='block'&&!window.confirm('Заблокировать собеседника?'))return;
     if(name==='end'&&!window.confirm('Завершить диалог?'))return;
@@ -129,7 +136,7 @@ window.NoraIncognito = (() => {
     if(!panel)create();
     if(panel.open)return;
     previousFocus=document.activeElement;
-    state='idle';session=null;cursor=0;feed.replaceChildren();input.value='';pending=null;showError();refreshView('idle');
+    state='idle';session=null;recent=null;cursor=0;feed.replaceChildren();input.value='';pending=null;showError();refreshView('idle');
     document.body.classList.add('incognito-open');panel.showModal();void request('status');
   }
   document.addEventListener('click',e=>{if(e.target.closest('[data-incognito-open]')){e.preventDefault();open();}});
