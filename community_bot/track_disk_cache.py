@@ -17,6 +17,7 @@ from community_bot.profile_track import MAX_TRACK_BYTES
 
 CACHE_BYTES = 128 * 1024 * 1024
 DOWNLOADS = 2
+MAX_PENDING = 8
 
 
 class _BoundedFile(io.BufferedWriter):
@@ -59,6 +60,7 @@ class TrackDiskCache:
         self._entries = OrderedDict()
         self._locks = WeakValueDictionary()
         self._downloads = asyncio.Semaphore(DOWNLOADS)
+        self._pending = 0
 
     def _root(self):
         if self._directory is None:
@@ -129,28 +131,34 @@ class TrackDiskCache:
         lease = self._hit(key)
         if lease is not None:
             return lease
-        # Deduplicate concurrent downloads of the same Telegram file.
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            lease = self._hit(key)
-            if lease is not None:
-                return lease
-            async with self._downloads:
-                root = self._root()
-                partial = root / (key + ".part")
-                final = root / key
-                try:
-                    await download(partial)
-                    size = partial.stat().st_size
-                    if not 0 < size <= MAX_TRACK_BYTES:
-                        raise ValueError("Invalid audio file size")
-                    self._make_room(size)
-                    partial.replace(final)
-                    entry = _Entry(final, size)
-                    self._entries[key] = entry
-                    self._bytes += size
-                    return TrackLease(entry)
-                finally:
-                    partial.unlink(missing_ok=True)
+        if self._pending >= MAX_PENDING:
+            raise OSError("Audio cache is busy")
+        self._pending += 1
+        try:
+            # Deduplicate concurrent downloads of the same Telegram file.
+            async with self._locks.setdefault(key, asyncio.Lock()):
+                lease = self._hit(key)
+                if lease is not None:
+                    return lease
+                async with self._downloads:
+                    root = self._root()
+                    partial = root / (key + ".part")
+                    final = root / key
+                    try:
+                        await download(partial)
+                        size = partial.stat().st_size
+                        if not 0 < size <= MAX_TRACK_BYTES:
+                            raise ValueError("Invalid audio file size")
+                        self._make_room(size)
+                        partial.replace(final)
+                        entry = _Entry(final, size)
+                        self._entries[key] = entry
+                        self._bytes += size
+                        return TrackLease(entry)
+                    finally:
+                        partial.unlink(missing_ok=True)
+        finally:
+            self._pending -= 1
 
     def close(self):
         for entry in self._entries.values():
