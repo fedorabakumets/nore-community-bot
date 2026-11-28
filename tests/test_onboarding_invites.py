@@ -1,21 +1,12 @@
-"""Automatic admissions, chat invites and command scopes."""
+"""Manual admissions, chat invites and command scopes."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import SendMessage
-
 from community_bot.database import Database
 from community_bot.main import configure_commands
-from community_bot.onboarding_invites import (
-    BROADCAST_MARKER,
-    BROADCAST_DONE,
-    accept_waiting_applications,
-    broadcast_entry_once,
-    entry_keyboard,
-    entry_text,
-)
-from community_bot.routers.group import auto_approve_join_request
+from community_bot.onboarding_invites import entry_keyboard
+from community_bot.routers.group import community_join_request
+from community_bot.routers.life import captcha_join_request, captcha_ok
 from community_bot.routers.private import _notify_application_decision
 
 
@@ -54,86 +45,58 @@ def test_invite_card_has_real_join_button_and_no_invalid_link():
     markup = entry_keyboard(settings(), bot_username="nora_community_bot")
     assert markup.inline_keyboard[0][0].url == "https://t.me/+NoraTest"
     assert markup.inline_keyboard[1][0].url.endswith("?startapp")
-    assert "чат" in entry_text().lower()
     invalid = SimpleNamespace(community_invite_url="javascript:alert(1)")
     assert entry_keyboard(invalid).inline_keyboard == []
 
 
-async def test_one_time_broadcast_is_per_recipient_and_has_entry_button(tmp_path):
-    db = Database(tmp_path / "invites.db")
-    await db.initialize()
-    await db.ensure_user(7)
-    await db.ensure_user(8)
-    client = bot()
-    assert await broadcast_entry_once(client, db, settings()) == (2, 0)
-    assert client.send_message.await_count == 2
-    sent = client.send_message.call_args_list[0]
-    assert sent.kwargs["parse_mode"] == "HTML"
-    assert sent.kwargs["reply_markup"].inline_keyboard[0][0].url == "https://t.me/+NoraTest"
-    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "sent"
-    assert await broadcast_entry_once(client, db, settings()) == (0, 0)
-    assert client.send_message.await_count == 2
-    assert await db.get_bot_state(BROADCAST_DONE) == "1"
-    await db.ensure_user(9)
-    assert await broadcast_entry_once(client, db, settings()) == (0, 0)
-    assert client.send_message.await_count == 2
-
-
-async def test_existing_pending_applications_are_approved_and_not_broadcast_twice(tmp_path):
-    db = Database(tmp_path / "approved.db")
-    await db.initialize()
-    await db.ensure_user(99)
-    await db.ensure_user(7)
-    application_id = await db.create_application(7, {"name": "Анна"})
-    client = bot()
-    assert await accept_waiting_applications(client, db, settings()) == 1
-    assert await db.has_approved_application(7)
-    assert (await db.get_application(application_id))["status"] == "approved"
-    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "sent"
-    assert await accept_waiting_applications(client, db, settings()) == 0
-    assert await broadcast_entry_once(client, db, settings()) == (1, 0)
-
-
-async def test_chat_join_requests_accepted_only_after_questionnaire(tmp_path):
+async def test_chat_join_requests_stay_pending_even_with_an_approved_questionnaire(tmp_path, monkeypatch):
     db = Database(tmp_path / "join.db")
     await db.initialize()
     await db.ensure_user(7)
     client = bot()
+    remember = AsyncMock()
+    monkeypatch.setattr("community_bot.referral_campaign.remember_request", remember)
     req = SimpleNamespace(
         chat=SimpleNamespace(id=-100123456),
         from_user=SimpleNamespace(id=7),
+        invite_link=SimpleNamespace(invite_link=settings().community_invite_url),
+        approve=AsyncMock(),
+        decline=AsyncMock(),
     )
-    await auto_approve_join_request(req, db, settings(), client)
-    client.approve_chat_join_request.assert_not_awaited()
+    await captcha_join_request(req, db, client, settings())
+    await community_join_request(req, db, settings())
     application_id = await db.create_application(7, {"name": "Анна"})
     await db.decide_application(application_id, 99, "approved", None)
-    await auto_approve_join_request(req, db, settings(), client)
-    client.approve_chat_join_request.assert_awaited_once_with(-100123456, 7)
+    await community_join_request(req, db, settings())
+    assert remember.await_count == 2
+    req.approve.assert_not_awaited()
+    req.decline.assert_not_awaited()
+    client.approve_chat_join_request.assert_not_awaited()
 
 
-async def test_non_messageable_users_are_marked_processed_in_one_time_broadcast(tmp_path):
-    db = Database(tmp_path / "unreachable.db")
+async def test_legacy_captcha_button_does_not_approve_telegram_join(tmp_path):
+    db = Database(tmp_path / "captcha.db")
     await db.initialize()
-    await db.ensure_user(7)
     client = bot()
-    client.send_message.side_effect = TelegramBadRequest(
-        method=SendMessage(chat_id=7, text="test"), message="chat not found",
+    client.restrict_chat_member = AsyncMock()
+    await db.add_captcha(7, -100123456)
+    callback = SimpleNamespace(
+        data="captcha:ok:-100123456", from_user=SimpleNamespace(id=7), message=None, answer=AsyncMock(),
     )
-    assert await broadcast_entry_once(client, db, settings()) == (0, 1)
-    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "blocked"
-    assert await db.get_bot_state(BROADCAST_DONE) == "1"
-    assert await broadcast_entry_once(client, db, settings()) == (0, 0)
-    assert client.send_message.await_count == 1
+    await captcha_ok(callback, db, client, settings())
+    client.restrict_chat_member.assert_awaited_once()
+    client.approve_chat_join_request.assert_not_awaited()
 
 
-async def test_automatic_admission_marks_invite_and_accepts_pending_telegram_join(tmp_path):
+async def test_manual_admission_accepts_pending_telegram_join(tmp_path):
     db = Database(tmp_path / "pending_join.db")
     await db.initialize()
     await db.ensure_user(7)
     application_id = await db.create_application(7, {"name": "Анна"})
-    await db.decide_application(application_id, 99, "approved", None)
     client = bot()
-    await _notify_application_decision(client, db, settings(), application_id, 99, "approved", None, automatic=True)
+    await _notify_application_decision(client, db, settings(), application_id, 99, "approved", None)
+    client.approve_chat_join_request.assert_not_awaited()
+    await db.decide_application(application_id, 99, "approved", None)
+    await _notify_application_decision(client, db, settings(), application_id, 99, "approved", None)
     client.approve_chat_join_request.assert_awaited_once_with(-100123456, 7)
-    assert await db.get_bot_state(f"{BROADCAST_MARKER}7") == "sent"
     assert client.send_message.await_count >= 2

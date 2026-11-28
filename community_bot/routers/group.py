@@ -16,8 +16,13 @@ from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import (
-    TelegramAPIError, TelegramBadRequest, TelegramForbiddenError,
-    TelegramNetworkError, TelegramNotFound, TelegramRetryAfter, TelegramServerError,
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramNotFound,
+    TelegramRetryAfter,
+    TelegramServerError,
 )
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
@@ -45,7 +50,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from community_bot import social_likes
-from community_bot.access import needs_reapplication, private_allowed
+from community_bot.access import needs_reapplication
 from community_bot.aliases import command_or_alias, is_command_message, remainder_args, strip_command_address
 from community_bot.audit import (
     SYSTEM_ACTOR_ID,
@@ -107,7 +112,6 @@ from community_bot.keyboards import (
     shop_home_keyboard,
     transfer_keyboard,
 )
-from community_bot.profile_fields import normalize_tg_channel_url
 from community_bot.permissions import (
     PERM_ADMIN_PANEL,
     PERM_BAN,
@@ -120,9 +124,10 @@ from community_bot.permissions import (
     PERM_USERS_EDIT,
     PERM_WARN,
 )
+from community_bot.profile_fields import normalize_tg_channel_url
 from community_bot.reaction_authors import ReactionAuthors
-from community_bot.reputation_chat_access import sync_reputation_chat_access
 from community_bot.reply_rich import bot_publication
+from community_bot.reputation_chat_access import sync_reputation_chat_access
 from community_bot.shop_catalog import (
     IMMUNITY_HOURS,
     PET_SUPPLIES,
@@ -146,29 +151,13 @@ _LIKE_NOTICE_COOLDOWN = 300
 
 
 @router.chat_join_request()
-async def auto_approve_join_request(
-    request: ChatJoinRequest, db: Database, settings: Settings, bot: Bot,
-) -> None:
-    """Join-request links no longer require a second manual review after the questionnaire."""
+async def community_join_request(request: ChatJoinRequest, db: Database, settings: Settings) -> None:
+    """Record referrals while Telegram admins review requests."""
     if request.chat.id != settings.community_chat_id:
         return
     from community_bot.referral_campaign import remember_request
 
     await remember_request(db, request)
-    user_id = request.from_user.id
-    # The public invitation sent by NORA admits everybody except actively banned users.
-    # Other join-request links keep the existing application gate.
-    ban = await db.ban_reset_state(user_id)
-    if db.ban_is_active(ban):
-        return
-    invite_link = getattr(getattr(request, "invite_link", None), "invite_link", None)
-    direct_invite = invite_link == settings.community_invite_url
-    if not direct_invite and not await private_allowed(db, settings, user_id, ban=ban):
-        return
-    try:
-        await bot.approve_chat_join_request(request.chat.id, user_id)
-    except (TelegramBadRequest, TelegramForbiddenError) as error:
-        logging.getLogger(__name__).warning("Community join request approval failed (%s)", type(error).__name__)
 
 
 @router.chat_member()

@@ -153,12 +153,13 @@ class PrivateAccessMiddleware(BaseMiddleware):
             if text in {'помощь', 'хелп'} or command in {'/help', '/commands'}:
                 pending = await db.has_pending_application(uid)
                 guide = 'Анкета на проверке. Решение придёт сюда.' if pending else (
-                    'Заполни анкету в Норе. После одобрения откроются остальные разделы.'
+                    'Заполни анкету для возвращения в чат.' if ban else
+                    'Приложение можно открыть сразу. Для входа в общий чат подай заявку.'
                 )
                 await event.answer(
                     f'{guide} Если нужна помощь, напиши поддержке.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        *start_apply_keyboard(pending=pending).inline_keyboard,
+                        *start_apply_keyboard(pending=pending, open_app=not ban).inline_keyboard,
                         [ibtn('Написать поддержке', 'menu:question', STYLE_CLOSE)],
                     ]),
                 )
@@ -182,8 +183,10 @@ class PrivateAccessMiddleware(BaseMiddleware):
             lambda text, **kwargs: data['bot'].send_message(uid, text, **kwargs)
         )
         pending = await db.has_pending_application(uid)
-        body = 'Анкета на проверке. Решение придёт сюда.' if pending else 'Сначала заполни анкету — это вход в Нору.'
-        markup = start_apply_keyboard(pending=pending)
+        body = 'Анкета на проверке. Решение придёт сюда.' if pending else (
+            'Заполни анкету для возвращения в чат.' if ban else 'Открой приложение Норы, чтобы продолжить.'
+        )
+        markup = start_apply_keyboard(pending=pending, open_app=not ban)
         if markup.inline_keyboard:
             await answer(body, reply_markup=markup)
         await answer('Помощь всегда здесь.' if markup.inline_keyboard else body, reply_markup=guest_keyboard())

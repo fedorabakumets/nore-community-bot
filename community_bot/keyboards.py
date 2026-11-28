@@ -119,12 +119,13 @@ def private_menu_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def start_apply_keyboard(*, pending: bool = False) -> InlineKeyboardMarkup:
+def start_apply_keyboard(*, pending: bool = False, open_app: bool = False) -> InlineKeyboardMarkup:
     url = os.getenv("MINIAPP_URL", "").strip()
     if url.startswith("https://"):
+        label = "Открыть Нору" if open_app else ("Проверить статус анкеты" if pending else "📝 Заполнить анкету")
         rows = [[
             InlineKeyboardButton(
-                text="Проверить статус анкеты" if pending else "📝 Заполнить анкету",
+                text=label,
                 web_app=WebAppInfo(url=url),
                 style=STYLE_GO,
             ),

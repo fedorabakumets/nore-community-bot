@@ -665,9 +665,6 @@ async def main() -> None:
     december_meetup_task = asyncio.create_task(publish_december_meetup(db, settings, bot))
     house_vote_task = asyncio.create_task(publish_house_vote(db, settings, bot))
     sticker_delivery_task = asyncio.create_task(sticker_delivery_job(bot, db))
-    from community_bot.onboarding_invites import run_entry_release
-
-    entry_release_task = asyncio.create_task(run_entry_release(bot, db, settings))
     from community_bot.referral_campaign import reward_scheduler
 
     referral_reward_task = asyncio.create_task(reward_scheduler(bot, db))
@@ -714,7 +711,6 @@ async def main() -> None:
             december_meetup_task,
             house_vote_task,
             sticker_delivery_task,
-            entry_release_task,
             referral_reward_task,
             emergency_task,
             restart_task,
@@ -741,7 +737,6 @@ async def main() -> None:
                 december_meetup_task,
                 house_vote_task,
                 sticker_delivery_task,
-                entry_release_task,
             referral_reward_task,
                 emergency_task,
                 restart_task,
