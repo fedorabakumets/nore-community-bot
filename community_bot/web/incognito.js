@@ -3,8 +3,8 @@ window.NoraIncognito = (() => {
   let panel, feed, form, input, error, title, subtitle, lobby, tools, finder;
   let state = 'idle', session = null, cursor = 0, timer = null, busy = false, epoch = 0;
   let lastTyping = 0, pending = null, previousFocus = null, recent = null;
-  let activeRequest = null, acting = false, confirmation = null, gesture = null, pressTimer = null;
-  let selectedMessage = null, ended = false, fullHeight = 0;
+  let activeRequest = null, acting = false, confirmation = null, gesture = null, pressTimer = null, lastAction = '';
+  let selectedMessage = null, ended = false, peerEnded = false, fullHeight = 0;
   const tr = value => window.NoraI18n?.t(value) || value;
   const icons = {
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg>',
@@ -85,7 +85,7 @@ window.NoraIncognito = (() => {
   function finishConfirm(answer){if(!confirmation)return;const resolve=confirmation;confirmation=null;$i('.incognito-confirm').hidden=true;resolve(answer);}
   function confirmAction(heading,copy){
     if(confirmation)return Promise.resolve(false);
-    input.blur();const box=$i('.incognito-confirm');box.querySelector('strong').textContent=tr(heading);box.querySelector('p').textContent=tr(copy);box.hidden=false;
+    input.blur();const box=$i('.incognito-confirm');box.querySelector('strong').textContent=tr(heading);box.querySelector('p').textContent=tr(copy);box.hidden=false;box.querySelector('[data-inc-confirm="no"]').focus({preventScroll:true});
     return new Promise(resolve=>{confirmation=resolve;});
   }
   function messageMenu(bubble){if(!bubble.isConnected||state!=='matched'||acting||confirmation)return;selectedMessage=bubble.querySelector('span').textContent;$i('.incognito-message-menu').hidden=false;$i('.incognito-menu').hidden=true;haptic();}
@@ -98,7 +98,7 @@ window.NoraIncognito = (() => {
     if(!matched) {$i('.incognito-menu').hidden=true;dismissMessage();}
     $i('[data-inc="recent-report"]').hidden=!recent||matched;
     finder.textContent=tr(searching?'Отменить поиск':ended?'Найти нового':'Найти собеседника');
-    title.textContent=tr(searching?'Ищем собеседника…':ended?'Диалог завершён.':'Кто-то незнакомый.');
+    title.textContent=tr(searching?'Ищем собеседника…':ended?(peerEnded?'Собеседник завершил диалог.':'Диалог завершён.'):'Кто-то незнакомый.');
     $i('[data-inc-copy]').textContent=tr(searching?'Кто-то тоже ищет разговор.':ended?'Можно начать новый разговор.':'Ни имён, ни профилей. Только вы и разговор.');
     subtitle.textContent=tr(matched?'Незнакомец':searching?'Поиск собеседника':'Анонимный чат · 18+');
     subtitle.dataset.online='false';subtitle.dataset.typing='false';syncSend();
@@ -110,8 +110,8 @@ window.NoraIncognito = (() => {
       session=result.session;cursor=0;resetFeed();input.value='';input.style.height='auto';pending=null;dismissMessage();
       if(!session)input.blur();
     }
-    if(result.state==='idle'&&old==='matched')ended=true;
-    else if(result.state!=='idle')ended=false;
+    if(result.state==='idle'&&old==='matched'){ended=true;peerEnded=lastAction==='status'||lastAction==='typing';}
+    else if(result.state!=='idle'){ended=false;peerEnded=false;}
     state=result.state;recent=result.recent||null;refreshView(old);
     if(state==='matched') {
       subtitle.textContent=tr(result.typing?'печатает':result.online?'Незнакомец · в сети':'Незнакомец');
@@ -144,7 +144,7 @@ window.NoraIncognito = (() => {
     try {
       const result=await api('incognito/'+name,data);
       if(current!==epoch || !panel.open)return null;
-      accept(result);if(name==='status')showError();
+      lastAction=name;accept(result);if(name==='status')showError();
       return result;
     } catch(e) {
       if(current===epoch && panel.open) {
@@ -160,7 +160,7 @@ window.NoraIncognito = (() => {
     const target=session;acting=true;clearTimeout(timer);syncSend();
     try{
     if(activeRequest)await activeRequest;
-    if(state!=='matched'||session!==target)return;
+    if(state!=='matched'||session!==target||!panel.open)return;
     if(!pending || pending.text!==text || pending.session!==session) {
       const bytes=crypto.getRandomValues(new Uint8Array(16));
       pending={session, text, client_id:Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')};
@@ -213,7 +213,7 @@ window.NoraIncognito = (() => {
     if(!panel)create();
     if(panel.open)return;
     previousFocus=document.activeElement;
-    state='idle';session=null;recent=null;cursor=0;ended=false;resetFeed();input.value='';pending=null;showError();refreshView('idle');
+    state='idle';session=null;recent=null;cursor=0;ended=false;peerEnded=false;resetFeed();input.value='';pending=null;showError();refreshView('idle');
     document.body.classList.add('incognito-open');fullHeight=0;panel.showModal();syncViewport();void request('status');
   }
   document.addEventListener('click',e=>{if(e.target.closest('[data-incognito-open]')){e.preventDefault();open();}});
