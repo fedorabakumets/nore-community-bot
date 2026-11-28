@@ -59,4 +59,72 @@
 #dice-root .dice-labgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 #dice-root select{background:#1c1f2a;border:1px solid #ffffff20;padding:9px;border-radius:10px;font-size:11px}
 #dice-root .dice-notice{text-align:center;min-height:18px}
-body:has(#app[data-screen="dice"]) #nora-mini-player{display:none!important}
+
+/* DICE owns the Mini App viewport, including its own navigation. */
+html:has(#app[data-screen="dice"]),
+body:has(#app[data-screen="dice"]){
+  overflow:hidden!important;overscroll-behavior:none;background:#090a10;
+}
+body:has(#app[data-screen="dice"]){height:100dvh;min-height:0}
+body:has(#app[data-screen="dice"]) :is(#nav,#nora-mini-player,#scroll-jump){display:none!important}
+body:has(#app[data-screen="dice"])::before,
+body:has(#app[data-screen="dice"])::after{background:#090a10;pointer-events:none}
+#app[data-screen="dice"],body.nora-mini-player-active #app[data-screen="dice"]{
+  position:fixed!important;
+  inset:max(var(--safe-top,0px),calc(var(--device-top,0px) + 56px)) 0 var(--safe-bottom,0px) 0;
+  width:100%;max-width:none;height:auto;min-height:0;max-height:none;
+  margin:0!important;padding:0 var(--safe-right,0px) 0 var(--safe-left,0px)!important;
+  display:flex;flex-direction:column;overflow:hidden;background:#090a10;
+}
+#dice-root{
+  width:100%;max-width:680px;flex:1;min-height:0;
+  display:flex;flex-direction:column;border-radius:0;overflow:hidden;
+  font-family:system-ui,-apple-system,sans-serif;
+}
+#dice-root .dice-top{flex:none;padding:9px 12px 6px}
+#dice-root .dice-body{
+  flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;padding:0 12px 8px;
+}
+#dice-root .dice-nav{flex:none;margin:6px 10px 8px}
+#dice-root[data-dice-screen="arena"] .dice-body{display:flex;flex-direction:column}
+#dice-root[data-dice-screen="arena"] .dice-detail{
+  flex:1 0 190px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+#dice-root[data-dice-screen="arena"] .dice-hero-art{width:clamp(145px,45vw,210px)}
+#dice-root[data-dice-screen="arena"] .dice-body>.dice-primary{flex:none}
+#dice-root[data-dice-screen="battle"] .dice-top{padding-block:5px}
+#dice-root[data-dice-screen="battle"] .dice-top strong{font-size:21px}
+#dice-root[data-dice-screen="battle"] .dice-body{display:flex;flex-direction:column;gap:4px;padding:0 8px 6px}
+#dice-root[data-dice-screen="battle"] .dice-body>*{flex:none;margin:0}
+#dice-root[data-dice-screen="battle"] .dice-mode-label{margin:0;min-height:34px}
+#dice-root[data-dice-screen="battle"] .dice-mode-label .dice-secondary{padding:7px 10px}
+#dice-root[data-dice-screen="battle"] .dice-stats{padding:1px 0 3px}
+#dice-root[data-dice-screen="battle"] .dice-stats strong{font-size:clamp(19px,5.5vw,25px)}
+#dice-root[data-dice-screen="battle"] .dice-stage{
+  flex:1 0 0;min-height:180px;min-width:0;display:grid;place-items:center;
+  container-type:size;overflow:hidden;
+  border-radius:16px;border:1px solid #ffffff13;
+  background:radial-gradient(ellipse at center,#141725,#090b12 75%);
+}
+#dice-root[data-dice-screen="battle"] .dice-stage.duel{min-height:260px}
+#dice-root .dice-stage .dice-canvas{
+  display:block;width:auto;height:auto;max-width:100%;max-height:100%;
+  border:0;border-radius:12px;object-fit:contain;
+}
+@supports (width:1cqh){
+  #dice-root .dice-stage .dice-canvas{width:min(100%,162.16cqh);height:auto}
+  #dice-root .dice-stage.duel .dice-canvas{width:min(100%,81.08cqh);height:auto}
+}
+#dice-root[data-dice-screen="battle"] .dice-actions{gap:5px}
+#dice-root[data-dice-screen="battle"] .dice-actions .dice-primary{padding:11px 8px}
+#dice-root[data-dice-screen="battle"] .dice-card{padding:3px 2px 5px}
+#dice-root[data-dice-screen="battle"] .dice-small svg{max-width:42px}
+#dice-root[data-dice-screen="battle"] .dice-notice{min-height:0;font-size:10px;line-height:1.3}
+#dice-root [data-dice-lab]:empty,#dice-root [data-dice-result]:empty{display:none}
+@media(max-height:640px){
+  #dice-root[data-dice-screen="battle"] .dice-small svg{max-width:32px}
+  #dice-root[data-dice-screen="battle"] .dice-stage{min-height:155px}
+  #dice-root[data-dice-screen="battle"] .dice-stage.duel{min-height:225px}
+  #dice-root[data-dice-screen="battle"] .dice-top small{display:none}
+}
