@@ -1790,7 +1790,7 @@ window.NoraProfileTrack = (() => {
       }))};
     }
     const params = new URLSearchParams(station.genre ? {genre:station.genre} :
-      station.artist ? {artist:station.artist} : {});
+      station.artist ? {artist:station.artist} : station.chart ? {chart:station.chart} : {});
     const query = params.toString();
     const response = await api('music-library/wave' + (query ? '?' + query : ''));
     return {items:response.tracks.map(track => ({wave:true,catalogId:track.id,track,station})),
@@ -1897,7 +1897,7 @@ window.NoraProfileTrack = (() => {
   function canStep(direction) {
     if (queueLoading || queueIndex < 0) return false;
     if (direction < 0) return queueIndex > 0;
-    return queueIndex + 1 < queue.length || Boolean(queue[queueIndex]?.wave) || (shuffle && queue.length > 1);
+    return queueIndex + 1 < queue.length || Boolean(queue[queueIndex]?.wave && !queue[queueIndex].station?.chart) || (shuffle && queue.length > 1);
   }
 
   function paintQueue() {
