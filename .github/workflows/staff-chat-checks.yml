@@ -1,0 +1,68 @@
+name: Staff Chat Media Checks
+on:
+  push:
+    branches: [cursor/nora-2-update-d133, cursor/nora-stage9-validation]
+    paths:
+      - "community_bot/staff_chat.py"
+      - "community_bot/community_scope.py"
+      - "community_bot/main.py"
+      - "community_bot/message_widgets.py"
+      - "community_bot/ephemeral.py"
+      - "community_bot/routers/group.py"
+      - "community_bot/routers/life.py"
+      - "community_bot/domain.py"
+      - "community_bot/reputation.py"
+      - "community_bot/reputation_chat_access.py"
+      - "community_bot/shop_catalog.py"
+      - "community_bot/shop_api.py"
+      - "community_bot/web/cabinet.js"
+      - "tests/test_reputation_shield_ttl.py"
+      - "tests/test_shop_api.py"
+      - "community_bot/config.py"
+      - "tests/test_domain.py"
+      - "tests/test_bot_fixes.py"
+      - "tests/test_reputation_policy.py"
+      - "tests/test_reputation_restore_chat.py"
+      - "tests/test_incident_replay.py"
+      - "tests/test_reputation_chat_gate.py"
+      - "community_bot/staff_chat_send.py"
+      - "community_bot/staff_chat_moderation.py"
+      - "community_bot/staff_chat_admin.py"
+      - "tests/test_staff_chat_moderation.py"
+      - "tests/test_staff_chat_admin.py"
+      - "community_bot/staff_chat_delivery.py"
+      - "community_bot/web/staff-chat-delivery.js"
+      - "tests/test_staff_chat_delivery.py"
+      - "tests/staff_chat_delivery.cjs"
+      - "community_bot/staff_chat_live.py"
+      - "community_bot/staff_chat_reactions.py"
+      - "community_bot/web/style.css"
+      - "community_bot/miniapp.py"
+      - "community_bot/database.py"
+      - "community_bot/web/staff-chat.js"
+      - "community_bot/web/index.html"
+      - "tests/test_staff_chat.py"
+      - "tests/staff_chat_media.cjs"
+      - ".github/workflows/staff-chat-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Check shield and shop Python
+        run: python -m ruff check community_bot/database.py community_bot/reputation.py community_bot/shop_api.py community_bot/shop_catalog.py community_bot/miniapp.py community_bot/reputation_chat_access.py tests/test_reputation_shield_ttl.py tests/test_reputation_restore_chat.py
+      - name: Test access, media and replies
+        run: python -m pytest -q tests/test_reputation_shield_ttl.py tests/test_reputation_restore_chat.py tests/test_shop_api.py tests/test_staff_chat_admin.py tests/test_staff_chat_moderation.py tests/test_staff_chat_delivery.py tests/test_staff_chat.py tests/test_incident_replay.py tests/test_reputation_chat_gate.py tests/test_reputation_policy.py tests/test_domain.py tests/test_bot_fixes.py tests/test_nora_commands_release.py tests/test_bug_and_command_cleanup.py tests/test_telegram_startup.py
+      - name: Validate browser syntax
+        run: node --check community_bot/web/staff-chat.js && node --check community_bot/web/staff-chat-delivery.js && node --check community_bot/web/cabinet.js
+      - name: Media composer browser smoke
+        run: node tests/staff_chat_media.cjs && node tests/staff_chat_delivery.cjs

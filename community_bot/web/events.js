@@ -1,0 +1,156 @@
+'use strict';
+window.NoraEvents=(()=>{
+  let items=null,editing=null,canMention=false,canDelete=false,managing=null,pending=false,linkedEventId=null;
+  const participantLists = new Map();
+  const when=e=>e.starts_at?new Date(e.starts_at).toLocaleString(NoraI18n.locale,{timeZone:'Europe/Moscow',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}):NoraI18n.t("Дата — скоро");
+  function description(event, preview = false) {
+    if (!event.description_blocks?.length) {
+      const tag = preview ? 'blockquote' : 'p';
+      return `<${tag} class="event-description">${esc(event.description || NoraI18n.t("Подробности скоро появятся."))}</${tag}>`;
+    }
+    return event.description_blocks.map(({kind, text}) => {
+      if (kind === 'quote') return `<blockquote class="event-description event-quote">${esc(text)}</blockquote>`;
+      if (kind === 'bold') return `<p class="event-description"><strong>${esc(text)}</strong></p>`;
+      return `<p class="event-description">${esc(text.trim())}</p>`;
+    }).join('');
+  }
+  function participantList(event) {
+    return `<details class="play-details event-about event-participants" data-retain-open="participants-${esc(event.id)}"
+      data-event-participants="${esc(event.id)}" data-count="${esc(event.count)}">
+      <summary>${NoraI18n.html("Участники ·")} ${number(event.count)}${event.capacity ? ' / ' + number(event.capacity) : ''}</summary>
+      <div data-participant-list aria-live="polite"></div>
+    </details>`;
+  }
+  function drawParticipants(details, state) {
+    const body = details.querySelector('[data-participant-list]');
+    const rows = state.items.map(person => `<li>${person.id
+      ? `<button class="text-btn" data-person-view="${esc(person.id)}">${esc(person.name)}</button>`
+      : `<span class="sub">${esc(person.name)}</span>`}</li>`).join('');
+    body.innerHTML = (rows ? `<ul>${rows}</ul>` : '') + (state.loading ? ("<p class=\"sub\">" + NoraI18n.html("Загружаем…") + "</p>")
+      : state.failed ? ("<button type=\"button\" class=\"text-btn\" data-participant-more>" + NoraI18n.html("Повторить загрузку") + "</button>")
+      : state.next !== null ? ("<button type=\"button\" class=\"text-btn\" data-participant-more>" + NoraI18n.html("Показать ещё") + "</button>")
+      : !rows ? ("<p class=\"sub\">" + NoraI18n.html("Пока никто не записался.") + "</p>") : '');
+  }
+  async function loadParticipants(details, nextPage = false) {
+    if (!details.open) return;
+    const id = details.dataset.eventParticipants, count = Number(details.dataset.count);
+    let state = participantLists.get(id);
+    if (!state || state.count !== count) {
+      state = {count, items: [], next: count ? 0 : null, loaded: !count, loading: false, failed: false};
+      participantLists.set(id, state);
+    }
+    if (state.loading || state.next === null || (!nextPage && (state.loaded || state.failed))) {
+      drawParticipants(details, state);
+      return;
+    }
+    state.loading = true;
+    state.failed = false;
+    drawParticipants(details, state);
+    try {
+      const response = await api('events/' + encodeURIComponent(id) + '/participants?offset=' + state.next);
+      state.items.push(...response.items);
+      state.next = response.next_offset;
+      state.loaded = true;
+    } catch {
+      state.failed = true;
+    } finally {
+      state.loading = false;
+      if (participantLists.get(id) === state) {
+        for (const node of document.querySelectorAll('details[open][data-event-participants]')) {
+          if (node.dataset.eventParticipants === id) drawParticipants(node, state);
+        }
+      }
+    }
+  }
+  function card(event, featured = true) {
+    const {id, title, starts_at, location, links, count, capacity, price, paid, joined, has_media,
+      organizer, registration_only} = event;
+    const full = capacity && count >= capacity;
+    const status = paid ? NoraI18n.t("Билет оплачен") : !price && joined ? NoraI18n.t("Ты в списке ✓") : full ? NoraI18n.t("Все места заняты") : price ? NoraI18n.t("Купить билет") : NoraI18n.t("Я буду");
+    const about = description(event);
+    return `<article class="card event event-detail${featured ? '' : ' event-compact'}" id="event-${esc(id)}">
+      ${has_media ? `<img class="event-cover" data-event-cover="${esc(id)}" alt="${NoraI18n.html("Обложка мероприятия")}" decoding="async">` : ''}
+      <div class="event-content">
+        <p class="event-date">${esc(when(event))}${starts_at ? NoraI18n.t(" · МСК") : ''}</p>
+        <h2>${esc(title)}</h2>
+        ${location ? `<p class="sub event-location">${esc(location)}</p>` : ''}
+        ${featured ? about : `<details class="play-details event-about" data-retain-open="about-${esc(id)}"><summary>${NoraI18n.html("О событии")}</summary>${about}</details>`}
+        ${links?.length ? `<details class="play-details event-about" data-retain-open="links-${esc(id)}"><summary>${NoraI18n.html("Доп. информация")}</summary>${links.map(link => `<p><a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a></p>`).join('')}</details>` : ''}
+        ${organizer ? `<button type="button" class="person-visit event-organizer" data-person-view="${esc(organizer.id)}">
+          <span class="person-avatar" data-person-avatar="${esc(organizer.id)}" aria-hidden="true">${esc(Array.from(organizer.name)[0] || NoraI18n.t("А"))}</span>
+          <span><b>${esc(organizer.name)}</b><small>${esc(organizer.role)} ${NoraI18n.html("· Открыть профиль")}</small></span>
+        </button>` : ''}
+        <div class="event-booking">
+          ${registration_only ? '' : `<div class="price">${price ? number(price)+' 🍪' : NoraI18n.t("Бесплатно")}</div>`}
+          <button class="primary" data-event="${esc(id)}" ${paid || !price && joined || full ? 'disabled' : ''}>${status}</button>
+        </div>
+        ${participantList(event)}
+        ${data.events_admin ? `<button class="secondary" data-event-edit="${esc(id)}">${NoraI18n.html("Редактировать")}</button>` : ''}
+      </div>
+    </article>`;
+  }
+  function form(){const e=editing;return `<button class="text-btn" data-event-editor-close>${NoraI18n.html("← К мероприятиям")}</button><h1>${e.published?("<em>" + NoraI18n.html("Редактировать") + "</em>"):("<em>" + NoraI18n.html("Новое событие") + "</em>")}</h1><p class="sub">${NoraI18n.html("Сохрани настройки, затем проверь предпросмотр и отправь пост в чат.")}</p><form id="event-editor-form"><label>${NoraI18n.html("Название")}<input name="title" maxlength="80" required value="${esc(e.title)}"></label><label>${NoraI18n.html("Описание")}<textarea name="description" rows="5" maxlength="2500">${esc(e.description)}</textarea></label><div class="event-form-grid"><label>${NoraI18n.html("Начало · Москва")}<input name="starts_at" type="datetime-local" value="${esc(e.localDate||'')}"></label><label>${NoraI18n.html("Локация")}<input name="location" maxlength="200" value="${esc(e.location)}" placeholder="${NoraI18n.html("Адрес или место встречи")}"></label></div><label class="event-toggle"><input name="free" type="checkbox" ${e.price===0?'checked':''}> ${NoraI18n.html("Бесплатное мероприятие")}</label><div class="event-form-grid"><label>${NoraI18n.html("Цена · 🍪")}<input name="price" type="number" min="0" max="1000000" step="1" value="${e.price}" ${e.price===0?'disabled':''}></label><label>${NoraI18n.html("Максимум участников")}<input name="capacity" type="number" min="0" max="100000" step="1" value="${e.capacity||0}"></label></div><p class="footer-note">${NoraI18n.html("0 мест — без ограничения. Цена фиксируется после первой записи.")}</p><section class="card event-editor-section"><h3>${NoraI18n.html("Медиа")}</h3><p class="sub" id="event-media-state">${e.media_token?NoraI18n.t("Новое медиа загружено"):e.has_media?NoraI18n.t("Медиа прикреплено"):NoraI18n.t("Пока без медиа")}</p><label>${NoraI18n.html("Фото или видео")}<input id="event-media-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4"></label><p class="footer-note">${NoraI18n.html("Фото до 5 МБ, MP4 до 20 МБ. С медиа текст поста — до 1024 символов.")}</p>${!e.published?("<button class=\"text-btn\" type=\"button\" data-event-remove-media>" + NoraI18n.html("Убрать медиа") + "</button>"):''}</section><section class="card event-editor-section"><h3>${NoraI18n.html("Доп. информация")}</h3><p class="sub">${NoraI18n.html("Именованные ссылки появятся отдельным блоком в сообщении.")}</p><div id="event-links">${linkInputs()}</div><button class="secondary" type="button" id="event-link-add">${NoraI18n.html("+ Добавить ссылку")}</button></section><section class="card event-editor-section"><h3>${NoraI18n.html("Опрос")}</h3><label>${NoraI18n.html("Вопрос")}<input name="poll_question" maxlength="300" value="${esc(e.poll?.question||'')}" placeholder="${NoraI18n.html("Оставь пустым, если опрос не нужен")}"></label><label>${NoraI18n.html("Варианты — каждый с новой строки")}<textarea name="poll_options" rows="4">${esc(e.poll?.options?.join('\n')||'')}</textarea></label><label class="event-toggle"><input name="poll_anonymous" type="checkbox" ${e.poll?.anonymous!==false?'checked':''}> ${NoraI18n.html("Анонимное голосование")}</label><p class="footer-note">${NoraI18n.html("2–10 вариантов. Отправленный опрос Telegram не позволяет редактировать.")}</p></section><button class="primary" type="submit" ${pending?'disabled':''}>${NoraI18n.html("Сохранить настройки")}</button><button class="secondary" type="button" id="event-preview" ${pending?'disabled':''}>${NoraI18n.html("Предпросмотр и публикация")}</button>${canDelete&&e.revision?("<button class=\"text-btn event-delete\" type=\"button\" id=\"event-delete\">" + NoraI18n.html("Удалить мероприятие") + "</button>"):''}</form>`}
+  function linkInputs(){return (editing.links||[]).map((l,i)=>`<div class="event-link-row"><label>${NoraI18n.html("Название")}<input data-link-label="${i}" maxlength="60" required value="${esc(l.label)}"></label><label>${NoraI18n.html("Адрес")}<input data-link-url="${i}" type="url" required value="${esc(l.url)}" placeholder="https://…"></label><button type="button" class="text-btn event-delete" data-remove-link="${i}">${NoraI18n.html("Убрать")}</button></div>`).join('')}
+  function screen(){if(editing&&data.events_admin)return form();const selected=data.events.find(e=>e.id===linkedEventId);const events=selected?[selected,...data.events.filter(e=>e.id!==linkedEventId)]:data.events;return `<div class="nora-page-heading"><h1>${NoraI18n.html("События")}</h1></div>${data.events_admin?("<button class=\"primary\" data-event-create>" + NoraI18n.html("+ Создать мероприятие") + "</button>"):''}${data.events.length?events.map((event, index)=>card(event, index===0)).join(''):("<div class=\"card empty\">" + NoraI18n.html("Пока без анонсов.") + "<br>" + NoraI18n.html("Новая встреча появится здесь.") + "</div>")}${data.events_admin?`<section id="event-drafts">${drafts()}</section>`:''}`}
+  function drafts(){const hidden=items?.filter(e=>e.status!=='active')||[];return hidden.length?`<h2>${NoraI18n.html("Черновики и выключенные")}</h2>${hidden.map(e=>`<button class="category-card" data-event-edit="${esc(e.id)}"><span><b>${esc(e.title)}</b><small>${e.published?NoraI18n.t("Запись выключена"):NoraI18n.t("Ещё не опубликовано")}</small></span><span>${NoraI18n.html("Редактировать →")}</span></button>`).join('')}`:''}
+  function manage() {
+    if (managing) return managing;
+    managing = api('events/manage').then(result => {
+      items = result.items;
+      canMention = result.can_mention;
+      canDelete = result.can_delete;
+      const draftList = $('#event-drafts');
+      if (draftList) draftList.innerHTML = drafts();
+    }).catch(error => toast(error.message)).finally(() => { managing = null; });
+    return managing;
+  }
+  function collect(){if(!editing)return;const f=$('#event-editor-form');if(!f)return;const x=new FormData(f);for(const key of ['title','description','location'])editing[key]=x.get(key)||'';editing.localDate=x.get('starts_at')||'';editing.starts_at=editing.localDate?editing.localDate+':00+03:00':null;editing.price=x.get('free')?0:Number(x.get('price')||0);editing.capacity=Number(x.get('capacity')||0);const q=String(x.get('poll_question')||'').trim();editing.poll=q?{question:q,options:String(x.get('poll_options')||'').split('\n').map(s=>s.trim()).filter(Boolean),anonymous:!!x.get('poll_anonymous')}:null;editing.links=[...f.querySelectorAll('[data-link-label]')].map(n=>({label:n.value,url:f.querySelector(`[data-link-url="${n.dataset.linkLabel}"]`).value}))}
+  async function edit(id){if(pending)return;await manage();const e=items?.find(e=>e.id===id);if(!e){toast(NoraI18n.t("Мероприятие больше недоступно"));return}$('#sheet').close();tab='events';NoraShop.tabChanged(tab);editing=structuredClone(e);editing.localDate=e.starts_at?new Date(new Date(e.starts_at).getTime()+3*3600000).toISOString().slice(0,16):'';render();window.scrollTo(0,0)}
+  async function save(preview=false){if(pending||!editing)return;if(!$('#event-editor-form').reportValidity())return;collect();pending=true;try{await api('events/save',editing);await manage();const fresh=items.find(e=>e.id===editing.id);editing={...fresh,localDate:editing.localDate};invalidateCover(editing.id);data=await api('me');pending=false;render();toast(NoraI18n.t("Настройки сохранены"));if(preview)showPreview()}catch(e){toast(e.message)}finally{pending=false}}
+  function showPreview(){const e=editing;sheet(`<span class="eyebrow">${NoraI18n.html("Предпросмотр сообщения")}</span><article class="event-post-preview"><h2>🎟 ${esc(e.title)}</h2><p>${esc(when(e))} ${NoraI18n.html("· МСК")}${e.location?'<br>📍 '+esc(e.location):''}</p><p>${e.registration_only?NoraI18n.t("Запись без оплаты в Норе"):e.price?number(e.price)+' 🍪':NoraI18n.t("Бесплатно")}${e.capacity?NoraI18n.t(" · Мест: ")+number(e.capacity):''}</p>${description(e,true)}${e.links.length?`<h3>${NoraI18n.html("Доп. информация")}</h3>${e.links.map(l=>`<p><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)} ↗</a></p>`).join('')}`:''}${e.has_media?("<p class=\"sub\">" + NoraI18n.html("📎 Прикреплённое медиа будет в посте.") + "</p>"):''}${e.poll?`<p class="sub">${NoraI18n.html("📊 Опрос:")} ${esc(e.poll.question)}</p>`:''}</article><p class="sub">${e.published?NoraI18n.t("Пост уже существует: обновим его и проверим закреп."):NoraI18n.t("Пост появится в чате и будет закреплён.")}</p>${canMention?("<label class=\"event-toggle\"><input type=\"checkbox\" id=\"event-notify\" checked> " + NoraI18n.html("Отдельно уведомить участников ссылками за эмодзи") + "</label>"):("<p class=\"sub\">" + NoraI18n.html("Упоминания доступны сотрудникам с отдельным правом уведомлений.") + "</p>")}<button class="primary" id="event-publish">${e.published?NoraI18n.t("Обновить публикацию"):NoraI18n.t("Отправить пост и закрепить")}</button>`);$('#event-publish').onclick=async()=>{if(pending)return;pending=true;$('#event-publish').disabled=true;try{const r=await api('events/publish',{id:e.id,revision:e.revision,notify:!!$('#event-notify')?.checked});$('#sheet').close();editing=null;items=null;data=await api('me');render();toast(r.message)}catch(err){toast(err.message);if($('#event-publish'))$('#event-publish').disabled=false}finally{pending=false}}}
+  function remove(){collect();const e=editing;sheet(`<h2>${NoraI18n.html("Удалить мероприятие?")}</h2><p>${esc(e.title)}</p><p class="sub">${NoraI18n.html("Запись закроется, мероприятие исчезнет из списка и с главной. Известные оплаты и залоги вернутся один раз; история останется.")}</p><button class="primary event-delete" id="event-delete-confirm">${NoraI18n.html("Удалить и вернуть оплаты")}</button>`);$('#event-delete-confirm').onclick=async()=>{if(pending)return;pending=true;$('#event-delete-confirm').disabled=true;try{const r=await api('events/delete',{id:e.id,revision:e.revision});$('#sheet').close();editing=null;items=null;data=await api('me');render();toast(r.message)}catch(err){toast(err.message);$('#event-delete-confirm').disabled=false}finally{pending=false}}}
+  const covers=new Map(),coverLoads=new Map();
+  function invalidateCover(id){const url=covers.get(id);if(url)URL.revokeObjectURL(url);covers.delete(id);coverLoads.delete(id)}
+  function loadCover(id){
+    if(covers.has(id))return Promise.resolve(covers.get(id));
+    if(coverLoads.has(id))return coverLoads.get(id);
+    const load=(async()=>{
+      for(let attempt=0;attempt<3;attempt++){
+        try{
+          const r=await fetch('/api/events/'+encodeURIComponent(id)+'/cover',{headers:{Authorization:'tma '+auth}});
+          if(!r.ok)throw Error('cover unavailable');
+          const blob=await r.blob();
+          if(coverLoads.get(id)!==load)return null;
+          const url=URL.createObjectURL(blob);covers.set(id,url);return url;
+        }catch{if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)))}
+      }
+      return null;
+    })().finally(()=>{if(coverLoads.get(id)===load)coverLoads.delete(id)});
+    coverLoads.set(id,load);return load;
+  }
+  function loadCovers(){
+    for(const event of data.events)if(event.has_media)loadCover(event.id);
+    for(const node of document.querySelectorAll('[data-event-cover]')){
+      if(node.getAttribute('src'))continue;
+      loadCover(node.dataset.eventCover).then(url=>{if(url&&node.isConnected)node.src=url});
+    }
+  }
+  function mount(){
+    if(tab==='events'&&data.events_admin&&!items&&!managing)manage();
+    loadCovers();
+    for (const details of document.querySelectorAll('details[open][data-event-participants]')) loadParticipants(details);
+  }
+  function hero(){return `<div class="home-event-strip home-carousel" aria-label="${NoraI18n.html("Ближайшие встречи")}">${data.events.map(e=>`<article class="home-meetup"><img class="home-meetup-cover" ${e.has_media?`data-event-cover="${esc(e.id)}"`:'src="/home-art/gathering-v1.webp"'} alt="${NoraI18n.html("Обложка встречи")}"><span class="home-meetup-badge">${navIcon('events')}${NoraI18n.html("Ближайшая встреча")}</span><div class="home-meetup-content"><h2>${esc(e.title)}</h2><p>${esc(when(e))}${e.location?' · '+esc(e.location):''}</p><div class="home-meetup-footer"><span class="home-meetup-social">${number(e.count)}${e.capacity?' / '+number(e.capacity):''} ${e.capacity?NoraI18n.t("участников"):plural(e.count,NoraI18n.t("участник"),NoraI18n.t("участника"),NoraI18n.t("участников"))}</span><button class="primary" data-home-event="${esc(e.id)}">${NoraI18n.html("Подробнее")} ${window.NoraInteractive?.icon("arrow")||""}</button></div></div></article>`).join('')}</div>${window.NoraHome.carouselDots(data.events.length,NoraI18n.t("встреча"))}`}
+  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-event-create')){editing={id:'e'+crypto.randomUUID().replaceAll('-','').slice(0,20),revision:0,title:'',description:'',location:'',price:0,capacity:0,links:[],poll:null,published:false};tab='events';render();window.scrollTo(0,0)}if(b.dataset.eventEdit)edit(b.dataset.eventEdit);if(b.hasAttribute('data-event-editor-close')){editing=null;render()}if(b.id==='event-link-add'){collect();if(editing.links.length>=8){toast(NoraI18n.t("Максимум 8 ссылок"));return}editing.links.push({label:'',url:''});$('#event-links').innerHTML=linkInputs()}if(b.dataset.removeLink!==undefined){collect();editing.links.splice(Number(b.dataset.removeLink),1);$('#event-links').innerHTML=linkInputs()}if(b.hasAttribute('data-event-remove-media')){editing.remove_media=true;editing.media_token=null;editing.has_media=false;$('#event-media-state').textContent=NoraI18n.t("Медиа будет удалено после сохранения")}if(b.id==='event-preview')save(true);if(b.id==='event-delete')remove()});
+  document.addEventListener('toggle', event => {
+    if (event.target.matches('details[open][data-event-participants]')) loadParticipants(event.target);
+  }, true);
+  document.addEventListener('click', event => {
+    const more = event.target.closest('[data-participant-more]');
+    if (more) loadParticipants(more.closest('details'), true);
+  });
+  document.addEventListener('input',e=>{if(e.target.closest('#event-editor-form'))collect()});
+  document.addEventListener('change',async e=>{if(e.target.name==='free'){$('[name="price"]').disabled=e.target.checked;if(e.target.checked)$('[name="price"]').value=0;collect()}if(e.target.id!=='event-media-file')return;const file=e.target.files?.[0];if(!file||pending)return;const uploadEditor=editing;pending=true;$('#event-media-state').textContent=NoraI18n.t("Загружаем…");try{const r=await fetch('/api/events/upload',{method:'POST',headers:{Authorization:'tma '+auth,'Content-Type':file.type},body:file});const j=await r.json();if(!r.ok)throw Error(j.error||NoraI18n.t("Не удалось загрузить медиа"));if(editing!==uploadEditor)return;editing.media_token=j.token;editing.remove_media=false;editing.has_media=true;$('#event-media-state').textContent=NoraI18n.t("Медиа загружено · сохрани настройки")}catch(err){if(editing===uploadEditor){toast(err.message);const state=$('#event-media-state');if(state)state.textContent=NoraI18n.t("Загрузка не удалась")}}finally{pending=false}});
+  document.addEventListener('submit',e=>{if(e.target.id==='event-editor-form'){e.preventDefault();save()}});
+  return {screen,mount,hero,card,focusEvent:id=>{linkedEventId=id},editorOpen:()=>tab==='events'&&!!editing};
+})();

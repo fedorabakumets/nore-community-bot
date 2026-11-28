@@ -36,11 +36,14 @@ def contest_join_keyboard(contest_id: int, count: int = 0) -> InlineKeyboardMark
 
 
 def contest_home_keyboard(*, has_open: bool) -> InlineKeyboardMarkup:
+    from community_bot.seasonal import TITLE
+
     rows = [[ibtn("📝 Новый конкурс", "admin:contest:new", STYLE_GO)]]
     if has_open:
         rows.append([ibtn("🏆 Подвести итог", "admin:contest:draw", STYLE_FUN)])
         rows.append([ibtn("👥 Участники", "admin:contest:list")])
         rows.append([ibtn("✖️ Снять конкурс", "admin:contest:cancel", STYLE_CLOSE)])
+    rows.append([ibtn(f"Сезон 1 · {TITLE}", "admin:season:home")])
     rows.append([back_btn("admin:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -126,8 +129,10 @@ async def publish_contest_post(
     media_type: str | None,
     media_file_id: str | None,
 ) -> Message | None:
+    from community_bot.reply_rich import bot_publication
+
     keyboard = contest_join_keyboard(contest_id, 0)
-    with keep_in_chat():
+    with keep_in_chat(), bot_publication():
         try:
             if media_type and media_file_id and len(text) <= CAPTION_LIMIT:
                 return await _send_media(

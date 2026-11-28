@@ -1,0 +1,36 @@
+<!doctype html><html><head><style>
+*{box-sizing:border-box}body{margin:0;padding:0;background:#171719;color:#f7f5f1;font-family:system-ui,sans-serif}
+.card{padding:24px 24px max(24px,env(safe-area-inset-bottom));border:1px solid #343439;border-radius:20px}
+.brand{font:700 11px monospace;letter-spacing:3px;color:#92929d}.dot{color:#f32843}
+h2{font-size:20px;letter-spacing:-.5px;margin:18px 0 8px}p{color:#92929d;font-size:12px;line-height:1.5;margin:8px 0}
+.readout{text-align:center;padding:18px 0 12px}.number{font-size:clamp(30px,10vw,48px);font-weight:750;letter-spacing:-2px;font-variant-numeric:tabular-nums;overflow-wrap:break-word}
+.unit{display:block;color:#92929d;font-size:12px;margin-top:2px}.adjust,.presets{display:flex;gap:8px;margin:10px 0}
+button{font:600 14px system-ui;min-height:44px;border:1px solid #343439;border-radius:12px;background:#222225;color:#f7f5f1;flex:1;padding:10px 5px}
+button:active{background:#343439}.adjust button{font-size:20px}.primary{display:block;width:100%;background:#f32843;border:0;margin-top:16px}
+.primary:active{background:#d51f37}.busy{opacity:.55}.details{border-top:1px solid #343439;padding-top:12px;margin-top:8px}.line{display:flex;justify-content:space-between;gap:10px;font-size:12px;margin:8px 0;color:#92929d}.line b{color:#f7f5f1;text-align:right;overflow-wrap:break-word;min-width:0}
+@media(max-width:260px){.card{padding:20px}h2{font-size:18px}.number{font-size:30px}}
+</style></head><body><div class="card"><div class="brand">NORA<span class="dot"> /</span></div><h2 id="title"></h2><div class="readout"><span class="number" id="value"></span><span class="unit" id="unit"></span></div><div id="controls"><div class="adjust"><button id="minus">−</button><button id="plus">+</button></div><div class="presets" id="presets"></div><button class="primary" id="submit"></button></div><div class="details" id="details"></div><p id="note"></p></div><script>
+const c=/*CONFIG*/{};
+const el=id=>document.getElementById(id),sdk=typeof TelegramWidget==='undefined'?null:TelegramWidget;
+let value=c.value,busy=false,done=false;
+if(c.token)try{const saved=Number(localStorage.getItem('value'));if(saved>=c.min&&saved<=c.max)value=saved}catch(e){}
+el('title').textContent=c.title;el('unit').textContent=c.unit;el('note').textContent=c.note;
+function draw(){el('value').textContent=String(value).replace(/\B(?=(\d{3})+(?!\d))/g,' ');const n=value%100,k=n%10;el('unit').textContent=c.unit==='лет'?(n>=11&&n<=14?'лет':k===1?'год':k>=2&&k<=4?'года':'лет'):(n>=11&&n<=14?'печенек':k===1?'печенька':k>=2&&k<=4?'печеньки':'печенек')}
+function change(n){if(busy||done)return;value=Math.max(c.min,Math.min(c.max,n));try{localStorage.setItem('value',String(value))}catch(e){}draw()}
+draw();
+if(c.token){
+el('details').style.display='none';el('submit').textContent=c.submit;
+el('minus').addEventListener('click',()=>change(value-c.step));el('plus').addEventListener('click',()=>change(value+c.step));
+c.presets.forEach(n=>{const b=document.createElement('button');b.textContent=String(n);b.addEventListener('click',()=>change(n));el('presets').appendChild(b)});
+el('submit').addEventListener('click',()=>{
+if(busy||done)return;
+if(!sdk||typeof sdk.request!=='function'||sdk.isForward){el('note').textContent='Отправь число в личный чат с Норой';return}
+busy=true;el('submit').classList.add('busy');el('submit').textContent='Сохраняю…';
+sdk.request('nora:'+c.token+':'+value).then(a=>{let r={};try{r=JSON.parse(a.result||'{}')}catch(e){}done=!!r.ok;el('note').textContent=r.message||'Отправь число в чат';el('submit').textContent=done?'Готово':c.submit},()=>{el('note').textContent='Не удалось сохранить. Повтори или отправь число в чат';el('submit').textContent=c.submit}).finally(()=>{busy=false;el('submit').classList.remove('busy')});
+});
+}else{
+el('controls').style.display='none';
+[['Получатель',c.recipient],['Комиссия',c.percent+'%'],['Будет зачислено',c.received+' 🍪']].forEach(row=>{const p=document.createElement('div');p.className='line';const s=document.createElement('span'),b=document.createElement('b');s.textContent=row[0];b.textContent=row[1];p.appendChild(s);p.appendChild(b);el('details').appendChild(p)});
+}
+if(sdk)sdk.ready();
+</script></body></html>

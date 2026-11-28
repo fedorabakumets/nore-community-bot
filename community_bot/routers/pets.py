@@ -4,9 +4,12 @@ import html
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
+from aiogram.types import (
+    CallbackQuery, FSInputFile, InputMediaPhoto, InputRichBlockDetails,
+    InputRichBlockParagraph, InputRichMessage, Message,
+)
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file
@@ -19,7 +22,11 @@ from community_bot.expedition import (
     remaining_label,
 )
 from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_category_keyboard
+from community_bot.menu_art import menu_cover
+from community_bot.pet_care import care_error, needs_care
 from community_bot.pets_talk import SPECIES, aftercare_line, pet_pronouns, species_meta
+from community_bot.private_rich import standalone_rich_message, text_blocks
+from community_bot.reply_rich import bot_publication
 from community_bot.shop_catalog import shop_header_lines, shop_prices_for
 from community_bot.states import PetFlow
 from community_bot.ui_owner import bind_ui_owner
@@ -35,6 +42,9 @@ def _bar(value: int) -> str:
 
 
 def pet_photo(species: str) -> FSInputFile | None:
+    modern = menu_cover(f"pet_{species}")
+    if modern:
+        return FSInputFile(modern)
     fallback = ASSETS / f"{species}.png"
     return FSInputFile(fallback) if fallback.is_file() else None
 
@@ -47,30 +57,51 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
     mood = int(pet["mood"])
     sleeping = bool(int(pet["sleeping"]))
     status = f"💤 {words['sleep_status']}" if sleeping else f"✨ {words['awake']}"
+    notice = "🔒 Нужен уход: сытость и вода ≥ 50.\n" if needs_care(pet) else ""
+    until = str(pet.get("expedition_until") or "")
+    expedition = (
+        f"🗺 В экспедиции · {remaining_label(until, timezone)}"
+        if until else "🗺 Экспедиция · 24 часа"
+    )
     return (
         f"{emoji} <b>{html.escape(str(pet['name']))}</b> · {species}\n"
         f"{status}\n\n"
-        "Тамагочи — ваш талисман, который сыщет для вас самые редкие вещи!\n"
-        "Через него в сообществе появляются сезонные находки, титулы, коллекционные награды "
-        "и особые призы с мероприятий.\n\n"
-        f"🍗 Сытость: <b>{hunger}/100</b>\n<code>{_bar(hunger)}</code>\n"
-        f"💧 Жажда: <b>{thirst}/100</b>\n<code>{_bar(thirst)}</code>\n"
-        f"😊 Настроение: <b>{mood}/100</b>\n<code>{_bar(mood)}</code>\n\n"
-        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n\n"
-        f"{_expedition_line(pet, words, timezone)}"
-        "Печеньки талисман приносит только из экспедиции — сам по себе он их не фармит."
+        f"🍗 <code>{_bar(hunger)}</code> <b>{hunger}/100</b>\n"
+        f"💧 <code>{_bar(thirst)}</code> <b>{thirst}/100</b>\n"
+        f"😊 <code>{_bar(mood)}</code> <b>{mood}/100</b>\n"
+        f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
+        f"{notice}{expedition}"
     )
 
 
-def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: str) -> str:
-    until = str(pet.get("expedition_until") or "")
-    if until:
-        left = remaining_label(until, timezone)
-        return (
-            f"🗺 Сейчас в экспедиции ({left}). {words['returned'].capitalize()} с находкой — "
-            "одно сообщение в чат и в личку.\n\n"
-        )
-    return "🗺 Можно отправить в экспедицию раз в 24 часа. Находка: 1–10 🍪, крупные награды очень редки.\n\n"
+def _pet_help(pet: dict[str, object]) -> str:
+    words = pet_pronouns(str(pet["species"]))
+    expedition = (
+        f"{words['returned'].capitalize()} — одно сообщение в чат и в личку. "
+        "Можно вернуть питомца раньше без находки. Потраченные ресурсы не возвращаются."
+        if pet.get("expedition_until") else
+        "Поход длится 24 часа. Расход: 60 сытости, 60 воды и 40 настроения. "
+        "Настроение влияет на шанс и размер находки; возможна неудача."
+    )
+    return (
+        "Питомец находит сезонные вещи, коллекционные награды и призы с мероприятий.\n"
+        "Для доступа к возможностям сытость и вода должны быть не ниже 50. "
+        "Кормление и поилка доступны.\n"
+        f"{expedition}\n"
+        "Печеньки питомец приносит только из экспедиции."
+    )
+
+
+def _pet_rich(pet: dict[str, object], text: str, photo: FSInputFile | None) -> InputRichMessage:
+    blocks = [{"type": "photo", "photo": {"type": "photo", "media": photo}}] if photo else []
+    return InputRichMessage(blocks=[
+        *blocks,
+        *text_blocks(text, "HTML", compact=False),
+        InputRichBlockDetails(
+            summary="Как это работает?",
+            blocks=[InputRichBlockParagraph(text=_pet_help(pet))],
+        ),
+    ])
 
 
 async def _maybe_announce(message: Message, db: Database, settings: Settings, pet: dict[str, object]) -> None:
@@ -97,8 +128,16 @@ async def send_pet_card(
     text = pet_text(pet, timezone)
     photo = pet_photo(str(pet["species"]))
     sent: Message | None = None
-    markup = pet_keyboard(pet, timezone)
-    if photo:
+    markup = pet_keyboard(pet)
+    try:
+        sent = await message.answer(
+            rich_message=_pet_rich(pet, text, photo or cover_file("pet")),
+            reply_markup=markup,
+        )
+    except (TelegramBadRequest, TelegramNotFound, ValueError, TypeError):
+        # Never make the optional Rich layout a prerequisite for accessing the pet.
+        pass
+    if sent is None and photo:
         try:
             sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
         except TelegramBadRequest:
@@ -111,7 +150,8 @@ async def send_pet_card(
             except TelegramBadRequest:
                 sent = None
     if sent is None:
-        sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
+        with standalone_rich_message(), bot_publication():
+            sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     if db and message.from_user:
         await bind_ui_owner(db, sent, message.from_user.id, "pet")
     return sent
@@ -126,7 +166,17 @@ async def refresh_pet_card(
     timezone = settings.timezone if settings else "Europe/Moscow"
     text = pet_text(pet, timezone)
     photo = pet_photo(str(pet["species"]))
-    markup = pet_keyboard(pet, timezone)
+    markup = pet_keyboard(pet)
+    if getattr(target, "rich_message", None):
+        try:
+            await target.edit_text(
+                rich_message=_pet_rich(pet, text, photo or cover_file("pet")),
+                reply_markup=markup,
+            )
+            return
+        except (TelegramBadRequest, TelegramNotFound, ValueError, TypeError) as error:
+            if "message is not modified" in str(error).casefold():
+                return
     if photo:
         try:
             await target.edit_media(
@@ -157,7 +207,7 @@ async def _show_pet(
 ) -> None:
     pet = await db.get_pet(user_id)
     if not pet:
-        text = "У вас пока нет тамагочи. Откройте магазин снизу."
+        text = "У вас пока нет питомца. Откройте магазин снизу."
         if replace:
             from community_bot.blocks import replace_block
 
@@ -173,7 +223,7 @@ async def _show_pet(
 
 
 @router.message(command_or_alias("pet"))
-@router.message(F.text == "🐾 Тамагочи")
+@router.message(F.chat.type == "private", F.text.in_({"🐾 Тамагочи", "🐾 Питомец"}))
 async def show_pet(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
@@ -185,15 +235,25 @@ async def choose_species(callback: CallbackQuery, state: FSMContext, db: Databas
     if not callback.data or not callback.message:
         return
     if not await db.feature_enabled("tamagotchi"):
-        await callback.answer("Тамагочи временно выключены администрацией.", show_alert=True)
+        await callback.answer("Питомцы временно выключены администрацией.", show_alert=True)
         return
-    _, _, species, raw_price = callback.data.split(":")
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Откройте покупку питомца заново.", show_alert=True)
+        return
+    _, _, species, token = parts
     if species not in SPECIES:
         await callback.answer("Неизвестный питомец.", show_alert=True)
         return
-    price = int(raw_price)
+    intent = await db.get_wallet_intent(callback.from_user.id, token)
+    if not intent or intent["item"] != "tamagotchi" or intent["target_id"] != callback.from_user.id:
+        await callback.answer("Покупка устарела или уже выполнена. Откройте магазин заново.", show_alert=True)
+        return
+    price = int(intent["price"])
     await state.set_state(PetFlow.name)
-    await state.set_data({"pet_species": species, "pet_price": price, "flow_kind": "pet_name"})
+    await state.set_data({
+        "pet_species": species, "pet_price": price, "purchase_intent": token, "flow_kind": "pet_name",
+    })
     await callback.answer()
     emoji, label, _gender = SPECIES[species]
     words = pet_pronouns(species)
@@ -214,9 +274,14 @@ async def create_pet(message: Message, state: FSMContext, db: Database, settings
         await message.answer("Имя должно содержать от 1 до 24 символов.")
         return
     data = await state.get_data()
+    if not data.get("purchase_intent"):
+        await message.answer("Покупка устарела. Откройте магазин заново.")
+        return
     species = str(data["pet_species"])
     price = int(data["pet_price"])
-    ok, error = await db.purchase_pet(message.from_user.id, species, name, price)
+    ok, error = await db.purchase_pet(
+        message.from_user.id, species, name, price, intent_id=str(data["purchase_intent"]),
+    )
     await state.clear()
     if not ok:
         await message.answer(error)
@@ -236,7 +301,9 @@ async def create_pet(message: Message, state: FSMContext, db: Database, settings
 @router.callback_query(F.data.startswith("pet:custom"))
 @router.callback_query(F.data.startswith("pet:look"))
 async def stale_pet_custom(callback: CallbackQuery) -> None:
-    await callback.answer("Кастомизация тамагочи больше недоступна. Теперь это талисман экспедиций.", show_alert=True)
+    await callback.answer(
+        "Кастомизация питомца больше недоступна. Питомец ищет находки в экспедициях.", show_alert=True,
+    )
 
 
 @router.callback_query(F.data.startswith("pet:use:"))
@@ -257,7 +324,10 @@ async def use_supply(callback: CallbackQuery, db: Database, settings: Settings) 
 async def begin_rename(callback: CallbackQuery, state: FSMContext, db: Database) -> None:
     if not callback.message:
         return
-    pet = await db.get_pet(callback.from_user.id, settle=False)
+    pet = await db.get_pet(callback.from_user.id)
+    if pet and (error := care_error(pet)):
+        await callback.answer(error, show_alert=True)
+        return
     await state.set_state(PetFlow.rename)
     await state.set_data({"flow_kind": "pet_rename"})
     await callback.answer()
@@ -277,7 +347,11 @@ async def rename_pet(message: Message, state: FSMContext, db: Database) -> None:
     if not 1 <= len(name) <= 24:
         await message.answer("Имя должно содержать от 1 до 24 символов.")
         return
-    pet = await db.get_pet(message.from_user.id, settle=False)
+    pet = await db.get_pet(message.from_user.id)
+    if pet and (error := care_error(pet)):
+        await state.clear()
+        await message.answer(error)
+        return
     if not await db.rename_pet(message.from_user.id, name):
         await state.clear()
         await message.answer("Питомец не найден.")
@@ -298,7 +372,7 @@ async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settin
     until = str((pet or {}).get("expedition_until") or "")
     if until:
         left = remaining_label(until, settings.timezone)
-        await callback.answer(f"Талисман ещё в экспедиции ({left}).", show_alert=True)
+        await callback.answer(f"Питомец ещё в экспедиции ({left}).", show_alert=True)
         return
     ok, error, _reward = await db.start_expedition(callback.from_user.id, timezone=settings.timezone)
     if not ok:
@@ -307,9 +381,21 @@ async def pet_expedition(callback: CallbackQuery, db: Database, settings: Settin
     from community_bot.life import unlock
 
     await unlock(db, callback.from_user.id, "expedition")
-    await callback.answer("Талисман ушёл искать редкие вещи на 24 часа.")
+    await callback.answer("Питомец ушёл искать редкие вещи на 24 часа.")
     pet = await db.get_pet(callback.from_user.id, settle=False)
     if pet:
+        await refresh_pet_card(callback.message, pet, db, settings)
+
+
+@router.callback_query(F.data.startswith("pet:return:"))
+async def pet_return(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not callback.data:
+        return
+    until = callback.data.removeprefix("pet:return:")
+    ok, message = await db.cancel_expedition(callback.from_user.id, until)
+    await callback.answer(message, show_alert=not ok)
+    pet = await db.get_pet(callback.from_user.id, settle=False)
+    if ok and pet:
         await refresh_pet_card(callback.message, pet, db, settings)
 
 
@@ -327,7 +413,7 @@ async def pet_shop(callback: CallbackQuery, db: Database, settings: Settings) ->
     prices = shop_prices_for(user, settings.restricted_reputation_threshold, await db.priced_shop_map())
     await callback.answer()
     header = shop_header_lines(await db.shop_header())
-    title = str((category or {}).get("title") or "🐾 Тамагочи")
+    title = str((category or {}).get("title") or "🐾 Питомец")
     intro = str((category or {}).get("description") or "")
     sent = await callback.message.answer(
         f"{header}{title}\nБаланс: {user['cookies']} 🍪\n\n{intro}",

@@ -1,0 +1,23 @@
+name: Updates feed checks
+on:
+  pull_request:
+    paths:
+      - 'community_bot/updates_feed.py'
+      - 'community_bot/community_scope.py'
+      - 'community_bot/main.py'
+      - 'tests/test_updates_feed.py'
+      - '.github/workflows/updates-feed-checks.yml'
+permissions:
+  contents: read
+jobs:
+  updates-feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'aiogram>=3.31,<4' aiosqlite python-dotenv pytest pytest-asyncio Pillow
+      - run: python -m compileall -q community_bot/updates_feed.py community_bot/community_scope.py community_bot/main.py
+      - run: python -m pytest tests/test_updates_feed.py -q

@@ -21,7 +21,8 @@ def test_shop_trigger_is_exact_only() -> None:
 def test_reputation_discounts_and_event_exclusion() -> None:
     assert reputation_tier(95).discount == 10
     assert reputation_tier(80).discount == 5
-    assert reputation_tier(40).discount == 2
+    assert reputation_tier(49).discount == 0
+    assert reputation_tier(50).discount == 2
     assert discounted_price(50, 10) == 45
     assert item_discount("event_pass", 10) == 0
     assert item_discount("forgive", 10) == 10
@@ -83,7 +84,7 @@ def test_public_profile_shows_warn_count() -> None:
             "role": "member",
             "custom_status": None,
             "hobbies": "чат",
-            "age": 20,
+            "birth_date": '2005-01-01',
             "reputation": 69,
             "cookies": 1,
             "warnings": 3,

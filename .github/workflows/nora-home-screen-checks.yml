@@ -1,0 +1,31 @@
+name: NORA home screen shortcut checks
+
+on:
+  pull_request:
+    branches: ["cursor/nora-2-update-d133"]
+  workflow_dispatch:
+
+jobs:
+  install-shortcut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Python lint
+        run: python -m ruff check community_bot/group_message_close.py community_bot/miniapp.py tests/test_homescreen_pin.py
+      - name: Rich pin and existing group regressions
+        run: python -m pytest -q tests/test_homescreen_pin.py tests/test_group_message_close.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Mini App syntax
+        run: |
+          node --check community_bot/web/home-screen.js
+          node --check community_bot/web/home.js
+          node --check community_bot/web/app.js
+      - name: Profile wizard avatar upload regression
+        run: node --test tests/test_profile_wizard_upload.mjs

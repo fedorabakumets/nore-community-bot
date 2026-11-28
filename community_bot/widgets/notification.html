@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+html{color-scheme:light dark}
+body{margin:0;font:14px/1.4 system-ui,sans-serif}
+.card{--bg:#f7f5f5;--text:#20191b;--muted:#65585d;--panel:#fff;--line:#dfd2d5;--red:#b91c1c;
+  box-sizing:border-box;padding:12px;background:var(--bg);color:var(--text);border-radius:12px}
+@media(prefers-color-scheme:dark){
+  .card{--bg:#171518;--text:#fcf6f7;--muted:#c6b7bc;--panel:#242024;--line:#51454b}
+}
+.heading{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.45px}
+#dot{width:8px;height:8px;border-radius:50%;background:var(--red);border:1px solid #df6969}
+h2,p{margin:0;overflow-wrap:anywhere;overflow:hidden}
+h2{margin:5px 0;max-height:61.2px;font:700 17px/1.2 system-ui,sans-serif}
+.meta{font-size:12px;color:var(--muted);max-height:33.6px}
+.date{white-space:nowrap}
+.body{max-height:196px}
+.details{padding:8px;margin-top:8px;background:var(--panel);border-radius:8px;border:1px solid var(--line)}
+.details p+p{margin-top:5px}
+.controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+button{padding:6px 8px;min-height:32px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel);color:var(--text);font:600 12px/1.2 system-ui,sans-serif}
+button:active{opacity:.75}
+button[disabled]{opacity:.65}
+.primary{background:var(--red);border-color:var(--red);color:#fff}
+.closed{display:none}
+@media(max-width:299px){.card{padding:9px}.body{max-height:98px}h2{max-height:40.8px}}
+.page{justify-content:space-between;align-items:center}
+#text-narrow{display:none}
+@media(max-width:299px){#text{display:none}#text-narrow{display:inline}}
+#status{margin-top:5px}
+@keyframes reveal{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:no-preference){.details{animation:reveal .16s ease-out}}
+</style>
+</head>
+<body>
+<section class="card">
+  <div class="heading"><span id="dot" aria-label="Новое"></span>НОРА | Уведомления</div>
+  <h2 id="count"></h2>
+  <div class="controls">
+    <button id="toggle" aria-expanded="false" aria-controls="details">Подробнее</button>
+    <button class="primary" id="close">Прочитать и закрыть</button>
+  </div>
+  <section class="details closed" id="details">
+    <h2 id="title"></h2>
+    <p class="meta" id="sender"></p>
+    <p class="meta date" id="date"></p>
+    <p class="meta" id="context"></p>
+    <p class="body"><span id="text"></span><span id="text-narrow"></span></p>
+    <div class="controls page" id="pages">
+      <button id="previous" aria-label="Предыдущее уведомление">←</button>
+      <span id="position"></span>
+      <button id="next" aria-label="Следующее уведомление">→</button>
+    </div>
+    <div class="controls">
+      <button id="open">Открыть Нору</button>
+      <button id="read">Прочитано</button>
+    </div>
+  </section>
+  <p id="status" class="meta closed" role="status"></p>
+</section>
+<script>
+const tw = TelegramWidget;
+const el = id => document.getElementById(id);
+const toggle = el('toggle');
+let state = {r: 0, n: 0, i: 0};
+const pages = new Map();
+let expanded = false;
+let pending = false;
+let closed = false;
+
+function noun(n) {
+  const last = n % 10, tail = n % 100;
+  if (tail >= 11 && tail <= 14) return 'уведомлений';
+  return last === 1 ? 'уведомление' : last >= 2 && last <= 4 ? 'уведомления' : 'уведомлений';
+}
+function render() {
+  const has = Boolean(state.p) && !closed;
+  const open = expanded && has;
+  el('count').textContent = has ? 'У вас ' + state.n + ' ' + noun(state.n) + '!' : 'Уведомления прочитаны';
+  el('dot').classList.toggle('closed', !has);
+  el('close').classList.toggle('closed', !has);
+  el('close').disabled = pending;
+  toggle.classList.toggle('closed', !has);
+  toggle.textContent = open ? 'Свернуть' : 'Подробнее';
+  toggle.setAttribute('aria-expanded', String(open));
+  el('details').classList.toggle('closed', !open);
+  if (!has) return;
+  const p = state.p;
+  el('title').textContent = p.title;
+  el('sender').textContent = 'От кого: ' + p.sender;
+  el('date').textContent = p.date;
+  el('context').textContent = p.context;
+  el('text').textContent = p.details;
+  const chars = Array.from(p.details);
+  el('text-narrow').textContent = chars.length > 68 ? chars.slice(0, 67).join('') + '…' : p.details;
+  el('position').textContent = (state.i + 1) + ' / ' + state.n;
+  el('pages').classList.toggle('closed', state.n <= 1);
+  el('previous').disabled = pending || state.i <= 0;
+  el('next').disabled = pending || state.i + 1 >= state.n;
+  el('read').disabled = pending;
+}
+function setStatus(text) {
+  el('status').textContent = text;
+  el('status').classList.toggle('closed', !text);
+}
+function apply(next, push) {
+  if (!next) return;
+  if (next.closed) closed = true;
+  if (typeof next.r !== 'number' || typeof next.n !== 'number') return;
+  if (next.r < state.r || (next.r === state.r && next.n > state.n)) return;
+  if (next.r !== state.r || next.n !== state.n) pages.clear();
+  if (next.p) pages.set(next.i, next);
+  if (push && next.r === state.r && next.n === state.n) return;
+  state = next;
+}
+function parse(text) {
+  try { return JSON.parse(text); } catch (_) { return null; }
+}
+function request(action, value) {
+  if (pending || closed || !state.p) return;
+  pending = true;
+  setStatus('');
+  render();
+  const failed = () => {
+    pending = false;
+    if (!closed) setStatus('Не удалось выполнить действие. Попробуй ещё раз.');
+    render();
+  };
+  tw.request('nwi:' + action + ':' + value).then(answer => {
+    const next = parse(answer.result);
+    if (!next || (!next.closed && typeof next.r !== 'number')) { failed(); return; }
+    pending = false;
+    apply(next, false);
+    if (next.changed) setStatus('Появилось новое уведомление. Проверь список.');
+    render();
+  }, failed);
+}
+toggle.addEventListener('click', () => { expanded = !expanded; render(); });
+el('open').addEventListener('click', () => { if (state.p) tw.openTelegramLink(state.p.url); });
+function turnPage(index) {
+  if (pending || index < 0 || index >= state.n) return;
+  if (!pages.has(index)) { request('page', index); return; }
+  state = pages.get(index);
+  setStatus('');
+  render();
+}
+el('previous').addEventListener('click', () => turnPage(state.i - 1));
+el('next').addEventListener('click', () => turnPage(state.i + 1));
+el('read').addEventListener('click', () => { if (state.p) request('read', state.p.id); });
+el('close').addEventListener('click', () => request('close', state.r));
+tw.onEvent('chatDataChanged', () => { apply(parse(tw.chatData), true); render(); });
+apply(parse(tw.chatData), true);
+render();
+tw.ready();
+</script>
+</body>
+</html>

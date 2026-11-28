@@ -10,12 +10,12 @@ from community_bot.life import (
     vitrine_active,
 )
 from community_bot.shop_catalog import BASE_SHOP_PRICES, GIFTABLE_ITEMS
-from community_bot.updates import community_announcement, latest_update, staff_announcement
+from community_bot.updates import UPDATES, community_announcement, staff_announcement
 
 
 def test_gift_aliases_and_remainder() -> None:
     assert gift_item_from_args("щит") == "rep_shield"
-    assert gift_item_from_args(["плащ"]) == "immunity_24h"
+    assert gift_item_from_args(["плащ"]) is None
     assert gift_item_from_args("набор") == "season_pack"
     assert remainder_text("подарить щит") == "щит"
     assert parse_trigger("розыгрыш итог") == ("lotterydraw", "")
@@ -35,16 +35,17 @@ def test_vitrine_and_stop_words() -> None:
 
 
 def test_public_update_omits_staff_and_has_member_copy() -> None:
-    item = latest_update()
+    item = next(item for item in UPDATES if item.number == 23)
     pin = community_announcement(item)
     staff = staff_announcement(item)
-    assert item.number == 14
-    assert "Обновление №14" in pin
+    assert item.number == 23
+    assert f"Обновление №{item.number}" in pin
     assert "Админское" not in pin
-    assert "утро" in pin.casefold() or "погод" in pin.casefold()
+    assert "Нора" in pin
+    assert "Нора читает голосовые и кружки" in pin
     assert "Витрина после выбора" not in pin
-    assert "Админское обновление №14" in staff
-    assert "morning" in staff.casefold() or "9:00" in staff
+    assert f"Админское обновление №{item.number}" in staff
+    assert "Groq или Gemini" in staff
     assert len(pin) <= 1024
 
 
@@ -84,6 +85,7 @@ async def test_season_pack_and_lottery(tmp_path) -> None:
     await db.ensure_user(2, telegram_name="Two")
     await db.add_cookies(1, 80, "test")
     await db.add_cookies(2, 80, "test")
+    assert (await db.purchase_pet(1, "cat", "Булочка", 10))[0]
     ok, _ = await db.buy_item(1, "season_pack", 28)
     assert ok is True
     assert int((await db.get_user(1))["hate_shields"]) == 1
@@ -125,7 +127,8 @@ async def test_vitrine_stock_and_achievements(tmp_path) -> None:
     title = await unlock(db, 1, "shop_first")
     assert title == "Покупатель"
     user = await db.get_user(1)
-    assert user["profile_title"] == "Покупатель"
+    assert not user["profile_title"]
+    assert "shop_first" in await db.list_achievements(1)
     assert await unlock(db, 1, "shop_first") is None
 
 
@@ -134,6 +137,9 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
 
     from community_bot.database import Database
     from community_bot.main import announce_latest_update
+
+    item = next(item for item in UPDATES if item.number == 23)
+    monkeypatch.setattr("community_bot.main.latest_update", lambda: item)
 
     db = Database(Path(tmp_path) / "staff.db")
     await db.initialize()
@@ -157,10 +163,7 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
         async def unpin_chat_message(self, chat_id, message_id):
             return None
 
-    async def fake_publish(_db, _item):
-        return None
 
-    monkeypatch.setattr("community_bot.main.publish_member_update", fake_publish)
     settings = SimpleNamespace(community_chat_id=-100)
     await announce_latest_update(FakeBot(), db, settings)
     chats = [chat_id for chat_id, _ in dms]
@@ -170,4 +173,4 @@ async def test_staff_update_goes_to_panel_users_only(tmp_path, monkeypatch) -> N
     public = [text for chat_id, text in dms if chat_id == -100]
     assert staff_texts and "Админское" in staff_texts[0]
     assert public and "Админское" not in public[0]
-    assert "Обновление №14" in public[0]
+    assert "Нора читает голосовые и кружки" in public[0]

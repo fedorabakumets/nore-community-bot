@@ -1,0 +1,9 @@
+{
+  "start": 16.35,
+  "first": 21.5,
+  "spacing": 7,
+  "doorZ": -2.65,
+  "knockRadius": 3.2,
+  "minZ": -7.5,
+  "maxZ": 5.5
+}

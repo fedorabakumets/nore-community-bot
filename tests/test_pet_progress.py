@@ -1,0 +1,188 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from aiogram.types import Chat, Message, User
+
+from community_bot import durak_rooms, pet_progress, social_likes
+from community_bot.database import Database
+
+
+async def new_pet(db):
+    await db.ensure_user(1, telegram_name="Test")
+    await db.add_cookies(1, 100, "test")
+    assert (await db.purchase_pet(1, "cat", "Барс", 10))[0]
+
+
+async def test_existing_pet_is_preserved(tmp_path):
+    db = Database(tmp_path / "pets.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    await db.execute("UPDATE pets SET hunger=36,thirst=42,mood=78,food_units=4")
+    original = await db.get_pet(1, settle=False)
+    async with db.connect() as conn:
+        for table in ("pet_quest_events", "pet_quests", "pet_quest_days", "pet_stage_rewards", "pet_development"):
+            await conn.execute(f"DROP TABLE {table}")
+        await conn.commit()
+    await db.initialize()
+    assert await db.get_pet(1, settle=False) == original
+    state = await pet_progress.dashboard(db, 1)
+    assert (state["level"], state["stage"], state["xp"]) == (1, 1, 0)
+
+
+async def test_nine_days_and_rewards(tmp_path):
+    db = Database(tmp_path / "pets.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    await db.execute("UPDATE users SET reputation=50 WHERE user_id=1")
+    for offset in range(9):
+        now = datetime(2026, 11, 1, 12, tzinfo=UTC) + timedelta(days=offset)
+        async with db.connect() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            for _ in range(5):
+                for event in ("stroke", "durak", "barricade", "like"):
+                    await pet_progress.record(conn, 1, event, now=now)
+            for index in range(10):
+                sent = now + timedelta(seconds=index * 10)
+                message = (-1, index + offset * 10, sent)
+                await pet_progress.record(conn, 1, "text", now=sent, message=message)
+                await pet_progress.record(conn, 1, "text", now=sent, message=message)
+            await conn.commit()
+        day = await db.fetchone("SELECT xp FROM pet_quest_days WHERE day=?", (now.date().isoformat(),))
+        state = await db.fetchone("SELECT level,stage,messages FROM pet_development")
+        assert day["xp"] == 100
+        assert state["stage"] == offset + 2
+        assert state["level"] == (1 if offset < 3 else 2 if offset < 8 else 3)
+        assert state["messages"] == min(offset + 1, 8) * 10
+
+    rewards = await db.fetchall("SELECT * FROM pet_stage_rewards ORDER BY stage")
+    assert len(rewards) == 10
+    assert (await pet_progress.dashboard(db, 1))['quests'] == []
+    assert len(await db.fetchall('SELECT day FROM pet_quest_days')) == 9
+    assert (await db.get_user(1))["cookies"] == 115
+    assert sum(row["amount"] for row in rewards if row["kind"] == "reputation") == 10
+    for kind, stat in pet_progress.CONSUMABLES.items():
+        await db.execute(f"UPDATE pets SET {stat}=100 WHERE user_id=1")
+        token = await db.create_wallet_intent(1, "pet_action", 1)
+        assert not (await pet_progress.redeem(db, 1, kind, token))[0]
+        await db.execute(f"UPDATE pets SET {stat}=25 WHERE user_id=1")
+        assert (await pet_progress.redeem(db, 1, kind, token))[0]
+        another = await db.create_wallet_intent(1, "pet_action", 1)
+        assert not (await pet_progress.redeem(db, 1, kind, another))[0]
+    pet = await db.get_pet(1, settle=False)
+    assert (pet["hunger"], pet["thirst"], pet["mood"]) == (65, 75, 100)
+
+
+@pytest.mark.asyncio
+async def test_progress_rolls_over_at_moscow_midnight(tmp_path):
+    db = Database(tmp_path / "pets.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    start = datetime(2026, 11, 1, 20, 58, tzinfo=UTC)
+    for now in (start, start + timedelta(minutes=2)):
+        async with db.connect() as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            for event in ("food", "stroke"):
+                await pet_progress.record(conn, 1, event, now=now)
+            await conn.commit()
+    days = await db.fetchall("SELECT day FROM pet_quest_days ORDER BY day")
+    assert [day["day"] for day in days] == ["2026-11-01", "2026-11-02"]
+
+
+async def test_only_plain_text_counts_once(tmp_path):
+    db = Database(tmp_path / "pets.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    now = pet_progress.moscow_now()
+    day = now.date().isoformat()
+    await pet_progress.dashboard(db, 1)
+    await db.execute(
+        "UPDATE pet_quests SET events='text',target=10 WHERE user_id=1 AND day=? AND slot=1", (day,),
+    )
+    await db.execute(
+        "UPDATE pet_quests SET events='like',target=5 WHERE user_id=1 AND day=? AND slot=3", (day,),
+    )
+
+    sender = User(id=1, is_bot=False, first_name="Автор")
+    other = User(id=2, is_bot=False, first_name="Участник")
+    chat = Chat(id=-100123, type="supergroup")
+    reply = Message(message_id=100, date=now, chat=chat, from_user=other, text="Привет")
+    command = Message(message_id=101, date=now, chat=chat, from_user=sender, text="/pet")
+    attempt = Message(message_id=103, date=now, chat=chat, from_user=sender, text="-реп", reply_to_message=reply)
+    ordinary = command.model_copy(update={"message_id": 104, "text": "Привет!"})
+    second = ordinary.model_copy(update={"message_id": 105})
+    for message in (command, attempt, ordinary, ordinary, second):
+        await pet_progress.record_message(db, message)
+    quests = await db.fetchall("SELECT slot,progress,xp FROM pet_quests ORDER BY slot")
+    assert quests[0]["progress"] == 2
+    assert (quests[2]["progress"], quests[2]["xp"]) == (0, 0)
+    assert (await db.fetchone("SELECT messages FROM pet_development"))["messages"] == 2
+    assert not await db.fetchall("SELECT id FROM reputation_actions")
+
+
+async def test_daily_quests_increment_and_text_is_issued_once_per_stage(tmp_path):
+    db = Database(tmp_path / "quests.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    now = datetime(2026, 11, 24, 12, tzinfo=UTC)
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        await pet_progress.record(conn, 1, "food", now=now)
+        day = now.date().isoformat()
+        rows = await (await conn.execute("SELECT * FROM pet_quests WHERE day=? ORDER BY slot", (day,))).fetchall()
+        assert rows[1]["events"] == "stroke" and rows[2]["events"] == "text"
+        event, target = rows[0]["events"], rows[0]["target"]
+        await pet_progress.record(conn, 1, event, now=now)
+        quest = await pet_progress.one(conn, "SELECT progress,xp FROM pet_quests WHERE day=? AND slot=1", (day,))
+        assert (quest["progress"], quest["xp"]) == (1, 0)
+        for _ in range(target - 1):
+            await pet_progress.record(conn, 1, event, now=now)
+        quest = await pet_progress.one(conn, "SELECT progress,xp FROM pet_quests WHERE day=? AND slot=1", (day,))
+        assert (quest["progress"], quest["xp"]) == (target, 50)
+        tomorrow = now + timedelta(days=1)
+        await pet_progress.record(conn, 1, "food", now=tomorrow)
+        rows = await (await conn.execute(
+            "SELECT events FROM pet_quests WHERE day=?", (tomorrow.date().isoformat(),),
+        )).fetchall()
+        assert "text" not in {row["events"] for row in rows}
+        await conn.commit()
+
+
+async def test_successful_likes_advance_sender_only(tmp_path):
+    db = Database(tmp_path / "likes.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    await pet_progress.dashboard(db, 1)
+    await db.execute("UPDATE pet_quests SET events='like',target=5 WHERE user_id=1 AND slot=1")
+    for uid in range(2, 7):
+        await db.ensure_user(uid, telegram_name="Друг")
+        assert await social_likes.give(db, 1, uid) is None
+        assert await social_likes.give(db, 1, uid) is not None
+    row = await db.fetchone("SELECT progress,xp FROM pet_quests WHERE user_id=1 AND slot=1")
+    assert (row["progress"], row["xp"]) == (5, 50)
+    assert not await db.fetchone("SELECT 1 FROM pet_development WHERE user_id=2")
+
+
+@pytest.mark.parametrize("game,reason,expected", [
+    ("durak", "played", 1), ("durak", "draw", 1), ("barricade", "goal", 1),
+    ("durak", "surrender", 0), ("barricade", "timeout", 0),
+])
+async def test_room_settlement_counts_natural_games_only(tmp_path, game, reason, expected, monkeypatch):
+    db = Database(tmp_path / "rooms.sqlite3")
+    await db.initialize()
+    await new_pet(db)
+    await pet_progress.dashboard(db, 1)
+    await db.execute("UPDATE pet_quests SET events=?,target=3 WHERE user_id=1 AND slot=1", (game,))
+
+    async def members(conn, rid):
+        return [{"uid": 1, "seat": 0, "reserved": 0}, {"uid": 2, "seat": 1, "reserved": 0}]
+
+    monkeypatch.setattr(durak_rooms, "_members", members)
+    room = {"id": "test", "kind": game, "game": {
+        "result": {"reason": reason, "loser": 1, "forfeit": []}, "out": [],
+    }}
+    async with db.connect() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        await durak_rooms._finish(conn, room, datetime.now(UTC).timestamp())
+        await conn.commit()
+    row = await db.fetchone("SELECT progress,xp FROM pet_quests WHERE user_id=1 AND slot=1")
+    assert (row["progress"], row["xp"]) == (expected, 0)

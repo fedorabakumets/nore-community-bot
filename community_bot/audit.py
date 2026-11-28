@@ -16,6 +16,7 @@ SYSTEM_ACTOR_ID = 0
 ACTION_LABELS: dict[str, str] = {
     "mute": "Мут",
     "unmute": "Снятие мута",
+    "unmute_all": "Массовое снятие мутов",
     "warn": "Предупреждение",
     "unwarn": "Снятие предупреждения",
     "kick": "Кик",
@@ -28,6 +29,8 @@ ACTION_LABELS: dict[str, str] = {
     "set_cookies": "Установка баланса 🍪",
     "role": "Смена роли",
     "role_create": "Создание роли",
+    "role_prefix": "Префикс роли",
+    "community_reset": "Сброс сообщества",
     "role_perm": "Права роли",
     "role_delete": "Удаление роли",
     "set_status": "Кастомный статус",
@@ -43,6 +46,8 @@ ACTION_LABELS: dict[str, str] = {
     "ticket_close": "Тикет закрыт",
     "user_cookies": "Баланс 🍪",
     "user_add_cookies": "Начисление 🍪",
+    "user_remove_cookies": "Списание 🍪",
+    "user_rep": "Изменение репутации",
     "user_name": "Имя профиля",
     "user_age": "Возраст",
     "user_avatar": "Аватар",
@@ -54,13 +59,14 @@ ACTION_LABELS: dict[str, str] = {
 }
 
 PUNITIVE_ACTIONS = {"mute", "warn", "kick", "ban"}
-REVERSAL_ACTIONS = {"unmute", "unwarn", "unban"}
+REVERSAL_ACTIONS = {"unmute", "unmute_all", "unwarn", "unban"}
 _DOUBTFUL_WITHOUT_REASON = {
     "give_cookies",
     "set_cookies",
     "chat_mute",
     "user_cookies",
     "user_add_cookies",
+    "user_remove_cookies",
     "user_warnings",
     "set_status",
 }
@@ -130,14 +136,14 @@ def parse_moderation_args(text: str) -> tuple[timedelta, str, bool]:
 
 
 def parse_punitive_args(
-    text: str,
+    text: str | list[str],
     *,
     need_duration: bool,
     allow_permanent: bool = False,
 ) -> tuple[timedelta | None, str, str | None]:
     from community_bot.aliases import remainder_args
 
-    args = remainder_args(text)
+    args = remainder_args(text) if isinstance(text, str) else text
     if need_duration:
         if not args:
             hint = "30m флуд" if not allow_permanent else "7d мошенничество (или навсегда)"
@@ -156,10 +162,10 @@ def parse_punitive_args(
     return None, reason, None
 
 
-def parse_warn_args(text: str) -> tuple[timedelta | None, str, str | None]:
+def parse_warn_args(text: str | list[str]) -> tuple[timedelta | None, str, str | None]:
     from community_bot.aliases import remainder_args
 
-    args = remainder_args(text)
+    args = remainder_args(text) if isinstance(text, str) else text
     if not args:
         return None, "", "Нужна причина. Пример: /warn спам или /warn 2h токсик"
     duration = parse_duration(args[0])

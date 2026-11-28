@@ -4,16 +4,20 @@ import asyncio
 import contextlib
 import html
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.filters import Command, CommandStart
+from aiogram.enums import ChatMemberStatus
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
+from aiogram.filters import Command, CommandStart, MagicData
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     ChatPermissions,
     FSInputFile,
@@ -22,13 +26,17 @@ from aiogram.types import (
     LinkPreviewOptions,
     Message,
     User,
+    WebAppInfo,
 )
 
+from community_bot.admin_workspace import CHAT_ACTIONS, MEMBER_PERMISSIONS, member_field_permission, permitted
 from community_bot.aliases import command_or_alias
-from community_bot.audit import format_audit_log, person_label
+from community_bot.application_form import validate_application_age
+from community_bot.audit import duration_label, format_audit_log, parse_punitive_args, person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database, utcnow
+from community_bot.domain import is_permanent_duration
 from community_bot.helpers import (
     application_block_reason,
     can_manage_user,
@@ -46,7 +54,6 @@ from community_bot.helpers import (
 from community_bot.keyboards import (
     STYLE_CLOSE,
     STYLE_GO,
-    YES_NO_KEYBOARD,
     admin_chat_keyboard,
     admin_mail_keyboard,
     admin_panel_keyboard,
@@ -67,7 +74,7 @@ from community_bot.keyboards import (
     feature_reset_keyboard,
     features_panel_text,
     flow_reply_keyboard,
-    main_private_keyboard,
+    private_menu_keyboard,
     role_selection_keyboard,
     role_users_keyboard,
     roles_hub_keyboard,
@@ -82,6 +89,7 @@ from community_bot.permissions import (
     PERM_AUTOMESSAGES,
     PERM_BROADCAST,
     PERM_CHAT_LOCK,
+    PERM_EVENT_PARTICIPANTS,
     PERM_FEATURES,
     PERM_MENTION,
     PERM_PAYMENTS,
@@ -89,19 +97,16 @@ from community_bot.permissions import (
     PERM_ROLES_ASSIGN,
     PERM_ROLES_EDIT,
     PERM_TICKETS,
-    PERM_USERS_COOKIES,
-    PERM_USERS_EDIT,
     slugify_role,
 )
+from community_bot.private_rich import fresh_private_panel, send_private_copy, standalone_rich_message
+from community_bot.profile_fields import parse_birth_date, profile_age
 from community_bot.restart import play_countdown, try_begin
 from community_bot.routers.flows import restore_private_menu
 from community_bot.staff_guide import staff_guide_text
 from community_bot.states import AdminFlow, ApplicationForm, ModeratorReply, TicketForm
 from community_bot.texts import (
-    APPLICATION_INTRO,
-    APPLICATION_QUESTIONS,
-    APPLICATION_REJECTED_INTERVIEW,
-    GROUP_COMMANDS_TEXT,
+    APPLICATION_PHOTO_PROMPT,
     REPUTATION_HELP_TEXT,
     STORE_HELP_TEXT,
     WELCOME_MEMBER_TEXT,
@@ -125,46 +130,65 @@ EMERGENCY_STOP_KEYBOARD = InlineKeyboardMarkup(
 
 
 async def _private_keyboard(user_id: int, db: Database, settings: Settings):
-    del user_id, db, settings
-    return main_private_keyboard()
+    from community_bot.access import private_keyboard
+
+    return await private_keyboard(db, settings, user_id)
 
 
 async def _panel_markup(db: Database, settings: Settings, user_id: int):
     return admin_panel_keyboard(await user_permissions(db, settings, user_id), await db.dashboard_stats())
 
 
-async def _send_welcome(message: Message, db: Database, settings: Settings, reply_markup) -> None:
-    cover = settings.welcome_cover
+async def private_menu_content(db: Database, settings: Settings, user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    from community_bot.access import private_allowed
+
+    ban = await db.ban_reset_state(user_id)
+    if db.ban_is_active(ban):
+        return "Анкету можно заполнить после разбана.", InlineKeyboardMarkup(inline_keyboard=[])
+    if await private_allowed(db, settings, user_id, ban=ban):
+        approved = await db.has_approved_application(user_id)
+        markup = private_menu_keyboard(
+            await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
+            unread=await db.notify_unread_count(user_id),
+        )
+        if approved:
+            from community_bot.onboarding_invites import entry_keyboard
+
+            markup.inline_keyboard[:0] = entry_keyboard(settings).inline_keyboard[:1]
+        return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
+    help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
+    pending = await db.pending_application_photo_status(user_id)
+    markup = start_apply_keyboard(pending=bool(pending), open_app=not ban)
+    if not ban:
+        from community_bot.onboarding_invites import entry_keyboard
+
+        markup.inline_keyboard.extend(entry_keyboard(settings).inline_keyboard)
+    text = WELCOME_PENDING_TEXT if pending else WELCOME_TEXT
+    if not ban:
+        access_text = "Приложение Норы и игры можно открыть сразу. В общий чат впускают админы по заявкам."
+        text = f"{text}\n\n{access_text}" if pending else f"👋 Привет!\n\n{access_text}"
+    if pending and not pending["has_photo"]:
+        text += f"\n\n{APPLICATION_PHOTO_PROMPT}"
+    return text, InlineKeyboardMarkup(inline_keyboard=[*markup.inline_keyboard, help_row])
+
+
+async def _send_welcome(message: Message, db: Database, settings: Settings) -> None:
+    from community_bot.menu_art import menu_cover
+
+    bundled = menu_cover("welcome")
+    cover = str(bundled) if bundled else settings.welcome_cover
     user_id = message.from_user.id if message.from_user else 0
-    apply_markup = None
-    if await db.has_approved_application(user_id):
-        text = WELCOME_MEMBER_TEXT
-    elif await db.has_pending_application(user_id):
-        text = WELCOME_PENDING_TEXT
-    else:
-        apply_markup = start_apply_keyboard()
-        text = WELCOME_TEXT
-    first_markup = apply_markup or reply_markup
+    text, markup = await private_menu_content(db, settings, user_id)
     if not cover:
-        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
-        if apply_markup:
-            await message.answer(
-                "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
-                reply_markup=reply_markup,
-            )
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
         return
     source: str | FSInputFile = cover
     if await asyncio.to_thread(Path(cover).is_file):
         source = FSInputFile(cover)
     try:
-        await message.answer_photo(source, caption=text, reply_markup=first_markup, parse_mode="HTML")
+        await message.answer_photo(source, caption=text, reply_markup=markup, parse_mode="HTML")
     except (TelegramBadRequest, OSError):
-        await message.answer(text, reply_markup=first_markup, parse_mode="HTML")
-    if apply_markup:
-        await message.answer(
-            "Это анкета вступления. Отвечай по одному вопросу — решение придёт сюда.",
-            reply_markup=reply_markup,
-        )
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.message(Command(EMERGENCY_STOP_COMMAND))
@@ -211,12 +235,7 @@ async def emergency_stop_confirm(
     if callback.message:
         await callback.message.edit_text("⛔ Бот аварийно отключён.")
 
-    chat_ids = {settings.community_chat_id}
-    stored_channel_id = await db.get_bot_state("freebie_channel_id")
-    if stored_channel_id:
-        with contextlib.suppress(ValueError):
-            chat_ids.add(int(stored_channel_id))
-    for chat_id in chat_ids:
+    for chat_id in {settings.community_chat_id, settings.freebie_channel_id}:
         if chat_id:
             with contextlib.suppress(TelegramBadRequest, TelegramForbiddenError):
                 await bot.leave_chat(chat_id)
@@ -228,9 +247,32 @@ async def emergency_stop_confirm(
 async def start(message: Message, state: FSMContext, db: Database, settings: Settings) -> None:
     if not message.from_user:
         return
+    if message.chat.type == "private":
+        from community_bot.private_rich import reopen_private_panel
+
+        reopen_private_panel()
+        from community_bot.birthday import (
+            SPECIAL_DAY,
+            SPECIAL_USERNAME,
+            gift_keyboard,
+            offer_special_on_contact,
+            pending_gift,
+        )
+
+        if datetime.now(ZoneInfo(settings.timezone)).date().isoformat() == SPECIAL_DAY:
+            await offer_special_on_contact(db, message.from_user, SPECIAL_DAY)
+        day = await pending_gift(db, message.from_user.id)
+        is_recipient = (message.from_user.username or "").casefold() == SPECIAL_USERNAME.casefold()
+        birthday_link = (message.text or "").partition(" ")[2].strip() == "birthday"
+        if day and (is_recipient or birthday_link):
+            await message.answer("🎁 <b>Подарок НОРЫ</b> · 500 🍪", parse_mode="HTML", reply_markup=gift_keyboard(day))
+            return
     await register_telegram_user(db, message.from_user)
     await state.clear()
-    await _send_welcome(message, db, settings, await _private_keyboard(message.from_user.id, db, settings))
+    if message.chat.type == "private" and (message.text or "").partition(" ")[2].strip() == "idea":
+        await open_ticket(message, state, db, settings, message.bot)
+        return
+    await _send_welcome(message, db, settings)
 
 
 @router.message(command_or_alias("pogoda"), F.chat.type == "private")
@@ -245,18 +287,11 @@ async def private_weather(message: Message, settings: Settings) -> None:
     )
 
 
-@router.message(command_or_alias("help", "commands"))
-async def help_command(message: Message, db: Database, settings: Settings) -> None:
-    if not message.from_user:
-        return
-    await answer_block(
-        message,
-        "commands",
-        GROUP_COMMANDS_TEXT,
-        cover_caption="📚 <b>Команды NORA COMMUNITY</b>\nПишите через / или русским словом. Полный список ниже.",
-        parse_mode="HTML",
-        reply_markup=await _private_keyboard(message.from_user.id, db, settings),
-    )
+@router.message(command_or_alias("help", "commands"), F.chat.type == "private")
+async def help_command(message: Message, bot: Bot) -> None:
+    from community_bot.commands_guide import send_commands_card
+
+    await send_commands_card(message, bot)
 
 
 @router.message(command_or_alias("store"))
@@ -306,7 +341,7 @@ async def menu_profile(callback: CallbackQuery, db: Database, settings: Settings
     from community_bot.routers.profile import send_profile_card
 
     user = await register_telegram_user(db, callback.from_user)
-    text = await render_profile(db, settings, user)
+    text = await render_profile(db, settings, user, compact=True)
     await callback.answer()
     await send_profile_card(callback.message, user, settings, editable=True, text=text, replace=True, db=db)
 
@@ -318,7 +353,7 @@ async def menu_wallet(callback: CallbackQuery, db: Database, settings: Settings)
     from community_bot.routers.wallet import send_wallet
 
     await callback.answer()
-    await send_wallet(callback.message, db, settings)
+    await send_wallet(callback.message, db, settings, actor=callback.from_user, replace=True)
 
 
 @router.callback_query(F.data == "menu:question")
@@ -332,18 +367,19 @@ async def menu_question(
     if not callback.message:
         return
     await callback.answer()
-    await open_ticket(callback.message, state, db, settings, bot)
+    await open_ticket(callback.message, state, db, settings, bot, actor=callback.from_user)
 
 
 @router.callback_query(F.data == "menu:shop")
 async def menu_shop(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not callback.from_user:
         return
+    from community_bot.blocks import replace_block
     from community_bot.routers.group import _shop_home_markup, _shop_home_text
 
     user = await register_telegram_user(db, callback.from_user)
     await callback.answer()
-    await answer_block(
+    await replace_block(
         callback.message,
         "shop",
         await _shop_home_text(db, user, settings),
@@ -362,11 +398,28 @@ async def menu_pet(callback: CallbackQuery, db: Database, settings: Settings) ->
     await _show_pet(callback.message, db, callback.from_user.id, settings, replace=True)
 
 
+async def _web_admin_markup(db: Database, settings: Settings, user_id: int):
+    from community_bot.access import miniapp_allowed
+
+    url = os.getenv("MINIAPP_URL", "")
+    if url.startswith("https://") and await miniapp_allowed(db, settings, user_id):
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Открыть админ-панель", web_app=WebAppInfo(url=url.split("#", 1)[0]+"?view=admin"),
+            ),
+        ]])
+    return None
+
+
 @router.callback_query(F.data == "menu:admin")
 async def menu_admin(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
     await callback.answer()
+    web_markup = await _web_admin_markup(db, settings, callback.from_user.id)
+    if web_markup:
+        await callback.message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
+        return
     await callback.message.answer(
         await _admin_panel_text(db),
         parse_mode="HTML",
@@ -409,6 +462,10 @@ async def _admin_panel_text(db: Database) -> str:
 @router.message(F.text == "🛡 Админ-панель")
 async def admin_panel(message: Message, db: Database, settings: Settings) -> None:
     if not message.from_user or not await _admin_role(message.from_user.id, db, settings):
+        return
+    web_markup = await _web_admin_markup(db, settings, message.from_user.id)
+    if web_markup:
+        await message.answer("Админ-панель теперь в миниапке Норы.", reply_markup=web_markup)
         return
     await answer_block(
         message,
@@ -458,6 +515,73 @@ async def admin_queue(callback: CallbackQuery, db: Database, settings: Settings)
     )
 
 
+@router.callback_query(F.data.startswith("admin:tickets:"))
+async def admin_tickets(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    raw = (callback.data or "").rsplit(":", 1)[-1]
+    page = int(raw) if raw.isdigit() else 0
+    rows = await db.fetchall(
+        "SELECT t.id, u.telegram_name FROM tickets t JOIN users u ON u.user_id=t.user_id "
+        "WHERE t.status='open' ORDER BY t.updated_at DESC LIMIT 11 OFFSET ?", (page * 10,),
+    )
+    buttons = [[InlineKeyboardButton(text=f"№{row['id']} · {row['telegram_name'] or 'Участник'}"[:60],
+                                     callback_data=f"admin:ticket:{row['id']}:0")] for row in rows[:10]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:tickets:{page-1}"))
+    if len(rows) > 10:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:tickets:{page+1}"))
+    if paging:
+        buttons.append(paging)
+    buttons.append([InlineKeyboardButton(text="К очереди", callback_data="admin:queue")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎫 <b>Тикеты</b>\n\nВыберите диалог." if rows else "🎫 <b>Тикеты</b>\n\nОткрытых диалогов нет.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:ticket:"))
+async def admin_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
+        return
+    _, _, raw_id, raw_page = (callback.data or "").split(":")
+    ticket_id, page = int(raw_id), int(raw_page)
+    ticket = await db.get_ticket(ticket_id)
+    if not ticket:
+        await callback.answer("Тикет не найден", show_alert=True)
+        return
+    records = await db.fetchall(
+        "SELECT * FROM ticket_messages WHERE ticket_id=? ORDER BY id DESC LIMIT 6 OFFSET ?",
+        (ticket_id, page * 5),
+    )
+    await callback.answer()
+    await callback.message.answer(f"🎫 <b>Диалог №{ticket_id}</b>", parse_mode="HTML")
+    for record in reversed(records[:5]):
+        sender = "Участник" if record["sender_kind"] == "user" else "Модератор"
+        body = f"<b>{sender}</b>\n{html.escape(str(record['text'] or ''))}"
+        media_type, file_id = record.get("media_type"), record.get("media_file_id")
+        method = getattr(bot, f"send_{media_type}", None) if media_type in {
+            "photo", "video", "document", "audio", "voice", "animation",
+        } else None
+        if method and file_id:
+            await method(callback.from_user.id, file_id, caption=body[:1024], parse_mode="HTML")
+        else:
+            await callback.message.answer(body, parse_mode="HTML")
+    rows = [[InlineKeyboardButton(text="Ответить", callback_data=f"ticket:reply:{ticket_id}"),
+             InlineKeyboardButton(text="Закрыть тикет", callback_data=f"ticket:close:{ticket_id}", style="danger")]]
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="Новее", callback_data=f"admin:ticket:{ticket_id}:{page-1}"))
+    if len(records) > 5:
+        paging.append(InlineKeyboardButton(text="Раньше", callback_data=f"admin:ticket:{ticket_id}:{page+1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="К тикетам", callback_data="admin:tickets:0")])
+    await callback.message.answer("Действия с диалогом", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
 @router.callback_query(F.data == "admin:reports")
 async def admin_reports(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_TICKETS):
@@ -468,7 +592,7 @@ async def admin_reports(callback: CallbackQuery, db: Database, settings: Setting
         lines.append("Очередь пуста.")
     for row in rows:
         snippet = html.escape((str(row.get("text") or "")[:80]).replace("\n", " "))
-        reason = html.escape(str(row.get("reason") or ""))
+        reason = html.escape(str(row.get("reason") or "")[:80])
         lines.append(f"#{row['id']} на {row['target_id']} · {reason}")
         if snippet:
             lines.append(f"<i>{snippet}</i>")
@@ -489,7 +613,45 @@ async def admin_report_review(callback: CallbackQuery, db: Database, settings: S
     if len(parts) < 4:
         await callback.answer("Нет.", show_alert=True)
         return
+    if not parts[3].isdigit() or parts[2] not in {"view", "ok", "no"}:
+        await callback.answer("Неизвестное действие.", show_alert=True)
+        return
     action, report_id = parts[2], int(parts[3])
+    if action == "view":
+        import json
+
+        from community_bot.helpers import telegram_message_link
+
+        row = await db.fetchone("SELECT * FROM reports WHERE id = ?", (report_id,))
+        if not row:
+            await callback.answer("Запись не найдена.", show_alert=True)
+            return
+        await callback.answer()
+        heading = "Баг" if str(row["reason"]).startswith("БАГ · ") else "Репорт"
+        link = ""
+        if row["chat_id"] and row["message_id"] and str(row["chat_id"]).startswith("-100"):
+            link = f'\n<a href="{telegram_message_link(row["chat_id"], row["message_id"])}">Оригинал сообщения ↗</a>'
+        await callback.message.answer(
+            f"<b>{heading} #{report_id}</b> · {html.escape(row['created_at'][:16])} UTC\n"
+            f"Автор записи: <code>{row['reporter_id']}</code>\n"
+            f"Участник: <code>{row['target_id']}</code>\n"
+            f"{html.escape(row['reason'])}{link}", parse_mode="HTML",
+        )
+        body = str(row["text"] or "[Без текста]")
+        for offset in range(0, len(body), 2000):
+            await callback.message.answer(body[offset:offset+2000], parse_mode=None)
+        attachment = await db.get_bot_state(f"report_attachment:{report_id}")
+        if attachment:
+            kind, file_id = json.loads(attachment)
+            if kind in {"photo", "video", "animation", "document", "audio", "voice", "sticker", "video_note"}:
+                try:
+                    await getattr(callback.bot, f"send_{kind}")(
+                        chat_id=callback.message.chat.id, **{kind: file_id},
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    await callback.message.answer("Вложение сейчас недоступно. Текст и ссылка сохранены в журнале.")
+        await callback.message.answer("Действия с записью", reply_markup=admin_reports_keyboard([row]))
+        return
     status = "approved" if action == "ok" else "rejected"
     if not await db.review_report(report_id, callback.from_user.id, status):
         await callback.answer("Уже разобрали.", show_alert=True)
@@ -595,7 +757,7 @@ async def admin_people(callback: CallbackQuery, db: Database, settings: Settings
         return
     await callback.answer()
     await callback.message.edit_text(
-        "👤 <b>Люди</b>\n\nПоиск, роли, карточка, заметка и титул недели.",
+        "👤 <b>Люди</b>\n\nПоиск, роли, карточки и заметки.",
         parse_mode="HTML",
         reply_markup=admin_people_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
@@ -607,10 +769,46 @@ async def admin_chatroom(callback: CallbackQuery, db: Database, settings: Settin
         return
     await callback.answer()
     await callback.message.edit_text(
-        "💬 <b>Чат</b>\n\nПост, автосообщения, мут, упоминание, рассылка и флаги.",
+        "💬 <b>Чат</b>\n\nПосты, события и участники, автосообщения, мут, упоминание, рассылка и флаги.",
         parse_mode="HTML",
         reply_markup=admin_chat_keyboard(await user_permissions(db, settings, callback.from_user.id)),
     )
+
+
+@router.callback_query(F.data.in_({"admin:lobby", "admin:lobby:publish"}))
+async def admin_lobby_widget(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await callback.answer()
+    text = (
+        "🎮 <b>Лобби NORA</b>\n\n"
+        "Живой HTML-виджет: игроки онлайн / участники сообщества и вход сразу в игру.\n"
+        "Счётчик обновляется примерно каждые 10 секунд. Нужен Telegram с поддержкой виджетов.\n\n"
+        "Сообщение появится в чате сообщества и будет закреплено. "
+        "Повторное нажатие закрепит тот же виджет. Остальные закрепы сохранятся."
+    )
+    if callback.data == 'admin:lobby:publish':
+        from aiogram.exceptions import TelegramAPIError
+
+        service = getattr(bot, '_nora_lobby_widget', None)
+        if service is None:
+            text = 'Сервис лобби ещё не готов. Попробуй позже.'
+        else:
+            try:
+                text = html.escape(await service.publish(callback.from_user.id))
+                await db.log_admin_action(callback.from_user.id, 'lobby_widget_publish',
+                                          str(settings.community_chat_id))
+            except TelegramAPIError as error:
+                from community_bot.lobby_widget import delivery_error
+
+                text = html.escape(delivery_error(error))
+                logger.warning('Lobby publication rejected: %s', delivery_error(error))
+            except ValueError as error:
+                text = str(error)
+    await callback.message.edit_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Опубликовать и закрепить', callback_data='admin:lobby:publish')],
+        [InlineKeyboardButton(text='← Публикации', callback_data='admin:chatroom')],
+    ]))
 
 
 def _system_text(*, is_owner: bool) -> str:
@@ -752,22 +950,13 @@ async def admin_search_begin(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
     await state.set_state(AdminFlow.user_value)
     await state.set_data({"admin_action": "search", "target_user_id": 0})
     await callback.answer()
     await callback.message.answer("Имя, @username или Telegram ID:", reply_markup=flow_reply_keyboard())
-
-
-@router.callback_query(F.data.startswith("admin:weekstar:"))
-async def admin_weekstar(callback: CallbackQuery, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _admin_callback(callback, db, settings, PERM_USERS_EDIT):
-        return
-    user_id = int(callback.data.rsplit(":", 1)[1])
-    if not await db.get_user(user_id):
-        await callback.answer("Пользователь не найден.", show_alert=True)
-        return
-    await db.set_weekly_star(user_id)
-    await callback.answer("Титул недели выдан.", show_alert=True)
 
 
 @router.callback_query(F.data == "admin:vitrine")
@@ -873,17 +1062,9 @@ async def admin_eventtitle_begin(
     db: Database,
     settings: Settings,
 ) -> None:
-    if not callback.message or not await _admin_callback(callback, db, settings):
-        return
-    await state.set_state(AdminFlow.user_value)
-    await state.set_data({"admin_action": "eventtitle", "target_user_id": 0})
-    await callback.answer()
-    current = await db.get_bot_state("event_title")
-    await callback.message.answer(
-        f"Текущее название: {html.escape(current or 'не задано')}\nВведите новое (2–80 символов).",
-        parse_mode="HTML",
-        reply_markup=flow_reply_keyboard(),
-    )
+    # Retire stale system controls: all event operations live in Chat → Events.
+    await state.clear()
+    await admin_event_list(callback, db, settings)
 
 
 @router.callback_query(F.data == "admin:features")
@@ -907,7 +1088,7 @@ async def admin_features_reset_ask(callback: CallbackQuery, db: Database, settin
     await callback.message.edit_text(
         "♻️ <b>Сброс функций</b>\n\n"
         "Вернуть все переключатели к заводским значениям?\n"
-        "Игры, тамагочи, видео-профили и награды за активность — включены.\n"
+        "Игры, питомцы, видео-профили и награды за активность — включены.\n"
         "Антифлуд, фильтры ссылок/медиа/стикеров, ночной и рейд-режим — выключены.",
         parse_mode="HTML",
         reply_markup=feature_reset_keyboard(),
@@ -960,12 +1141,15 @@ async def admin_morning(callback: CallbackQuery, db: Database, settings: Setting
     from community_bot.morning import publish_morning_digest
 
     try:
-        await publish_morning_digest(bot, db, settings, force=True)
+        pinned = await publish_morning_digest(bot, db, settings, force=True)
     except Exception:
         logger.exception("Не удалось отправить утренний пост вручную")
-        await callback.message.answer("Сводку собрать не удалось. Повторю в 9:00.")
+        await callback.message.answer("Сводку собрать не удалось. Повторю в 8:00.")
         return
-    await callback.message.answer("Утренний пост отправлен в чат и закреплён.")
+    await callback.message.answer(
+        "Утренний пост отправлен в чат и закреплён." if pinned else
+        "Пост отправлен, но закрепить его не удалось. Проверьте право бота закреплять сообщения.",
+    )
 
 
 @router.callback_query(F.data == "admin:health")
@@ -1036,12 +1220,20 @@ async def _start_application(message: Message, state: FSMContext, db: Database, 
     reason = await application_block_reason(db, user.id)
     if reason:
         await state.clear()
-        await message.answer(reason)
+        pending = await db.pending_application_photo_status(user.id)
+        if pending:
+            if not pending["has_photo"]:
+                reason += f"\n\n{APPLICATION_PHOTO_PROMPT}"
+            markup = start_apply_keyboard(pending=True)
+            await message.answer(reason, reply_markup=markup if markup.inline_keyboard else None)
+        else:
+            await message.answer(reason)
         return False
     await register_telegram_user(db, user)
     await state.set_state(ApplicationForm.name)
-    await state.set_data({"flow_kind": "application"})
-    await message.answer(APPLICATION_INTRO, reply_markup=flow_reply_keyboard())
+    ban = await db.ban_reset_state(user.id)
+    await state.set_data({"flow_kind": "application", "ban_version": ban.get("version")})
+    await message.answer("Как тебя зовут?", reply_markup=flow_reply_keyboard())
     return True
 
 
@@ -1078,95 +1270,162 @@ async def application_name(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(name=text)
     await state.set_state(ApplicationForm.age)
-    await message.answer(APPLICATION_QUESTIONS["age"], reply_markup=flow_reply_keyboard())
+    await message.answer("Сколько тебе лет?", reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.age)
 async def application_age(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message, maximum=50)) is None:
+    try:
+        value = validate_application_age(message.text)
+    except ValueError as error:
+        await message.answer(str(error))
         return
-    await state.update_data(age=text)
-    await state.set_state(ApplicationForm.referral)
-    await message.answer(APPLICATION_QUESTIONS["referral"], reply_markup=flow_reply_keyboard())
+    await state.update_data(age=value)
+    await state.set_state(ApplicationForm.city)
+    from community_bot.city_gate import city_keyboard
+
+    await message.answer(
+        "📍 Из какого ты города? Выбери из кнопок ниже или напиши название, чтобы найти другой.",
+        reply_markup=city_keyboard(message.from_user.id, prefix="appcity"),
+    )
 
 
-@router.message(ApplicationForm.referral)
-async def application_referral(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message, maximum=100)) is None:
+@router.message(ApplicationForm.city)
+async def application_city(message: Message, state: FSMContext) -> None:
+    from community_bot.city_gate import city_keyboard
+    from community_bot.city_lookup import search_cities
+
+    try:
+        options = await search_cities(message.text or "")
+    except ValueError as error:
+        await message.answer(str(error))
         return
-    await state.update_data(referral=text)
-    await state.set_state(ApplicationForm.expectations)
-    await message.answer(APPLICATION_QUESTIONS["expectations"], reply_markup=flow_reply_keyboard())
-
-
-@router.message(ApplicationForm.expectations)
-async def application_expectations(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message)) is None:
+    if not options:
+        await message.answer("Не нашёл такой город. Попробуй написать иначе.")
         return
-    await state.update_data(expectations=text)
+    await message.answer(
+        "📍 Выбери свой город из найденных вариантов:",
+        reply_markup=city_keyboard(message.from_user.id, suggestions=options, prefix="appcity"),
+    )
+
+
+@router.callback_query(ApplicationForm.city, F.data.startswith("appcity:"))
+async def application_city_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    from community_bot.city_gate import city_keyboard
+    from community_bot.city_lookup import resolve_city_id
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 4 or parts[2] != str(callback.from_user.id):
+        await callback.answer("Эта кнопка не для твоей анкеты.", show_alert=True)
+        return
+    if parts[1] == "page" and len(parts) == 4:
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 0
+        await callback.message.edit_text(
+            "📍 Выбери город из списка или напиши название сообщением.",
+            reply_markup=city_keyboard(callback.from_user.id, page=page, prefix="appcity"),
+        )
+        await callback.answer()
+        return
+    if parts[1] != "pick" or len(parts) != 5:
+        await callback.answer("Кнопка устарела.", show_alert=True)
+        return
+    try:
+        city = await resolve_city_id(parts[3] + ":" + parts[4])
+    except ValueError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+    await state.update_data(city=city)
     await state.set_state(ApplicationForm.bio)
-    await message.answer(APPLICATION_QUESTIONS["bio"], reply_markup=flow_reply_keyboard())
+    await callback.message.edit_text(f"✅ Город: <b>{html.escape(city)}</b>", parse_mode="HTML",
+                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
+    await callback.answer("Город выбран")
+    await callback.message.answer("Расскажи немного о себе.", reply_markup=flow_reply_keyboard())
 
 
 @router.message(ApplicationForm.bio)
-async def application_bio(message: Message, state: FSMContext) -> None:
-    if (text := await _validate_text(message)) is None:
+async def application_bio(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot
+) -> None:
+    if not message.from_user or (bio := await _validate_text(message, maximum=1000)) is None:
         return
-    await state.update_data(bio=text)
-    await state.set_state(ApplicationForm.interview)
-    await message.answer(APPLICATION_QUESTIONS["interview"], reply_markup=YES_NO_KEYBOARD)
+    user = message.from_user
+    values = await state.get_data()
+    fields = ("name", "age", "city")
+    if not all(field in values for field in fields):
+        return
+    answers = {field: values[field] for field in fields}
+    answers["bio"] = bio
+    application_id = await db.create_application(user.id, answers, ban_version=values.get("ban_version"))
+    await state.clear()
+    if not application_id:
+        reason = await application_block_reason(db, user.id) or "Начни анкету заново."
+        await message.answer(reason)
+        await restore_private_menu(message, db, settings)
+        return
+    await notify_application_reviewers(bot, settings, application_id, user.id, user.username, answers)
+    await restore_private_menu(message, db, settings)
+
+
+@router.message(F.photo, MagicData(F.application_photo_target))
+async def attach_application_photo(message: Message, db: Database, application_photo_target: dict) -> None:
+    if not message.from_user or not message.photo:
+        return
+    if application_photo_target["has_photo"]:
+        await message.answer("Фото уже прикреплено к анкете.")
+        return
+    attached = await db.attach_application_photo(
+        application_photo_target["id"], message.from_user.id, message.photo[-1].file_id,
+    )
+    text = "Фото прикреплено. Анкета на проверке." if attached else "Анкета изменилась. Проверь её статус."
+    await message.answer(text)
+
+
+@router.callback_query(F.data == "application:skip-photo")
+async def skip_application_photo(callback: CallbackQuery, db: Database) -> None:
+    await callback.answer()
+    if callback.message and await db.has_pending_application(callback.from_user.id):
+        markup = start_apply_keyboard(pending=True)
+        await callback.message.answer("Анкета на проверке. Решение придёт сюда.",
+                                      reply_markup=markup if markup.inline_keyboard else None)
 
 
 def _application_text(application_id: int, user_id: int, username: str | None, answers: dict[str, Any]) -> str:
-    who = f"@{html.escape(username)}" if username else user_link(user_id, answers["name"])
+    name = answers.get("name", "не указано")
+    who = f"@{html.escape(username)}" if username else user_link(user_id, name)
+    birth = answers.get("birth_date")
+    birth_line = (
+        f"<b>Дата рождения:</b> {html.escape('.'.join(reversed(birth.split('-'))))}"
+        if birth else f"<b>Возраст:</b> {html.escape(str(answers.get('age', 'не указан')))}"
+    )
     return (
         f"📝 <b>Новая анкета №{application_id}</b>\n"
         f"Пользователь: {who} (<code>{user_id}</code>)\n\n"
-        f"<b>Имя:</b> {html.escape(answers['name'])}\n"
-        f"<b>Возраст:</b> {html.escape(answers['age'])}\n"
-        f"<b>Откуда узнал:</b> {html.escape(answers['referral'])}\n\n"
-        f"<b>Ожидания:</b>\n{html.escape(answers['expectations'])}\n\n"
-        f"<b>О себе:</b>\n{html.escape(answers['bio'])}\n\n"
-        "<b>Онлайн-интервью:</b> да"
+        f"<b>Имя:</b> {html.escape(name)}\n"
+        f"{birth_line}\n"
+        f"<b>Город:</b> {html.escape(answers.get('city', 'не указан'))}\n\n"
+        f"<b>О себе:</b>\n{html.escape(answers.get('bio', ''))}"
     )
 
 
-@router.callback_query(ApplicationForm.interview, F.data.startswith("application:interview:"))
-async def finish_application(
-    callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot
+async def notify_application_reviewers(
+    bot: Bot, settings: Settings, application_id: int, user_id: int,
+    username: str | None, answers: dict[str, Any],
 ) -> None:
-    if not callback.from_user or not callback.data or not callback.message:
-        return
-    await callback.answer()
-    if callback.data.endswith(":no"):
-        await state.clear()
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(APPLICATION_REJECTED_INTERVIEW)
-        await restore_private_menu(callback.message, db, settings)
-        return
-    answers = await state.get_data()
-    application_id = await db.create_application(callback.from_user.id, answers)
-    if not application_id:
-        await state.clear()
-        reason = await application_block_reason(db, callback.from_user.id) or "Анкета уже есть."
-        await callback.message.answer(reason)
-        await restore_private_menu(callback.message, db, settings)
-        return
-    text = _application_text(application_id, callback.from_user.id, callback.from_user.username, answers)
+    text = _application_text(application_id, user_id, username, answers)
     for reviewer_id in settings.reviewers:
-        await safe_send(
-            bot,
-            reviewer_id,
-            text,
-            parse_mode="HTML",
-            reply_markup=application_review_keyboard(application_id),
-        )
-    await state.clear()
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(
-        f"✅ Анкета №{application_id} отправлена на проверку. Решение придёт сюда.",
-    )
-    await restore_private_menu(callback.message, db, settings)
+        try:
+            await safe_send(
+                bot,
+                reviewer_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=application_review_keyboard(application_id),
+            )
+        except TelegramAPIError as error:
+            logger.warning("Application review notification failed (%s)", type(error).__name__)
 
 
 async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -> bool:
@@ -1174,6 +1433,21 @@ async def _reviewer(callback: CallbackQuery, db: Database, settings: Settings) -
         return True
     await callback.answer("Недостаточно прав.", show_alert=True)
     return False
+
+
+@router.callback_query(F.data.regexp(r"^application:photo:[0-9]+$"))
+async def admin_application_photo(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _reviewer(callback, db, settings):
+        return
+    application_id = int(callback.data.rsplit(":", 1)[1])
+    photo = await db.application_photo(application_id)
+    if not photo:
+        await callback.answer("К анкете пока не прикрепили фото.", show_alert=True)
+        return
+    await callback.answer()
+    source = BufferedInputFile(photo, filename="application.jpg") if isinstance(photo, bytes) else photo
+    await callback.message.answer_photo(source, caption=f"Фото к анкете №{application_id}",
+                                        reply_markup=application_review_keyboard(application_id))
 
 
 async def _notify_application_decision(
@@ -1186,28 +1460,42 @@ async def _notify_application_decision(
     reason: str | None,
 ) -> None:
     application = await db.get_application(application_id)
-    if not application:
+    if not application or application["status"] != status:
         return
+    user_id = int(application["user_id"])
     approved = status == "approved"
     result = "✅ Заявка одобрена" if approved else "❌ Заявка отклонена"
     reason_text = f"\nПричина: {html.escape(reason)}" if reason else ""
-    invite = ""
-    if approved and settings.community_invite_url:
-        invite = (
-            "\n\nДобро пожаловать в НОРУ:\n"
-            f'<a href="{html.escape(settings.community_invite_url, quote=True)}">'
-            f"{html.escape(settings.community_invite_url)}</a>"
+    # The invitation is sent as a dedicated card with an actual join button.
+    if approved:
+        markup = private_menu_keyboard(
+            await has_permission(db, settings, user_id, PERM_ADMIN_PANEL),
+            unread=await db.notify_unread_count(user_id),
         )
-    is_staff = await has_permission(db, settings, int(application["user_id"]), PERM_ADMIN_PANEL)
-    await safe_send(
-        bot,
-        int(application["user_id"]),
-        f"{result}.{reason_text}{invite}",
-        parse_mode="HTML",
-        reply_markup=main_private_keyboard(is_staff),
-    )
+        menu_text = "Выбери раздел."
+    else:
+        menu_text, markup = await private_menu_content(db, settings, user_id)
+    with standalone_rich_message():
+        if approved:
+            from community_bot.onboarding_invites import send_entry
+
+            await send_entry(bot, settings, user_id)
+        else:
+            await safe_send(bot, user_id, f"{result}.{reason_text}", parse_mode="HTML")
+    with fresh_private_panel(user_id):
+        await safe_send(bot, user_id, menu_text, parse_mode="HTML", reply_markup=markup)
+    # A user can have a pending Telegram join request from before submitting the form.
+    if approved and settings.community_chat_id:
+        approve_join = getattr(bot, "approve_chat_join_request", None)
+        if approve_join is not None:
+            try:
+                await approve_join(settings.community_chat_id, user_id)
+            except (TelegramBadRequest, TelegramForbiddenError):
+                pass  # No pending request or Telegram has already processed it.
+            except TelegramAPIError as error:
+                logger.warning("Existing community join request approval failed (%s)", type(error).__name__)
     report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
-    for reviewer_id in settings.reviewers - {moderator_id, int(application["user_id"])}:
+    for reviewer_id in settings.reviewers - {moderator_id, user_id}:
         await safe_send(bot, reviewer_id, report, parse_mode="HTML")
 
 
@@ -1427,27 +1715,90 @@ async def admin_role_create_name(message: Message, state: FSMContext, db: Databa
     if not 2 <= len(name) <= 40:
         await message.answer("Название — от 2 до 40 символов.")
         return
-    slug = slugify_role(name)
-    existing = await db.get_staff_role(slug)
-    suffix = 2
-    while existing:
-        slug = f"{slugify_role(name)[:20]}_{suffix}"
-        existing = await db.get_staff_role(slug)
-        suffix += 1
-    actor_rank = await rank_of_user(db, settings, message.from_user.id)
-    rank = min(50, max(1, actor_rank - 1))
-    if not await db.create_staff_role(slug, name, rank, []):
-        await message.answer("Не удалось создать роль, попробуйте другое имя.")
+    await state.set_state(AdminFlow.role_prefix)
+    await state.set_data({'prefix_name': name, 'prefix_color': '', 'prefix_emoji': ''})
+    await message.answer('Настрой префикс роли:', reply_markup=_prefix_keyboard('', ''))
+
+
+def _prefix_keyboard(color, emoji):
+    from community_bot.role_prefixes import COLORS, EMOJI_LABELS, EMOJIS
+
+    colors = list({'': 'Без плашки', **COLORS}.items())
+    rows = [[InlineKeyboardButton(text=('✓ ' if color == key else '') + label,
+                                  callback_data='admin:prefix:color:' + key)
+             for key, label in colors[i:i + 2]] for i in range(0, len(colors), 2)]
+    rows += [[InlineKeyboardButton(text=('✓ ' if emoji == value else '') + EMOJI_LABELS[value],
+                                   callback_data=f'admin:prefix:emoji:{i}')
+              for i, value in enumerate(EMOJIS) if i // 4 == group] for group in (0, 1)]
+    rows += [[InlineKeyboardButton(text='Сохранить', callback_data='admin:prefix:save')],
+             [InlineKeyboardButton(text='Отменить', callback_data='admin:prefix:cancel')]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith('admin:roleprefix:'))
+async def admin_role_prefix(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
         return
-    await state.clear()
-    await db.log_admin_action(message.from_user.id, "role_create", slug, name)
-    role = await db.get_staff_role(slug)
-    assert role
-    await message.answer(
-        f"✅ Роль <b>{html.escape(name)}</b> создана (ранг {rank}). Включите нужные права:",
-        parse_mode="HTML",
-        reply_markup=staff_role_view_keyboard(role, True),
-    )
+    role = await db.get_staff_role(callback.data.rsplit(':', 1)[1])
+    if not role:
+        await callback.answer('Роль не найдена', show_alert=True)
+        return
+    await state.set_state(AdminFlow.role_prefix)
+    await state.set_data({'prefix_slug': role['slug'], 'prefix_name': role['name'],
+                          'prefix_color': role['prefix_color'], 'prefix_emoji': role['prefix_emoji']})
+    await callback.answer()
+    await callback.message.edit_text('Настрой префикс роли:',
+                                     reply_markup=_prefix_keyboard(role['prefix_color'], role['prefix_emoji']))
+
+
+@router.callback_query(AdminFlow.role_prefix, F.data.startswith('admin:prefix:'))
+async def admin_prefix_choice(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings):
+    from community_bot.role_prefixes import COLORS, EMOJIS
+
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_ROLES_EDIT):
+        return
+    data = await state.get_data()
+    action = callback.data.removeprefix('admin:prefix:')
+    if action == 'cancel':
+        await state.clear()
+        await callback.answer('Отменено')
+        await callback.message.edit_text('Настройка отменена.', reply_markup=roles_hub_keyboard(True))
+        return
+    color, emoji = data.get('prefix_color', ''), data.get('prefix_emoji', '')
+    if action.startswith('color:') and action[6:] in ('', *COLORS):
+        color = action[6:]
+    elif action.startswith('emoji:') and action[6:].isdigit() and int(action[6:]) < len(EMOJIS):
+        emoji = EMOJIS[int(action[6:])]
+    elif action == 'save':
+        name, slug = data['prefix_name'], data.get('prefix_slug')
+        if slug:
+            if not await db.update_staff_role(slug, prefix_color=color, prefix_emoji=emoji):
+                await callback.answer('Роль больше не существует', show_alert=True)
+                return
+        else:
+            slug = slugify_role(name)
+            suffix = 2
+            while await db.get_staff_role(slug):
+                slug = f'{slugify_role(name)[:20]}_{suffix}'
+                suffix += 1
+            rank = min(50, max(1, await rank_of_user(db, settings, callback.from_user.id) - 1))
+            if not await db.create_staff_role(slug, name, rank, [], prefix_color=color, prefix_emoji=emoji):
+                await callback.answer('Не удалось создать роль', show_alert=True)
+                return
+        await db.log_admin_action(callback.from_user.id, 'role_prefix' if data.get('prefix_slug')
+                                  else 'role_create', slug, name)
+        await state.clear()
+        await callback.answer('Сохранено')
+        await _show_role_view(callback, db, settings, slug)
+        return
+    else:
+        await callback.answer('Выбери вариант из списка', show_alert=True)
+        return
+    await state.update_data(prefix_color=color, prefix_emoji=emoji)
+    await callback.answer()
+    preview = f'{emoji} {data["prefix_name"]}'.strip() if color else 'Без плашки'
+    await callback.message.edit_text(f'Префикс: {preview}\nЦвет: {COLORS.get(color, "без цвета")}',
+                                     reply_markup=_prefix_keyboard(color, emoji))
 
 
 async def _show_role_view(callback: CallbackQuery, db: Database, settings: Settings, slug: str) -> None:
@@ -1587,6 +1938,9 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
         await callback.answer("Нельзя выдать роль не ниже своей.", show_alert=True)
         return
     await db.set_role(user_id, new_role)
+    from community_bot.access import sync_menu
+
+    await sync_menu(bot, db, settings, user_id)
     label = str(role["name"])
     await callback.answer(f"Новая роль: {label}.")
     roles = await db.list_staff_roles()
@@ -1600,13 +1954,13 @@ async def admin_set_role(callback: CallbackQuery, db: Database, settings: Settin
             settings.is_owner(callback.from_user.id),
         ),
     )
-    await safe_send(
-        bot,
-        user_id,
-        f"Ваша роль изменена: <b>{html.escape(label)}</b>.",
-        parse_mode="HTML",
-        reply_markup=main_private_keyboard(),
-    )
+    if target["role"] != new_role:
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        await send_service_notification(
+            bot, db, user_id, Sender(), "Изменение роли", f"Ваша роль изменена: {label}.", "lk",
+            event_key=f"role:{callback.id}",
+        )
 
 
 async def _can_admin_manage(actor_id: int, target_id: int, db: Database, settings: Settings) -> bool:
@@ -1617,10 +1971,7 @@ async def _can_admin_manage(actor_id: int, target_id: int, db: Database, setting
 async def admin_users(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
-    if not (
-        await has_permission(db, settings, callback.from_user.id, PERM_USERS_EDIT)
-        or await has_permission(db, settings, callback.from_user.id, PERM_USERS_COOKIES)
-    ):
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
         await callback.answer("Недостаточно прав.", show_alert=True)
         return
     users = await db.list_users(limit=100)
@@ -1637,6 +1988,9 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
     actor_role = await _admin_callback(callback, db, settings)
     if not callback.data or not callback.message or not actor_role:
         return
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
     user_id = int(callback.data.rsplit(":", 1)[1])
     user = await db.get_user(user_id)
     if not user:
@@ -1652,8 +2006,7 @@ async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Set
         f"👤 <b>{html.escape(str(name))}</b> · <code>{user_id}</code>\n"
         f"Роль: {html.escape(await role_title(db, str(user['role'])))}\n"
         f"Репутация: <b>{user['reputation']}</b> · щиты {int(user.get('hate_shields') or 0)}\n"
-        f"Титул: {html.escape(str(user.get('profile_title') or 'нет'))}\n"
-        f"Возраст: {user['age'] or 'не указан'}\n"
+        f"Возраст: {profile_age(user) or 'не указан'}\n"
         f"Баланс: <b>{user['cookies']} 🍪</b>\n"
         f"Предупреждения: <b>{user['warnings']}</b>\n"
         f"Заметка: {html.escape(note)}\n\n"
@@ -1681,8 +2034,17 @@ async def admin_begin_user_edit(
     prompts = {
         "cookies": "Введите точный новый баланс от 0 до 1 000 000.",
         "add_cookies": "Сколько печенек начислить? От 1 до 1 000 000.",
+        "remove_cookies": "Сколько печенек списать? От 1 до 1 000 000.",
+        "mute": "Выберите срок мута и укажите причину.",
+        "unmute": "Укажите причину снятия мута.",
+        "ban": "Выберите срок бана и укажите причину. Бан сбросит профиль, баланс, репутацию и прогресс.",
+        "unban": "Укажите причину разбана.",
+        "clear_name": "Имя будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                      "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
+        "clear_bio": "Описание будет полностью очищено. Магазин и события станут недоступны до заполнения. "
+                     "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
         "name": "Введите новое имя (до 50 символов).",
-        "age": "Введите новый возраст числом от 14 до 120.",
+        "age": "Введите дату рождения в формате ДД.ММ.ГГГГ.",
         "avatar": "Отправьте новую фотографию или видео профиля.",
         "warnings": "Введите точное количество предупреждений, 0 или больше.",
         "rep": "Введите новую репутацию числом от -20 до 100.",
@@ -1690,6 +2052,13 @@ async def admin_begin_user_edit(
     }
     if action not in prompts:
         await callback.answer("Неизвестное действие.", show_alert=True)
+        return
+    if not await has_permission(db, settings, callback.from_user.id, member_field_permission(action)):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+    if action in CHAT_ACTIONS and (not settings.community_chat_id or callback.from_user.id == user_id
+                                   or settings.is_owner(user_id)):
+        await callback.answer("Модерация этого участника недоступна.", show_alert=True)
         return
     await state.set_state(AdminFlow.user_value)
     await state.set_data({"admin_action": action, "target_user_id": user_id})
@@ -1711,13 +2080,20 @@ async def admin_save_user_edit(
     data = await state.get_data()
     user_id = int(data.get("target_user_id") or 0)
     action = str(data["admin_action"])
+    if action.startswith('event_meta:'):
+        from community_bot.event_manager import save_field
+
+        await save_field(message, state, db, settings, bot)
+        return
     if action == "search":
-        if not actor_role:
+        if not actor_role or not permitted(
+            await user_permissions(db, settings, message.from_user.id), MEMBER_PERMISSIONS,
+        ):
             await state.clear()
             await message.answer("Недостаточно прав.")
             return
-        query = (message.text or "").strip()
-        if len(query) < 2 and not query.isdigit():
+        query = (message.text or "").strip().removeprefix("@")
+        if (len(query) < 2 and not query.isdecimal()) or len(query) > (18 if query.isdecimal() else 80):
             await message.answer("Введите имя, @username или Telegram ID.")
             return
         users = await db.search_users(query)
@@ -1731,17 +2107,8 @@ async def admin_save_user_edit(
         )
         return
     if action == "eventtitle":
-        if not actor_role:
-            await state.clear()
-            await message.answer("Недостаточно прав.")
-            return
-        title = (message.text or "").strip()
-        if not 2 <= len(title) <= 80:
-            await message.answer("Название от 2 до 80 символов.")
-            return
-        await db.set_bot_state("event_title", title)
         await state.clear()
-        await message.answer(f"✅ Мероприятие теперь: {html.escape(title)}", parse_mode="HTML")
+        await message.answer("Настройка перенесена: Админ-панель → Чат → События и участники.")
         return
     if action == "stopword_add":
         if not actor_role or not await has_permission(db, settings, message.from_user.id, PERM_FEATURES):
@@ -1830,9 +2197,16 @@ async def admin_save_user_edit(
             )
         await message.answer("Розыгрыш опубликован в чат.")
         return
-    if not actor_role or not await _can_admin_manage(message.from_user.id, user_id, db, settings):
+    if (
+        not actor_role
+        or not await has_permission(db, settings, message.from_user.id, member_field_permission(action))
+        or not await _can_admin_manage(message.from_user.id, user_id, db, settings)
+    ):
         await state.clear()
         await message.answer("Недостаточно прав для изменения этого пользователя.")
+        return
+    if action in CHAT_ACTIONS:
+        await _save_chat_moderation(message, state, db, settings, bot, user_id, action)
         return
     if action == "avatar":
         if not message.photo and not message.video:
@@ -1845,6 +2219,16 @@ async def admin_save_user_edit(
             await db.update_profile(user_id, "avatar_file_id", message.photo[-1].file_id)
             await db.update_profile(user_id, "avatar_media_type", "photo")
         result = "Аватар обновлён."
+    elif action in {"clear_name", "clear_bio"}:
+        if (message.text or "").strip() != "ОЧИСТИТЬ":
+            await message.answer("Для подтверждения введите ОЧИСТИТЬ или отмените действие.")
+            return
+        field = "profile_name" if action == "clear_name" else "profile_bio"
+        await db.execute(
+            f"UPDATE users SET {field} = '', updated_at = ? WHERE user_id = ?",
+            (datetime.now(UTC).isoformat(), user_id),
+        )
+        result = "Поле очищено. Участнику нужно заполнить профиль заново для доступа к магазину и событиям."
     elif action == "name":
         value = (message.text or "").strip()
         if not 1 <= len(value) <= 50:
@@ -1853,11 +2237,12 @@ async def admin_save_user_edit(
         await db.update_profile(user_id, "profile_name", value)
         result = "Имя обновлено."
     elif action == "age":
-        if not message.text or not message.text.isdigit() or not 14 <= int(message.text) <= 120:
-            await message.answer("Возраст должен быть числом от 14 до 120.")
+        try:
+            await db.update_profile(user_id, "birth_date", parse_birth_date(message.text or ""))
+        except ValueError as error:
+            await message.answer(str(error))
             return
-        await db.update_profile(user_id, "age", int(message.text))
-        result = "Возраст обновлён."
+        result = "Дата рождения сохранена."
     elif action == "warnings":
         if not message.text or not message.text.isdigit():
             await message.answer("Введите целое число 0 или больше.")
@@ -1866,7 +2251,7 @@ async def admin_save_user_edit(
         result = f"Количество предупреждений установлено: {int(message.text)}."
     elif action == "rep":
         raw = (message.text or "").strip()
-        if not raw.lstrip("-").isdigit():
+        if not raw.removeprefix("-").isascii() or not raw.removeprefix("-").isdigit() or len(raw) > 4:
             await message.answer("Репутация — целое число от -20 до 100.")
             return
         value = int(raw)
@@ -1888,21 +2273,104 @@ async def admin_save_user_edit(
         await db.update_profile(user_id, "moderator_note", value)
         result = "Заметка обновлена."
     elif action == "cookies":
-        if not message.text or not message.text.isdigit() or int(message.text) > 1_000_000:
+        raw = message.text or ""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > 7 or int(raw) > 1_000_000:
             await message.answer("Баланс должен быть числом от 0 до 1 000 000.")
             return
-        await db.set_cookies(user_id, int(message.text), message.from_user.id)
-        result = f"Баланс установлен: {int(message.text)} 🍪."
+        await db.set_cookies(user_id, int(raw), message.from_user.id)
+        result = f"Баланс установлен: {int(raw)} 🍪."
     else:
-        if not message.text or not message.text.isdigit() or not 1 <= int(message.text) <= 1_000_000:
+        raw = message.text or ""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > 7 or not 1 <= int(raw) <= 1_000_000:
             await message.answer("Количество должно быть числом от 1 до 1 000 000.")
             return
-        amount = int(message.text)
-        await db.add_cookies(user_id, amount, "admin", f"by:{message.from_user.id}")
-        result = f"Начислено {amount} 🍪."
-    await db.log_admin_action(message.from_user.id, f"user_{action}", str(user_id), result)
+        amount = int(raw)
+        if action == "remove_cookies":
+            if not await db.remove_admin_cookies(user_id, amount, message.from_user.id):
+                await message.answer("На балансе недостаточно печенек для списания.")
+                return
+            result = f"Списано {amount} 🍪."
+        else:
+            await db.add_cookies(user_id, amount, "admin", f"by:{message.from_user.id}")
+            result = f"Начислено {amount} 🍪."
+    audit_id = await db.log_admin_action(message.from_user.id, f"user_{action}", str(user_id), result)
     await state.clear()
     await message.answer(f"✅ {result}")
+    if action in {"cookies", "add_cookies", "remove_cookies", "rep"}:
+        from community_bot.widget_notifications import Sender, send_service_notification
+
+        reputation = action == "rep"
+        await send_service_notification(
+            bot, db, user_id, Sender(), "Изменение репутации" if reputation else "Изменение баланса",
+            result, "reputation" if reputation else "history", event_key=f"admin:{audit_id}",
+        )
+
+
+async def _save_chat_moderation(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot, user_id: int, action: str,
+) -> None:
+    from community_bot.routers.group import _full_permissions, apply_chat_ban, lift_chat_ban, restrict_mute
+
+    actor = message.from_user
+    chat_id = settings.community_chat_id
+    target = await db.get_user(user_id)
+    if not actor or not chat_id or not target or actor.id == user_id or settings.is_owner(user_id):
+        await state.clear()
+        await message.answer("Модерация этого участника недоступна.")
+        return
+    duration, reason, error = parse_punitive_args(
+        (message.text or "").split(), need_duration=action in {"mute", "ban"}, allow_permanent=action == "ban",
+    )
+    if error or len(reason) > 400:
+        await message.answer(error or "Причина должна быть не длиннее 400 символов.")
+        return
+    if action == "unmute" and int(target["reputation"]) < settings.restricted_reputation_threshold:
+        await message.answer("Репутация ниже бронзы. Сначала восстановите репутацию.")
+        return
+    if action == "mute" and duration is not None and is_permanent_duration(duration):
+        await message.answer("Срок мута должен быть меньше 366 дней.")
+        return
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except TelegramAPIError:
+        await message.answer("Не удалось проверить статус участника в Telegram.")
+        return
+    if member.status in {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}:
+        await message.answer("К администратору Telegram это действие неприменимо.")
+        return
+    ban_state = await db.ban_reset_state(user_id) if action in {"ban", "unban"} else {}
+    if action == "ban" and (member.status == ChatMemberStatus.KICKED or db.ban_is_active(ban_state)):
+        await message.answer("Участник уже забанен.")
+        return
+    if action == "unban" and member.status != ChatMemberStatus.KICKED and not db.ban_is_active(ban_state):
+        await message.answer("У участника нет активного бана.")
+        return
+    if action == "unmute" and (member.status != ChatMemberStatus.RESTRICTED or member.can_send_messages):
+        await message.answer("У участника нет активного мута.")
+        return
+    try:
+        if action == "mute" and duration is not None:
+            await restrict_mute(bot, chat_id, user_id, duration)
+        elif action == "ban" and duration is not None:
+            await apply_chat_ban(bot, db, settings, chat_id, user_id, duration)
+        elif action == "unmute":
+            await bot.restrict_chat_member(chat_id, user_id, permissions=_full_permissions())
+        elif action == "unban":
+            await lift_chat_ban(bot, db, settings, chat_id, user_id)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        await message.answer("Telegram отклонил действие. Проверьте права Норы и статус участника в чате.")
+        return
+    await state.clear()
+    await db.log_admin_action(
+        actor.id, action, str(user_id), duration_label(duration), reason=reason,
+        actor_name=actor.full_name, target_name=person_label(target), default_duration=False,
+    )
+    await message.answer({
+        "mute": "Мут в основном чате установлен.",
+        "unmute": "Мут в основном чате снят.",
+        "ban": "Участник забанен. Профиль и прогресс сброшены.",
+        "unban": "Бан снят. Для возвращения нужна новая анкета." if ban_state else "Бан в основном чате снят.",
+    }[action])
 
 
 def _open_chat_permissions() -> ChatPermissions:
@@ -1969,7 +2437,7 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
     failed = 0
     for user in await db.list_all_users():
         try:
-            await bot.copy_message(int(user["user_id"]), message.chat.id, message.message_id)
+            await send_private_copy(bot, int(user["user_id"]), message)
             delivered += 1
         except (TelegramForbiddenError, TelegramBadRequest):
             failed += 1
@@ -1982,6 +2450,98 @@ async def admin_send_broadcast(message: Message, state: FSMContext, db: Database
         f"delivered:{delivered}:failed:{failed}",
     )
     await message.answer(f"✅ Рассылка завершена. Доставлено: {delivered}, недоступно: {failed}.")
+
+
+@router.callback_query(F.data.startswith("admin:events:"))
+async def admin_event_list(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    from community_bot.event_manager import can_read
+
+    if not callback.message or not await can_read(db, settings, callback.from_user.id):
+        return
+    raw = (callback.data or "").rsplit(":", 1)[-1]
+    if not raw.isdigit():
+        await callback.answer("Некорректная страница.", show_alert=True)
+        return
+    page = int(raw)
+    from community_bot.event_manager import visible_events
+
+    events = await visible_events(db, page * 8, 9)
+    rows = [[InlineKeyboardButton(
+        text=f"{event['title'][:42]} ({event['participants']})",
+        callback_data=f"admin:event:view:{event['event_id']}",
+    )] for event in events[:8]]
+    if await has_permission(db, settings, callback.from_user.id, PERM_POST):
+        rows.insert(0, [InlineKeyboardButton(text="＋ Добавить мероприятие", callback_data="admin:event:new:0")])
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:events:{page - 1}"))
+    if len(events) > 8:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:events:{page + 1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="← Чат", callback_data="admin:chatroom")])
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎟 <b>События и участники</b>\n\n"
+        + ("Выберите пост. В скобках — число записавшихся." if events else "Опубликованных событий пока нет."),
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:attendees:"))
+async def admin_event_participants(callback: CallbackQuery, db: Database, settings: Settings) -> None:
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_EVENT_PARTICIPANTS):
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4 or not parts[3].isdigit():
+        await callback.answer("Некорректная страница.", show_alert=True)
+        return
+    event_id, page = parts[2], int(parts[3])
+    event = await db.get_studio_event(event_id) or await db.get_event_offer(event_id)
+    count = await db.event_participant_count(event_id)
+    if event is None and count == 0:
+        await callback.answer("Событие не найдено.", show_alert=True)
+        return
+    page = min(page, max(0, (count - 1) // 10))
+    people = await db.list_rsvps(event_id, offset=page * 10, limit=10)
+    title = str(event["title"]) if event else f"Архивное событие {event_id}"
+    lines = [f"🎟 <b>{html.escape(title)}</b>", f"Участники: <b>{count}</b>", ""]
+    for index, person in enumerate(people, start=page * 10 + 1):
+        link = user_link(int(person["user_id"]), person_label(person))
+        username = f" · @{html.escape(str(person['username']))}" if person.get("username") else ""
+        stake = int(person["stake"])
+        if person["kind"] == "payment":
+            status = f"оплачено {stake} 🍪"
+        elif person["kind"] == "legacy" and stake:
+            status = f"внесено {stake} 🍪 (архив)"
+        else:
+            status = f"залог {stake} 🍪" if stake else "записан"
+        lines.append(f"{index}. {link}{username} — {status}")
+    if not people:
+        lines.append("Пока никто не записался.")
+    rows = []
+    paging = []
+    if page:
+        paging.append(InlineKeyboardButton(text="←", callback_data=f"admin:attendees:{event_id}:{page - 1}"))
+    if (page + 1) * 10 < count:
+        paging.append(InlineKeyboardButton(text="→", callback_data=f"admin:attendees:{event_id}:{page + 1}"))
+    if paging:
+        rows.append(paging)
+    rows.append([InlineKeyboardButton(text="Журнал оплат", callback_data=f"eventlist:{event_id}:1:0")])
+    rows.append([InlineKeyboardButton(text="Обновить", callback_data=f"admin:attendees:{event_id}:{page}")])
+    if event and str(event["chat_id"]).startswith("-100"):
+        rows.append([InlineKeyboardButton(
+            text="Открыть пост", url=f"https://t.me/c/{str(event['chat_id'])[4:]}/{event['message_id']}",
+        )])
+    rows.append([InlineKeyboardButton(text="← События", callback_data="admin:events:0")])
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
+    except TelegramBadRequest as error:
+        if "message is not modified" not in error.message.casefold():
+            raise
 
 
 @router.callback_query(F.data == "admin:post")
@@ -2004,6 +2564,7 @@ async def admin_begin_community_post(
             "post_file_id": None,
             "post_buttons": [],
             "post_poll": None,
+            "post_draft": uuid4().hex,
         }
     )
     await callback.answer()
@@ -2018,10 +2579,14 @@ async def admin_begin_community_post(
 
 @router.callback_query(F.data == "post:cancel")
 async def admin_post_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
     await state.clear()
     await callback.answer("Отменено")
     if callback.message:
-        await callback.message.answer("Публикация отменена.")
+        await callback.message.answer(
+            "Пост уже опубликован. Незавершённые шаги закрыты; опубликованный пост сохранён."
+            if data.get("post_sent_id") else "Публикация отменена.",
+        )
 
 
 @router.callback_query(F.data.startswith("post:tpl:"))
@@ -2156,7 +2721,7 @@ async def _show_post_preview(message: Message, data: dict[str, Any], bot: Bot) -
     html_text = (
         html_text + poll_preview_block(data.get("post_poll")) + rsvp_preview_block(data.get("post_rsvp"))
     ).strip() or " "
-    markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"))
+    markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"), preview=True)
     preview = preview_keyboard()
     if markup:
         try:
@@ -2319,6 +2884,9 @@ async def admin_post_rsvp_no(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
+    if await state.get_state() != AdminFlow.post_rsvp_ask.state:
+        await callback.answer("Этот шаг уже завершён. Продолжите текущий черновик.", show_alert=True)
+        return
     await state.update_data(post_rsvp=None)
     await state.set_state(AdminFlow.post_preview)
     await callback.answer()
@@ -2335,7 +2903,10 @@ async def admin_post_rsvp_yes(
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
         return
-    event_id = f"e{int(datetime.now(UTC).timestamp())}"
+    if await state.get_state() != AdminFlow.post_rsvp_ask.state:
+        await callback.answer("Этот шаг уже завершён. Продолжите текущий черновик.", show_alert=True)
+        return
+    event_id = f"e{uuid4().hex[:20]}"
     await state.update_data(post_rsvp=event_id)
     await state.set_state(AdminFlow.post_preview)
     await callback.answer()
@@ -2360,32 +2931,70 @@ async def admin_post_send(
     settings: Settings,
     bot: Bot,
 ) -> None:
+    from community_bot.rsvp import event_lock
+
+    async with event_lock(db, f"studio:{callback.from_user.id}"):
+        await _admin_post_send(callback, state, db, settings, bot)
+
+
+async def _admin_post_send(
+    callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot,
+) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_preview.state:
+        await callback.answer("Этот черновик уже отправлен или закрыт.", show_alert=True)
         return
     if not settings.community_chat_id:
         await callback.answer("ID чата сообщества не настроен.", show_alert=True)
         return
-    from community_bot.posting import compose_post_markup, render_post, send_studio_poll, send_studio_post
+    from community_bot.posting import compose_post_markup, post_title, render_post, send_studio_poll, send_studio_post
+    from community_bot.reply_rich import bot_publication
 
     data = await state.get_data()
     html_text = render_post(str(data.get("post_template") or "announce"), str(data.get("post_body") or ""))
     markup = compose_post_markup(list(data.get("post_buttons") or []), data.get("post_rsvp"))
+    if markup and not html_text.strip() and not data.get("post_file_id"):
+        await callback.answer("Для кнопок нужен пост: добавьте текст или медиа в новом черновике.", show_alert=True)
+        return
     poll = data.get("post_poll")
-    sent = None
+    sent_id = int(data.get("post_sent_id") or 0)
+    event_id = str(data.get("post_rsvp") or data.get("post_event_id") or f"e{uuid4().hex[:20]}")
+    await state.update_data(post_event_id=event_id)
     try:
-        if html_text.strip() or data.get("post_file_id"):
-            sent = await send_studio_post(
-                bot,
-                settings.community_chat_id,
-                html_text or " ",
-                data.get("post_media_type"),
-                data.get("post_file_id"),
-                markup,
+        if not sent_id and (html_text.strip() or data.get("post_file_id")):
+            with bot_publication():
+                sent = await send_studio_post(
+                    bot,
+                    settings.community_chat_id,
+                    html_text or " ",
+                    data.get("post_media_type"),
+                    data.get("post_file_id"),
+                    markup,
+                )
+            if data.get("post_template") == "event":
+                await db.set_bot_state("current_studio_event", event_id)
+            sent_id = int(sent.message_id)
+            await state.update_data(post_sent_id=sent_id)
+        if sent_id and (data.get("post_rsvp") or data.get("post_template") == "event"):
+            raw_stake = await db.get_bot_state("rsvp_stake") or "0"
+            await db.save_studio_event(
+                event_id, settings.community_chat_id, sent_id, post_title(str(data.get("post_body") or "")),
+                list(data.get("post_buttons") or []), int(raw_stake) if raw_stake.isdigit() else 0,
+                callback.from_user.id, rsvp_enabled=bool(data.get("post_rsvp")),
+                description=str(data.get("post_body") or ""), media_type=str(data.get("post_media_type") or ""),
             )
-        if poll:
+        if sent_id and (data.get("post_template") == "event" or data.get("post_rsvp")):
+            from community_bot.stickers import send_context_sticker
+
+            await send_context_sticker(bot, db, settings.community_chat_id, "event", sent_id)
+        if poll and not data.get("post_poll_sent"):
             await send_studio_poll(bot, settings.community_chat_id, dict(poll))
+            await state.update_data(post_poll_sent=True)
     except TelegramBadRequest:
-        await callback.answer("Telegram не принял это сообщение или опрос.", show_alert=True)
+        await callback.answer(
+            "Telegram не принял сообщение или опрос. Повторите попытку или создайте новый черновик.", show_alert=True,
+        )
         return
     await db.log_admin_action(
         callback.from_user.id,
@@ -2396,7 +3005,6 @@ async def admin_post_send(
         reason=str(data.get("post_template") or "пост"),
     )
     template = str(data.get("post_template") or "")
-    event_id = str(data.get("post_rsvp") or "")
     await callback.answer("Опубликовано")
     from community_bot.notify import fanout
 
@@ -2404,16 +3012,14 @@ async def admin_post_send(
     if len(preview) > 180:
         preview = preview[:177] + "…"
     await fanout(bot, db, "events", f"📣 Новый пост студии.\n{preview}" if preview else "📣 Новый пост студии.")
-    if template == "event" and sent is not None:
+    if template == "event" and sent_id:
         from community_bot.posting import pay_ask_keyboard
 
-        if not event_id:
-            event_id = f"e{int(datetime.now(UTC).timestamp())}"
         await state.set_state(AdminFlow.post_pay_ask)
         await state.set_data(
             {
-                "pay_chat_id": int(sent.chat.id),
-                "pay_message_id": int(sent.message_id),
+                "pay_chat_id": settings.community_chat_id,
+                "pay_message_id": sent_id,
                 "pay_event_id": event_id,
                 "pay_body": html_text,
                 "pay_buttons": list(data.get("post_buttons") or []),
@@ -2431,15 +3037,25 @@ async def admin_post_send(
 
 
 @router.callback_query(F.data == "post:pay:no")
-async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext) -> None:
+async def admin_post_pay_no(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_pay_ask.state:
+        await callback.answer("Этот шаг уже завершён.", show_alert=True)
+        return
     await state.clear()
     await callback.answer()
     if callback.message:
-        await callback.message.answer("Ок, пост без кнопки оплаты.")
+        await callback.message.answer("Ок, мероприятие бесплатное; запись доступна в магазине.")
 
 
 @router.callback_query(F.data == "post:pay:yes")
-async def admin_post_pay_yes(callback: CallbackQuery, state: FSMContext) -> None:
+async def admin_post_pay_yes(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
+    if not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    if await state.get_state() != AdminFlow.post_pay_ask.state:
+        await callback.answer("Этот шаг уже завершён.", show_alert=True)
+        return
     await state.set_state(AdminFlow.post_pay_text)
     await callback.answer()
     if callback.message:
@@ -2465,7 +3081,10 @@ async def admin_post_pay_text(message: Message, state: FSMContext, db: Database)
 
 
 @router.message(AdminFlow.post_pay_price)
-async def admin_post_pay_price(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
+async def admin_post_pay_price(message: Message, state: FSMContext, db: Database, bot: Bot, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_POST):
+        await state.clear()
+        return
     if not message.from_user or not message.text or not message.text.isdigit():
         await message.answer("Введите цену целым числом печенек.")
         return
@@ -2482,31 +3101,30 @@ async def admin_post_pay_price(message: Message, state: FSMContext, db: Database
         await state.clear()
         await message.answer("Не удалось привязать кнопку к посту.")
         return
-    from community_bot.posting import compose_post_markup
+    from community_bot.rsvp import event_lock, refresh_event_markup
 
-    await db.save_event_offer(
-        event_id,
-        chat_id,
-        message_id,
-        button_text,
-        price,
-        message.from_user.id,
-        title="Мероприятие",
-        body=str(data.get("pay_body") or ""),
-    )
-    markup = compose_post_markup(
-        list(data.get("pay_buttons") or []),
-        data.get("pay_rsvp"),
-        pay=(button_text, event_id),
-    )
-    try:
-        await bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
-    except TelegramBadRequest:
-        await state.clear()
-        await message.answer("Пост опубликован, но кнопку под ним отредактировать не удалось.")
-        return
+    async with event_lock(db, event_id):
+        event = await db.get_studio_event(event_id)
+        if not event:
+            await state.clear()
+            await message.answer("Не найден опубликованный пост. Создайте новый через студию.")
+            return
+        await db.save_event_offer(
+            event_id, chat_id, message_id, button_text, price, message.from_user.id,
+            title=str(event["title"]), body=str(data.get("pay_body") or ""),
+        )
+        await db.execute("UPDATE studio_events SET markup_dirty = 1 WHERE event_id = ?", (event_id,))
+        refreshed = await refresh_event_markup(bot, db, event_id)
     await state.clear()
-    await message.answer(f"✅ Кнопка «{html.escape(button_text)}» добавлена. Участие стоит {price} 🍪.")
+    await message.answer(
+        f"✅ Кнопка «{html.escape(button_text)}» добавлена. Участие стоит {price} 🍪." if refreshed
+        else "Оплата сохранена. Telegram пока не обновил кнопку; бот повторит попытку автоматически.",
+    )
+
+
+@router.callback_query(F.data == "post:rsvp:preview")
+async def admin_post_rsvp_preview(callback: CallbackQuery) -> None:
+    await callback.answer("Это предпросмотр. Запись откроется после публикации в сообществе.", show_alert=True)
 
 
 @router.callback_query(F.data == "admin:mention")
@@ -2666,23 +3284,28 @@ async def admin_delete_automessage(callback: CallbackQuery, db: Database, settin
 
 @router.message(command_or_alias("question"))
 @router.message(F.text == "❓ Задать вопрос")
-async def open_ticket(message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot) -> None:
-    if not message.from_user:
+async def open_ticket(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot,
+    *, actor: User | None = None,
+) -> None:
+    actor = actor or message.from_user
+    if not actor or actor.is_bot:
         return
-    await register_telegram_user(db, message.from_user)
-    ticket_id, created = await db.get_or_create_ticket(message.from_user.id)
+    await register_telegram_user(db, actor)
+    ticket_id, created = await db.get_or_create_ticket(actor.id)
     await state.set_state(TicketForm.active)
     await state.set_data({"ticket_id": ticket_id})
     if created:
         for reviewer_id in settings.reviewers:
-            await safe_send(
-                bot,
-                reviewer_id,
-                f"🎫 Открыт тикет №{ticket_id} пользователем "
-                f"{user_link(message.from_user.id, message.from_user.full_name)}.",
-                parse_mode="HTML",
-                reply_markup=ticket_keyboard(ticket_id),
-            )
+            with standalone_rich_message():
+                await safe_send(
+                    bot,
+                    reviewer_id,
+                    f"🎫 Открыт тикет №{ticket_id} пользователем "
+                    f"{user_link(actor.id, actor.full_name)}.",
+                    parse_mode="HTML",
+                    reply_markup=ticket_keyboard(ticket_id),
+                )
         body = (
             f"🎫 <b>Тикет №{ticket_id}</b>\n"
             "Открыт. Пишите сюда. Закроет стафф или /close."
@@ -2726,24 +3349,18 @@ async def relay_ticket_message(message: Message, state: FSMContext, db: Database
     header = f"🎫 <b>Тикет №{ticket_id}</b> от {user_link(message.from_user.id, message.from_user.full_name)}"
     delivered = 0
     for reviewer_id in settings.reviewers:
-        if await safe_send(
-            bot,
-            reviewer_id,
-            header,
-            parse_mode="HTML",
-            reply_markup=ticket_keyboard(ticket_id),
-        ):
-            try:
-                await bot.copy_message(reviewer_id, message.chat.id, message.message_id)
-            except TelegramBadRequest:
-                pass
+        try:
+            await send_private_copy(bot, reviewer_id, message, header=header, reply_markup=ticket_keyboard(ticket_id))
+        except (TelegramForbiddenError, TelegramBadRequest):
+            continue
+        else:
             delivered += 1
     await message.answer("Сообщение передано модераторам." if delivered else "Сообщение сохранено в тикете.")
 
 
 @router.callback_query(F.data.startswith("ticket:reply:"))
 async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)
@@ -2761,8 +3378,9 @@ async def begin_ticket_reply(callback: CallbackQuery, state: FSMContext, db: Dat
 
 
 @router.message(ModeratorReply.ticket_message)
-async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot) -> None:
-    if not message.from_user:
+async def send_ticket_reply(message: Message, state: FSMContext, db: Database, bot: Bot, settings: Settings) -> None:
+    if not message.from_user or not await has_permission(db, settings, message.from_user.id, PERM_TICKETS):
+        await state.clear()
         return
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
@@ -2775,8 +3393,8 @@ async def send_ticket_reply(message: Message, state: FSMContext, db: Database, b
     text = message.text or message.caption
     await db.add_ticket_message(ticket_id, message.from_user.id, "moderator", text, media_type, file_id)
     try:
-        await bot.send_message(int(ticket["user_id"]), f"💬 Ответ модератора по тикету №{ticket_id}:")
-        await bot.copy_message(int(ticket["user_id"]), message.chat.id, message.message_id)
+        await send_private_copy(bot, int(ticket["user_id"]), message,
+                                header=f"💬 Ответ модератора по тикету №{ticket_id}:")
     except (TelegramForbiddenError, TelegramBadRequest):
         await message.answer("Ответ сохранён, но пользователь заблокировал бота.")
         await state.clear()
@@ -2787,7 +3405,7 @@ async def send_ticket_reply(message: Message, state: FSMContext, db: Database, b
 
 @router.callback_query(F.data.startswith("ticket:close:"))
 async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
-    if not callback.data or not await _reviewer(callback, db, settings):
+    if not callback.data or not await _admin_callback(callback, db, settings, PERM_TICKETS):
         return
     ticket_id = int(callback.data.rsplit(":", 1)[1])
     ticket = await db.get_ticket(ticket_id)
@@ -2806,4 +3424,29 @@ async def moderator_close_ticket(callback: CallbackQuery, db: Database, settings
     await callback.answer("Тикет закрыт.")
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
-    await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
+    with standalone_rich_message():
+        await safe_send(bot, int(ticket["user_id"]), f"Тикет №{ticket_id} закрыт модератором.")
+
+
+@router.callback_query(F.data.startswith("admin:event:"))
+async def admin_manage_event(callback: CallbackQuery, state: FSMContext, db: Database, settings: Settings, bot: Bot):
+    from community_bot.event_manager import handle
+
+    await handle(callback, state, db, settings, bot)
+
+
+async def begin_event_creation(callback, state, db, settings):
+    if not callback.message or not await _admin_callback(callback, db, settings, PERM_POST):
+        return
+    await state.clear()
+    await state.set_state(AdminFlow.post_body)
+    await state.set_data({
+        "post_template": "event", "post_body": "", "post_media_type": None,
+        "post_file_id": None, "post_buttons": [], "post_poll": None, "post_draft": uuid4().hex,
+    })
+    await callback.answer()
+    await callback.message.answer(
+        "Новое мероприятие. Пришлите название первой строкой, ниже — описание. "
+        "Затем можно добавить фото, кнопки, RSVP и проверить предпросмотр. "
+        "В чат ничего не отправится до кнопки «Опубликовать».",
+    )

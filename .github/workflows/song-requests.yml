@@ -1,0 +1,48 @@
+name: Yandex Music song requests
+
+on:
+  pull_request:
+    paths:
+      - "community_bot/routers/song_requests.py"
+      - "community_bot/music_library.py"
+      - "community_bot/music_discovery.py"
+      - "tests/test_music_discovery.py"
+      - "community_bot/library_rich.py"
+      - "community_bot/nora.py"
+      - "tests/test_music_library.py"
+      - "community_bot/web/profile-track.js"
+      - "community_bot/track_disk_cache.py"
+      - "community_bot/social_profiles.py"
+      - "tests/test_track_disk_cache.py"
+      - "tests/test_profile_track.py"
+      - "tests/profile_track_stream.mjs"
+      - "community_bot/group_profile.py"
+      - "community_bot/profile_limits.py"
+      - "community_bot/routers/profile.py"
+      - "tests/test_group_profile_limits.py"
+      - "tests/test_chat_profile_compact.py"
+      - "community_bot/database.py"
+      - "community_bot/social_likes.py"
+      - "tests/test_shop_api.py"
+      - "community_bot/main.py"
+      - "pyproject.toml"
+      - "tests/test_song_requests.py"
+      - ".github/workflows/song-requests.yml"
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m compileall -q community_bot/profile_limits.py community_bot/group_profile.py community_bot/routers/profile.py community_bot/routers/song_requests.py tests/test_group_profile_limits.py
+      - run: python -m pytest -q tests/test_song_requests.py tests/test_music_discovery.py tests/test_shop_api.py tests/test_chat_profile_compact.py tests/test_group_profile_limits.py tests/test_music_library.py tests/test_profile_track.py tests/test_track_disk_cache.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check community_bot/web/profile-track.js
+      - run: node --test tests/profile_track_stream.mjs

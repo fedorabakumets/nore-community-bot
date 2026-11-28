@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-DEFAULT_SBP_PAYMENT_URL = "https://www.sberbank.com/sms/pbpn?requisiteNumber=79533571508"
+COOKIE_PAYMENT_URL = "https://finance.ozon.ru/apps/sbp/ozonbankpay/01a1cadc-413b-7ee6-9ba7-78da15aa5d4c"
+COOKIE_PAYMENT_QR = Path(__file__).resolve().parent.parent / "assets" / "payments" / "ozon-sbp.jpg"
+COOKIE_PAYMENT_MESSAGE_QR = COOKIE_PAYMENT_QR.with_name("nora-sbp.jpg")
 
 
 def _as_int(name: str, default: int = 0) -> int:
@@ -41,10 +43,17 @@ class Settings:
     restricted_reputation_threshold: int
     timezone: str
     cookie_price_rub: int
-    sbp_payment_url: str
     freebie_channel_id: int
     freebie_channel_url: str
     community_invite_url: str
+    tmdb_api_key: str
+    gemini_api_key: str
+    groq_api_key: str
+    openrouter_api_key: str = field(default="", repr=False)
+    openrouter_model: str = "openrouter/free"
+    deepseek_api_key: str = field(default="", repr=False)
+    deepseek_base_url: str = "https://positionapi.top/v1"
+    deepseek_model: str = "deepseek-v4-flash"
 
     def is_owner(self, user_id: int) -> bool:
         return user_id in self.owner_ids
@@ -69,16 +78,24 @@ def load_settings() -> Settings:
         welcome_cover=os.getenv("WELCOME_COVER", "").strip() or None,
         event_pass_price=max(0, _as_int("EVENT_PASS_PRICE")),
         support_price=max(0, _as_int("SUPPORT_PRICE")),
-        restricted_reputation_threshold=_as_int("RESTRICTED_REPUTATION_THRESHOLD"),
+        # Enforce the new bronze minimum even if Railway still has the old 0 setting.
+        restricted_reputation_threshold=max(50, _as_int("RESTRICTED_REPUTATION_THRESHOLD", 50)),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow").strip(),
         cookie_price_rub=max(1, _as_int("COOKIE_PRICE_RUB", 1)),
-        sbp_payment_url=os.getenv("SBP_PAYMENT_URL", "").strip() or DEFAULT_SBP_PAYMENT_URL,
         freebie_channel_id=_as_int("FREEBIE_CHANNEL_ID"),
         freebie_channel_url=os.getenv("FREEBIE_CHANNEL_URL", "").strip(),
         community_invite_url=os.getenv(
             "COMMUNITY_INVITE_URL",
             "https://t.me/+MfMowwQUlZlkMDIy",
         ).strip(),
+        tmdb_api_key=os.getenv("TMDB_API_KEY", "").strip(),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+        groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "").strip() or "openrouter/free",
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", "").strip(),
+        deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "").strip() or "https://positionapi.top/v1",
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "").strip() or "deepseek-v4-flash",
     )
     if not settings.bot_token:
         raise ValueError("BOT_TOKEN не задан в .env")

@@ -1,0 +1,25 @@
+name: Incognito checks
+on:
+  pull_request:
+    paths:
+      - 'community_bot/incognito_api.py'
+      - 'community_bot/web/incognito.js'
+      - 'community_bot/web/incognito.css'
+      - 'tests/test_incognito_api.py'
+      - '.github/workflows/incognito-checks.yml'
+permissions:
+  contents: read
+jobs:
+  incognito:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install aiohttp aiosqlite pytest pytest-asyncio
+      - run: python -m pytest tests/test_incognito_api.py -q
+      - run: node --check community_bot/web/incognito.js
+      - run: node --check community_bot/web/staff-chat.js
+      - run: node --check community_bot/web/community.js
