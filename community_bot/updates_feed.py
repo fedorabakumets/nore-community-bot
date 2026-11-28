@@ -22,16 +22,12 @@ _lock = asyncio.Lock()
 POSTS = (
     {
         "id": "nora-intro-20261128",
-        "revision": "1",
+        "revision": "2",
         "pin": True,
         "intro": True,
         "blocks": [
-            {"type": "heading", "text": "НОРА", "size": 1},
-            {"type": "paragraph", "text": "Больше, чем чат. Место, где хочется остаться."},
-            {"type": "paragraph", "text": "🎮 Играй в DOT, покер, Дурака и Баррикаду. Собирай печеньки и соревнуйся с друзьями."},
-            {"type": "paragraph", "text": "❤️ Знакомься, общайся, слушай музыку и развивай своего питомца."},
-            {"type": "paragraph", "text": "🎉 Участвуй в мероприятиях, конкурсах и встречах сообщества."},
-            {"type": "blockquote", "blocks": [{"type": "paragraph", "text": "Твоя история начинается в Норе."}]},
+            {"type": "heading", "text": "Что это?", "size": 1},
+            {"type": "paragraph", "text": "**Нора** — твоё **цифровое пространство внутри Telegram**. Здесь можно общаться, знакомиться, играть, слушать музыку, находить случайных собеседников в анонимном чате и участвовать в событиях сообщества"},
         ],
     },
     {
@@ -83,23 +79,7 @@ def is_production():
 
 def intro_cover():
     root = Path(__file__).resolve().parent.parent / "assets"
-    image = Image.new("RGB", (1200, 720), "#101014")
-    draw = ImageDraw.Draw(image)
-    font = root / "fonts" / "Inter-Bold.ttf"
-    big = ImageFont.truetype(str(font), 172)
-    small = ImageFont.truetype(str(font), 29)
-    svg = (root / "branding" / "nora-home-icon.svg").read_text(encoding="utf-8")
-    path = re.search(r'<path[^>]*\bd="([^"]+)"', svg)
-    coords = re.findall(r"[ML](\d+),(\d+)", path.group(1))
-    if len(coords) < 20:
-        raise ValueError("Original NORA mark not found")
-    draw.text((350, 335), "Н", font=big, anchor="mm", fill="#ffffff")
-    draw.polygon([(430 + int(x)*.335, 250 + int(y)*.335) for x,y in coords], fill="#ff164d")
-    draw.text((700, 335), "РА", font=big, anchor="mm", fill="#ffffff")
-    draw.text((600, 500), "ИГРЫ  ·  ЛЮДИ  ·  СОБЫТИЯ", font=small, anchor="mm", fill="#aaa9b2")
-    out = io.BytesIO()
-    image.save(out, "PNG")
-    return out.getvalue()
+    return (root / "branding" / "nora-logo-ru.jpg").read_bytes()
 
 
 async def publish_post(db, bot, chat_id, post):
@@ -115,10 +95,10 @@ async def publish_post(db, bot, chat_id, post):
     kwargs = {}
     if post.get("intro"):
         url = "https://t.me/nora_community_bot?startapp"
-        blocks.insert(1, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(intro_cover(), filename="nora.png"))))
+        blocks.insert(0, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(intro_cover(), filename="nora.jpg"))))
         blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Открыть Нору", url=url, style="primary")]))
-        blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Добавить Нору на экран", url=url+"="+HOME_SCREEN_PARAM, style="primary")]))
-        kwargs["reply_markup"] = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url)]])
+        blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Добавить Нору на экран", url=url+"="+HOME_SCREEN_PARAM, style="success")]))
+        kwargs["reply_markup"] = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url, style="danger")]])
     rich = InputRichMessage(blocks=blocks, skip_entity_detection=True)
     if not message_id:
         if await db.get_bot_state(key + ":sending"):
