@@ -358,6 +358,10 @@ async def public_music_library(request):
 
 async def _share_track_source(db, settings, uid, source, revision):
     """Resolve only an authorized, current audio reference; never accept a file ID from the client."""
+    if isinstance(source, str) and source.startswith(("/api/music-library/history/", "/api/music-library/social/")):
+        from community_bot.music_discovery import resolve
+
+        return await resolve(db, uid, source, revision)
     match = re.fullmatch(
         r"/api/(?:(?:people/([1-9][0-9]{0,15})/)?(track|music-library/[a-f0-9]{64})|profile/track)",
         source,
