@@ -21,7 +21,7 @@ POSTS = (
         "revision": "1",
         "pin": True,
         "blocks": [
-            {"type": "section_heading", "text": "НОРА / ОБНОВЛЕНИЯ", "size": 1},
+            {"type": "heading", "text": "НОРА / ОБНОВЛЕНИЯ", "size": 1},
             {"type": "paragraph", "text": "У Норы теперь есть отдельное место для новостей."},
             {"type": "blockquote", "blocks": [
                 {"type": "paragraph", "text": "Здесь будут обновления, новые идеи и планы развития Норы."},
