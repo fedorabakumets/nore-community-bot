@@ -655,6 +655,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import incognito_api, staff_chat, staff_chat_live
 
     app.router.add_post('/api/incognito/{action}', incognito_api.endpoint)
+    for name in ('incognito.js', 'incognito.css'):
+        app.router.add_get('/' + name, lambda _, n=name: web.FileResponse(ROOT / n))
     app.cleanup_ctx.append(incognito_api.cleanup_context)
 
     chat_hub = staff_chat_live.StaffChatHub()
