@@ -145,6 +145,7 @@ async def prepare_track(request, *, save):
 HISTORY_LIMIT = 50
 HISTORY_PREFIX = "music_history:"
 SOCIAL_PREFIX = "music_activity_public:"
+_LIVE = {}
 
 
 async def read_history(db, uid):
@@ -188,6 +189,8 @@ async def activity_visibility(request):
         return _error("Некорректная настройка.")
     db, uid = request.app["db"], request["actor"]["id"]
     await db.set_bot_state(SOCIAL_PREFIX + str(uid), "1" if payload["public"] else "0")
+    if not payload["public"]:
+        _LIVE.pop(uid, None)
     return web.json_response({"public": payload["public"]})
 
 
@@ -213,16 +216,23 @@ async def social(request):
         return _error("Некорректный период.")
     cutoff = time.time() - {"day": 86400, "week": 604800, "all": 10**12}[period]
     ranked, friends = {}, []
+    live_now = time.monotonic()
+    for owner, value in list(_LIVE.items()):
+        if value[0] <= live_now:
+            _LIVE.pop(owner, None)
     for row in await activity_rows(db, uid):
         seen = set()
         latest = None
+        live = _LIVE.get(row["user_id"])
         for key, record in json.loads(row["value"]).items():
             stamp, track = record["at"], record["track"]
             if not stamp:
                 continue
             item = {**public_track(key, track), "source": "/api/music-library/social/" + key, "at": stamp}
-            if row["friend"] and row["user_id"] != uid and (latest is None or stamp > latest["at"]):
-                latest = {**item, "name": row["telegram_name"] or "Участник"}
+            if row["friend"] and row["user_id"] != uid:
+                playing = bool(live and live[1] == key)
+                if playing or latest is None or (not latest["playing"] and stamp > latest["at"]):
+                    latest = {**item, "name": row["telegram_name"] or "Участник", "playing": playing}
             if stamp < cutoff:
                 continue
             identity = track.get("catalog_id") or key
@@ -234,7 +244,7 @@ async def social(request):
             friends.append(latest)
     return web.json_response({
         "top": sorted(ranked.values(), key=lambda entry: (-entry["listeners"], -entry["at"]))[:20],
-        "friends": sorted(friends, key=lambda entry: -entry["at"])[:15],
+        "friends": sorted(friends, key=lambda entry: (not entry["playing"], -entry["at"]))[:15],
     })
 
 
@@ -292,4 +302,26 @@ async def listened(request):
     if source.startswith("/api/people/") or source.startswith("/api/music-library/social/"):
         return web.json_response({"ok": True, "recorded": False})
     await remember(db, uid, track, listened=True)
+    return web.json_response({"ok": True})
+
+
+async def playing(request):
+    from community_bot.social_profiles import _share_track_source
+
+    db, uid = request.app["db"], request["actor"]["id"]
+    body = await request.json()
+    if not isinstance(body, dict) or type(body.get("playing")) is not bool:
+        return _error("Некорректный запрос.")
+    if not body["playing"] or await db.get_bot_state(SOCIAL_PREFIX + str(uid)) != "1":
+        _LIVE.pop(uid, None)
+        return web.json_response({"ok": True})
+    source = body.get("source")
+    if not isinstance(source, str) or not source.startswith(("/api/music-library/", "/api/profile/track")):
+        return _error("Некорректный трек.")
+    track = await _share_track_source(db, request.app["settings"], uid, source, body.get("revision"))
+    if not track:
+        raise web.HTTPNotFound()
+    if len(_LIVE) >= 512 and uid not in _LIVE:
+        _LIVE.pop(next(iter(_LIVE)), None)
+    _LIVE[uid] = (time.monotonic() + 40, track_id(track))
     return web.json_response({"ok": True})
