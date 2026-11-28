@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS incognito_messages (
     UNIQUE(session_id, sender_id, client_id)
 );
 CREATE INDEX IF NOT EXISTS idx_incognito_messages_session ON incognito_messages(session_id, id);
+CREATE TABLE IF NOT EXISTS incognito_recent (
+    session_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    other_id INTEGER NOT NULL,
+    evidence TEXT NOT NULL,
+    expires_at REAL NOT NULL,
+    PRIMARY KEY(session_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_incognito_recent_expiry ON incognito_recent(expires_at);
 CREATE TABLE IF NOT EXISTS incognito_blocks (
     user_id INTEGER NOT NULL,
     other_id INTEGER NOT NULL,
@@ -52,6 +61,7 @@ logger = logging.getLogger(__name__)
 QUEUE_TTL = 45
 IDLE_TTL = 1800
 SESSION_TTL = 86400
+REPORT_TTL = 900
 MAX_MESSAGES = 1000
 MAX_TEXT = 2000
 
@@ -71,6 +81,7 @@ async def one(conn, sql, args=()):
 
 async def purge(conn, now):
     await conn.execute('DELETE FROM incognito_queue WHERE expires_at <= ?', (now,))
+    await conn.execute('DELETE FROM incognito_recent WHERE expires_at <= ?', (now,))
     await conn.execute(
         'DELETE FROM incognito_sessions WHERE touched_at <= ? OR created_at <= ? '
         'OR (SELECT COUNT(*) FROM incognito_members m WHERE m.session_id = incognito_sessions.id) != 2',
@@ -89,6 +100,25 @@ async def eligible(conn, uid):
 async def current_session(conn, uid):
     row = await one(conn, 'SELECT session_id FROM incognito_members WHERE user_id = ?', (uid,))
     return row['session_id'] if row else None
+
+
+async def archive_for_report(conn, sid, now):
+    async with conn.execute(
+        'SELECT user_id FROM incognito_members WHERE session_id = ?', (sid,),
+    ) as cursor:
+        members = await cursor.fetchall()
+    if len(members) != 2:
+        return
+    async with conn.execute(
+        'SELECT sender_id, body FROM incognito_messages WHERE session_id = ? ORDER BY id DESC LIMIT 12', (sid,),
+    ) as cursor:
+        messages = await cursor.fetchall()
+    for uid, other in [(members[0]['user_id'], members[1]['user_id']),
+                       (members[1]['user_id'], members[0]['user_id'])]:
+        excerpt = '\n'.join(('Я: ' if r['sender_id'] == uid else 'Собеседник: ') + r['body']
+                            for r in reversed(messages))[-4000:]
+        await conn.execute('INSERT OR REPLACE INTO incognito_recent VALUES (?, ?, ?, ?, ?)',
+                           (sid, uid, other, excerpt, now + REPORT_TTL))
 
 
 async def enqueue(conn, uid, now, excluded=None, allowed=None):
@@ -130,7 +160,10 @@ async def snapshot(conn, uid, after=0, now=0):
     sid = await current_session(conn, uid)
     if not sid:
         queued = await one(conn, 'SELECT 1 FROM incognito_queue WHERE user_id = ?', (uid,))
-        return {'state': 'searching' if queued else 'idle', 'session': None, 'messages': []}
+        recent = await one(conn, 'SELECT session_id FROM incognito_recent WHERE user_id = ? '
+                           'ORDER BY expires_at DESC LIMIT 1', (uid,))
+        return {'state': 'searching' if queued else 'idle', 'session': None, 'messages': [],
+                'recent': recent['session_id'] if recent else None}
     async with conn.execute(
         'SELECT id, sender_id, body, created_at FROM incognito_messages '
         'WHERE session_id = ? AND id > ? ORDER BY id LIMIT 100',
@@ -170,7 +203,8 @@ async def operate(db, uid, action, data=None, now=None, allowed=None):
         if sid:
             peer = await one(conn, 'SELECT user_id FROM incognito_members WHERE session_id = ? AND user_id != ?',
                              (sid, uid))
-            if not peer or not await eligible(conn, peer['user_id']) or (allowed and not await allowed(peer['user_id'])):
+            if (not peer or not await eligible(conn, peer['user_id'])
+                    or (allowed and not await allowed(peer['user_id']))):
                 await conn.execute('DELETE FROM incognito_sessions WHERE id = ?', (sid,))
                 sid = None
             else:
@@ -186,6 +220,21 @@ async def operate(db, uid, action, data=None, now=None, allowed=None):
             if not sid or data.get('session') != sid:
                 raise ValueError('Диалог завершён')
             await conn.execute('UPDATE incognito_members SET typing_until = ? WHERE user_id = ?', (now + 4, uid))
+        elif action in {'block', 'report'} and data.get('session') != sid:
+            recent = await one(conn, 'SELECT other_id, evidence FROM incognito_recent '
+                               'WHERE user_id = ? AND session_id = ?', (uid, data.get('session')))
+            if not recent:
+                raise ValueError('Диалог завершён')
+            await conn.execute('INSERT OR IGNORE INTO incognito_blocks VALUES (?, ?)', (uid, recent['other_id']))
+            if action == 'report':
+                await conn.execute(
+                    'INSERT INTO reports(reporter_id, target_id, chat_id, message_id, text, reason, created_at) '
+                    'VALUES (?, ?, NULL, NULL, ?, ?, ?)',
+                    (uid, recent['other_id'], recent['evidence'], 'Инкогнито: жалоба на собеседника',
+                     datetime.now(UTC).isoformat()),
+                )
+            await conn.execute('DELETE FROM incognito_recent WHERE user_id = ? AND session_id = ?',
+                               (uid, data.get('session')))
         elif action in {'end', 'next', 'block', 'report'}:
             # A stale tab must not end a newer conversation.
             if sid != data.get('session'):
@@ -211,6 +260,9 @@ async def operate(db, uid, action, data=None, now=None, allowed=None):
                         'VALUES (?, ?, NULL, NULL, ?, ?, ?)',
                         (uid, other, excerpt, 'Инкогнито: жалоба на собеседника', datetime.now(UTC).isoformat()),
                     )
+                await archive_for_report(conn, sid, now)
+                if action in {'block', 'report'}:
+                    await conn.execute('DELETE FROM incognito_recent WHERE user_id = ? AND session_id = ?', (uid, sid))
                 await conn.execute('DELETE FROM incognito_sessions WHERE id = ?', (sid,))
             elif action in {'block', 'report'}:
                 raise ValueError('Диалог завершён')
