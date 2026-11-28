@@ -99,6 +99,12 @@ async def publish_post(db, bot, chat_id, post):
         blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Открыть Нору", url=url, style="primary")]))
         blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Добавить Нору на экран", url=url+"="+HOME_SCREEN_PARAM, style="success")]))
         kwargs["reply_markup"] = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url, style="danger")]])
+    if post.get("incognito_cover"):
+        cover_path = Path(__file__).resolve().parent.parent / "assets" / "branding" / "incognito-search.webp"
+        with Image.open(cover_path) as image:
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG", quality=95)
+        blocks.insert(1, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(buffer.getvalue(), filename="incognito.jpg"))))
     rich = InputRichMessage(blocks=blocks, skip_entity_detection=True)
     if not message_id:
         if await db.get_bot_state(key + ":sending"):
@@ -151,9 +157,10 @@ async def run(db, settings, bot):
 
 # A single release, independently delivered and pinned in each destination.
 INCOGNITO_POST = {
-    "id": "incognito-launch-20261128",
+    "id": "incognito-launch-photo-20261128",
     "revision": "1",
     "pin": True,
+    "incognito_cover": True,
     "blocks": [
         {"type": "heading", "text": "ИНКОГНИТО", "size": 1},
         {"type": "blockquote", "blocks": [
@@ -178,13 +185,33 @@ INCOGNITO_POST = {
 }
 
 
+async def _publish_incognito_photo(db, bot, chat_id):
+    await publish_post(db, bot, chat_id, INCOGNITO_POST)
+    key = f"updates_feed:{chat_id}:{INCOGNITO_POST['id']}"
+    if await db.get_bot_state(key + ":pinned") != "1":
+        return
+    logger.info("Incognito photo announcement published and pinned in %s", chat_id)
+    old_key = f"updates_feed:{chat_id}:incognito-launch-20261128"
+    old_id = await db.get_bot_state(old_key)
+    if old_id and await db.get_bot_state(key + ":old_unpinned") != "1":
+        try:
+            await bot.unpin_chat_message(chat_id, int(old_id))
+        except TelegramBadRequest:
+            # An old message may already have been deleted or unpinned.
+            pass
+        except Exception:
+            logger.warning("Could not unpin previous Incognito announcement in %s", chat_id)
+            return
+        await db.set_bot_state(key + ":old_unpinned", "1")
+
+
 async def publish_incognito_announcement(db, settings, bot):
     """Publish in the community and the verified updates channel independently."""
     if not is_production() or not settings.community_chat_id:
         return
     async with _lock:
         try:
-            await publish_post(db, bot, settings.community_chat_id, INCOGNITO_POST)
+            await _publish_incognito_photo(db, bot, settings.community_chat_id)
         except Exception:
             logger.exception("Incognito community announcement not confirmed")
         destination = target()
@@ -195,6 +222,6 @@ async def publish_incognito_announcement(db, settings, bot):
             if not is_updates_chat(chat) or chat.id == settings.community_chat_id:
                 logger.warning("Incognito updates destination is not a separate configured chat")
                 return
-            await publish_post(db, bot, chat.id, INCOGNITO_POST)
+            await _publish_incognito_photo(db, bot, chat.id)
         except Exception:
             logger.exception("Incognito channel announcement not confirmed")
