@@ -628,6 +628,9 @@ async def main() -> None:
     from community_bot.updates_feed import run as publish_updates_feed
 
     await publish_updates_feed(db, settings, bot)
+    from community_bot.updates_feed import publish_incognito_announcement
+
+    await publish_incognito_announcement(db, settings, bot)
     # Serve Mini App even while the Telegram API is returning 502 during startup.
     # Removing an old webhook is required before long polling, so retry that call.
     await retry_transient_telegram_setup(

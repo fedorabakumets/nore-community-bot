@@ -147,3 +147,54 @@ async def run(db, settings, bot):
                     logger.exception("Updates feed post not confirmed: %s", post["id"])
         except Exception:
             logger.exception("Updates feed chat unavailable")
+
+
+# A single release, independently delivered and pinned in each destination.
+INCOGNITO_POST = {
+    "id": "incognito-launch-20261128",
+    "revision": "1",
+    "pin": True,
+    "blocks": [
+        {"type": "heading", "text": "ИНКОГНИТО", "size": 1},
+        {"type": "blockquote", "blocks": [
+            {"type": "paragraph", "text": "Ни имён. Ни профилей. Только вы и разговор."},
+        ]},
+        {"type": "paragraph", "text": [
+            {"type": "bold", "text": "Инкогнито"},
+            " — новый анонимный чат Норы. Знакомься со случайными собеседниками один на один, не раскрывая свой профиль.",
+        ]},
+        {"type": "heading", "text": "Как начать?", "size": 2},
+        {"type": "paragraph", "text": "1. Открой Коммьюнити кнопкой ниже и выбери «Инкогнито»."},
+        {"type": "paragraph", "text": "2. Нажми «Найти собеседника» и дождись подключения."},
+        {"type": "paragraph", "text": "3. Общайся. Нажми «Следующий», чтобы найти другого человека, или «Завершить», чтобы выйти."},
+        {"type": "paragraph", "text": "🔒 Только текст, 18+. Не делись личными данными. В меню диалога можно заблокировать собеседника или пожаловаться. После завершения жалоба доступна ещё 15 минут."},
+        {"type": "buttons", "buttons": [
+            {"text": "🎭 Открыть Коммьюнити", "url": "https://t.me/nora_community_bot?startapp=nora_to_community", "style": "primary"},
+        ]},
+        {"type": "buttons", "buttons": [
+            {"text": "НОРА", "url": "https://t.me/nora_community_bot?startapp", "style": "danger"},
+        ]},
+    ],
+}
+
+
+async def publish_incognito_announcement(db, settings, bot):
+    """Publish in the community and the verified updates channel independently."""
+    if not is_production() or not settings.community_chat_id:
+        return
+    async with _lock:
+        try:
+            await publish_post(db, bot, settings.community_chat_id, INCOGNITO_POST)
+        except Exception:
+            logger.exception("Incognito community announcement not confirmed")
+        destination = target()
+        if not destination:
+            return
+        try:
+            chat = await bot.get_chat(destination)
+            if not is_updates_chat(chat) or chat.id == settings.community_chat_id:
+                logger.warning("Incognito updates destination is not a separate configured chat")
+                return
+            await publish_post(db, bot, chat.id, INCOGNITO_POST)
+        except Exception:
+            logger.exception("Incognito channel announcement not confirmed")
