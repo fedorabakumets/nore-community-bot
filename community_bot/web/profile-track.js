@@ -771,7 +771,7 @@ window.NoraProfileTrack = (() => {
       mini.hidden = false;
       if (!miniMotion.matches) mini.animate?.([{opacity:0,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(.2,.8,.2,1)'});
     } else if (!docked && mini.parentElement !== miniHome) {
-      miniHome.insertBefore(mini, miniNext);
+      miniHome.insertBefore(mini, miniNext?.parentElement === miniHome ? miniNext : dialog);
     }
     dialog.classList.toggle('music-mini-docked', docked);
     if (library && docked !== wasDocked) (docked ? content : dialog).scrollTop = scrollTop;
