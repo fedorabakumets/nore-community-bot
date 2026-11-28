@@ -43,6 +43,9 @@ async def search(request):
         return _error("Введи от 2 до 120 символов.")
     if not songs.enabled():
         return _error("Музыкальный каталог пока не подключён.", 503)
+    problem = await songs.song_care_error(request.app["db"], uid)
+    if problem:
+        return _error(problem, 403)
     now = time.monotonic()
     _prune(now)
     if uid in _IN_FLIGHT or now - _LAST.get(uid, -100) < 2 or _SEARCH_SLOTS.locked():
@@ -57,9 +60,11 @@ async def search(request):
     finally:
         _IN_FLIGHT.discard(uid)
     _SEARCHES[uid] = (time.monotonic() + songs.CHOICE_TTL, {song.id: song for song in tracks})
+    existing = await get_collection(request.app["db"], uid)
+    saved = {track.get("catalog_id"): key for key, track in existing.items() if track.get("catalog_id")}
     return web.json_response({"tracks": [
         {"id": song.id, "title": song.title, "artist": song.artist,
-         "duration": song.duration, "url": song.url}
+         "duration": song.duration, "url": song.url, "saved_id": saved.get(song.id)}
         for song in tracks
     ]})
 
