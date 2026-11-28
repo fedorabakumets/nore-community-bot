@@ -193,12 +193,13 @@ async def profile(request):
         presence=presence,
     )
     if not target["profile_private"] or uid == target["user_id"]:
-        from community_bot.social_likes import count
+        from community_bot.profile_theme import appearance
 
+        likes, theme = await appearance(db, target["user_id"])
         tier = reputation_tier(target["reputation"], settings.restricted_reputation_threshold)
         result.update(bio=target["profile_bio"], hobbies=target["hobbies"],
                       reputation=target["reputation"], tier=tier.label, cookies=target["cookies"],
-                      likes=await count(db, target["user_id"]),
+                      likes=likes, theme=theme,
                       track=await saved_track_summary(db, uid, await get_track(db, target["user_id"])),
                       music_library_public=await can_read_library(db, settings, uid, target["user_id"]))
     return web.json_response(result)

@@ -84,7 +84,7 @@ async def protection(request, handler):
             profile_optional = path in {
                 '/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo',
                 '/api/profile', '/api/profile/avatar',
-                '/api/profile/privacy', '/api/profile/track', '/api/profile/track/save',
+                '/api/profile/privacy', '/api/profile/theme', '/api/profile/track', '/api/profile/track/save',
                 '/api/music-library', '/api/notices', '/api/admin',
                 '/api/story/dedzytwo/like',
                 '/api/story/dedzytwo/status',
@@ -264,12 +264,13 @@ async def overview(request):
     used = await db.reputation_actions_today(user['user_id'], today)
     role = await effective_role(db, settings, user['user_id'])
     from community_bot.music_library import saved_track_summary
+    from community_bot.profile_theme import appearance
     from community_bot.profile_track import get_track
     from community_bot.role_prefixes import prefix_for
-    from community_bot.social_likes import count
 
+    likes, theme = await appearance(db, user['user_id'])
     stats = {
-        'likes': await count(db, user['user_id']),
+        'likes': likes, 'theme': theme,
         'shield_expires_at': await db.hate_shield_expiry(user['user_id']),
         'prefix': await prefix_for(db, settings, user['user_id']),
         'fill_percent': profile_fill_percent(user), 'reputation_cap': reputation_cap(user),
@@ -476,6 +477,18 @@ async def profile_privacy(request):
     return web.json_response({'ok': True, 'message': 'Настройки профиля сохранены'})
 
 
+async def save_profile_theme(request):
+    from community_bot.profile_theme import THEMES, set_theme
+
+    payload = await request.json()
+    theme = payload.get('theme') if isinstance(payload, dict) and set(payload) == {'theme'} else None
+    if not isinstance(theme, str) or (theme != 'default' and theme not in THEMES):
+        return web.json_response({'error': 'Выбери цвет из палитры'}, status=400)
+    if not await set_theme(request.app['db'], request['actor']['id'], theme):
+        return web.json_response({'error': 'Цвет оформления открывается с 50 лайков'}, status=403)
+    return web.json_response({'theme': None if theme == 'default' else theme})
+
+
 async def save_profile(request):
     from community_bot.profile_fields import validate_profile_fields
 
@@ -631,6 +644,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/application/photo', upload_application_photo)
     app.router.add_post('/api/profile', save_profile)
     app.router.add_post('/api/profile/privacy', profile_privacy)
+    app.router.add_post('/api/profile/theme', save_profile_theme)
     app.router.add_post('/api/profile/avatar', upload_avatar)
     app.router.add_get('/api/profile/avatar', avatar)
     from community_bot import cabinet_api, events_api, friends_api, mafia_api, rocket_api, sea_api, seasonal, shop_api

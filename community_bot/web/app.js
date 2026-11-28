@@ -1,10 +1,21 @@
 'use strict';
 const tg = window.Telegram?.WebApp;
+function syncTelegramPalette() {
+  const root = document.documentElement;
+  const scene = document.querySelector('#sheet[open].nora-profile-music:has(#person-profile)')
+    || document.querySelector('body.nora-profile-music:has(#app[data-screen="lk"])');
+  const color = getComputedStyle(scene || root).getPropertyValue(
+    scene ? '--theme-music-bg' : '--nora-background'
+  ).trim() || (scene ? '#354451' : '#111013');
+  root.classList.toggle('nora-music-shell', !!scene);
+  if (scene) root.style.setProperty('--active-music-bg', color);
+  else root.style.removeProperty('--active-music-bg');
+  $('meta[name="theme-color"]')?.setAttribute('content', color);
+  for (const [method, version] of [['setBackgroundColor','6.1'], ['setHeaderColor','6.9'], ['setBottomBarColor','7.10']]) {
+    try { if (tg?.isVersionAtLeast?.(version)) tg[method]?.(color); } catch {}
+  }
+}
 if (tg) {
-  const background = getComputedStyle(document.documentElement).getPropertyValue('--poster-bg').trim() || '#111013';
-  if (tg.isVersionAtLeast?.('6.1')) tg.setBackgroundColor?.(background);
-  if (tg.isVersionAtLeast?.('6.9')) tg.setHeaderColor?.(background);
-  if (tg.isVersionAtLeast?.('7.10')) tg.setBottomBarColor?.(background);
   if (tg.isVersionAtLeast?.('7.7')) tg.disableVerticalSwipes?.();
   tg.ready();
   tg.expand();
@@ -25,7 +36,22 @@ function profileTabLocked(target) {
     && !(target==='events'&&data.events_admin);
 }
 const number=n=>new Intl.NumberFormat(NoraI18n.locale).format(Number(n||0));
-const profileLikeText=likes=>`${likes>=50?'💜':'❤️'} ${number(likes)}`;
+const PROFILE_THEME_LIKES = 50;
+const profileLikeText=likes=>`${likes>=PROFILE_THEME_LIKES?'💜':'❤️'} ${number(likes)}`;
+const profileThemes = Object.freeze({
+  red: 'Красный', black: 'Чёрный', white: 'Белый', purple: 'Фиолетовый', pink: 'Розовый'
+});
+function profileTheme(profile) {
+  return profile?.likes >= PROFILE_THEME_LIKES && Object.hasOwn(profileThemes, profile.theme) ? profile.theme : '';
+}
+function applyProfileTheme(profile) {
+  const root = document.documentElement, theme = profileTheme(profile);
+  if ((root.dataset.appTheme || '') === theme) return;
+  if (theme) root.dataset.appTheme = theme;
+  else delete root.dataset.appTheme;
+  syncTelegramPalette();
+}
+syncTelegramPalette();
 const plural=(n,one,few,many)=>{n=Math.abs(Math.trunc(Number(n)||0));if(NoraI18n.language==='en')return n===1?one:many;return n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many};
 const gameViews = new Set(['durak', 'barricade', 'sea', 'mafia', 'rocket', 'dot', 'poker']);
 const gameWrites = new Map();
@@ -387,7 +413,7 @@ const mainTabScreens = {
 const screenHTML = content => `${demo?("<div class=\"demo\">" + NoraI18n.html("Демонстрация · пример данных, покупки отключены") + "</div>"):''}${content}`;
 let cancelPageSwipe, pageTouchInProgress;
 
-function render(swiped = false){if(!data)return;if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||NoraI18n.t("Друг");let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
+function render(swiped = false){if(!data)return;applyProfileTheme(data.profile);if(data.onboarding){showApplication(data.onboarding);return}if(profileTabLocked(tab))tab='lk';window.NoraCabinet?.syncHistory();if(data.profile.fill_percent===100){window.NoraShop?.preloadSeasonal();window.NoraPeople?.start()}const u=data.user,name=u.profile_name||u.telegram_name||NoraI18n.t("Друг");let content=Object.hasOwn(mainTabScreens,tab)?mainTabScreens[tab]()||'':'';
 if(tab==='commands')content=NoraCommands.screen();
 if(tab==='staffchat')content=window.NoraStaffChat?.screen()||("<section class=\"nora-staff-chat\"><h1>" + NoraI18n.html("Чат Норы") + "</h1><p class=\"sub\">" + NoraI18n.html("Экран чата не загрузился. Закрой и заново открой Нору.") + "</p><button type=\"button\" data-tab=\"community\" class=\"secondary\">" + NoraI18n.html("Назад") + "</button></section>");
 if(tab==='admin')content=window.NoraAdmin?.render()||("<p>" + NoraI18n.html("Открываем админ-панель…") + "</p>");
@@ -866,8 +892,9 @@ async function refresh() {
   if (tab === 'durak' || tab === 'barricade' || tab === 'dot' || tab === 'poker') return;
   if (window.NoraSea?.refreshCurrent() || window.NoraInteractive?.refreshCurrent()) return;
   try {
+    const current = data, theme = data.profile?.theme;
     const fresh = await api('me');
-    if (pageTouchInProgress?.()) return;
+    if (busy || $('#sheet').open || data !== current || data.profile?.theme !== theme || pageTouchInProgress?.()) return;
     data = fresh;
     render();
     if (data) window.NoraCabinet?.refreshCurrent();

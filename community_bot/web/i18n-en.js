@@ -1,6 +1,14 @@
 'use strict';
 // English UI and trusted server copy. Keys are the original Russian strings.
 window.NoraEnglish = Object.freeze({
+  "Цвет оформления": "Appearance",
+  "Цвет оформления открывается с 50 лайков": "Appearance unlocks at 50 likes",
+  "Один цвет для приложения и твоей карточки профиля.": "One color for the app and your profile card.",
+  "Выбери цвет из палитры": "Choose a color from the palette",
+  "Красный": "Red",
+  "Белый": "White",
+  "Фиолетовый": "Purple",
+  "Обычный": "Default",
   "Собеседник завершил диалог.": "The other person ended the chat.",
   "Инкогнито": "Incognito",
   "Анонимный чат · 18+": "Anonymous chat · 18+",
