@@ -5671,7 +5671,4 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
 
 
 /* My Wave: lightweight glass discovery tile and refresh action. */
-#music-library-profile .music-wave-head {display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px;}
-#music-library-profile .music-wave-head h3 {margin:0;}
-#music-library-profile .music-wave-head button {display:flex;align-items:center;gap:4px;width:auto;min-height:32px;padding:6px 12px;border:0;border-radius:999px;background:var(--profile-button);box-shadow:none;color:var(--profile-ink);font:500 12px/1.2 var(--body-font,system-ui);}
 #music-library-profile .music-feature[data-music-go="wave"] {background:radial-gradient(ellipse at 85% 12%,#b27cf0aa,transparent 65%),linear-gradient(145deg,#28203d,#60418e);}

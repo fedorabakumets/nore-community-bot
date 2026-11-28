@@ -224,7 +224,8 @@ const NoraProfileWaves = (() => {
 
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
-  let queue = [], queueIndex = -1, shuffle = false, repeat = false, queueLoading = false;
+  let waveArtists = [];
+  let queue = [], queueIndex = -1, shuffle = false, repeat = false, queueLoading = null;
   let playIntent = 0, playerReturn = null, closeMotion = null;
   let activityPublic, activityVersion = 0, presenceRequest = null, pendingPresence = null;
   const mini = document.getElementById('nora-mini-player');
@@ -413,7 +414,9 @@ window.NoraProfileTrack = (() => {
     }finally{try{await context?.close();}catch{}}
   }
   async function prepareMusicEnvelope(state) {
-    if(state.analysisStarted||!state.blob||!state.element?.closest('#app[data-screen="lk"] .lk-screen,#person-profile')||
+    const profile = state.element?.closest('#app[data-screen="lk"] .lk-screen,#person-profile');
+    const wave = state.station && $('#sheet[open] .music-wave-active');
+    if(state.analysisStarted||!state.blob||(!profile&&!wave)||
        matchMedia('(prefers-reduced-motion: reduce)').matches)return;
     const duration=state.audio.duration;
     if(!Number.isFinite(duration)||duration<=0)return;
@@ -504,9 +507,15 @@ window.NoraProfileTrack = (() => {
 
   const artistCover = '/game/dedzytwo-playlist.jpg';
 
-  function coverImage(track, className = 'music-cover') {
+  function coverUrl(track) {
     const url = track?.cover;
-    if (url !== artistCover && (typeof url !== 'string' || !/^https:\/\/avatars(?:\.mds)?\.yandex\.net\/[A-Za-z0-9_./-]+$/.test(url))) return '';
+    return url === artistCover || (typeof url === 'string' &&
+      /^https:\/\/avatars(?:\.mds)?\.yandex\.net\/[A-Za-z0-9_./-]+$/.test(url)) ? url : '';
+  }
+
+  function coverImage(track, className = 'music-cover') {
+    const url = coverUrl(track);
+    if (!url) return '';
     const full = className === 'music-full-cover';
     return '<img class="' + className + '" src="' + esc(url) + '" decoding="async"' +
       (full ? '' : ' loading="lazy"') + ' referrerpolicy="no-referrer" alt="">';
@@ -609,7 +618,8 @@ window.NoraProfileTrack = (() => {
       '<div class="music-discovery-heading"><h3 data-music-heading>' + t("Недавно добавлено") + '</h3></div>' +
       '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>' +
       '<div data-music-local-empty hidden>' + libraryEmpty() + '</div>' +
-      '<section data-music-catalog hidden><div class="music-wave-head"><h3 data-catalog-heading>' + t("Яндекс Музыка") + '</h3><button type="button" data-wave-refresh hidden>' + t("Обновить") + icon('refresh') + '</button></div><div data-music-results aria-live="polite"></div></section>' +
+      '<section class="music-wave" data-music-wave aria-label="' + t("Моя волна") + '" hidden></section>' +
+      '<section data-music-catalog hidden><h3>' + t("Яндекс Музыка") + '</h3><div data-music-results aria-live="polite"></div></section>' +
       '<div data-music-visibility>' + visibility + '</div>';
     const form = content.querySelector('[data-music-search]');
     const input = content.querySelector('[data-music-query]');
@@ -628,7 +638,7 @@ window.NoraProfileTrack = (() => {
     const scroller = $('#sheet-content');
     const searchHint = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
     let mode = 'home', generation = 0, controller = null, importPending = false, period = 'week';
-    let waveResponse = null, waveRequest = null, waveExpires = 0;
+    let waveView = null;
     let socialRequest = null, friendsRefresh = 0, paneMotion = null;
     const alive = () => panel.isConnected && $('#sheet').open;
     const retained = () => alive() || playerReturn?.panel === panel || artistProfileReturn?.panel === panel;
@@ -652,7 +662,9 @@ window.NoraProfileTrack = (() => {
       const waveMode = mode === 'wave';
       const artistMode = mode === 'artist';
       panel.classList.toggle('music-artist-active', artistMode);
-      form.hidden = tabs.hidden = artistMode;
+      panel.classList.toggle('music-wave-active', waveMode);
+      form.hidden = tabs.hidden = artistMode || waveMode;
+      content.querySelector('[data-music-wave]').hidden = !waveMode;
       artist.hidden = !artistMode;
       artistCard.hidden = mode !== 'home';
       list.hidden = count === 0 || socialMode || waveMode || artistMode;
@@ -662,9 +674,7 @@ window.NoraProfileTrack = (() => {
       content.querySelector('[data-music-cards]').hidden = mode !== 'home';
       content.querySelector('[data-music-visibility]').hidden = mode === 'search' || waveMode || artistMode;
       content.querySelector('[data-music-heading]').textContent = NoraI18n.t(mode === 'home' ? "Недавно добавлено" : mode === 'search' ? "В твоей коллекции" : "Мои треки");
-      catalog.hidden = mode !== 'search' && !waveMode;
-      content.querySelector('[data-catalog-heading]').textContent = NoraI18n.t(waveMode ? 'Моя волна' : 'Яндекс Музыка');
-      content.querySelector('[data-wave-refresh]').hidden = !waveMode;
+      catalog.hidden = mode !== 'search';
       content.querySelector('.music-discovery-heading').hidden = socialMode || waveMode || artistMode;
       social.hidden = !socialMode;
       content.querySelector('[data-music-activity-wrap]').hidden = mode === 'search' || waveMode || artistMode;
@@ -684,7 +694,8 @@ window.NoraProfileTrack = (() => {
         scroller.scrollTop = 0;
         const distance = direction || Math.sign(modes.indexOf(mode) - modes.indexOf(previousMode));
         let pane = list.hidden ? content.querySelector('[data-music-local-empty]') : list;
-        if (mode === 'wave' || mode === 'search') pane = catalog;
+        if (mode === 'search') pane = catalog;
+        if (mode === 'wave') pane = content.querySelector('[data-music-wave]');
         if (['top','friends','history'].includes(mode)) pane = social;
         if (mode === 'home') pane = previousMode === 'artist' ? artistCard : content.querySelector('[data-music-cards]');
         if (mode === 'artist') pane = artist;
@@ -695,7 +706,11 @@ window.NoraProfileTrack = (() => {
         artist.querySelector('h2').focus({preventScroll:true});
         void loadArtist();
       } else if (previousMode === 'artist') artistCard.focus({preventScroll:true});
-      if (mode === 'wave') void loadWave();
+      if (mode === 'wave') openWave();
+      else if (previousMode === 'wave') {
+        waveView?.suspend();
+        content.querySelector('[data-music-go="wave"]').focus({preventScroll:true});
+      }
       if (['top','friends','history'].includes(mode)) void loadSocial();
     }
     panel.musicSwipe = direction => {
@@ -826,8 +841,12 @@ window.NoraProfileTrack = (() => {
         }
       }
     }
-    panel.addEventListener('music-library-hidden', stopSocial);
+    panel.addEventListener('music-library-hidden', () => {
+      stopSocial();
+      waveView?.suspend();
+    });
     panel.addEventListener('music-library-restored', () => {
+      if (mode === 'wave') panel.paintWave();
       if (mode === 'friends') void loadSocial(true);
       else if (['top','history'].includes(mode) && !socialResults.musicMarkup) void loadSocial();
     });
@@ -864,8 +883,8 @@ window.NoraProfileTrack = (() => {
       remote.innerHTML = searchHint;
       filter();
     });
-    function renderCatalog(response, wave = false) {
-      remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t(wave ? (response.personalized ? "Подборка по твоему вкусу и новые открытия" : "Случайная музыка из каталога") : "Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
+    function renderCatalog(response) {
+      remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
           response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">' + icon('play') + icon('pause') + icon('loading', 'music-loading') + '</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
             esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></button><button type="button" data-music-import="' +
             esc(track.id) + '" data-import-state="' + (track.saved_id ? 'check' : 'plus') + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>' + icon('check') : '>' + icon('plus')) + '</button></article>').join('') :
@@ -875,26 +894,95 @@ window.NoraProfileTrack = (() => {
       if (matching) matching.closest('.music-catalog-row').dataset.playSource = active.src;
       paintCatalog(active);
     }
-    async function loadWave(refresh = false) {
-      if (importPending) return;
-      if (waveResponse && !refresh && Date.now() < waveExpires) { renderCatalog(waveResponse, true); filter(); return; }
-      const version = ++generation;
-      const button = content.querySelector('[data-wave-refresh]');
-      button.disabled = true;
-      remote.innerHTML = '<p class="music-catalog-note" role="status">' + t("Собираем твою волну…") + '</p>';
-      const request = waveRequest ||= api('music-library/wave');
-      try {
-        waveResponse = await request;
-        waveExpires = Date.now() + 20 * 60 * 1000;
-        if (alive() && version === generation && mode === 'wave') { renderCatalog(waveResponse, true); filter(); }
-      } catch (error) {
-        if (alive() && version === generation) remote.textContent = error.message;
-      } finally {
-        if (waveRequest === request) waveRequest = null;
-        button.disabled = false;
-      }
+    const waveRoot = content.querySelector('[data-music-wave]');
+    let waveStation = NoraMusicWave.personal, pendingStation = null, waveLoading = false, waveMessage = '';
+
+    panel.paintWave = () => {
+      if (mode !== 'wave' || !waveView) return;
+      const current = active?.station?.key === waveStation.key ? active : null;
+      waveView.sync(current, {
+        loading:waveLoading || Boolean(queueLoading && queue[queueIndex]?.station?.key === waveStation.key),
+        canAdvance:Boolean(current && canStep(1)), cover:coverUrl(current?.track), message:waveMessage
+      });
+      if (current && !current.audio.paused && !document.hidden) void prepareMusicEnvelope(current);
+    };
+
+    function openWave() {
+      const entering = !waveView;
+      waveView ||= NoraMusicWave.create(waveRoot, {
+        icon, select:chooseWave, back:() => setMode('home'), next:() => void stepQueue(1),
+        toggle:() => active?.station?.key === waveStation.key && !active.audio.ended
+          ? void toggleActive(active) : chooseWave(waveStation, true)
+      });
+      waveRoot.querySelector('h2').focus({preventScroll:true});
+      if (entering) waveView.setArtists(waveArtists);
+      if (active?.station && !waveLoading) {
+        waveStation = active.station;
+        waveView.setStation(waveStation);
+        if (active.audio.ended) chooseWave(waveStation, true);
+        else if (entering && active.audio.paused) void toggleActive(active);
+      } else if (!waveLoading && (entering || !waveMessage)) chooseWave(waveStation);
+      panel.paintWave();
     }
-    content.querySelector('[data-wave-refresh]').addEventListener('click', () => void loadWave(true));
+
+    function chooseWave(station, retry = false) {
+      const current = active?.station?.key === station.key && !active.audio.ended;
+      if (!retry && station.key === waveStation.key && (waveLoading || current)) {
+        if (current && !waveLoading && active.audio.paused) void toggleActive(active);
+        return;
+      }
+      waveStation = station;
+      waveView.setStation(station);
+      pendingStation = {station, intent:++playIntent};
+      queueLoading = null;
+      cancelQueueStarts();
+      waveMessage = NoraI18n.t("Собираем твою волну…");
+      if (waveLoading) panel.paintWave();
+      else void tuneWave();
+    }
+
+    async function tuneWave() {
+      waveLoading = true;
+      panel.paintWave();
+      while (pendingStation) {
+        const {station, intent} = pendingStation;
+        pendingStation = null;
+        try {
+          let selection;
+          try {
+            selection = await waveQueue(station);
+          } catch (error) {
+            if (error.status !== 429) throw error;
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            if (intent !== playIntent) continue;
+            selection = await waveQueue(station);
+          }
+          const {items, artists} = selection;
+          if (intent !== playIntent || !document.querySelector('#nav .nav-drop')) continue;
+          if (artists) {
+            waveArtists = artists;
+            waveView.setArtists(artists);
+          }
+          if (!items.length) {
+            waveMessage = NoraI18n.t(station.period ? "Здесь пока тихо" : "Треки не найдены");
+            continue;
+          }
+          queue = items;
+          queueIndex = 0;
+          waveMessage = '';
+          void startTrack(items[0]).then(() => {
+            if (queue !== items || waveStation !== station || active?.station?.key === station.key) return;
+            waveMessage = NoraI18n.t("Трек сейчас недоступен");
+            panel.paintWave();
+          });
+        } catch (error) {
+          if (intent === playIntent) waveMessage = error.message;
+        }
+      }
+      waveLoading = false;
+      panel.paintWave();
+    }
+
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (importPending || form.hasAttribute('aria-busy')) return;
@@ -933,8 +1021,7 @@ window.NoraProfileTrack = (() => {
         importPending = true;
         row.dataset.musicState = 'loading';
         try {
-          const isWave = mode === 'wave';
-          const response = await api('music-library/play', {id:playButton.dataset.musicPlay, wave:isWave});
+          const response = await api('music-library/play', {id:playButton.dataset.musicPlay});
           if (!alive() || version !== generation || intent !== playIntent) return;
           const track = response.track;
           const item = {src: response.source + '?v=' + encodeURIComponent(track.revision), track, catalogId:playButton.dataset.musicPlay};
@@ -944,10 +1031,8 @@ window.NoraProfileTrack = (() => {
             void toggleActive(active);
             return;
           }
-          if (isWave) {
-            queue = waveResponse.tracks.map(t => t.id === playButton.dataset.musicPlay ? {...item,wave:true,catalogId:t.id} : {wave:true,catalogId:t.id,track:t});
-            queueIndex = queue.findIndex(t=>t.catalogId === playButton.dataset.musicPlay);
-          } else { queue = [item]; queueIndex = 0; }
+          queue = [item];
+          queueIndex = 0;
           void startTrack(item);
         } catch (error) { if (alive()) toast(error.message); }
         finally {
@@ -962,7 +1047,7 @@ window.NoraProfileTrack = (() => {
       const version = generation;
       paintImport(button, 'loading');
       try {
-        const response = await api('music-library/import', {id: button.dataset.musicImport, wave:mode === 'wave'});
+        const response = await api('music-library/import', {id: button.dataset.musicImport});
         if (!alive()) return;
         const track = response.track;
         if (!Array.from(list.querySelectorAll('[data-track-id]')).some(row => row.dataset.trackId === String(track.id))) {
@@ -1693,12 +1778,32 @@ window.NoraProfileTrack = (() => {
       artist:element.dataset.trackArtist,duration:Number(element.dataset.trackLength)||0,cover:element.dataset.trackCover}};
   }
 
+  async function waveQueue(station) {
+    const localArtist = station.artist?.toLowerCase() === 'dedzytwo';
+    if (localArtist || station.period) {
+      const response = await api(localArtist ? 'music-library/artist' :
+        'music-library/social?' + new URLSearchParams({period:station.period, view:'top'}));
+      const tracks = localArtist ? response.tracks : response.top;
+      return {items:tracks.map(track => ({
+        src:(localArtist ? '/api/music-library/artist/' + track.id : track.source) +
+          '?v=' + encodeURIComponent(track.revision), track, station
+      }))};
+    }
+    const params = new URLSearchParams(station.genre ? {genre:station.genre} :
+      station.artist ? {artist:station.artist} : {});
+    const query = params.toString();
+    const response = await api('music-library/wave' + (query ? '?' + query : ''));
+    return {items:response.tracks.map(track => ({wave:true,catalogId:track.id,track,station})),
+      artists:response.artists};
+  }
+
   async function startTrack(item) {
     if (!item) return;
+    queueLoading = null;
     cancelQueueStarts();
     if (!item.src && item.wave && item.catalogId) {
       const intent = ++playIntent;
-      queueLoading = true;
+      const loading = queueLoading = {};
       paintQueue();
       try {
         const response = await api('music-library/play', {id:item.catalogId,wave:true});
@@ -1709,19 +1814,28 @@ window.NoraProfileTrack = (() => {
           if (row.querySelector('[data-music-play]')?.dataset.musicPlay === item.catalogId) row.dataset.playSource = item.src;
         }
       } catch (error) { if (intent === playIntent) toast(error.message); return; }
-      finally { queueLoading = false; paintQueue(); }
+      finally {
+        if (queueLoading === loading) {
+          queueLoading = null;
+          paintQueue();
+        }
+      }
     }
     if (active?.src === item.src) {
+      active.station = item.station;
+      active.wave = item.wave;
+      active.catalogId = item.catalogId;
       if (active.audio.ended) {
         active.audio.currentTime = 0;
         await toggleActive(active);
-      }
+      } else if (item.station && active.audio.paused) await toggleActive(active);
+      if (active) paint(active);
       return;
     }
     const full = $('#sheet').open && Boolean($('#nora-now-playing'));
     stop();
     const audio = new Audio();
-    active = {audio, element:null, src:item.src, catalogId:item.catalogId, wave:item.wave,
+    active = {audio, element:null, src:item.src, catalogId:item.catalogId, wave:item.wave, station:item.station,
       controller:new AbortController(), loading:true, track:item.track};
     const state = active;
     let listened = 0, last = 0;
@@ -1787,6 +1901,7 @@ window.NoraProfileTrack = (() => {
   }
 
   function paintQueue() {
+    visibleLibrary?.paintWave?.();
     const panel = $('#nora-now-playing');
     if (!panel) return;
     panel.querySelector('[data-queue-prev]').disabled = !canStep(-1);
@@ -1801,17 +1916,19 @@ window.NoraProfileTrack = (() => {
     }
     if (next >= queue.length && direction > 0 && queue[queueIndex]?.wave) {
       const intent = ++playIntent;
-      queueLoading = true;
+      const loading = queueLoading = {};
       paintQueue();
       try {
-        const response = await api('music-library/wave');
-        if (intent !== playIntent || !response.tracks.length) return;
+        const {items} = await waveQueue(queue[queueIndex].station || NoraMusicWave.personal);
+        if (intent !== playIntent || !items.length) return;
         const previous = new Set(queue.map(item=>item.catalogId));
-        const fresh = response.tracks.filter(track=>!previous.has(track.id));
-        queue = (fresh.length ? fresh : response.tracks).map(track=>({wave:true,catalogId:track.id,track}));
+        const fresh = items.filter(item=>!previous.has(item.catalogId));
+        queue = fresh.length ? fresh : items;
         next = 0;
       } catch (error) { if (intent === playIntent) toast(error.message); return; }
-      finally { queueLoading = false; paintQueue(); }
+      finally {
+        if (queueLoading === loading) { queueLoading = null; paintQueue(); }
+      }
     }
     if (next < 0 || next >= queue.length) return;
     queueIndex = next;
@@ -1875,7 +1992,7 @@ window.NoraProfileTrack = (() => {
   // In-memory audio is cleared when the authenticated navigation is removed.
   function rebind() {
     updateLibraryVisibility();
-    if (!document.querySelector('#nav .nav-drop')) { stop(); clearMusicCache(); return; }
+    if (!document.querySelector('#nav .nav-drop')) { stop(); clearMusicCache(); waveArtists = []; return; }
     syncMiniHost();
     if (active) paint(active);
   }
