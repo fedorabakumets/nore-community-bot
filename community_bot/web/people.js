@@ -55,7 +55,7 @@ window.NoraPeople = (() => {
       const el=document.querySelector('.person-photo');if(el){el.innerHTML=`<img src="${avatarURL}" alt="${NoraI18n.html("Фото профиля")}">`;el.disabled=false;}
     } catch {}
   }
-  async function visit(idOrRecipient) {
+  async function visit(idOrRecipient, {beforeOpen} = {}) {
     if(loading||busy)return;
     if(idOrRecipient===data.user.user_id){$('#sheet').close();tab='lk';NoraShop.tabChanged(tab);render();return}
     loading=true;const version=++generation;discardAvatar();
@@ -63,6 +63,7 @@ window.NoraPeople = (() => {
       const path=typeof idOrRecipient==='number'?'people/'+idOrRecipient:'people?recipient='+encodeURIComponent(idOrRecipient);
       const p=await api(path);if(version!==generation)return;
       if(p.id===data.user.user_id){$('#sheet').close();tab='lk';NoraShop.tabChanged(tab);render();return}
+      if (beforeOpen?.() === false) return;
       person=p;sheet(profileHTML(p));
       // Keep dialog autofocus on the profile, not on the first action button.
       $('#person-profile')?.focus({preventScroll:true});avatar(p,version);

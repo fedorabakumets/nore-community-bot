@@ -1,6 +1,11 @@
 'use strict';
 // English UI and trusted server copy. Keys are the original Russian strings.
 window.NoraEnglish = Object.freeze({
+  "Профиль в Норе": "NORA profile",
+  "Добавить все треки": "Add all tracks",
+  "Все треки добавлены": "All tracks added",
+  "Мэшапы и ремиксы": "Mashups and remixes",
+  "Артист Норы": "NORA artist",
   "Предыдущая история": "Previous story",
   "Следующая история": "Next story",
   "Продолжить историю": "Resume story",

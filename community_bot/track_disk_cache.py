@@ -101,8 +101,17 @@ class TrackDiskCache:
         return await self._open('telegram:' + file_id, download)
 
     async def open_track(self, bot, track):
-        if not track['file_id'].startswith('catalog:'):
-            return await self.open(bot, track['file_id'])
+        from community_bot.music_artist import PREFIX, release_paths
+
+        file_id = track['file_id']
+        if file_id.startswith(PREFIX):
+            path = release_paths().get(file_id)
+            if path is None:
+                raise ValueError("Unknown artist track")
+            stat = path.stat()
+            return TrackLease(_Entry(path, stat.st_size))
+        if not file_id.startswith('catalog:'):
+            return await self.open(bot, file_id)
         from community_bot.routers.song_requests import Song, SongError, _cookie_bytes, _download_sync, enabled
 
         async def download(partial):
