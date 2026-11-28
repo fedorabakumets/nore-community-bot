@@ -1,6 +1,7 @@
 'use strict';
 // English UI and trusted server copy. Keys are the original Russian strings.
 window.NoraEnglish = Object.freeze({
+  "Собеседник завершил диалог.": "The other person ended the chat.",
   "Инкогнито": "Incognito",
   "Анонимный чат · 18+": "Anonymous chat · 18+",
   "Случайный анонимный чат · 18+": "Random anonymous chat · 18+",
