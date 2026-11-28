@@ -11,6 +11,7 @@ from community_bot import social_likes
 from community_bot.cabinet_api import wallet_confirm, wallet_prepare
 from community_bot.database import Database
 from community_bot.friends_api import mutate, snapshot
+from community_bot.miniapp import save_profile_theme
 from community_bot.profile_fields import profile_revision
 from community_bot.social_profiles import avatar, heartbeat, presence_map, profile, update
 
@@ -240,3 +241,32 @@ async def test_privacy_gifts_and_legacy_hidden_profiles(env):
     assert await env.db.set_profile_privacy(8, False)
     reopened = Database(env.db.path)
     assert await reopened.set_profile_privacy(8, True)
+
+
+async def test_profile_color_uses_received_likes_and_respects_privacy(env):
+    db = env.db
+    target_likes = f"{social_likes.COUNT_PREFIX}9"
+    await db.set_bot_state(target_likes, "49")
+    change = Request(env, uid=9, body={"theme": "pink"})
+    assert (await save_profile_theme(change)).status == 403
+
+    await db.set_bot_state(target_likes, "50")
+    spoofed = Request(env, uid=9, body={"theme": "pink", "user_id": 8})
+    assert (await save_profile_theme(spoofed)).status == 400
+    for invalid in ("blue", ["pink"], None):
+        assert (await save_profile_theme(Request(env, uid=9, body={"theme": invalid}))).status == 400
+    for theme in ("red", "black", "white", "purple", "pink"):
+        change.body["theme"] = theme
+        assert json.loads((await save_profile_theme(change)).body) == {"theme": theme}
+        assert json.loads((await profile(Request(env))).body)["theme"] == theme
+
+    assert json.loads((await profile(Request(env, uid=9, target="8"))).body)["theme"] is None
+    await db.set_bot_state(target_likes, "49")
+    assert json.loads((await profile(Request(env))).body)["theme"] is None
+    await db.set_bot_state(target_likes, "50")
+    await db.update_profile(9, "profile_private", 1)
+    assert "theme" not in json.loads((await profile(Request(env))).body)
+    await db.update_profile(9, "profile_private", 0)
+    change.body["theme"] = "default"
+    assert json.loads((await save_profile_theme(change)).body) == {"theme": None}
+    assert json.loads((await profile(Request(env))).body)["theme"] is None
