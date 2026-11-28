@@ -63,6 +63,15 @@ class CommunityScopeMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         membership = event.my_chat_member
+        from community_bot.updates_feed import is_updates_chat, run as publish_updates_feed
+
+        if is_updates_chat(chat):
+            # Feed is outbound-only; do not forward its events into community logic.
+            if membership is not None and membership.new_chat_member.status in {
+                ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR,
+            } and settings is not None and data.get("db") is not None:
+                await publish_updates_feed(data["db"], settings, data["bot"])
+            return
         if community_chat_id and membership is not None:
             member = membership.new_chat_member
             if member.status in {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR} or (
