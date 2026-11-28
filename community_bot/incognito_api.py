@@ -7,7 +7,7 @@ import re
 import secrets
 import time
 from contextlib import suppress
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS incognito_sessions (
 );
 CREATE TABLE IF NOT EXISTS incognito_members (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES incognito_sessions(id) ON DELETE CASCADE
+    session_id TEXT NOT NULL REFERENCES incognito_sessions(id) ON DELETE CASCADE,
+    typing_until REAL NOT NULL DEFAULT 0,
+    seen_at REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_incognito_members_session ON incognito_members(session_id);
 CREATE TABLE IF NOT EXISTS incognito_messages (
@@ -38,6 +40,11 @@ CREATE TABLE IF NOT EXISTS incognito_messages (
     UNIQUE(session_id, sender_id, client_id)
 );
 CREATE INDEX IF NOT EXISTS idx_incognito_messages_session ON incognito_messages(session_id, id);
+CREATE TABLE IF NOT EXISTS incognito_blocks (
+    user_id INTEGER NOT NULL,
+    other_id INTEGER NOT NULL,
+    PRIMARY KEY(user_id, other_id)
+);
 """
 
 logger = logging.getLogger(__name__)
@@ -84,7 +91,7 @@ async def current_session(conn, uid):
     return row['session_id'] if row else None
 
 
-async def enqueue(conn, uid, now, excluded=None):
+async def enqueue(conn, uid, now, excluded=None, allowed=None):
     if await current_session(conn, uid):
         return
     await conn.execute(
@@ -99,22 +106,27 @@ async def enqueue(conn, uid, now, excluded=None):
         'WHERE q.user_id != ? AND q.user_id != ? AND q.expires_at > ? '
         'AND u.birth_date <= ? AND (q.avoid_user_id IS NULL OR q.avoid_user_id != ?) '
         'AND NOT EXISTS (SELECT 1 FROM incognito_members m WHERE m.user_id = q.user_id) '
+        'AND NOT EXISTS (SELECT 1 FROM incognito_blocks b WHERE '
+        '(b.user_id = ? AND b.other_id = q.user_id) OR (b.other_id = ? AND b.user_id = q.user_id)) '
         'ORDER BY RANDOM() LIMIT 20',
-        (uid, own_queue['avoid_user_id'] or uid, now, adult_cutoff().isoformat(), uid),
+        (uid, own_queue['avoid_user_id'] or uid, now, adult_cutoff().isoformat(), uid, uid, uid),
     ) as cursor:
         candidates = await cursor.fetchall()
     for candidate in candidates:
         other = candidate['user_id']
-        if not await eligible(conn, other):
+        if not await eligible(conn, other) or (allowed and not await allowed(other)):
             continue
         sid = secrets.token_urlsafe(24)
         await conn.execute('INSERT INTO incognito_sessions VALUES (?, ?, ?)', (sid, now, now))
-        await conn.executemany('INSERT INTO incognito_members VALUES (?, ?)', [(uid, sid), (other, sid)])
+        await conn.executemany(
+            'INSERT INTO incognito_members(user_id, session_id, seen_at) VALUES (?, ?, ?)',
+            [(uid, sid, now), (other, sid, now)],
+        )
         await conn.execute('DELETE FROM incognito_queue WHERE user_id IN (?, ?)', (uid, other))
         break
 
 
-async def snapshot(conn, uid, after=0):
+async def snapshot(conn, uid, after=0, now=0):
     sid = await current_session(conn, uid)
     if not sid:
         queued = await one(conn, 'SELECT 1 FROM incognito_queue WHERE user_id = ?', (uid,))
@@ -129,10 +141,14 @@ async def snapshot(conn, uid, after=0):
         {'id': r['id'], 'mine': r['sender_id'] == uid, 'text': r['body'], 'created_at': r['created_at']}
         for r in rows
     ]
-    return {'state': 'matched', 'session': sid, 'messages': messages, 'has_more': len(rows) == 100}
+    peer = await one(conn, 'SELECT typing_until, seen_at FROM incognito_members '
+                     'WHERE session_id = ? AND user_id != ?', (sid, uid))
+    return {'state': 'matched', 'session': sid, 'messages': messages, 'has_more': len(rows) == 100,
+            'typing': bool(peer and peer['typing_until'] > now),
+            'online': bool(peer and peer['seen_at'] > now - 15)}
 
 
-async def operate(db, uid, action, data=None, now=None):
+async def operate(db, uid, action, data=None, now=None, allowed=None):
     """Serialize matchmaking and membership checks in the same write transaction."""
     now = time.time() if now is None else now
     data = {} if data is None else data
@@ -151,14 +167,26 @@ async def operate(db, uid, action, data=None, now=None):
             await conn.execute('DELETE FROM incognito_queue WHERE user_id = ?', (uid,))
             await conn.commit()
             raise PermissionError('Инкогнито доступно с 18 лет')
+        if sid:
+            peer = await one(conn, 'SELECT user_id FROM incognito_members WHERE session_id = ? AND user_id != ?',
+                             (sid, uid))
+            if not peer or not await eligible(conn, peer['user_id']) or (allowed and not await allowed(peer['user_id'])):
+                await conn.execute('DELETE FROM incognito_sessions WHERE id = ?', (sid,))
+                sid = None
+            else:
+                await conn.execute('UPDATE incognito_members SET seen_at = ? WHERE user_id = ?', (now, uid))
         if action == 'join':
-            await enqueue(conn, uid, now)
+            await enqueue(conn, uid, now, allowed=allowed)
         elif action == 'status':
             if not sid:
                 queued = await one(conn, 'SELECT 1 FROM incognito_queue WHERE user_id = ?', (uid,))
                 if queued:
-                    await enqueue(conn, uid, now)
-        elif action in {'end', 'next'}:
+                    await enqueue(conn, uid, now, allowed=allowed)
+        elif action == 'typing':
+            if not sid or data.get('session') != sid:
+                raise ValueError('Диалог завершён')
+            await conn.execute('UPDATE incognito_members SET typing_until = ? WHERE user_id = ?', (now + 4, uid))
+        elif action in {'end', 'next', 'block', 'report'}:
             # A stale tab must not end a newer conversation.
             if sid != data.get('session'):
                 raise ValueError('Диалог уже изменился')
@@ -168,10 +196,27 @@ async def operate(db, uid, action, data=None, now=None):
                     conn, 'SELECT user_id FROM incognito_members WHERE session_id = ? AND user_id != ?', (sid, uid),
                 )
                 other = row['user_id'] if row else None
+                if other and action in {'block', 'report'}:
+                    await conn.execute('INSERT OR IGNORE INTO incognito_blocks VALUES (?, ?)', (uid, other))
+                if other and action == 'report':
+                    async with conn.execute(
+                        'SELECT body, sender_id FROM incognito_messages WHERE session_id = ? '
+                        'ORDER BY id DESC LIMIT 12', (sid,),
+                    ) as cursor:
+                        evidence = await cursor.fetchall()
+                    excerpt = '\n'.join(('Я: ' if r['sender_id'] == uid else 'Собеседник: ') + r['body']
+                                        for r in reversed(evidence))[-4000:]
+                    await conn.execute(
+                        'INSERT INTO reports(reporter_id, target_id, chat_id, message_id, text, reason, created_at) '
+                        'VALUES (?, ?, NULL, NULL, ?, ?, ?)',
+                        (uid, other, excerpt, 'Инкогнито: жалоба на собеседника', datetime.now(UTC).isoformat()),
+                    )
                 await conn.execute('DELETE FROM incognito_sessions WHERE id = ?', (sid,))
+            elif action in {'block', 'report'}:
+                raise ValueError('Диалог завершён')
             await conn.execute('DELETE FROM incognito_queue WHERE user_id = ?', (uid,))
             if action == 'next':
-                await enqueue(conn, uid, now, excluded=other)
+                await enqueue(conn, uid, now, excluded=other, allowed=allowed)
             after = 0
         elif action == 'send':
             if not sid or data.get('session') != sid:
@@ -201,9 +246,10 @@ async def operate(db, uid, action, data=None, now=None):
                     'VALUES (?, ?, ?, ?, ?)', (sid, uid, key, body.strip(), now),
                 )
                 await conn.execute('UPDATE incognito_sessions SET touched_at = ? WHERE id = ?', (now, sid))
+                await conn.execute('UPDATE incognito_members SET typing_until = 0 WHERE user_id = ?', (uid,))
         else:
             raise ValueError('Неизвестное действие')
-        result = await snapshot(conn, uid, after)
+        result = await snapshot(conn, uid, after, now)
         await conn.commit()
         return result
 
@@ -214,7 +260,17 @@ async def endpoint(request):
         if request.content_length is None or request.content_length > 16000:
             raise ValueError('Слишком большой запрос')
         data = await request.json()
-        result = await operate(request.app['db'], request['actor']['id'], action, data)
+        from community_bot.access import private_allowed
+        from community_bot.profile_fill import profile_is_complete
+
+        db, settings = request.app['db'], request.app['settings']
+
+        async def allowed(uid):
+            user = await db.get_user(uid)
+            return bool(user and user.get('city') and profile_is_complete(user)
+                        and await private_allowed(db, settings, uid))
+
+        result = await operate(db, request['actor']['id'], action, data, allowed=allowed)
     except PermissionError as exc:
         return web.json_response({'error': str(exc)}, status=403)
     except ValueError as exc:
