@@ -1,10 +1,13 @@
 """Isolated tests for the opt-in Yandex song feature, without network calls."""
+import asyncio
 import base64
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from community_bot import song_worker
 from community_bot.routers import song_requests as songs
 
 
@@ -40,12 +43,12 @@ def test_parse_results_and_urls():
 
 
 def test_preview_guard():
-    assert songs.is_full_track(200, 205)
-    assert not songs.is_full_track(22, 210)
-    assert songs.is_full_track(26, 27)
-    assert not songs.is_full_track(0, 120)
-    assert not songs.is_full_track(30, 0)
-    assert songs.is_full_track(120, 0)
+    assert song_worker.is_full_track(200, 205)
+    assert not song_worker.is_full_track(22, 210)
+    assert song_worker.is_full_track(26, 27)
+    assert not song_worker.is_full_track(0, 120)
+    assert not song_worker.is_full_track(30, 0)
+    assert song_worker.is_full_track(120, 0)
 
 
 def test_cookie_secret(monkeypatch):
@@ -179,15 +182,13 @@ async def test_direct_yandex_link_uses_exact_track_without_search(monkeypatch):
     message.answer.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_yandex_link_uses_same_extractor_as_song_download(monkeypatch):
-    from pathlib import Path
-
+def test_yandex_link_uses_same_extractor_as_song_download(monkeypatch, tmp_path):
     import yt_dlp
 
     raw = (b"# Netscape HTTP Cookie File\n"
            b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
-    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_bytes(raw)
     seen = []
 
     class FakeYDL:
@@ -213,21 +214,18 @@ async def test_yandex_link_uses_same_extractor_as_song_download(monkeypatch):
             }
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
-    result = await songs.find_song_by_link(
-        "https://music.yandex.ru/album/321/track/987?utm_source=share"
-    )
+    result = song_worker.resolve_metadata("987", "321", str(cookie_file))
     assert result == songs.Song("987", "321", "Песня", "Исполнитель", 200)
     assert len(seen) == 1
-    assert not Path(seen[0].options["cookiefile"]).exists()
 
 
-@pytest.mark.asyncio
-async def test_yandex_link_extractor_rejects_missing_or_wrong_track(monkeypatch):
+def test_yandex_link_extractor_rejects_missing_or_wrong_track(monkeypatch, tmp_path):
     import yt_dlp
 
     raw = (b"# Netscape HTTP Cookie File\n"
            b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
-    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_bytes(raw)
 
     class FakeYDL:
         def __init__(self, _options):
@@ -244,16 +242,16 @@ async def test_yandex_link_extractor_rejects_missing_or_wrong_track(monkeypatch)
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
     with pytest.raises(songs.SongError, match="нужной песни"):
-        await songs.find_song_by_link("https://music.yandex.ru/track/987")
+        song_worker.resolve_metadata("987", None, str(cookie_file))
 
 
-@pytest.mark.asyncio
-async def test_yandex_link_extractor_returns_helpful_error_not_secrets(monkeypatch):
+def test_yandex_link_extractor_returns_helpful_error_not_secrets(monkeypatch, tmp_path):
     import yt_dlp
 
     raw = (b"# Netscape HTTP Cookie File\n"
            b".yandex.ru\tTRUE\t/\tTRUE\t9999999999\tSession_id\tfake-secret\n")
-    monkeypatch.setenv("YANDEX_MUSIC_COOKIES_B64", base64.b64encode(raw).decode())
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_bytes(raw)
 
     class FakeYDL:
         def __init__(self, _options):
@@ -270,8 +268,68 @@ async def test_yandex_link_extractor_returns_helpful_error_not_secrets(monkeypat
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
     with pytest.raises(songs.SongError) as error:
-        await songs.find_song_by_link("https://music.yandex.ru/track/987")
+        song_worker.resolve_metadata("987", None, str(cookie_file))
     assert "fake-secret" not in str(error.value)
+
+
+async def test_yandex_worker_resolves_track_in_separate_process(monkeypatch):
+    spawn = asyncio.create_subprocess_exec
+    process = None
+    stub = """
+import os, runpy, sys, types
+from pathlib import Path
+class FakeYDL:
+    def __init__(self, options):
+        path = Path(options["cookiefile"])
+        assert path.read_bytes() == b"fake cookie"
+        if os.name == "posix":
+            assert path.stat().st_mode & 0o777 == 0o600
+        assert "YANDEX_MUSIC_COOKIES_B64" not in os.environ
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        pass
+    def extract_info(self, url, download):
+        assert url == "https://music.yandex.ru/album/321/track/987"
+        assert not download
+        return {"id": "987", "title": "Песня", "artist": "Имя", "duration": 200}
+sys.modules["yt_dlp"] = types.SimpleNamespace(YoutubeDL=FakeYDL)
+runpy.run_module("community_bot.song_worker", run_name="__main__")
+"""
+
+    async def launch(executable, *args, **kwargs):
+        nonlocal process
+        assert args == ("-m", "community_bot.song_worker")
+        process = await spawn(executable, "-c", stub, **kwargs)
+        return process
+
+    monkeypatch.setattr(songs, "_cookie_bytes", lambda: b"fake cookie")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
+    assert await songs.find_song_by_link("https://music.yandex.ru/album/321/track/987") == songs.Song(
+        "987", "321", "Песня", "Имя", 200,
+    )
+    assert process.returncode == 0
+
+
+async def test_cancelled_yandex_worker_is_reaped(monkeypatch, tmp_path):
+    spawn = asyncio.create_subprocess_exec
+    started = asyncio.Event()
+    process = None
+
+    async def launch(executable, *_args, **kwargs):
+        nonlocal process
+        process = await spawn(executable, "-c", "import time; time.sleep(30)", **kwargs)
+        started.set()
+        return process
+
+    monkeypatch.setattr(songs, "_cookie_bytes", lambda: b"fake cookie")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
+    task = asyncio.create_task(songs.download_song(songs.Song("987", None, "X", "Y", 200), str(tmp_path)))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=5)
+    assert process.returncode is not None
 
 
 @pytest.mark.asyncio

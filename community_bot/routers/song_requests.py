@@ -9,14 +9,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import logging
 import math
 import os
 import re
 import secrets
+import signal
+import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,13 +28,13 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from mutagen.mp3 import MP3
 
 from community_bot.config import Settings
 from community_bot.database import Database
 from community_bot.ephemeral import delete_user_command
 from community_bot.pet_care import care_error
 from community_bot.pet_progress import VIDEO_DAILY_LIMIT, moscow_now
+from community_bot.song_worker import MAX_FILE_BYTES, Song, SongError
 
 router = Router(name="song_requests")
 logger = logging.getLogger(__name__)
@@ -46,29 +49,13 @@ _TRACK_PATH = re.compile(r"/(?:album/(?P<album>\d{1,16})/)?track/(?P<track>\d{1,
 _YANDEX_HOSTS = {"music.yandex.ru", "music.yandex.by", "music.yandex.kz", "music.yandex.com"}
 
 _SEND_LOCK = asyncio.Lock()
+_WORKER_SLOTS = asyncio.Semaphore(2)
 _CHOICES: dict[str, "Choices"] = {}
 MAX_RESULTS = 5
-MAX_FILE_BYTES = 48 * 1024 * 1024
 COOLDOWN_SECONDS = 60
 DAILY_LIMIT = VIDEO_DAILY_LIMIT
 CHOICE_TTL = 15 * 60
 API_URL = "https://api.music.yandex.ru/search"
-
-
-@dataclass(frozen=True)
-class Song:
-    id: str
-    album_id: str | None
-    title: str
-    artist: str
-    duration: int
-    cover: str | None = None
-
-    @property
-    def url(self) -> str:
-        if self.album_id:
-            return f"https://music.yandex.ru/album/{self.album_id}/track/{self.id}"
-        return f"https://music.yandex.ru/track/{self.id}"
 
 
 @dataclass
@@ -77,10 +64,6 @@ class Choices:
     chat_id: int
     expires: float
     tracks: list[Song]
-
-
-class SongError(Exception):
-    """Expected configuration or provider failure safe to show in chat."""
 
 
 def enabled() -> bool:
@@ -222,113 +205,60 @@ async def find_songs(query: str) -> list[Song]:
     return parse_search_results(payload)
 
 
-def _song_metadata_sync(track_id: str, album_id: str | None, cookies: bytes) -> Song:
-    """Reuse the same modern Yandex extractor as actual audio downloads.
-
-    The standalone /tracks request previously lacked web-client headers and
-    could return an empty result even when the track was playable.
-    """
-    import yt_dlp
-
-    canonical_url = (
-        f"https://music.yandex.ru/album/{album_id}/track/{track_id}"
-        if album_id else f"https://music.yandex.ru/track/{track_id}"
-    )
-    with tempfile.TemporaryDirectory(prefix="nora-song-meta-") as directory:
-        cookie_file = Path(directory) / "cookies.txt"
-        cookie_file.write_bytes(cookies)
-        cookie_file.chmod(0o600)
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "ignoreerrors": False,
-            "noplaylist": True,
-            "skip_download": True,
-            "cookiefile": str(cookie_file),
-            "socket_timeout": 20,
-            "retries": 1,
-            "extractor_retries": 1,
-            "cachedir": False,
-        }
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(canonical_url, download=False)
-        except Exception as exc:
-            # Never include Yandex cookies, extracted stream URLs or raw
-            # provider error messages in application logs.
-            logger.warning("Yandex track metadata failed: track=%s, error=%s",
-                           track_id, type(exc).__name__)
-            raise SongError("Не удалось получить песню по ссылке. Проверь доступ к треку в Яндексе.") from exc
-
-    if not isinstance(info, dict) or str(info.get("id") or "") != track_id:
-        raise SongError("Яндекс не вернул данные нужной песни по этой ссылке.")
-    title = info.get("title")
-    if not isinstance(title, str) or not title.strip():
-        raise SongError("Яндекс не вернул название песни по ссылке.")
-
-    artist = info.get("artist") or info.get("performer") or "Неизвестный исполнитель"
-    album_from_info = str(info.get("album_id") or "")
-    if not album_from_info.isdecimal():
-        album_from_info = ""
-    try:
-        duration = max(0, int(float(info.get("duration") or 0)))
-    except (ValueError, TypeError):
-        duration = 0
-    return Song(track_id, album_id or album_from_info or None,
-                title.strip()[:180], str(artist)[:180], duration)
+async def _run_worker(directory: str, deadline: int, **request):
+    """Keep extractor imports and provider allocations out of the bot process."""
+    async with asyncio.timeout(deadline):
+        async with _WORKER_SLOTS:
+            cookie_file = Path(directory) / "cookies.txt"
+            cookie_file.touch(mode=0o600)
+            cookie_file.write_bytes(_cookie_bytes())
+            payload = json.dumps({**request, "cookie_file": str(cookie_file), "directory": directory}).encode()
+            env = {"PATH": os.environ.get("PATH", os.defpath), "PYTHONIOENCODING": "utf-8"}
+            if os.name == "nt":
+                env["SystemRoot"] = os.environ["SystemRoot"]
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "community_bot.song_worker", env=env,
+                start_new_session=os.name == "posix",
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                output, _ = await process.communicate(payload)
+            finally:
+                if process.returncode is None:
+                    try:
+                        if os.name == "posix":
+                            os.killpg(process.pid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+            if process.returncode:
+                raise OSError("Yandex Music worker failed")
+            response = json.loads(output)
+            if "error" in response:
+                raise SongError(response["error"])
+            return response["result"]
 
 
 async def find_song_by_link(raw_url: str) -> Song:
-    """Resolve a pasted song link with the extractor already used to download."""
+    """Resolve a pasted song link with the same extractor as downloads."""
     track_id, album_id = parse_track_link(raw_url)
-    cookies = _cookie_bytes()
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_song_metadata_sync, track_id, album_id, cookies), timeout=50,
-        )
-    except asyncio.TimeoutError as exc:
-        raise SongError("Яндекс слишком долго отвечает на ссылку. Попробуй позже.") from exc
-
-def is_full_track(actual: float, expected: int) -> bool:
-    """Reject 13–30 second preview files masquerading as full tracks."""
-    if actual <= 0:
-        return False
-    if expected > 0:
-        return actual >= max(1, expected * 0.72)
-    return actual >= 40
+    with tempfile.TemporaryDirectory(prefix="nora-song-meta-") as directory:
+        try:
+            info = await _run_worker(directory, 50, operation="metadata", track_id=track_id, album_id=album_id)
+            return Song(**info)
+        except TimeoutError as exc:
+            raise SongError("Яндекс слишком долго отвечает на ссылку. Попробуй позже.") from exc
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise SongError("Не удалось получить песню по ссылке. Проверь доступ к треку в Яндексе.") from exc
 
 
-def _download_sync(song: Song, directory: str, cookie_file: str, *, max_bytes=MAX_FILE_BYTES) -> str:
-    import yt_dlp
-
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": False,
-        "noplaylist": True,
-        "outtmpl": str(Path(directory) / "%(id)s.%(ext)s"),
-        "format": "bestaudio[ext=mp3]",
-        "cookiefile": cookie_file,
-        "socket_timeout": 20,
-        "retries": 2,
-        "max_filesize": max_bytes,
-        "cachedir": False,
-    }
-    with yt_dlp.YoutubeDL(options) as ydl:
-        ydl.extract_info(song.url, download=True)
-    files = list(Path(directory).glob("*.mp3"))
-    if len(files) != 1:
-        raise SongError("Яндекс не отдал MP3. Возможно, доступен только другой формат.")
-    audio = files[0]
-    if not 0 < audio.stat().st_size <= max_bytes:
-        raise SongError("Файл превышает лимит размера Telegram.")
-    try:
-        actual = MP3(str(audio)).info.length
-    except Exception as exc:
-        raise SongError("Не удалось проверить полученный MP3.") from exc
-    if not is_full_track(actual, song.duration):
-        raise SongError("Яндекс отдал только фрагмент трека. Проверь подписку и сессию.")
-    return str(audio)
+async def download_song(song: Song, directory: str, *, max_bytes=MAX_FILE_BYTES) -> Path:
+    filename = await _run_worker(
+        directory, 100, operation="download", song=asdict(song), max_bytes=max_bytes,
+    )
+    return Path(directory) / filename
 
 
 def _daily_key(user_id: int, day: str) -> str:
@@ -397,12 +327,7 @@ async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
         status = await bot.send_message(choice.chat_id, f"🎧 Загружаю: {song.artist} — {song.title}")
         try:
             with tempfile.TemporaryDirectory(prefix="nora-song-") as temp:
-                cookie_file = Path(temp) / "cookies.txt"
-                cookie_file.write_bytes(_cookie_bytes())
-                cookie_file.chmod(0o600)
-                path = await asyncio.wait_for(
-                    asyncio.to_thread(_download_sync, song, temp, str(cookie_file)), timeout=100,
-                )
+                path = await download_song(song, temp)
                 care_problem = await song_care_error(db, choice.user_id)
                 if care_problem:
                     await bot.send_message(choice.chat_id, care_problem)

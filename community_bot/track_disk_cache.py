@@ -112,29 +112,16 @@ class TrackDiskCache:
             return TrackLease(_Entry(path, stat.st_size))
         if not file_id.startswith('catalog:'):
             return await self.open(bot, file_id)
-        from community_bot.routers.song_requests import Song, SongError, _cookie_bytes, _download_sync, enabled
+        from community_bot.routers.song_requests import Song, SongError, download_song, enabled
 
         async def download(partial):
             if not enabled():
                 raise ValueError('Music catalog disabled')
             song = Song(track['catalog_id'], track.get('album_id'), track['title'], track['artist'], track['duration'])
-            def worker():
-                with TemporaryDirectory(prefix='nora-catalog-') as temp:
-                    cookie_file = Path(temp) / 'cookies.txt'
-                    cookie_file.touch(mode=0o600)
-                    cookie_file.write_bytes(_cookie_bytes())
-                    path = _download_sync(song, temp, str(cookie_file), max_bytes=MAX_TRACK_BYTES)
-                    shutil.move(path, partial)
-            task = asyncio.create_task(asyncio.to_thread(worker))
             try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                # Keep the slot until the actual worker has stopped writing.
-                try:
-                    await task
-                except Exception:
-                    pass
-                raise
+                with TemporaryDirectory(prefix='nora-catalog-') as temp:
+                    path = await download_song(song, temp, max_bytes=MAX_TRACK_BYTES)
+                    shutil.move(path, partial)
             except SongError as exc:
                 raise ValueError(str(exc)) from exc
             except Exception as exc:

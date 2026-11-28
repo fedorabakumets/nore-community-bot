@@ -153,13 +153,14 @@ async def test_catalog_download_is_shared_and_does_not_use_telegram(tmp_path, mo
 
     calls = []
     monkeypatch.setattr(song_requests, "enabled", lambda: True)
-    monkeypatch.setattr(song_requests, "_cookie_bytes", lambda: b"test")
-    def download(song, directory, cookie_file, *, max_bytes):
+
+    async def download(song, directory, *, max_bytes):
         calls.append((song.id, max_bytes))
         output = Path(directory) / "song.mp3"
         output.write_bytes(b"test audio")
-        return str(output)
-    monkeypatch.setattr(song_requests, "_download_sync", download)
+        return output
+
+    monkeypatch.setattr(song_requests, "download_song", download)
     cache = TrackDiskCache(tmp_path)
     bot = AsyncMock()
     track = {"file_id": "catalog:123", "catalog_id": "123", "title": "Song", "artist": "Artist", "duration": 120}
