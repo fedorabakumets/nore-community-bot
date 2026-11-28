@@ -538,7 +538,7 @@ form label{font-size:14px;color:var(--poster-muted)}
 .filters button{min-height:44px;background:var(--poster-raised);border:1px solid #756a77;border-radius:24px;color:var(--poster-ink);padding:10px 16px}
 .filters .selected{background:var(--poster-yellow);border-color:var(--poster-black);color:var(--poster-black);font-weight:750}
 /* Brand, rainbow and the home cover are a single composition. */
-.home-intro{position:relative;isolation:isolate;margin:0 -4px 20px;padding:0 4px 4px;overflow:hidden;background:var(--poster-bg)}
+.home-intro{position:relative;isolation:isolate;margin:0 -4px 20px;padding:0 4px 4px;overflow:hidden}
 .home-wordmark{position:relative;z-index:1;width:180px;height:auto;aspect-ratio:1100/450;margin:0 auto 8px}
 .home-intro .season-label{position:relative;z-index:1;margin:0 auto 12px}
 :is(#app,#nora-swipe-preview) .home-intro h1{position:relative;z-index:1;font-size:clamp(34px,8.5vw,48px);margin:0 0 8px;max-width:90%}
@@ -4581,7 +4581,7 @@ body { background:var(--nora-background); color:var(--nora-text); }
 /* Main navigation and ordinary screens share neutral surfaces. Illustrated tiles,
    semantic status badges and the game boards retain their individual colors. */
 :is(#app,#nora-swipe-preview):not([data-screen="mafia"],[data-screen="rocket"],[data-screen="sea"],[data-screen="durak"],[data-screen="barricade"])
-  :is(.card,.stat,.category-card,.product,.friend-row,.community-table,.wallet-card,.rep-level,.play-details,
+  :is(.card,.stat,.category-card:where(:not(.shop-categories .category-card)),.product,.friend-row,.community-table,.wallet-card,.rep-level,.play-details,
       .game-lobbies,.home-welcome,.home-access,.home-news-article,.home-shortcut,.shop-rep,.community-chat-launch):not(.lk-identity,.event-detail,.shop-featured,.seasonal-drop,.person-locked) {
   background-color:var(--nora-surface);
   border-color:var(--nora-divider); box-shadow:none;
@@ -5393,11 +5393,17 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
 }
 
 
-:root[data-app-theme] body,
+:root[data-app-theme] body {
+  min-height:100dvh;
+  /* Start at the same solid color as the native Telegram header. */
+  background-image:
+    linear-gradient(to bottom,var(--nora-background) var(--safe-top),transparent calc(var(--safe-top) + 110px)),
+    radial-gradient(ellipse 95% 410px at 50% calc(var(--safe-top) + 100px),var(--theme-glow),transparent);
+  background-repeat:no-repeat;
+}
 #sheet:has(#person-profile[data-profile-theme]:not([data-profile-theme=""])) {
   background-image:radial-gradient(ellipse 95% 410px at 50% 0,var(--theme-glow),transparent);
 }
-:root[data-app-theme] body { min-height:100dvh; }
 :root[data-app-theme] #nav { background:var(--nora-control); }
 :root[data-app-theme] body.nora-profile-music:has(#app[data-screen="lk"]) #nav { background:var(--theme-music-control); }
 :root[data-app-theme] body #nav .nav-drop {
@@ -5420,9 +5426,10 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
   background:var(--profile-button);
   border-color:var(--profile-rule);
 }
-:root[data-app-theme] body::before,
-:root[data-app-theme] body::after { background-color:var(--nora-background); }
-:root[data-app-theme] body:has(#app[data-screen="lk"] #profile-photo img)::before { background:transparent; }
+:root[data-app-theme] body::before {
+  background:linear-gradient(to bottom,var(--music-profile-base) 62%,transparent);
+  pointer-events:none;
+}
 
 .lk-theme-picker {
   margin:0 0 14px;
