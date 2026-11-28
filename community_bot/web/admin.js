@@ -3,10 +3,10 @@
 // https://github.com/heydamir/unslop
 window.NoraAdmin = (() => {
   let panel = null, loading = false, working = false, error = '', mediaURLs = [];
-  let draft = emptyDraft(), directoryQuery = '', menuOpen = false, focusAfter = '';
+  let draft = emptyDraft(), directoryQuery = '', lastSearch = '', menuOpen = false, focusAfter = '';
   const expandedPeople = new Set();
   const expanded = new Set(['profile', 'wallet', 'roles', 'actions', 'settings', 'permissions', 'directory', 'community', 'protection', 'perm_people', 'reports', 'tools', 'catalog', 'storefront', 'prefix_color', 'prefix_emoji']);
-  const groups = {profile:NoraI18n.t("Профиль"), wallet:NoraI18n.t("Печеньки и баланс"), moderation:NoraI18n.t("Репутация и модерация"),
+  const groups = {profile:NoraI18n.t("Профиль"), wallet:NoraI18n.t("Печеньки и баланс"), moderation:NoraI18n.t("Модерация чата"),
     roles:NoraI18n.t("Роль и права"), permissions:NoraI18n.t("Разрешения роли"), settings:NoraI18n.t("Настройки"),
     prefix_color:NoraI18n.t("Цвет префикса"), prefix_emoji:NoraI18n.t("Символ префикса"), directory:NoraI18n.t("Участники"), actions:NoraI18n.t("Действия"), danger:NoraI18n.t("Опасные действия"),
     community:NoraI18n.t("Возможности сообщества"), protection:NoraI18n.t("Защита чата"), automation:NoraI18n.t("Автоматизация"),
@@ -15,12 +15,19 @@ window.NoraAdmin = (() => {
   const formLabels = {role_name:[NoraI18n.t("Новая роль"),NoraI18n.t("Название роли"),NoraI18n.t("Настроить префикс")], search:[NoraI18n.t("Найти участника"),NoraI18n.t("Имя, @username или Telegram ID"),NoraI18n.t("Найти")],
     cookies:[NoraI18n.t("Установить баланс"),NoraI18n.t("Новый баланс"),NoraI18n.t("Сохранить баланс")],
     add_cookies:[NoraI18n.t("Начислить печеньки"),NoraI18n.t("Количество печенек"),NoraI18n.t("Начислить")],
-    rep:[NoraI18n.t("Репутация"),NoraI18n.t("Новое значение репутации"),NoraI18n.t("Сохранить")],
+    remove_cookies:[NoraI18n.t("Списать печеньки"),NoraI18n.t("Количество печенек"),NoraI18n.t("Списать")],
+    rep:[NoraI18n.t("Изменить репутацию"),NoraI18n.t("Новое значение репутации"),NoraI18n.t("Сохранить")],
     name:[NoraI18n.t("Имя участника"),NoraI18n.t("Новое имя"),NoraI18n.t("Сохранить имя")], age:[NoraI18n.t("Дата рождения"),NoraI18n.t("Дата рождения (ДД.ММ.ГГГГ)"),NoraI18n.t("Сохранить")],
     warnings:[NoraI18n.t("Предупреждения"),NoraI18n.t("Количество предупреждений"),NoraI18n.t("Сохранить")],
     note:[NoraI18n.t("Заметка модератора"),NoraI18n.t("Заметка"),NoraI18n.t("Сохранить заметку")], avatar:[NoraI18n.t("Аватар"),NoraI18n.t("Подпись к вложению"),NoraI18n.t("Загрузить")],
     clear_name:[NoraI18n.t("Очистить имя"),NoraI18n.t("Введи ОЧИСТИТЬ для подтверждения"),NoraI18n.t("Очистить имя")],
     clear_bio:[NoraI18n.t("Очистить описание"),NoraI18n.t("Введи ОЧИСТИТЬ для подтверждения"),NoraI18n.t("Очистить описание")]};
+  const moderationLabels = {mute:"Выдать мут", unmute:"Снять мут", ban:"Забанить", unban:"Разбанить"};
+  const memberAmounts = ['cookies', 'add_cookies', 'remove_cookies', 'rep', 'warnings'];
+  const durationOptions = [
+    ['10m', "10 минут"], ['1h', "1 час"], ['12h', "12 часов"],
+    ['1d', "1 день"], ['7d', "7 дней"], ['30d', "30 дней"], ['forever', "Навсегда"],
+  ];
   const paths = {overview:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
     people:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M17 4a4 4 0 0 1 0 7 M22 21v-2a4 4 0 0 0-3-4',
     queue:'M4 4h16v16H4z M4 14h5l2 3h2l2-3h5', content:'M4 21V4h16v17l-4-3-4 3-4-3z M8 8h8 M8 12h6',
@@ -30,12 +37,13 @@ window.NoraAdmin = (() => {
     arrow:'m9 5 7 7-7 7', search:'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14 M15 15l6 6',
     refresh:'M20 7A9 9 0 1 0 21 14 M20 2v6h-6', back:'m14 5-7 7 7 7', check:'m5 12 4 4 10-10'};
   function icon(key) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[key] || paths.arrow}"/></svg>`; }
-  function emptyDraft() { return {text:'', format:'plain', kind:'auto', file:null}; }
+  function emptyDraft() { return {text:'', format:'plain', kind:'auto', file:null, duration:'', confirmed:false, feedback:false}; }
   function redraw() { if (tab === 'admin') render(); }
   function clearMedia() { for (const url of mediaURLs) URL.revokeObjectURL(url); mediaURLs = []; }
   function show(next, keepDraft = false) {
     clearMedia(); if (!keepDraft) draft = emptyDraft(); panel = next; error = '';
-    for (const notice of next.notices || []) toast(notice);
+    if (next.workspace?.screen === 'admin:users') lastSearch = '';
+    for (const notice of next.notices || []) toast(NoraI18n.server(notice));
     if (next.exit) { tab = 'lk'; render(); } else redraw();
   }
   async function load(reset = false) {
@@ -51,7 +59,12 @@ window.NoraAdmin = (() => {
     if (working || loading || !panel || (navigation && !canLeave())) return;
     working = true; error = ''; menuOpen = false;
     focusAfter = navigation ? 'heading' : focusAfter; redraw();
-    try { show(await api('admin/action', {action, version:panel.version})); }
+    try {
+      const next = await api('admin/action', {action, version:panel.version});
+      if (next.form) focusAfter = 'input';
+      else if (next.cards.some(c => c.member)) focusAfter = 'member';
+      show(next);
+    }
     catch (e) { error = e.message; toast(e.message); } finally { working = false; redraw(); }
   }
   function disabled() { return working || loading ? 'disabled' : ''; }
@@ -66,19 +79,20 @@ window.NoraAdmin = (() => {
     return `<div class="adm-overview"><section class="adm-priority"><div class="adm-section-title"><h2>${NoraI18n.html("Требуют внимания")}</h2><span>${NoraI18n.html("Сейчас")}</span></div><p class="adm-muted">${NoraI18n.html("Новые обращения и незавершённые задачи сообщества")}</p><div class="adm-tool-list">${queue.map(t => toolButton(t, workspace.counts[t.id])).join('')}</div></section><section class="adm-section-list"><h2>${NoraI18n.html("Рабочие разделы")}</h2>${workspace.navigation.filter(n => !['overview','queue'].includes(n.id)).map(n => toolButton(n)).join('')}${workspace.tools.filter(t => t.section === 'overview').map(t => toolButton(t)).join('')}</section></div>`;
   }
   function searchForm() {
-    return `<form id="adm-search" class="adm-search" role="search"><label for="adm-search-query">${NoraI18n.html("Найти участника")}</label><div>${icon('search')}<input id="adm-search-query" type="search" autocomplete="off" placeholder="${NoraI18n.html("Имя, @username или ID")}" value="${esc(directoryQuery)}" ${disabled()}><button type="submit" ${disabled()}>${NoraI18n.html("Найти")}</button></div><small>${NoraI18n.html("Поиск по всему сообществу")}</small></form>`;
+    return `<form id="adm-search" class="adm-search" role="search"><label for="adm-search-query">${NoraI18n.html("Найти участника")}</label><div>${icon('search')}<input id="adm-search-query" type="search" maxlength="80" autocomplete="off" placeholder="${NoraI18n.html("Имя, @username или ID")}" value="${esc(directoryQuery)}" ${disabled()}><button type="submit" ${disabled()}>${NoraI18n.html("Найти")}</button></div><small>${NoraI18n.html("Поиск по всему сообществу")}</small></form>`;
   }
   function hub(workspace) {
     const section = workspace.section;
     const tools = workspace.tools.filter(t => t.section === section);
     // These screens are rendered as purpose-built workspaces, rather than Telegram keyboard rows.
-    if (section === 'people') return `${searchForm()}<div class="adm-section-title"><h2>${NoraI18n.html("Управление участниками")}</h2></div><div class="adm-tool-list">${tools.filter(t => t.id !== 'search').map(t => toolButton(t)).join('')}</div>`;
+    if (section === 'people') return `${tools.some(t => t.id === 'search') ? searchForm() : ''}<div class="adm-tool-list">${tools.filter(t => t.id !== 'search').map(t => toolButton(t)).join('')}</div>`;
     if (section === 'queue') return `<div class="adm-tool-list">${tools.map(t => toolButton(t, workspace.counts[t.id])).join('')}</div>`;
     if (section === 'content') return `<div class="adm-section-title"><h2>${NoraI18n.html("Сообщения и публикации")}</h2></div><div class="adm-tool-list">${tools.map(t => toolButton(t)).join('')}</div>`;
     return null;
   }
   function button(b) {
-    const label = b.kind === 'user' ? b.label || b.text : NoraI18n.server(b.label || b.text);
+    const label = b.kind === 'user' ? b.label || b.text :
+      NoraI18n.server(b.group === 'reputation' ? "Изменить репутацию" : b.label || b.text);
     const classes = `adm-control ${b.group === 'danger' || b.style === 'danger' ? 'is-danger' : ''}`;
     if (b.tab) return `<button class="${classes}" data-tab="${esc(b.tab)}">${esc(label)}</button>`;
     if (b.url) return `<a class="${classes}" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`;
@@ -90,7 +104,7 @@ window.NoraAdmin = (() => {
     if (b.kind === 'user') {
       const person = b.person, name = person?.name || label;
       const open = person && expandedPeople.has(String(person.id)), infoId = `adm-identity-${b.action}`;
-      return `<div class="adm-person-row" ${person ? `data-adm-person-row="${esc(person.id)}"` : ''}><button class="adm-person" data-admin-action="${esc(b.action)}" data-control-label="${esc(name)}" ${disabled()}>${avatar(person, name)}<span>${NoraPrefix(person?.prefix)}${esc(name)}</span>${icon('arrow')}</button>${person ? `<button type="button" class="adm-person-info" data-adm-identity="${esc(person.id)}" aria-label="${NoraI18n.html("Контакты")} ${esc(name)}${NoraI18n.html(": username и Telegram ID")}" aria-expanded="${Boolean(open)}" aria-controls="${esc(infoId)}">@ / ID${icon('arrow')}</button><div class="adm-person-contact" id="${esc(infoId)}" ${open ? '' : 'hidden'}><span>${person.username ? `@${esc(person.username)}` : NoraI18n.t("Без @username")}</span><span>Telegram ID: <b>${esc(person.id)}</b></span></div>` : ''}</div>`;
+      return `<div class="adm-person-row" ${person ? `data-adm-person-row="${esc(person.id)}"` : ''}><button class="adm-person" data-admin-action="${esc(b.action)}" data-control-label="${esc(name)}" ${disabled()}>${avatar(person, name)}<span><strong>${NoraPrefix(person?.prefix)}${esc(name)}</strong>${person?.username ? `<small>@${esc(person.username)}</small>` : ''}</span>${icon('arrow')}</button>${person ? `<button type="button" class="adm-person-info" data-adm-identity="${esc(person.id)}" aria-label="${NoraI18n.html("Контакты")} ${esc(name)}${NoraI18n.html(": username и Telegram ID")}" aria-expanded="${Boolean(open)}" aria-controls="${esc(infoId)}">@ / ID${icon('arrow')}</button><div class="adm-person-contact" id="${esc(infoId)}" ${open ? '' : 'hidden'}><span>${person.username ? `@${esc(person.username)}` : NoraI18n.t("Без @username")}</span><span>Telegram ID: <b>${esc(person.id)}</b></span></div>` : ''}</div>`;
     }
     return `<button class="${classes}" data-admin-action="${esc(b.action)}" data-control-label="${esc(label)}" ${disabled()}>${esc(label)}${b.kind === 'link' ? icon('arrow') : ''}</button>`;
   }
@@ -111,33 +125,103 @@ window.NoraAdmin = (() => {
     if (m.url) return `<a class="adm-file" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">${NoraI18n.html("Открыть вложение ↗")}</a>`;
     return `<div class="adm-media" data-admin-media="${esc(m.id)}" data-kind="${esc(m.kind)}"><span class="adm-muted">${NoraI18n.html("Загружаем вложение…")}</span></div>`;
   }
+  function memberCard(member, buttons) {
+    const actions = group => buttons.flat().filter(b => b.group === group);
+    const wallet = actions('wallet'), reputation = actions('reputation'), moderation = actions('moderation');
+    const tools = buttons.map(row => row.filter(b => !['wallet', 'reputation', 'moderation'].includes(b.group)));
+    const status = member.banned ? `<span class="adm-member-ban">${NoraI18n.html("Бан активен")} · ${member.ban_until
+      ? esc(new Intl.DateTimeFormat(NoraI18n.locale, {dateStyle:'medium', timeStyle:'short'}).format(member.ban_until * 1000))
+      : NoraI18n.html("Навсегда")}</span>` : '';
+    return `<section class="adm-member"><div class="adm-member-title">${avatar(member, member.name, true)}
+      <div><h2 id="adm-member-heading" tabindex="-1">${esc(member.name)}</h2>
+        <p>${NoraPrefix(member.prefix)||esc(NoraI18n.t(member.role))}${member.username ? ` · @${esc(member.username)}` : ''}</p>
+        <small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,NoraI18n.t("год"),NoraI18n.t("года"),NoraI18n.t("лет"))}` : ''}</small>${status}
+      </div></div>
+      <div class="adm-member-metrics">
+        <section><h3>${NoraI18n.html("Печеньки")}</h3><strong>${number(member.cookies)}</strong>
+          ${wallet.length ? `<div class="adm-member-buttons">${wallet.map(button).join('')}</div>` : ''}
+        </section>
+        <section><h3>${NoraI18n.html("Репутация")}</h3><strong>${number(member.reputation)}</strong>
+          <small>${NoraI18n.html("Щиты:")} ${number(member.hate_shields)}</small>
+          ${reputation.length ? `<div class="adm-member-buttons">${reputation.map(button).join('')}</div>` : ''}
+        </section>
+      </div>
+      <section class="adm-member-moderation"><div class="adm-section-title"><h3>${NoraI18n.html("Модерация чата")}</h3>
+        <span>${NoraI18n.html("Предупреждения")} · ${number(member.warnings)}</span></div>
+        ${moderation.length ? `<div class="adm-member-buttons">${moderation.map(button).join('')}</div>` : ''}
+        ${member.moderator_note ? `<p class="adm-member-note"><b>${NoraI18n.html("Заметка модератора")}</b>${esc(member.moderator_note)}</p>` : ''}
+      </section></section>${controls(tools)}`;
+  }
   function card(c) {
-    const member = c.member;
-    const summary = member ? `<div class="adm-member"><div class="adm-member-title">${avatar(member, member.name, true)}<div><h2>${esc(member.name)}</h2><p>${NoraPrefix(member.prefix)||esc(NoraI18n.t(member.role))}${member.username ? ` · @${esc(member.username)}` : ''}</p><small>ID ${esc(member.id)}${member.age ? ` · ${number(member.age)} ${plural(member.age,NoraI18n.t("год"),NoraI18n.t("года"),NoraI18n.t("лет"))}` : ''}</small></div></div><dl class="adm-member-stats"><div><dt>${NoraI18n.html("Печеньки")}</dt><dd>${number(member.cookies)}</dd></div><div><dt>${NoraI18n.html("Репутация")}</dt><dd>${number(member.reputation)}</dd><small>${NoraI18n.html("Щиты:")} ${number(member.hate_shields)}</small></div><div><dt>${NoraI18n.html("Нарушения")}</dt><dd>${number(member.warnings)}</dd></div></dl>${member.moderator_note ? `<p class="adm-member-note"><b>${NoraI18n.html("Заметка модератора")}</b>${esc(member.moderator_note)}</p>` : ''}</div>` : c.html && c.layout !== 'features' && !panel?.workspace?.prefix_preview ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
+    if (c.member) return `<div class="adm-card">${memberCard(c.member, c.buttons)}</div>`;
+    const summary = c.html && c.layout !== 'features' && !panel?.workspace?.prefix_preview ? `<div class="admin-copy adm-copy">${c.html}</div>` : '';
     return `<section class="adm-card">${media(c.media)}${summary}${controls(c.buttons)}</section>`;
+  }
+  function memberComposer(kind, target) {
+    const moderation = Object.hasOwn(moderationLabels, kind);
+    const timed = kind === 'mute' || kind === 'ban';
+    const labels = moderation ? [NoraI18n.t(moderationLabels[kind]), NoraI18n.t("Причина"),
+      NoraI18n.t(kind === 'ban' ? "Подтвердить бан" : moderationLabels[kind])] : formLabels[kind];
+    const balance = ['cookies', 'add_cookies', 'remove_cookies'].includes(kind);
+    const current = balance ? `${NoraI18n.html("Текущий баланс")} · ${number(target.cookies)} 🍪` :
+      kind === 'rep' ? `${NoraI18n.html("Текущая репутация")} · ${number(target.reputation)}` : '';
+    const limits = {cookies:'min="0" max="1000000"', add_cookies:'min="1" max="1000000"',
+      remove_cookies:`min="1" max="${Math.min(1000000, target.cookies)}"`, rep:'min="-20" max="100"', warnings:'min="0"'};
+    const value = draft.text || (kind === 'cookies' ? target.cookies : kind === 'rep' ? target.reputation : '');
+    const feedback = draft.feedback ? panel.cards.map(c => c.html).filter(Boolean).join('<br>') : '';
+    return `<section class="adm-composer adm-member-composer">
+      <div class="adm-section-title"><h2>${esc(labels[0])}</h2></div>
+      <p class="adm-form-target">${esc(target.name)} <small>· ID ${esc(target.id)}</small></p>
+      ${current ? `<p class="adm-muted">${current}</p>` : ''}
+      ${kind === 'ban' ? `<p class="adm-ban-warning" id="adm-ban-warning">${NoraI18n.html("Бан сбросит профиль, баланс, репутацию и игровой прогресс. Для возвращения нужна новая анкета.")}</p>` : ''}
+      <form id="admin-input">
+        ${timed ? `<label for="adm-duration">${NoraI18n.html("Срок ограничения")}</label>
+          <select id="adm-duration" required ${disabled()}><option value="">${NoraI18n.html("Выберите срок")}</option>
+          ${durationOptions.filter(([key]) => kind === 'ban' || key !== 'forever').map(([key, label]) =>
+            `<option value="${key}" ${draft.duration === key ? 'selected' : ''}>${NoraI18n.html(label)}</option>`).join('')}</select>` : ''}
+        <label for="admin-text">${esc(labels[1])}</label>
+        ${moderation ? `<textarea id="admin-text" rows="3" required minlength="2" maxlength="400" ${disabled()}>${esc(draft.text)}</textarea>` :
+          `<input id="admin-text" type="number" required step="1" ${limits[kind]} value="${esc(value)}" ${disabled()}>`}
+        ${kind === 'ban' ? `<label class="adm-confirm-ban"><input id="adm-confirm-ban" type="checkbox" required
+          aria-describedby="adm-ban-warning" ${draft.confirmed ? 'checked' : ''} ${disabled()}>${NoraI18n.html("Подтверждаю сброс данных участника")}</label>` : ''}
+        ${feedback ? `<div class="adm-error" role="alert">${feedback}</div>` : ''}
+        <div class="adm-form-actions"><button class="adm-primary ${kind === 'ban' ? 'is-danger' : ''}" type="submit" ${disabled()}>${esc(labels[2])}</button>
+          <button class="adm-quiet" type="button" data-adm-cancel ${disabled()}>${NoraI18n.html("Отменить")}</button></div>
+      </form></section>`;
   }
   function composer() {
     const kind = panel.workspace?.form_kind || '', labels = formLabels[kind] || [NoraI18n.t("Заполнить форму"),NoraI18n.t("Текст или подпись к вложению"),NoraI18n.t("Продолжить")];
-    const numeric = ['cookies','add_cookies','rep','warnings'].includes(kind);
+    const numeric = memberAmounts.includes(kind);
     return `<section class="adm-composer"><div class="adm-section-title"><h2>${labels[0]}</h2><span>${NoraI18n.html("Не сохранено")}</span></div><form id="admin-input"><label for="admin-text">${labels[1]}</label>${numeric ? `<input id="admin-text" type="number" step="1" ${kind === 'rep' ? 'min="-20" max="100"' : kind === 'warnings' ? 'min="0"' : `min="${kind === 'cookies' ? 0 : 1}" max="1000000"`} value="${esc(draft.text)}" ${disabled()}>` : `<textarea id="admin-text" rows="${kind === 'search' ? 2 : 5}" maxlength="4096" placeholder="${labels[1]}" ${disabled()}>${esc(draft.text)}</textarea>`}${numeric || kind === 'age' || kind === 'role_name' || kind === 'search' || kind.startsWith('clear_') ? '' : `<details class="adm-attachments"><summary>${NoraI18n.html("Форматирование и вложения")}${draft.file ? NoraI18n.t(" · файл выбран") : ''}</summary><div class="adm-formatting"><label><input type="checkbox" id="admin-html" ${draft.format === 'html' ? 'checked' : ''}> ${NoraI18n.html("HTML-форматирование")}</label><button type="button" data-admin-format="b" aria-label="${NoraI18n.html("Жирный текст")}">${NoraI18n.html("Ж")}</button><button type="button" data-admin-format="i" aria-label="${NoraI18n.html("Курсив")}">${NoraI18n.html("К")}</button><button type="button" data-admin-format="blockquote">${NoraI18n.html("Цитата")}</button></div><label for="admin-file">${NoraI18n.html("Вложение")}</label><input type="file" id="admin-file" ${disabled()}>${draft.file ? `<p class="adm-muted">${NoraI18n.html("Выбран файл:")} ${esc(draft.file.name)} <button type="button" data-adm-remove-file>${NoraI18n.html("Убрать")}</button></p>` : ''}<label for="admin-kind">${NoraI18n.html("Тип вложения")}</label><select id="admin-kind" ${disabled()}>${[['auto',NoraI18n.t("Определить по файлу")],['photo',NoraI18n.t("Фотография")],['video',NoraI18n.t("Видео")],['animation',NoraI18n.t("GIF / анимация")],['document',NoraI18n.t("Документ")],['audio',NoraI18n.t("Аудио")],['voice',NoraI18n.t("Голосовое OGG")]].map(([value,title]) => `<option value="${value}" ${draft.kind === value ? 'selected' : ''}>${title}</option>`).join('')}</select><p class="adm-muted">${NoraI18n.html("До 20 МБ. Файл сохранится в личном диалоге с Норой. Публикация выполняется отдельным действием.")}</p></details>`}<div class="adm-form-actions"><button class="adm-primary" type="submit" ${disabled()}>${working ? NoraI18n.t("Сохраняем…") : labels[2]}</button><button class="adm-quiet" type="button" data-adm-cancel ${disabled()}>${NoraI18n.html("Отменить")}</button></div></form></section>`;
   }
   function renderPanel() {
     if (!panel && !loading && !error) queueMicrotask(() => load());
     const w = panel?.workspace, section = w?.navigation.find(n => n.id === w.section);
+    const quickForm = panel?.form && w?.form_target && (memberAmounts.includes(w.form_kind) ||
+      Object.hasOwn(moderationLabels, w.form_kind));
+    const directory = w?.tools.find(t => t.id === 'directory');
+    const member = panel?.cards.some(c => c.member);
+    const returnToList = member && directory ? (lastSearch
+      ? `<button type="button" class="adm-directory-back" data-adm-search-back ${disabled()}>${icon('back')}${NoraI18n.html("К результатам поиска")}</button>`
+      : `<button type="button" class="adm-directory-back" data-adm-go="${esc(directory.action)}" ${disabled()}>${icon('back')}${NoraI18n.html("К списку участников")}</button>`) : '';
     let content = '';
-    if (w) {
+    if (quickForm) content = memberComposer(w.form_kind, w.form_target);
+    else if (w) {
       if (w.screen === 'admin:panel') content = overview(w);
       else if (['admin:people','admin:queue','admin:chatroom'].includes(w.screen) && !panel.form && !(w.section === 'settings')) content = hub(w) ?? panel.cards.map(card).join('');
       else content = `${w.section === 'people' && !panel.form && (w.screen === 'admin:search' || panel.cards.some(c => c.buttons.flat().some(b => b.kind === 'user'))) ? searchForm() : ''}${panel.cards.map(card).join('')}`;
     } else if (panel) content = panel.cards.map(card).join('');
     const sectionTools = w?.tools.filter(t => t.section === w.section && t.id !== 'search') || [];
-    const shortcuts = w && w.section !== 'overview' && sectionTools.length > 1 ? `<div class="adm-section-tools" aria-label="${NoraI18n.html("Инструменты раздела")}">${sectionTools.map(t => `<button class="${t.current ? 'is-active' : ''}" data-adm-go="${esc(t.action)}" ${t.current ? 'aria-current="page"' : ''} ${disabled()}>${esc(NoraI18n.t(t.title))}</button>`).join('')}</div>` : '';
-    return `<div class="adm-workspace" aria-busy="${working || loading}"><aside class="adm-sidebar"><div class="adm-brand"><span>${NoraI18n.html("Нора")}<span class="adm-brand-dot">.</span></span><small>${NoraI18n.html("Панель команды")}</small></div><button class="adm-menu-button" aria-expanded="${menuOpen}" aria-controls="adm-navigation" data-adm-menu>${icon(w?.section || 'overview')}<span>${esc(NoraI18n.t(section?.title) || NoraI18n.t("Разделы панели"))}</span>${icon('arrow')}</button><nav id="adm-navigation" class="adm-navigation ${menuOpen ? 'is-open' : ''}" aria-label="${NoraI18n.html("Управление Норой")}">${(w?.navigation || []).map(n => navButton(n, n.id === w.section)).join('')}</nav><button class="adm-return" data-tab="lk">${icon('back')}<span>${NoraI18n.html("Личный кабинет")}</span></button></aside><div class="adm-main"><header class="adm-header"><div><p>${NoraI18n.html("Управление сообществом")}</p><h1 id="adm-heading" tabindex="-1">${esc(NoraI18n.t(section?.title) || NoraI18n.t("Админ-панель"))}</h1><span>${esc(NoraI18n.t(section?.description) || NoraI18n.t("Рабочее пространство команды Норы"))}</span></div><button class="adm-refresh" data-admin-refresh aria-label="${NoraI18n.html("Обновить текущий экран")}" title="${NoraI18n.html("Обновить")}" ${disabled()}>${icon('refresh')}</button></header>${error ? `<div class="adm-error" role="alert">${esc(error)}<button data-admin-refresh ${disabled()}>${NoraI18n.html("Обновить экран")}</button></div>` : ''}${loading && !panel ? ("<div class=\"adm-loading\" role=\"status\">" + NoraI18n.html("Открываем панель команды…") + "</div>") : ''}<div class="adm-content">${shortcuts}${w?.prefix_preview?`<div class="adm-prefix-preview"><small>${NoraI18n.html("Так будет выглядеть префикс")}</small><p>${NoraPrefix(w.prefix_preview)||("<span class=\"sub\">" + NoraI18n.html("Без плашки") + "</span>")} ${NoraI18n.html("Имя участника")}</p></div>`:''}${content}${panel?.form ? composer() : ''}</div>${working ? ("<p class=\"adm-progress\" role=\"status\">" + NoraI18n.html("Выполняем действие…") + "</p>") : ''}</div></div>`;
+    const shortcuts = w && w.section !== 'overview' && w.screen !== 'admin:people' && !member && !w.form_target && sectionTools.length > 1 ? `<div class="adm-section-tools" aria-label="${NoraI18n.html("Инструменты раздела")}">${sectionTools.map(t => `<button class="${t.current ? 'is-active' : ''}" data-adm-go="${esc(t.action)}" ${t.current ? 'aria-current="page"' : ''} ${disabled()}>${esc(NoraI18n.t(t.title))}</button>`).join('')}</div>` : '';
+    return `<div class="adm-workspace" aria-busy="${working || loading}"><aside class="adm-sidebar"><div class="adm-brand"><span>${NoraI18n.html("Нора")}<span class="adm-brand-dot">.</span></span><small>${NoraI18n.html("Панель команды")}</small></div><button class="adm-menu-button" aria-expanded="${menuOpen}" aria-controls="adm-navigation" data-adm-menu>${icon(w?.section || 'overview')}<span>${esc(NoraI18n.t(section?.title) || NoraI18n.t("Разделы панели"))}</span>${icon('arrow')}</button><nav id="adm-navigation" class="adm-navigation ${menuOpen ? 'is-open' : ''}" aria-label="${NoraI18n.html("Управление Норой")}">${(w?.navigation || []).map(n => navButton(n, n.id === w.section)).join('')}</nav><button class="adm-return" data-tab="lk">${icon('back')}<span>${NoraI18n.html("Личный кабинет")}</span></button></aside><div class="adm-main"><header class="adm-header"><div><p>${NoraI18n.html("Управление сообществом")}</p><h1 id="adm-heading" tabindex="-1">${esc(NoraI18n.t(section?.title) || NoraI18n.t("Админ-панель"))}</h1><span>${esc(NoraI18n.t(section?.description) || NoraI18n.t("Рабочее пространство команды Норы"))}</span></div><button class="adm-refresh" data-admin-refresh aria-label="${NoraI18n.html("Обновить текущий экран")}" title="${NoraI18n.html("Обновить")}" ${disabled()}>${icon('refresh')}</button></header>${error ? `<div class="adm-error" role="alert">${esc(error)}<button data-admin-refresh ${disabled()}>${NoraI18n.html("Обновить экран")}</button></div>` : ''}${loading && !panel ? ("<div class=\"adm-loading\" role=\"status\">" + NoraI18n.html("Открываем панель команды…") + "</div>") : ''}<div class="adm-content">${shortcuts}${w?.prefix_preview?`<div class="adm-prefix-preview"><small>${NoraI18n.html("Так будет выглядеть префикс")}</small><p>${NoraPrefix(w.prefix_preview)||("<span class=\"sub\">" + NoraI18n.html("Без плашки") + "</span>")} ${NoraI18n.html("Имя участника")}</p></div>`:''}${returnToList}${content}${panel?.form && !quickForm ? composer() : ''}</div>${working ? ("<p class=\"adm-progress\" role=\"status\">" + NoraI18n.html("Выполняем действие…") + "</p>") : ''}</div></div>`;
   }
-  async function search(e) {
-    e.preventDefault(); if (working || loading) return;
-    const query = $('#adm-search-query').value.trim(); directoryQuery = query;
-    if (query.length < 2 && !/^\d+$/.test(query)) { toast(NoraI18n.t("Введи имя, @username или Telegram ID")); return; }
+  async function search(query) {
+    if (working || loading) return;
+    const normalized = query.replace(/^@/, '');
+    if ((normalized.length < 2 && !/^\d+$/.test(normalized)) || /^\d{19,}$/.test(normalized)) {
+      toast(NoraI18n.t("Введи имя, @username или Telegram ID")); return;
+    }
+    directoryQuery = query;
     const target = panel.workspace.tools.find(t => t.id === 'search'); if (!target) return;
     working = true; error = ''; redraw();
     try {
@@ -145,7 +229,7 @@ window.NoraAdmin = (() => {
       show(form);
       if (!form.form) throw Error(NoraI18n.t("Поиск недоступен. Обнови панель"));
       show(await api('admin/input', {form:form.form, version:form.version, text:query}));
-      focusAfter = 'heading';
+      lastSearch = query; focusAfter = 'heading';
     } catch (e) { error = e.message; } finally { working = false; redraw(); }
   }
   async function submit(e) {
@@ -156,7 +240,9 @@ window.NoraAdmin = (() => {
     if (file && file.size > 20 * 1024 * 1024) { toast(NoraI18n.t("Файл должен быть не больше 20 МБ")); return; }
     let kind = draft.kind;
     if (kind === 'auto' && file) kind = file.type.startsWith('image/') ? (file.type === 'image/gif' ? 'animation' : 'photo') : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
-    const body = {form:panel.form, version:panel.version, text, format};
+    const formText = draft.duration ? `${draft.duration} ${text}` : text;
+    const body = {form:panel.form, version:panel.version, text:formText, format};
+    if (panel.workspace?.form_kind === 'ban') body.confirmed = draft.confirmed;
     working = true; error = ''; redraw();
     try {
       let next;
@@ -167,22 +253,26 @@ window.NoraAdmin = (() => {
         next = await r.json(); if (!r.ok) throw Error(NoraI18n.server(next.error) || NoraI18n.t("Не удалось загрузить вложение"));
       } else next = await api('admin/input', body);
       // Validation errors from existing handlers keep the same form open and retain the input.
-      show(next, next.state === panel.state && next.workspace?.form_kind === panel.workspace?.form_kind);
-      focusAfter = next.form ? 'input' : 'heading';
+      const retry = Boolean(next.form && next.state === panel.state && next.workspace?.form_kind === panel.workspace?.form_kind);
+      draft.feedback = retry;
+      focusAfter = next.form ? 'input' : next.cards.some(c => c.member) ? 'member' : 'heading';
+      show(next, retry);
     } catch (e) { error = e.message; toast(e.message); } finally { working = false; redraw(); }
   }
   function mount() {
     const form = $('#admin-input'); if (form) form.onsubmit = submit;
-    const find = $('#adm-search'); if (find) find.onsubmit = search;
+    const find = $('#adm-search');
+    if (find) find.onsubmit = e => { e.preventDefault(); search($('#adm-search-query').value.trim()); };
     for (const details of document.querySelectorAll('[data-adm-group]')) details.ontoggle = () => {
       if (!details.isConnected) return;
       if (details.open) expanded.add(details.dataset.admGroup); else expanded.delete(details.dataset.admGroup);
     };
     for (const holder of document.querySelectorAll('[data-admin-media]')) loadMedia(holder);
     if (!working && !loading && focusAfter) {
-      const target = focusAfter === 'input' ? $('#admin-text') : focusAfter === 'heading' ? $('#adm-heading') :
+      const target = focusAfter === 'input' ? ($('#adm-duration') || $('#admin-text')) :
+        focusAfter === 'heading' ? $('#adm-heading') : focusAfter === 'member' ? $('#adm-member-heading') :
         Array.from(document.querySelectorAll('[data-control-label]')).find(el => el.dataset.controlLabel === focusAfter);
-      target?.focus({preventScroll:true}); focusAfter = '';
+      target?.focus({preventScroll:focusAfter === 'heading'}); focusAfter = '';
     }
   }
   async function loadMedia(holder) {
@@ -205,6 +295,8 @@ window.NoraAdmin = (() => {
     if (e.target.id === 'adm-search-query') directoryQuery = e.target.value;
   });
   document.addEventListener('change', e => {
+    if (e.target.id === 'adm-duration') draft.duration = e.target.value;
+    if (e.target.id === 'adm-confirm-ban') draft.confirmed = e.target.checked;
     if (e.target.id === 'admin-html') draft.format = e.target.checked ? 'html' : 'plain';
     if (e.target.id === 'admin-kind') draft.kind = e.target.value;
     if (e.target.id === 'admin-file') {
@@ -225,11 +317,14 @@ window.NoraAdmin = (() => {
     }
     if (b.dataset.adminAction) { focusAfter = b.dataset.controlLabel || 'heading'; act(b.dataset.adminAction); }
     if (b.dataset.admGo) act(b.dataset.admGo, true);
+    if (b.hasAttribute('data-adm-search-back')) search(lastSearch);
     if (b.hasAttribute('data-admin-refresh')) load();
     if (b.hasAttribute('data-adm-menu')) { menuOpen = !menuOpen; redraw(); }
-    if (b.hasAttribute('data-adm-cancel') && canLeave()) {
+    if (b.hasAttribute('data-adm-cancel')) {
+      if ((draft.text || draft.file || draft.duration) && !canLeave()) return;
       const item = panel.workspace.navigation.find(n => n.id === panel.workspace.section);
-      if (item) act(item.action); else load(true);
+      if (panel.workspace.form_return) act(panel.workspace.form_return);
+      else if (item) act(item.action); else load(true);
     }
     if (b.hasAttribute('data-adm-remove-file')) { draft.file = null; redraw(); }
     if (b.dataset.adminFormat) {

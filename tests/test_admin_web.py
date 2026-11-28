@@ -20,6 +20,7 @@ class TelegramSession(BaseSession):
     def __init__(self):
         super().__init__()
         self.calls = []
+        self.members = {}
         output = BytesIO()
         Image.new('RGB', (64, 64), 'red').save(output, 'JPEG')
         self.media = output.getvalue()
@@ -32,6 +33,15 @@ class TelegramSession(BaseSession):
         name = method.__api_method__
         if name == 'getMe':
             return User(id=bot.id, is_bot=True, first_name='Нора', username='nora_test_bot')
+        if name == 'getChatMember':
+            return self.members.get(method.user_id, SimpleNamespace(status='member'))
+        if name == 'restrictChatMember':
+            self.members[method.user_id] = SimpleNamespace(
+                status='restricted' if not method.permissions.can_send_messages else 'member',
+                can_send_messages=method.permissions.can_send_messages,
+            )
+        if name in {'banChatMember', 'unbanChatMember'}:
+            self.members[method.user_id] = SimpleNamespace(status='kicked' if name == 'banChatMember' else 'left')
         if name == 'getFile':
             return File(file_id=method.file_id, file_unique_id='fixture', file_size=len(self.media),
                         file_path='photos/local.jpg')
@@ -82,8 +92,8 @@ async def click(env, view, label):
     return await env.bridge.action(env.actor, button(view, label))
 
 
-async def text(env, view, value):
-    return await env.bridge.input(env.actor, {'form': view['form'], 'version': view['version'], 'text': value})
+async def text(env, view, value, **extra):
+    return await env.bridge.input(env.actor, {'form': view['form'], 'version': view['version'], 'text': value, **extra})
 
 
 async def navigate(env, view, section):
@@ -241,6 +251,81 @@ async def test_workspace_directory_identity_and_avatar_metadata_without_file_ids
     assert any(b.get('person', {}).get('username') == 'anna'
                for c in view['cards'] for row in c['buttons'] for b in row)
     assert not env.telegram.calls  # Photos use the existing authenticated avatar route on demand.
+
+
+async def test_member_moderation_requires_confirmation_and_uses_main_chat(env):
+    view = await click(env, await navigate(env, await env.bridge.open(env.actor), 'people'), 'Профили')
+    view = await click(env, view, 'Участник 8')
+    view = await click(env, view, 'Выдать мут')
+    assert view['workspace']['form_target']['id'] == 8
+    view = await text(env, view, '1h флуд')
+    view = await text(env, await click(env, view, 'Снять мут'), 'ошибка')
+    await env.db.add_cookies(8, 42, 'fixture')
+    await env.db.update_profile(8, 'profile_name', 'Анна')
+    confirmation = await click(env, view, 'Забанить')
+    with pytest.raises(ValueError, match='Подтвердите сброс'):
+        await text(env, confirmation, '7d спам')
+    assert (await env.db.get_user(8))['cookies'] == 42
+    view = await text(env, confirmation, '7d спам', confirmed=True)
+    assert view['cards'][0]['member']['banned'] is True
+    assert view['cards'][0]['member']['ban_until']
+    assert view['cards'][0]['member']['cookies'] == 0
+    assert not (await env.db.get_user(8))['profile_name']
+    with pytest.raises(web.HTTPConflict):
+        await text(env, confirmation, '7d спам', confirmed=True)
+    view = await text(env, await click(env, view, 'Разбанить'), 'срок пересмотрен')
+    assert view['cards'][0]['member']['banned'] is False
+    methods = [m for m in env.telegram.calls if m.__api_method__ in {
+        'restrictChatMember', 'banChatMember', 'unbanChatMember',
+    }]
+    assert [m.__api_method__ for m in methods] == [
+        'restrictChatMember', 'restrictChatMember', 'banChatMember', 'unbanChatMember',
+    ]
+    assert all(m.chat_id == env.settings.community_chat_id and m.user_id == 8 for m in methods)
+    assert methods[0].permissions.can_send_messages is False and methods[1].permissions.can_send_messages is True
+    assert methods[0].until_date and methods[2].until_date and methods[-1].only_if_banned
+    logs = await env.db.fetchall(
+        "SELECT action,reason FROM admin_audit_log WHERE actor_id=7 AND target='8' ORDER BY id",
+    )
+    assert [(row['action'], row['reason']) for row in logs] == [
+        ('mute', 'флуд'), ('unmute', 'ошибка'), ('ban', 'спам'), ('unban', 'срок пересмотрен'),
+    ]
+
+
+async def test_member_wallet_deduction_is_atomic_and_reputation_is_editable(env):
+    await env.db.execute("UPDATE users SET username='anya',profile_name='Анна' WHERE user_id=8")
+    await env.db.add_cookies(8, 7, 'fixture')
+    view = await navigate(env, await env.bridge.open(env.actor), 'people')
+    tool = next(item for item in view['workspace']['tools'] if item['id'] == 'search')
+    search = await env.bridge.action(env.actor, {'action': tool['action'], 'version': view['version']})
+    view = await click(env, await text(env, search, '@ANYA'), 'Анна')
+    view = await click(env, view, 'Списать печеньки')
+    view = await text(env, view, '8')
+    assert view['form'] and 'недостаточно печенек' in view['cards'][0]['html']
+    view = await text(env, view, '3')
+    assert view['cards'][0]['member']['cookies'] == 4
+    view = await text(env, await click(env, view, 'Репутация'), '22')
+    assert view['cards'][0]['member']['reputation'] == 22
+    results = await asyncio.gather(*(env.db.remove_admin_cookies(8, 4, 7) for _ in range(2)))
+    assert sorted(results) == [False, True]
+
+
+async def test_member_mute_permission_does_not_grant_wallet_profile_or_ban(env):
+    await env.db.create_staff_role('muter', 'Модератор чата', 45, ['admin.panel', 'mod.mute'])
+    await env.db.set_role(8, 'muter')
+    env.actor = {'id': 8, 'first_name': 'Модератор'}
+    view = await navigate(env, await env.bridge.open(env.actor), 'people')
+    tool = next(item for item in view['workspace']['tools'] if item['id'] == 'directory')
+    view = await env.bridge.action(env.actor, {'action': tool['action'], 'version': view['version']})
+    view = await click(env, view, 'Участник 9')
+    labels = {b['label'] for row in view['cards'][0]['buttons'] for b in row}
+    assert {'Выдать мут', 'Снять мут'} <= labels
+    assert not {'Забанить', 'Разбанить', 'Репутация', 'Установить баланс', 'Списать печеньки'} & labels
+    opened = await click(env, view, 'Выдать мут')
+    await env.db.set_role(9, 'muter')
+    denied = await text(env, opened, '1h флуд')
+    assert not denied['form']
+    assert not any(m.__api_method__ == 'restrictChatMember' for m in env.telegram.calls)
 
 
 async def test_workspace_tools_respect_granular_permissions(env):

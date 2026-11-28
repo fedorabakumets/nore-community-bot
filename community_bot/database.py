@@ -2520,6 +2520,18 @@ class Database:
             await self._add_cookies(db, user_id, amount, kind, details, utcnow())
             await db.commit()
 
+    async def remove_admin_cookies(self, user_id: int, amount: int, actor_id: int) -> bool:
+        if amount <= 0:
+            return False
+        async with self.connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            user = await (await db.execute("SELECT cookies FROM users WHERE user_id = ?", (user_id,))).fetchone()
+            if not user or user["cookies"] < amount:
+                return False
+            await self._add_cookies(db, user_id, -amount, "admin", f"by:{actor_id}", utcnow())
+            await db.commit()
+            return True
+
     async def set_cookies(self, user_id: int, amount: int, actor_id: int) -> tuple[bool, int]:
         if amount < 0:
             return False, 0
@@ -3440,20 +3452,26 @@ class Database:
         )
 
     async def search_users(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        needle = f"%{query.strip()}%"
-        if query.strip().isdigit():
-            by_id = await self.fetchone("SELECT * FROM users WHERE user_id = ?", (int(query.strip()),))
-            if by_id:
-                return [by_id]
-        return await self.fetchall(
-            """
-            SELECT * FROM users
-            WHERE telegram_name LIKE ? OR profile_name LIKE ? OR IFNULL(username, '') LIKE ?
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (needle, needle, needle, limit),
-        )
+        needle = query.strip().removeprefix("@").casefold()
+        if not needle:
+            return []
+        async with self.connect() as db:
+            if needle.isdecimal() and len(needle) <= 18:
+                by_id = await (await db.execute("SELECT * FROM users WHERE user_id = ?", (int(needle),))).fetchone()
+                if by_id:
+                    return [dict(by_id)]
+            await db.create_function("casefold", 1, lambda text: (text or "").casefold(), deterministic=True)
+            rows = await (await db.execute(
+                """
+                SELECT * FROM users
+                WHERE instr(casefold(telegram_name), ?) OR instr(casefold(profile_name), ?)
+                   OR instr(casefold(username), ?)
+                ORDER BY updated_at DESC, user_id DESC
+                LIMIT ?
+                """,
+                (needle, needle, needle, limit),
+            )).fetchall()
+            return [dict(row) for row in rows]
 
     async def list_open_tickets(self, limit: int = 15) -> list[dict[str, Any]]:
         return await self.fetchall(

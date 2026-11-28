@@ -3,12 +3,34 @@ from __future__ import annotations
 
 import re
 
-from community_bot.permissions import role_has_permission
+from community_bot.permissions import (
+    PERM_BAN,
+    PERM_MUTE,
+    PERM_USERS_COOKIES,
+    PERM_USERS_EDIT,
+    role_has_permission,
+)
+
+MEMBER_PERMISSIONS = (PERM_USERS_EDIT, PERM_USERS_COOKIES, PERM_MUTE, PERM_BAN)
+CHAT_ACTIONS = {
+    'mute': ('Выдать мут', PERM_MUTE),
+    'unmute': ('Снять мут', PERM_MUTE),
+    'ban': ('Забанить', PERM_BAN),
+    'unban': ('Разбанить', PERM_BAN),
+}
+WALLET_FIELDS = {'cookies', 'add_cookies', 'remove_cookies'}
+
+
+def member_field_permission(field):
+    if field in CHAT_ACTIONS:
+        return CHAT_ACTIONS[field][1]
+    return PERM_USERS_COOKIES if field in WALLET_FIELDS else PERM_USERS_EDIT
+
 
 # Each entry opens an existing read-only screen or a draft, never a publication.
 SECTIONS = (
     ('overview', 'Обзор', 'Все задачи команды', 'admin:panel', ()),
-    ('people', 'Участники', 'Профили, печеньки, репутация и права', 'admin:people', ()),
+    ('people', 'Участники', 'Профили, печеньки и модерация чата', 'admin:people', ()),
     ('queue', 'Обращения', 'Анкеты, платежи, тикеты и почта', 'admin:queue', ()),
     ('content', 'Публикации', 'Посты, рассылки и автосообщения', 'admin:chatroom', ()),
     ('events', 'События', 'Мероприятия, участники и оплаты', 'admin:events:0', ('events.participants', 'chat.post')),
@@ -18,10 +40,10 @@ SECTIONS = (
 )
 
 TOOLS = (
-    ('people', 'directory', 'Все участники', 'Профиль, баланс, репутация и роль', 'admin:users',
-     ('users.edit', 'users.cookies')),
+    ('people', 'directory', 'Список участников', 'Недавние записи. Поиск охватывает всё сообщество.', 'admin:users',
+     MEMBER_PERMISSIONS),
     ('people', 'search', 'Найти участника', 'По имени, @username или Telegram ID', 'admin:search',
-     ('users.edit', 'users.cookies')),
+     MEMBER_PERMISSIONS),
     ('people', 'roles', 'Роли и права', 'Состав команды и разрешения ролей', 'admin:roles',
      ('roles.assign', 'roles.edit')),
     ('people', 'inactive', 'Неактивные участники', 'Посмотреть активность сообщества', 'admin:inactive', ()),
@@ -107,8 +129,9 @@ def button_meta(callback, text):
         meta['group'] = 'storefront'
     if callback.startswith('admin:edit:'):
         field = callback.split(':')[2]
-        meta['group'] = ('wallet' if field in {'cookies', 'add_cookies'} else
-                         'moderation' if field in {'warnings', 'note', 'rep'} else
+        meta['group'] = ('wallet' if field in WALLET_FIELDS else
+                         'reputation' if field == 'rep' else
+                         'moderation' if field in CHAT_ACTIONS or field in {'warnings', 'note'} else
                          'danger' if field.startswith('clear_') else 'profile')
     if callback.startswith(('admin:setrole:', 'admin:rolev', 'admin:rolerank:', 'admin:roledel:')):
         meta['group'] = 'roles'

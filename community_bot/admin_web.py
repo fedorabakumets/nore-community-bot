@@ -40,7 +40,15 @@ from aiogram.types import (
 from aiohttp import web
 
 from community_bot.access import miniapp_allowed
-from community_bot.admin_workspace import SECTIONS, TOOLS, button_meta, permitted
+from community_bot.admin_workspace import (
+    CHAT_ACTIONS,
+    MEMBER_PERMISSIONS,
+    SECTIONS,
+    TOOLS,
+    button_meta,
+    member_field_permission,
+    permitted,
+)
 from community_bot.helpers import has_permission, role_title, user_permissions
 from community_bot.permissions import PERM_ADMIN_PANEL
 from community_bot.profile_fields import profile_age
@@ -50,6 +58,10 @@ ASSETS = Path(__file__).resolve().parent.parent / 'assets'
 ACTIVE: ContextVar[Any] = ContextVar('nora_admin_web_request', default=None)
 MAX_UPLOAD = 20 * 1024 * 1024
 WIDGET_TEST = 'admin:web-widget-notification-test'
+MEMBER_FORM_FIELDS = {
+    'cookies', 'add_cookies', 'remove_cookies', 'rep', 'note', 'name', 'age', 'avatar',
+    'warnings', 'clear_name', 'clear_bio', *CHAT_ACTIONS,
+}
 
 
 class SafeHTML(HTMLParser):
@@ -351,6 +363,11 @@ class AdminBridge:
                     for button in row:
                         item = {'text': button.text, 'style': button.style or '',
                                 **button_meta(button.callback_data or '', button.text)}
+                        callback = button.callback_data or ''
+                        if callback.startswith('admin:edit:') and not permitted(
+                            session.permissions, (member_field_permission(callback.split(':')[2]),),
+                        ):
+                            continue
                         if item.get('kind') == 'user':
                             item['person'] = people.get(int(button.callback_data.rsplit(':', 1)[1]))
                         if button.callback_data and button.callback_data.startswith('shop:'):
@@ -414,6 +431,8 @@ class AdminBridge:
                 uid = int(edit.rsplit(':', 1)[1] if edit else role.split(':')[2])
                 member = await self.db.get_user(uid)
                 if edit and member:
+                    ban_state = await self.db.ban_reset_state(uid)
+                    banned = self.db.ban_is_active(ban_state)
                     output['member'] = {
                         'id': uid,
                         'name': member['profile_name'] or member['telegram_name'] or member['username'] or str(uid),
@@ -421,11 +440,25 @@ class AdminBridge:
                         'prefix': await prefix_for(self.db, self.settings, uid),
                         'has_avatar': bool(member.get('avatar_file_id') and member.get('avatar_media_type') == 'photo'),
                         'age': profile_age(member),
+                        'banned': banned,
+                        'ban_until': ban_state.get('until') if banned else None,
                         **{key: member.get(key) for key in ('username', 'cookies', 'reputation', 'hate_shields',
                                                          'warnings', 'moderator_note')},
                     }
+                    actions = [('remove_cookies', 'Списать печеньки', '')]
+                    if self.settings.community_chat_id and uid != session.uid and not self.settings.is_owner(uid):
+                        actions.extend((key, label, 'danger' if key == 'ban' else '')
+                                       for key, (label, _) in CHAT_ACTIONS.items()
+                                       if not banned or key == 'unban')
+                    for field, label, style in actions:
+                        if permitted(session.permissions, (member_field_permission(field),)):
+                            callback = f'admin:edit:{field}:{uid}'
+                            action = secrets.token_urlsafe(18)
+                            session.actions[action] = (mid, callback)
+                            output['buttons'].append([{'text': label, 'style': style, 'action': action,
+                                                       **button_meta(callback, label)}])
                 callback = f'admin:user:{uid}' if edit else f'admin:manage:{uid}'
-                required = ('roles.assign',) if edit else ('users.edit', 'users.cookies')
+                required = ('roles.assign',) if edit else MEMBER_PERMISSIONS
                 if permitted(session.permissions, required):
                     action = secrets.token_urlsafe(18)
                     session.actions[action] = (mid, callback)
@@ -434,6 +467,19 @@ class AdminBridge:
                                                'action': action, 'group': 'roles' if edit else 'profile'}])
         form_data = await context.get_data() if state else {}
         form_kind = str(form_data.get('admin_action') or '')
+        form_target = None
+        form_return = None
+        target_id = form_data.get('target_user_id')
+        if state == 'AdminFlow:user_value' and target_id and form_kind in MEMBER_FORM_FIELDS:
+            target = await self.db.get_user(target_id)
+            if target:
+                form_target = {
+                    'id': target_id,
+                    'name': target['profile_name'] or target['telegram_name'] or target['username'] or str(target_id),
+                    'cookies': target['cookies'],
+                    'reputation': target['reputation'],
+                }
+                form_return = self.navigation_action(session, f'admin:manage:{target_id}', 'people')
         prefix_preview = None
         if state == 'AdminFlow:role_prefix':
             prefix_preview = {'text': form_data.get('prefix_name', ''),
@@ -450,7 +496,8 @@ class AdminBridge:
                 'version': session.version, 'draft': bool(state),
                 'workspace': {'section': session.section, 'screen': session.screen,
                               'navigation': navigation, 'tools': tools, 'counts': counts,
-                              'form_kind': form_kind, 'prefix_preview': prefix_preview}}
+                              'form_kind': form_kind, 'form_target': form_target, 'form_return': form_return,
+                              'prefix_preview': prefix_preview}}
 
     @staticmethod
     def navigation_action(session, callback, section):
@@ -531,7 +578,7 @@ class AdminBridge:
         session = await self.session(actor['id'])
         async with session.lock:
             await self.check_permissions(session)
-            if (not isinstance(data, dict) or set(data) - {'form', 'version', 'text', 'kind', 'format'}
+            if (not isinstance(data, dict) or set(data) - {'form', 'version', 'text', 'kind', 'format', 'confirmed'}
                     or not session.form or data.get('form') != session.form or data.get('version') != session.version):
                 raise web.HTTPConflict(text='Форма уже отправлена или устарела. Обнови панель')
             text = data.get('text') or ''
@@ -541,6 +588,11 @@ class AdminBridge:
                 raise web.HTTPConflict(text='Нет открытой формы')
             context = await self.context(session.uid)
             previous_state, previous_data = await context.get_state(), await context.get_data()
+            if previous_state == 'AdminFlow:user_value' and previous_data.get('admin_action') in CHAT_ACTIONS:
+                if upload is not None:
+                    raise ValueError('Укажите причину текстом.')
+                if previous_data['admin_action'] == 'ban' and data.get('confirmed') is not True:
+                    raise ValueError('Подтвердите сброс данных участника.')
             from community_bot.admin_text import compose
 
             text, entities = compose(text, data.get('format', 'plain'))
@@ -572,9 +624,7 @@ class AdminBridge:
                                    chat=Chat(id=session.uid, type='private'), text=text, entities=entities)
             await self.feed(session, actor, message=incoming)
             # Saving a member field should return to that member, not a confirmation-only dead end.
-            profile_fields = {'cookies', 'add_cookies', 'rep', 'note', 'name', 'age', 'avatar',
-                              'warnings', 'clear_name', 'clear_bio'}
-            if (previous_state == 'AdminFlow:user_value' and previous_data.get('admin_action') in profile_fields
+            if (previous_state == 'AdminFlow:user_value' and previous_data.get('admin_action') in MEMBER_FORM_FIELDS
                     and previous_data.get('target_user_id') and not await context.get_state()):
                 notices = list(session.notices) + [session.cards[mid].get('text', '') for mid in session.visible]
                 callback = f'admin:manage:{int(previous_data["target_user_id"])}'

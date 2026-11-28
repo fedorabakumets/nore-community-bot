@@ -46,6 +46,8 @@ ACTION_LABELS: dict[str, str] = {
     "ticket_close": "Тикет закрыт",
     "user_cookies": "Баланс 🍪",
     "user_add_cookies": "Начисление 🍪",
+    "user_remove_cookies": "Списание 🍪",
+    "user_rep": "Изменение репутации",
     "user_name": "Имя профиля",
     "user_age": "Возраст",
     "user_avatar": "Аватар",
@@ -64,6 +66,7 @@ _DOUBTFUL_WITHOUT_REASON = {
     "chat_mute",
     "user_cookies",
     "user_add_cookies",
+    "user_remove_cookies",
     "user_warnings",
     "set_status",
 }

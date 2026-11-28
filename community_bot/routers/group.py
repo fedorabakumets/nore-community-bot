@@ -598,7 +598,7 @@ async def _take_target(
     return target, args
 
 
-async def _restrict_mute(bot: Bot, chat_id: int, user_id: int, duration: timedelta) -> None:
+async def restrict_mute(bot: Bot, chat_id: int, user_id: int, duration: timedelta) -> None:
     kwargs: dict[str, Any] = {"permissions": ChatPermissions(can_send_messages=False)}
     if not is_permanent_duration(duration):
         kwargs["until_date"] = datetime.now(UTC) + duration
@@ -784,7 +784,7 @@ async def mute_member(message: Message, db: Database, settings: Settings, bot: B
         return
     label = duration_label(duration)
     try:
-        await _restrict_mute(bot, message.chat.id, int(target["user_id"]), duration)
+        await restrict_mute(bot, message.chat.id, int(target["user_id"]), duration)
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         await _respond(message, f"Telegram отказал в муте: {exc}")
         return
@@ -1100,6 +1100,23 @@ async def kick_member(message: Message, db: Database, settings: Settings, bot: B
     )
 
 
+async def apply_chat_ban(
+    bot: Bot, db: Database, settings: Settings, chat_id: int, target_id: int, duration: timedelta,
+) -> bool:
+    until = None if is_permanent_duration(duration) else datetime.now(UTC) + duration
+    await bot.ban_chat_member(chat_id, target_id, **({"until_date": until} if until else {}))
+    resets_account = chat_id == settings.community_chat_id or not settings.community_chat_id
+    if resets_account:
+        await db.reset_banned_user(target_id, until.timestamp() if until else None)
+    return resets_account
+
+
+async def lift_chat_ban(bot: Bot, db: Database, settings: Settings, chat_id: int, target_id: int) -> None:
+    await bot.unban_chat_member(chat_id, target_id, only_if_banned=True)
+    if chat_id == settings.community_chat_id or not settings.community_chat_id:
+        await db.release_ban_reset(target_id)
+
+
 @router.message(command_or_alias("ban"), F.chat.type.in_({"group", "supergroup"}))
 async def ban_member(message: Message, db: Database, settings: Settings, bot: Bot) -> None:
     if not await _require_perm(message, db, settings, PERM_BAN) or not message.from_user:
@@ -1114,19 +1131,12 @@ async def ban_member(message: Message, db: Database, settings: Settings, bot: Bo
         await _respond(message, error or "Нужны время и причина. Пример: /ban 7d скам или /ban навсегда скам")
         return
     label = duration_label(duration)
-    kwargs: dict[str, Any] = {}
-    if not is_permanent_duration(duration):
-        kwargs["until_date"] = datetime.now(UTC) + duration
     target_id = int(target["user_id"])
     try:
-        await bot.ban_chat_member(message.chat.id, target_id, **kwargs)
+        resets_account = await apply_chat_ban(bot, db, settings, message.chat.id, target_id, duration)
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         await _respond(message, f"Telegram отказал в бане: {exc}")
         return
-    resets_account = message.chat.id == settings.community_chat_id or not settings.community_chat_id
-    if resets_account:
-        until = kwargs["until_date"].timestamp() if "until_date" in kwargs else None
-        await db.reset_banned_user(target_id, until)
     await db.log_admin_action(
         message.from_user.id,
         "ban",
@@ -1168,12 +1178,10 @@ async def unban_member(message: Message, db: Database, settings: Settings, bot: 
         await _respond(message, "Ранг этого человека не ниже вашего — действие закрыто.")
         return
     try:
-        await bot.unban_chat_member(message.chat.id, target_id, only_if_banned=True)
+        await lift_chat_ban(bot, db, settings, message.chat.id, target_id)
     except (TelegramBadRequest, TelegramForbiddenError) as exc:
         await _respond(message, f"Telegram отказал: {exc}")
         return
-    if message.chat.id == settings.community_chat_id or not settings.community_chat_id:
-        await db.release_ban_reset(target_id)
     await db.log_admin_action(
         message.from_user.id,
         "unban",
@@ -1202,7 +1210,7 @@ async def warn_member(message: Message, db: Database, settings: Settings, bot: B
     mute_note = ""
     if duration is not None:
         try:
-            await _restrict_mute(bot, message.chat.id, int(target["user_id"]), duration)
+            await restrict_mute(bot, message.chat.id, int(target["user_id"]), duration)
             mute_note = f" + мут {duration_label(duration)}"
         except (TelegramBadRequest, TelegramForbiddenError) as exc:
             mute_note = f" (мут не встал: {exc})"

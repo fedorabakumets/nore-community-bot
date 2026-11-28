@@ -12,6 +12,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
+from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart, MagicData
 from aiogram.fsm.context import FSMContext
@@ -28,12 +29,14 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+from community_bot.admin_workspace import CHAT_ACTIONS, MEMBER_PERMISSIONS, member_field_permission, permitted
 from community_bot.aliases import command_or_alias
 from community_bot.application_form import validate_application_age
-from community_bot.audit import format_audit_log, person_label
+from community_bot.audit import duration_label, format_audit_log, parse_punitive_args, person_label
 from community_bot.blocks import answer_block
 from community_bot.config import Settings
 from community_bot.database import Database, utcnow
+from community_bot.domain import is_permanent_duration
 from community_bot.helpers import (
     application_block_reason,
     can_manage_user,
@@ -94,8 +97,6 @@ from community_bot.permissions import (
     PERM_ROLES_ASSIGN,
     PERM_ROLES_EDIT,
     PERM_TICKETS,
-    PERM_USERS_COOKIES,
-    PERM_USERS_EDIT,
     slugify_role,
 )
 from community_bot.private_rich import fresh_private_panel, send_private_copy, standalone_rich_message
@@ -941,6 +942,9 @@ async def admin_search_begin(
     settings: Settings,
 ) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
+        return
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
+        await callback.answer("Недостаточно прав.", show_alert=True)
         return
     await state.set_state(AdminFlow.user_value)
     await state.set_data({"admin_action": "search", "target_user_id": 0})
@@ -1976,10 +1980,7 @@ async def _can_admin_manage(actor_id: int, target_id: int, db: Database, setting
 async def admin_users(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     if not callback.message or not await _admin_callback(callback, db, settings):
         return
-    if not (
-        await has_permission(db, settings, callback.from_user.id, PERM_USERS_EDIT)
-        or await has_permission(db, settings, callback.from_user.id, PERM_USERS_COOKIES)
-    ):
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
         await callback.answer("Недостаточно прав.", show_alert=True)
         return
     users = await db.list_users(limit=100)
@@ -1995,6 +1996,9 @@ async def admin_users(callback: CallbackQuery, db: Database, settings: Settings)
 async def admin_manage_user(callback: CallbackQuery, db: Database, settings: Settings) -> None:
     actor_role = await _admin_callback(callback, db, settings)
     if not callback.data or not callback.message or not actor_role:
+        return
+    if not permitted(await user_permissions(db, settings, callback.from_user.id), MEMBER_PERMISSIONS):
+        await callback.answer("Недостаточно прав.", show_alert=True)
         return
     user_id = int(callback.data.rsplit(":", 1)[1])
     user = await db.get_user(user_id)
@@ -2039,6 +2043,11 @@ async def admin_begin_user_edit(
     prompts = {
         "cookies": "Введите точный новый баланс от 0 до 1 000 000.",
         "add_cookies": "Сколько печенек начислить? От 1 до 1 000 000.",
+        "remove_cookies": "Сколько печенек списать? От 1 до 1 000 000.",
+        "mute": "Выберите срок мута и укажите причину.",
+        "unmute": "Укажите причину снятия мута.",
+        "ban": "Выберите срок бана и укажите причину. Бан сбросит профиль, баланс, репутацию и прогресс.",
+        "unban": "Укажите причину разбана.",
         "clear_name": "Имя будет полностью очищено. Магазин и события станут недоступны до заполнения. "
                       "Баланс сохранится, повторного бонуса не будет. Для подтверждения введите ОЧИСТИТЬ.",
         "clear_bio": "Описание будет полностью очищено. Магазин и события станут недоступны до заполнения. "
@@ -2052,6 +2061,13 @@ async def admin_begin_user_edit(
     }
     if action not in prompts:
         await callback.answer("Неизвестное действие.", show_alert=True)
+        return
+    if not await has_permission(db, settings, callback.from_user.id, member_field_permission(action)):
+        await callback.answer("Недостаточно прав.", show_alert=True)
+        return
+    if action in CHAT_ACTIONS and (not settings.community_chat_id or callback.from_user.id == user_id
+                                   or settings.is_owner(user_id)):
+        await callback.answer("Модерация этого участника недоступна.", show_alert=True)
         return
     await state.set_state(AdminFlow.user_value)
     await state.set_data({"admin_action": action, "target_user_id": user_id})
@@ -2079,12 +2095,14 @@ async def admin_save_user_edit(
         await save_field(message, state, db, settings, bot)
         return
     if action == "search":
-        if not actor_role:
+        if not actor_role or not permitted(
+            await user_permissions(db, settings, message.from_user.id), MEMBER_PERMISSIONS,
+        ):
             await state.clear()
             await message.answer("Недостаточно прав.")
             return
-        query = (message.text or "").strip()
-        if len(query) < 2 and not query.isdigit():
+        query = (message.text or "").strip().removeprefix("@")
+        if (len(query) < 2 and not query.isdecimal()) or len(query) > (18 if query.isdecimal() else 80):
             await message.answer("Введите имя, @username или Telegram ID.")
             return
         users = await db.search_users(query)
@@ -2188,9 +2206,16 @@ async def admin_save_user_edit(
             )
         await message.answer("Розыгрыш опубликован в чат.")
         return
-    if not actor_role or not await _can_admin_manage(message.from_user.id, user_id, db, settings):
+    if (
+        not actor_role
+        or not await has_permission(db, settings, message.from_user.id, member_field_permission(action))
+        or not await _can_admin_manage(message.from_user.id, user_id, db, settings)
+    ):
         await state.clear()
         await message.answer("Недостаточно прав для изменения этого пользователя.")
+        return
+    if action in CHAT_ACTIONS:
+        await _save_chat_moderation(message, state, db, settings, bot, user_id, action)
         return
     if action == "avatar":
         if not message.photo and not message.video:
@@ -2235,7 +2260,7 @@ async def admin_save_user_edit(
         result = f"Количество предупреждений установлено: {int(message.text)}."
     elif action == "rep":
         raw = (message.text or "").strip()
-        if not raw.lstrip("-").isdigit():
+        if not raw.removeprefix("-").isascii() or not raw.removeprefix("-").isdigit() or len(raw) > 4:
             await message.answer("Репутация — целое число от -20 до 100.")
             return
         value = int(raw)
@@ -2257,22 +2282,30 @@ async def admin_save_user_edit(
         await db.update_profile(user_id, "moderator_note", value)
         result = "Заметка обновлена."
     elif action == "cookies":
-        if not message.text or not message.text.isdigit() or int(message.text) > 1_000_000:
+        raw = message.text or ""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > 7 or int(raw) > 1_000_000:
             await message.answer("Баланс должен быть числом от 0 до 1 000 000.")
             return
-        await db.set_cookies(user_id, int(message.text), message.from_user.id)
-        result = f"Баланс установлен: {int(message.text)} 🍪."
+        await db.set_cookies(user_id, int(raw), message.from_user.id)
+        result = f"Баланс установлен: {int(raw)} 🍪."
     else:
-        if not message.text or not message.text.isdigit() or not 1 <= int(message.text) <= 1_000_000:
+        raw = message.text or ""
+        if not raw.isascii() or not raw.isdigit() or len(raw) > 7 or not 1 <= int(raw) <= 1_000_000:
             await message.answer("Количество должно быть числом от 1 до 1 000 000.")
             return
-        amount = int(message.text)
-        await db.add_cookies(user_id, amount, "admin", f"by:{message.from_user.id}")
-        result = f"Начислено {amount} 🍪."
+        amount = int(raw)
+        if action == "remove_cookies":
+            if not await db.remove_admin_cookies(user_id, amount, message.from_user.id):
+                await message.answer("На балансе недостаточно печенек для списания.")
+                return
+            result = f"Списано {amount} 🍪."
+        else:
+            await db.add_cookies(user_id, amount, "admin", f"by:{message.from_user.id}")
+            result = f"Начислено {amount} 🍪."
     audit_id = await db.log_admin_action(message.from_user.id, f"user_{action}", str(user_id), result)
     await state.clear()
     await message.answer(f"✅ {result}")
-    if action in {"cookies", "add_cookies", "rep"}:
+    if action in {"cookies", "add_cookies", "remove_cookies", "rep"}:
         from community_bot.widget_notifications import Sender, send_service_notification
 
         reputation = action == "rep"
@@ -2280,6 +2313,73 @@ async def admin_save_user_edit(
             bot, db, user_id, Sender(), "Изменение репутации" if reputation else "Изменение баланса",
             result, "reputation" if reputation else "history", event_key=f"admin:{audit_id}",
         )
+
+
+async def _save_chat_moderation(
+    message: Message, state: FSMContext, db: Database, settings: Settings, bot: Bot, user_id: int, action: str,
+) -> None:
+    from community_bot.routers.group import _full_permissions, apply_chat_ban, lift_chat_ban, restrict_mute
+
+    actor = message.from_user
+    chat_id = settings.community_chat_id
+    target = await db.get_user(user_id)
+    if not actor or not chat_id or not target or actor.id == user_id or settings.is_owner(user_id):
+        await state.clear()
+        await message.answer("Модерация этого участника недоступна.")
+        return
+    duration, reason, error = parse_punitive_args(
+        (message.text or "").split(), need_duration=action in {"mute", "ban"}, allow_permanent=action == "ban",
+    )
+    if error or len(reason) > 400:
+        await message.answer(error or "Причина должна быть не длиннее 400 символов.")
+        return
+    if action == "unmute" and int(target["reputation"]) < settings.restricted_reputation_threshold:
+        await message.answer("Репутация ниже бронзы. Сначала восстановите репутацию.")
+        return
+    if action == "mute" and duration is not None and is_permanent_duration(duration):
+        await message.answer("Срок мута должен быть меньше 366 дней.")
+        return
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except TelegramAPIError:
+        await message.answer("Не удалось проверить статус участника в Telegram.")
+        return
+    if member.status in {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}:
+        await message.answer("К администратору Telegram это действие неприменимо.")
+        return
+    ban_state = await db.ban_reset_state(user_id) if action in {"ban", "unban"} else {}
+    if action == "ban" and (member.status == ChatMemberStatus.KICKED or db.ban_is_active(ban_state)):
+        await message.answer("Участник уже забанен.")
+        return
+    if action == "unban" and member.status != ChatMemberStatus.KICKED and not db.ban_is_active(ban_state):
+        await message.answer("У участника нет активного бана.")
+        return
+    if action == "unmute" and (member.status != ChatMemberStatus.RESTRICTED or member.can_send_messages):
+        await message.answer("У участника нет активного мута.")
+        return
+    try:
+        if action == "mute" and duration is not None:
+            await restrict_mute(bot, chat_id, user_id, duration)
+        elif action == "ban" and duration is not None:
+            await apply_chat_ban(bot, db, settings, chat_id, user_id, duration)
+        elif action == "unmute":
+            await bot.restrict_chat_member(chat_id, user_id, permissions=_full_permissions())
+        elif action == "unban":
+            await lift_chat_ban(bot, db, settings, chat_id, user_id)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        await message.answer("Telegram отклонил действие. Проверьте права Норы и статус участника в чате.")
+        return
+    await state.clear()
+    await db.log_admin_action(
+        actor.id, action, str(user_id), duration_label(duration), reason=reason,
+        actor_name=actor.full_name, target_name=person_label(target), default_duration=False,
+    )
+    await message.answer({
+        "mute": "Мут в основном чате установлен.",
+        "unmute": "Мут в основном чате снят.",
+        "ban": "Участник забанен. Профиль и прогресс сброшены.",
+        "unban": "Бан снят. Для возвращения нужна новая анкета." if ban_state else "Бан в основном чате снят.",
+    }[action])
 
 
 def _open_chat_permissions() -> ChatPermissions:
