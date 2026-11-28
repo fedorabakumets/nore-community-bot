@@ -141,6 +141,12 @@ def parse_search_results(data: dict) -> list[Song]:
         return []
     tracks = result.get("tracks") or {}
     entries = tracks.get("results", []) if isinstance(tracks, dict) else []
+    return _parse_catalog_tracks(entries, MAX_RESULTS)
+
+
+def _parse_catalog_tracks(entries, limit):
+    if not isinstance(entries, list):
+        return []
     songs: list[Song] = []
     seen: set[str] = set()
     for item in entries:
@@ -175,12 +181,65 @@ def parse_search_results(data: dict) -> list[Song]:
             cover = None
         songs.append(Song(track_id, album_id, title[:180], artist[:180], duration, cover))
         seen.add(track_id)
-        if len(songs) == MAX_RESULTS:
+        if len(songs) == limit:
             break
     return songs
 
 
 async def find_songs(query: str) -> list[Song]:
+    payload = await _catalog_json(API_URL, {"text": query, "type": "track", "page": "0"})
+    return parse_search_results(payload)
+
+
+async def _artist_catalog(base, name):
+    found = await _catalog_json(API_URL, {"text": name, "type": "artist", "page": "0"})
+    result = found.get("result")
+    artists = result.get("artists") if isinstance(result, dict) else None
+    rows = artists.get("results") if isinstance(artists, dict) else None
+    if not isinstance(rows, list):
+        return []
+    key = " ".join(name.casefold().split())
+    for row in rows[:20]:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            continue
+        artist_id = str(row.get("id", ""))
+        if not re.fullmatch(r"[0-9]{1,20}", artist_id) or " ".join(row["name"].casefold().split()) != key:
+            continue
+        payload = await _catalog_json(f"{base}/artists/{artist_id}/tracks", {"page": 0, "page-size": 40})
+        result = payload.get("result")
+        return _parse_catalog_tracks(result.get("tracks"), 40) if isinstance(result, dict) else []
+    return []
+
+
+async def wave_catalog(kind: str, seed: str) -> list[Song]:
+    base = API_URL.rsplit("/", 1)[0]
+    if kind == "artist":
+        return await _artist_catalog(base, seed)
+    if kind == "similar" and re.fullmatch(r"[0-9]{1,20}", seed):
+        path = f"/tracks/{seed}/similar"
+    elif kind == "genre" and re.fullmatch(r"[a-z-]+", seed):
+        path = f"/rotor/station/genre:{seed}/tracks"
+    elif kind == "chart" and seed == "russia":
+        path = "/landing3/chart/russia"
+    else:
+        raise ValueError("Unknown catalog station")
+    payload = await _catalog_json(base + path)
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return []
+    if kind == "similar":
+        return _parse_catalog_tracks(result.get("similarTracks"), 40)
+    if kind == "genre":
+        rows = result.get("sequence")
+    else:
+        chart = result.get("chart")
+        rows = chart.get("tracks") if isinstance(chart, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return _parse_catalog_tracks([row.get("track") for row in rows[:100] if isinstance(row, dict)], 40)
+
+
+async def _catalog_json(url, params=None):
     cookies = _cookie_bytes()
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -191,8 +250,7 @@ async def find_songs(query: str) -> list[Song]:
     timeout = aiohttp.ClientTimeout(total=14)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(API_URL, params={"text": query, "type": "track", "page": "0"},
-                                   headers=headers, allow_redirects=False) as response:
+            async with session.get(url, params=params, headers=headers, allow_redirects=False) as response:
                 if response.status in (401, 403):
                     raise SongError("Яндекс отклонил сессию. Нужно заново войти в аккаунт.")
                 if response.status != 200:
@@ -202,7 +260,7 @@ async def find_songs(query: str) -> list[Song]:
         raise SongError("Не удалось подключиться к Яндекс Музыке.") from exc
     if not isinstance(payload, dict):
         raise SongError("Яндекс вернул неожиданный ответ поиска.")
-    return parse_search_results(payload)
+    return payload
 
 
 async def _run_worker(directory: str, deadline: int, **request):

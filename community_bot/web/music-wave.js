@@ -65,9 +65,9 @@ window.NoraMusicWave = (() => {
     const input = form.querySelector('input');
     const motion = matchMedia('(prefers-reduced-motion: reduce)');
     let station = personal, tab = 'genres', artists = featured, choices = [];
-    let cover = '', texture = null, pendingTexture = null, frame = 0, last = 0, elapsed = 0, energy = 0;
+    let cover = '', texture = null, pendingTexture = null, frame = 0, last = 0, lastShape = 0, elapsed = 0, energy = 0;
     let lobes = personal.lobes, targetHue = personal.hue;
-    let state = null;
+    let state = null, wasPlaying = false, settlingUntil = 0, metaMotion = null, optionsMotion = null;
 
     function paintChoices() {
       const focused = options.contains(document.activeElement)
@@ -75,7 +75,7 @@ window.NoraMusicWave = (() => {
       choices = tab === 'genres' ? genres.map(([genre, name, hue, lobes]) =>
         ({key:'genre:' + genre, genre, title:name, hue, lobes})) :
         tab === 'charts' ? charts.map(([period, name, hue]) =>
-          ({key:'chart:' + period, period, title:name, display:t('Топ Норы') + ' · ' + t(name), hue, lobes:4})) :
+          ({key:'chart:' + period, period, title:name, display:t('Топ Норы') + ' · ' + t(name), hue, lobes:4})).concat({key:'chart:russia', chart:'russia', title:'Яндекс Музыка', hue:42, lobes:5}) :
           artists.map(makeArtist);
       options.innerHTML = choices.map(({key, title, artist, hue}, index) =>
         '<button type="button" data-wave-choice="' + index + '" aria-pressed="' + (key === station.key) + '">' +
@@ -114,7 +114,8 @@ window.NoraMusicWave = (() => {
       // Take the shorter route around the hue wheel on station changes.
       targetHue += ((value.hue - targetHue) % 360 + 540) % 360 - 180;
       root.style.setProperty('--wave-hue', targetHue);
-      if (!frame) {
+      settlingUntil = performance.now() + 850;
+      if (motion.matches) {
         lobes = value.lobes;
         orb.style.setProperty('--wave-shape', shape(elapsed, 0));
       }
@@ -131,6 +132,7 @@ window.NoraMusicWave = (() => {
       if (texture) {
         const previous = texture;
         previous.classList.add('music-wave-cover-out');
+        previous.classList.toggle('music-wave-cover-replaced', Boolean(image));
         previous.addEventListener('animationend', () => previous.remove(), {once:true});
         if (motion.matches) previous.remove();
       }
@@ -175,18 +177,21 @@ window.NoraMusicWave = (() => {
 
     function draw(now) {
       frame = 0;
-      if (!visible() || motion.matches || !playing()) { suspend(); return; }
+      const isPlaying = playing();
+      if (!visible() || motion.matches || (!isPlaying && now >= settlingUntil)) { suspend(); return; }
       frame = requestAnimationFrame(draw);
       const delta = now - last;
-      if (delta < 31) return;
       const seconds = Math.min(64, delta) / 1000;
       last = now;
       lobes += (station.lobes - lobes) * (1 - Math.exp(-seconds * 3));
-      const index = Math.floor(state.audio.currentTime * 40);
-      const drive = (state.beats?.[index] || 0) * .64 + (state.envelope?.[index] || 0) * .36;
-      energy += (drive - energy) * (1 - Math.exp(-seconds * (drive > energy ? 17 : 5)));
+      const index = Math.floor((state?.audio.currentTime || 0) * 40);
+      const drive = isPlaying ? (state.beats?.[index] || 0) * .64 + (state.envelope?.[index] || 0) * .36 : 0;
+      energy += (drive - energy) * (1 - Math.exp(-seconds * (drive > energy ? 14 : 4.5)));
       elapsed += seconds * (.65 + lobes * .09 + energy * .15);
-      orb.style.setProperty('--wave-shape', shape(elapsed, energy));
+      if (now - lastShape >= 28) {
+        lastShape = now;
+        orb.style.setProperty('--wave-shape', shape(elapsed, energy));
+      }
       orb.style.transform = 'scale(' + (1 + .052 * energy).toFixed(3) + ')';
     }
 
@@ -201,6 +206,9 @@ window.NoraMusicWave = (() => {
 
     function sync(current, {loading = false, canAdvance = false, cover = '', message = ''} = {}) {
       state = current;
+      const isPlaying = playing();
+      if (wasPlaying && !isPlaying) settlingUntil = performance.now() + 850;
+      wasPlaying = isPlaying;
       const busy = loading || Boolean(current?.loading);
       const track = current?.track;
       const text = track?.title || (station.artist ? station.title : station.display || t(station.title));
@@ -208,9 +216,10 @@ window.NoraMusicWave = (() => {
       if (title.textContent !== text || byline.textContent !== artist) {
         title.textContent = text;
         byline.textContent = artist;
-        if (visible() && !motion.matches) title.parentElement.animate?.([
-          {opacity:.55, transform:'translateY(3px)'}, {opacity:1, transform:'translateY(0)'}
-        ], {duration:260, easing:'ease-out'});
+        metaMotion?.cancel();
+        if (visible() && !motion.matches) metaMotion = title.parentElement.animate?.([
+          {opacity:.42, transform:'translateY(5px)'}, {opacity:1, transform:'translateY(0)'}
+        ], {duration:370, easing:'cubic-bezier(.22,.71,.29,1)'});
       }
       byline.hidden = Boolean(message);
       status.hidden = !message;
@@ -222,7 +231,7 @@ window.NoraMusicWave = (() => {
       play.disabled = busy;
       play.setAttribute('aria-label', t(busy ? 'Загружаем трек' : playing() ? 'Пауза' : 'Воспроизвести'));
       advance.disabled = loading || !canAdvance;
-      if (visible() && playing() && !motion.matches) {
+      if (visible() && (playing() || performance.now() < settlingUntil) && !motion.matches) {
         root.dataset.waveMoving = '';
         if (!frame) { last = performance.now(); frame = requestAnimationFrame(draw); }
       } else if (frame) suspend();
@@ -238,7 +247,8 @@ window.NoraMusicWave = (() => {
       if (button.dataset.waveTab && tab !== button.dataset.waveTab) {
         tab = button.dataset.waveTab;
         paintChoices();
-        if (!motion.matches) options.animate?.([
+        optionsMotion?.cancel();
+        if (!motion.matches) optionsMotion = options.animate?.([
           {opacity:.35, transform:'translateY(4px)'}, {opacity:1, transform:'translateY(0)'}
         ], {duration:245, easing:'cubic-bezier(.2,.65,.3,1)'});
       }

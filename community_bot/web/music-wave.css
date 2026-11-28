@@ -145,6 +145,7 @@
 @keyframes music-wave-color { from { opacity:0; } to { opacity:.71; } }
 .music-wave-fluid img.music-wave-cover-out { animation:music-wave-cover-out 620ms ease both; }
 @keyframes music-wave-cover-out { from { opacity:.71; } to { opacity:0; } }
+.music-wave-fluid img.music-wave-cover-replaced { animation-delay:260ms; }
 #sheet .music-wave .music-wave-play {
   position:absolute;
   z-index:1;

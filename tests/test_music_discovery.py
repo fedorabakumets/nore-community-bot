@@ -195,23 +195,27 @@ async def test_wave_uses_external_metadata_and_personal_taste_without_audio(tmp_
         await db.ensure_user(uid, telegram_name=str(uid))
     monkeypatch.setattr(songs, "enabled", lambda: True)
     monkeypatch.setattr(songs, "song_care_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(discovery, "_WAVE_SEEDS", ("Seed A", "Seed B", "Seed C", "Seed D"))
-    monkeypatch.setattr(discovery.random, "sample", lambda values, k: list(values)[:k])
-    async def lookup(query):
-        index = {"Seed A": 1, "Seed B": 2, "Seed C": 3, "Seed D": 4, "Favorite": 5}[query]
-        return [songs.Song(str(index), None, "Song " + query, query, 120)]
-    find = AsyncMock(side_effect=lookup)
+    monkeypatch.setattr(discovery.random, "choice", lambda values: values[0])
+    async def lookup(kind, seed):
+        index, name = {("chart", "russia"): (1, "Chart"), ("genre", "pop"): (2, "Pop"),
+                       ("similar", "9"): (5, "Discovery")}[(kind, seed)]
+        return [songs.Song(str(index), None, name, name, 120)]
+    provider = AsyncMock(side_effect=lookup)
+    monkeypatch.setattr(songs, "wave_catalog", provider)
+    find = AsyncMock(side_effect=AssertionError("must not search Telegram file names"))
     monkeypatch.setattr(songs, "find_songs", find)
+    await discovery.remember(db, 1, {"file_id": "tg-attachment", "title": "abc_123.mp3",
+        "artist": "random_file", "mime": "audio/mpeg", "duration": 120, "revision": "b"*32}, listened=True)
     delivery = AsyncMock(side_effect=AssertionError("must not send Telegram audio"))
     monkeypatch.setattr(songs, "send_song", delivery)
     response = json.loads((await discovery.wave(Request(1, db, None))).body)
     assert not response["personalized"]
-    assert len(response["tracks"]) == 3
+    assert {track["id"] for track in response["tracks"]} == {"1", "2"}
+    assert response["artists"] == []
     assert not await get_collection(db, 1)
-    assert not await discovery.read_history(db, 1)
-    assert find.await_count == 3
+    assert provider.await_count == 2
     await discovery.wave(Request(2, db, None))
-    assert find.await_count == 3
+    assert provider.await_count == 2
     denied = await discovery.play_track(Request(3, db, None, payload={"id": "1", "wave": True}))
     assert denied.status == 409
     play = await discovery.play_track(Request(1, db, None, payload={"id": "1", "wave": True}))
@@ -222,8 +226,10 @@ async def test_wave_uses_external_metadata_and_personal_taste_without_audio(tmp_
     discovery._WAVE_LAST.clear()
     response = json.loads((await discovery.wave(Request(1, db, None))).body)
     assert response["personalized"]
-    assert any(track["artist"] == "Favorite" for track in response["tracks"])
-    assert find.await_count == 4
+    assert response["artists"] == ["Favorite"]
+    assert response["tracks"][0]["artist"] == "Discovery"
+    provider.assert_any_await("similar", "9")
+    find.assert_not_awaited()
     delivery.assert_not_awaited()
 
 
@@ -276,6 +282,7 @@ async def test_wave_stations_filter_provider_matches_and_keep_previous_choices(t
         ]
 
     monkeypatch.setattr(songs, "find_songs", lookup)
+    monkeypatch.setattr(songs, "wave_catalog", AsyncMock(return_value=[]))
     genre = await discovery.wave(Request(1, db, None, {"genre": "house"}))
     assert {track["id"] for track in json.loads(genre.body)["tracks"]} == {"1", "2", "3"}
     discovery._WAVE_LAST.clear()
@@ -284,3 +291,16 @@ async def test_wave_stations_filter_provider_matches_and_keep_previous_choices(t
     assert set(discovery._WAVES[1][1]) == {"1", "2", "3", "4"}
     invalid = await discovery.wave(Request(1, db, None, {"genre": "house", "artist": "Chosen"}))
     assert invalid.status == 400
+
+
+async def test_catalog_wave_parses_provider_payloads_and_preserves_chart_order(monkeypatch):
+    tracks = [{"id": str(i), "title": str(i), "artists": [{"name": "Sample"}]} for i in (29, 10, 22)]
+    search = {"result": {"artists": {"results": [{"id": 4, "name": "Sample"}]}}}
+    chart = {"result": {"chart": {"tracks": [{"track": track} for track in tracks]}}}
+    radio = {"result": {"sequence": [{"track": tracks[0]}]}}
+    mock = AsyncMock(side_effect=[chart, radio, search, {"result": {"tracks": tracks}}])
+    monkeypatch.setattr(songs, "_catalog_json", mock)
+    assert [track.id for track in await songs.wave_catalog("chart", "russia")] == ["29", "10", "22"]
+    assert [track.id for track in await songs.wave_catalog("genre", "house")] == ["29"]
+    assert [track.id for track in await songs.wave_catalog("artist", "sample")] == ["29", "10", "22"]
+    assert mock.await_args.args[0].endswith("/artists/4/tracks")
