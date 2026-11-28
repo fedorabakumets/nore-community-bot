@@ -187,6 +187,9 @@ async def operate(db, uid, action, data=None, now=None, allowed=None):
     data = {} if data is None else data
     if not isinstance(data, dict):
         raise ValueError('Некорректный запрос')
+    supplied_session = data.get('session')
+    if supplied_session is not None and (not isinstance(supplied_session, str) or len(supplied_session) > 64):
+        raise ValueError('Некорректный диалог')
     after = data.get('after', 0)
     if type(after) is not int or not 0 <= after <= 2**63 - 1:
         raise ValueError('Некорректный курсор')
