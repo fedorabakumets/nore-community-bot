@@ -100,11 +100,8 @@ async def publish_post(db, bot, chat_id, post):
         blocks.append(InputRichBlockButtons(buttons=[RichMessageButton(text="Добавить Нору на экран", url=url+"="+HOME_SCREEN_PARAM, style="success")]))
         kwargs["reply_markup"] = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="НОРА", url=url, style="danger")]])
     if post.get("incognito_cover"):
-        cover_path = Path(__file__).resolve().parent.parent / "assets" / "branding" / "incognito-search.webp"
-        with Image.open(cover_path) as image:
-            buffer = io.BytesIO()
-            image.convert("RGB").save(buffer, format="JPEG", quality=95)
-        blocks.insert(1, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(buffer.getvalue(), filename="incognito.jpg"))))
+        cover_path = Path(__file__).resolve().parent.parent / "assets" / "branding" / "incognito-search-original.jpg"
+        blocks.insert(1, InputRichBlockPhoto(photo=InputMediaPhoto(media=BufferedInputFile(cover_path.read_bytes(), filename="incognito.jpg"))))
     rich = InputRichMessage(blocks=blocks, skip_entity_detection=True)
     if not message_id:
         if await db.get_bot_state(key + ":sending"):
@@ -158,7 +155,7 @@ async def run(db, settings, bot):
 # A single release, independently delivered and pinned in each destination.
 INCOGNITO_POST = {
     "id": "incognito-launch-photo-20261128",
-    "revision": "1",
+    "revision": "2",
     "pin": True,
     "incognito_cover": True,
     "blocks": [
