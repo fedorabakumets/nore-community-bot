@@ -109,3 +109,34 @@ test('append failure falls back to complete blob without a second request', asyn
   assert.equal(h.requests.length,1);
   assert.equal(h.plays(),1);
 });
+
+test('music mini player moves into modal, preserves scrolling and returns the same element', () => {
+  const code = script.slice(script.indexOf('  function syncMiniHost()'),script.indexOf('  function paintMini()'));
+  const classes = new Set(), panel = {focus() {}};
+  const content = {scrollTop:0,replaceChildren(node){assert.equal(node,panel); dialog.library=panel;dialog.full=null;}};
+  const mini = {parentElement:null, hidden:true,animate() {}};
+  const home = {insertBefore(node){node.parentElement=this;}};
+  mini.parentElement=home;
+  const dialog = {open:true,library:panel,full:null,scrollTop:125,append(node){node.parentElement=this;},
+    querySelector(s){return s==='#music-library-profile'?this.library:this.full;},
+    classList:{contains(v){return classes.has(v);},toggle(v,on){if(on) classes.add(v);else classes.delete(v);}}};
+  const context = vm.createContext({mini,miniHome:home,miniNext:null,miniMotion:{matches:true},
+    $:s=>s==='#sheet'?dialog:content,active:{},playerReturn:null,libraryReturn:null,window:{},paint() {}});
+  vm.runInContext(code+'\nthis.sync=syncMiniHost;this.closeFull=closeNowPlaying;',context);
+  assert.equal(context.sync(),true);
+  assert.equal(mini.parentElement,dialog);
+  assert.equal(mini.hidden,false);
+  assert.equal(content.scrollTop,125);
+  context.playerReturn={panel,libraryReturn:7,scrollTop:88};
+  dialog.library=null;dialog.full={};
+  assert.equal(context.sync(),false);
+  assert.equal(mini.parentElement,home);
+  assert.equal(context.closeFull(),true);
+  assert.equal(dialog.library,panel);
+  assert.equal(content.scrollTop,88);
+  assert.equal(context.libraryReturn,7);
+  assert.equal(mini.parentElement,dialog);
+  dialog.open=false;
+  context.sync();
+  assert.equal(mini.parentElement,home);
+});
