@@ -54,6 +54,11 @@ class CommunityScopeMiddleware(BaseMiddleware):
             return await handler(event, data)
         if chat.type == ChatType.PRIVATE:
             return await handler(event, data)
+        settings = data.get("settings")
+        community_chat_id = settings.community_chat_id if settings is not None else 0
+        if community_chat_id and chat.id == community_chat_id:
+            return await handler(event, data)
+
         membership = event.my_chat_member
         from community_bot.updates_feed import is_updates_chat, run as publish_updates_feed
 
@@ -67,11 +72,6 @@ class CommunityScopeMiddleware(BaseMiddleware):
 
         if chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
             return
-
-        settings = data.get("settings")
-        community_chat_id = settings.community_chat_id if settings is not None else 0
-        if community_chat_id and chat.id == community_chat_id:
-            return await handler(event, data)
 
         if community_chat_id and membership is not None:
             member = membership.new_chat_member
