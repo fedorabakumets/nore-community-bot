@@ -47,9 +47,41 @@ window.NoraStories = (() => {
   let paused = false, muted = false, closing = false;
   let windowMotion = [], slideMotion = [], outgoing;
 
+  // Store views per Telegram account and per content version, not per cover slot.
+  const viewKey = 'nora:home-story-views:v1:' + (tg?.initDataUnsafe?.user?.id ?? 'guest');
+  const slideKey = entry => {
+    const story = stories[entry.story];
+    return JSON.stringify([entry.story, story.video || story.cover, story.poster || '', entry.step ?? null]);
+  };
+  const validKeys = new Set(slides.map(slideKey));
+  const seen = new Set();
+  try {
+    const stored = JSON.parse(localStorage.getItem(viewKey) || '[]');
+    if (Array.isArray(stored)) stored.filter(key => validKeys.has(key)).forEach(key => seen.add(key));
+  } catch { /* Storage can be unavailable in a webview. */ }
+  const viewedStyle = 'background:#77777f;box-shadow:none';
+  function isViewed(id) {
+    return slides.filter(entry => entry.story === id).every(entry => seen.has(slideKey(entry)));
+  }
+  function markViewed(index) {
+    const entry = slides[index];
+    const key = slideKey(entry);
+    if (seen.has(key)) return;
+    seen.add(key);
+    try { localStorage.setItem(viewKey, JSON.stringify([...seen])); } catch {}
+    if (isViewed(entry.story)) {
+      for (const trigger of document.querySelectorAll('[data-home-story="' + entry.story + '"]')) {
+        trigger.classList.add('is-viewed');
+        trigger.style.background = '#77777f';
+        trigger.style.boxShadow = 'none';
+      }
+    }
+  }
+
   function triggers() {
     return '<div class="home-stories">' + Object.entries(stories).map(([id, story]) =>
-      '<button type="button" class="home-story-trigger" data-home-story="' + id +
+      '<button type="button" class="home-story-trigger' + (isViewed(id) ? ' is-viewed' : '') +
+      '" style="' + (isViewed(id) ? viewedStyle : '') + '" data-home-story="' + id +
       '" aria-label="' + NoraI18n.html(story.label) + '" aria-haspopup="dialog" aria-controls="home-story-viewer">' +
       '<img src="' + story.cover + '" alt="" width="52" height="52"></button>'
     ).join('') + NoraI18n.button() + '</div>';
@@ -119,6 +151,7 @@ window.NoraStories = (() => {
 
   function resumePlayback() {
     if (!playbackAllowed() || current.failed) return;
+    if (!current.video) markViewed(current.index);
     if (current.video?.ended) {
       advance(1);
       return;
@@ -156,6 +189,9 @@ window.NoraStories = (() => {
     error.hidden = true;
     error.textContent = NoraI18n.t("Не удалось загрузить историю.");
     video.addEventListener('error', () => fail(slide));
+    video.addEventListener('playing', () => {
+      if (slide === current && playbackAllowed() && !slide.failed) markViewed(slide.index);
+    });
     video.addEventListener('ended', () => {
       if (slide === current && playbackAllowed()) advance(1);
     });
