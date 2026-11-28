@@ -978,6 +978,8 @@ window.NoraPrefix = p => {
   const full = () => player.open && !!player.querySelector('#nora-now-playing');
   const blocked = () => !data?.profile || app.inert || $('#nav').inert ||
     currentGame() || document.body.classList.contains('intro-playing');
+  const miniReady = () => !mini.hidden && (player.open && player.classList.contains('music-mini-docked') && mini.parentElement === player
+    || !blocked() && !document.querySelector('dialog[open]'));
   const pageReady = () => !blocked() && !document.querySelector('dialog[open]') &&
     routeMotionOrder.includes(tab) && !window.NoraEvents?.editorOpen();
   const neighbor = (dx) => {
@@ -1111,7 +1113,7 @@ window.NoraPrefix = p => {
     if (!(target instanceof Element) || target.closest(excluded)) return;
     let kind;
     if (full() && player.contains(target)) kind = 'close';
-    else if (!blocked() && !mini.hidden && mini.contains(target) && (!document.querySelector('dialog[open]') || player.classList.contains('music-mini-docked'))) kind = 'open';
+    else if (miniReady() && mini.contains(target)) kind = 'open';
     else if (pageReady() && app.contains(target) && !horizontalScroller(target) &&
       p.clientX > 22 && p.clientX < innerWidth - 22) kind = 'page';
     else return;
@@ -1133,7 +1135,7 @@ window.NoraPrefix = p => {
       if (!horizontal && !vertical) return;
       if ((t.kind === 'page' && (!horizontal || !pageReady())) ||
           (t.kind === 'close' && (!vertical || dy <= 0 || player.scrollTop > 1 || !full())) ||
-          (t.kind === 'open' && (!vertical || dy >= 0 || blocked()))) { touch = null; return; }
+          (t.kind === 'open' && (!vertical || dy >= 0 || !miniReady()))) { touch = null; return; }
       if (!event.cancelable) { touch = null; return; }
       event.preventDefault();
       t.locked = true;
@@ -1195,8 +1197,8 @@ window.NoraPrefix = p => {
       shade(end, t.height);
       // Vertical movement settles from the exact dragged position.
       animate(player, 0, t.offset, 0, end, 300, () => {
-        if (close && full() && !window.NoraProfileTrack?.closeNowPlaying?.()) player.close();
         resetPlayer();
+        if (close && full() && !window.NoraProfileTrack?.closeNowPlaying?.()) player.close();
         done();
       });
     }
