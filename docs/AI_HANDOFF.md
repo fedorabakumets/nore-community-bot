@@ -1,3 +1,11 @@
+## My Wave — 28.11.2026
+
+- Uses the existing Yandex catalog search API rather than a new dependency, token or external recommendations service. Cold start samples three artist seeds from a varied fixed list, then favors up to two of the user's top eight artists (saved songs weighted 3, listening history weighted 1) plus exploration. Up to 15 results, shuffled, prefers tracks not previously heard/returned. It is a simple taste heuristic, not Yandex's official personalized radio. Metadata cache shared for 30 minutes, at most 128 queries; wave authorization private per user, two hours, at most 90 IDs. Three provider search slots shared with regular search; 4-second refresh protection. No background audio prefetch, no paid APIs or additional workers. On selecting a track the queue loads only its current audio and at end fetches another batch on demand. Existing 128 MB disk cache and 2 downloads unchanged. The same PR includes mini-player docking and search alignment. Verify provider and iOS in production.
+
+## Music Mini App polish — 28.11.2026
+
+- The original mini player is moved into the modal music library while a track is active, instead of creating another player or Audio instance. Footer slides in; content scrolls independently. The full player restores the same library DOM (tab, search, list and scroll) when dismissed via Back or swipe. Outside the library the player returns to its original location. Search input scoped CSS removes generic dialog borders/focus outlines and uses a single grid-aligned frame. Asset versions bumped. Added docking regression test; actual iOS appearance still requires visual check.
+
 # AI_HANDOFF — NORA
 ## Музыка / этап 2 — 28 ноября 2026
 

@@ -25,10 +25,16 @@ def clear_state():
     discovery._SEARCHES.clear()
     discovery._LAST.clear()
     discovery._IN_FLIGHT.clear()
+    discovery._WAVES.clear()
+    discovery._WAVE_LAST.clear()
+    discovery._WAVE_METADATA.clear()
     yield
     discovery._SEARCHES.clear()
     discovery._LAST.clear()
     discovery._IN_FLIGHT.clear()
+    discovery._WAVES.clear()
+    discovery._WAVE_LAST.clear()
+    discovery._WAVE_METADATA.clear()
 
 
 async def test_search_and_import_are_private_and_idempotent(tmp_path, monkeypatch):
@@ -155,3 +161,42 @@ async def test_chart_is_opt_in_and_counts_unique_listeners(tmp_path):
     await db.reset_banned_user(2, None)
     assert not await discovery.read_history(db, 2)
     assert not json.loads((await discovery.social(req)).body)["top"]
+
+
+async def test_wave_uses_external_metadata_and_personal_taste_without_audio(tmp_path, monkeypatch):
+    db = Database(tmp_path / "wave.sqlite3")
+    await db.initialize()
+    for uid in (1, 2, 3):
+        await db.ensure_user(uid, telegram_name=str(uid))
+    monkeypatch.setattr(songs, "enabled", lambda: True)
+    monkeypatch.setattr(songs, "song_care_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(discovery, "_WAVE_SEEDS", ("Seed A", "Seed B", "Seed C", "Seed D"))
+    monkeypatch.setattr(discovery.random, "sample", lambda values, k: list(values)[:k])
+    async def lookup(query):
+        index = {"Seed A": 1, "Seed B": 2, "Seed C": 3, "Seed D": 4, "Favorite": 5}[query]
+        return [songs.Song(str(index), None, "Song " + query, query, 120)]
+    find = AsyncMock(side_effect=lookup)
+    monkeypatch.setattr(songs, "find_songs", find)
+    delivery = AsyncMock(side_effect=AssertionError("must not send Telegram audio"))
+    monkeypatch.setattr(songs, "send_song", delivery)
+    response = json.loads((await discovery.wave(Request(1, db, None))).body)
+    assert not response["personalized"]
+    assert len(response["tracks"]) == 3
+    assert not await get_collection(db, 1)
+    assert not await discovery.read_history(db, 1)
+    assert find.await_count == 3
+    await discovery.wave(Request(2, db, None))
+    assert find.await_count == 3
+    denied = await discovery.play_track(Request(3, db, None, payload={"id": "1", "wave": True}))
+    assert denied.status == 409
+    play = await discovery.play_track(Request(1, db, None, payload={"id": "1", "wave": True}))
+    assert play.status == 200
+    await discovery.remember(db, 1, {"file_id": "catalog:9", "catalog_id": "9",
+        "title": "Favorite song", "artist": "Favorite", "mime": "audio/mpeg",
+        "duration": 120, "revision": "a"*32}, listened=True)
+    discovery._WAVE_LAST.clear()
+    response = json.loads((await discovery.wave(Request(1, db, None))).body)
+    assert response["personalized"]
+    assert any(track["artist"] == "Favorite" for track in response["tracks"])
+    assert find.await_count == 4
+    delivery.assert_not_awaited()

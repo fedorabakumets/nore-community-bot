@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
+from collections import Counter
 from uuid import uuid4
 
 from aiogram.exceptions import TelegramAPIError
@@ -19,6 +21,19 @@ _LAST = {}
 _IN_FLIGHT = set()
 _SEARCH_SLOTS = asyncio.Semaphore(3)
 _MAX_USERS = 256
+_WAVES = {}
+_WAVE_LAST = {}
+_WAVE_METADATA = {}
+_WAVE_LOOKUPS = {}
+_WAVE_TTL = 2 * 60 * 60
+_WAVE_CACHE_TTL = 30 * 60
+_WAVE_CACHE_LIMIT = 128
+_WAVE_SEEDS = (
+    'The Weeknd', 'Daft Punk', 'Billie Eilish', 'Disclosure', 'M83', 'Bicep',
+    'ODESZA', 'Arctic Monkeys', 'Kendrick Lamar', 'Adele', 'Bonobo', 'Nirvana',
+    'Молчат Дома', 'Кино', 'Земфира', 'Моя Мишель', 'Баста', 'Cream Soda',
+    'Imagine Dragons', 'Dua Lipa', 'Tame Impala', 'Gorillaz', 'Radiohead', 'The xx',
+)
 
 
 def _error(message, status=400):
@@ -85,7 +100,7 @@ async def prepare_track(request, *, save):
     payload = await request.json()
     if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
         return _error("Некорректный трек.")
-    entry = _SEARCHES.get(uid)
+    entry = (_WAVES if payload.get("wave") is True else _SEARCHES).get(uid)
     if not entry or entry[0] <= time.monotonic() or payload["id"] not in entry[1]:
         return _error("Поиск устарел. Найди трек снова.", 409)
     if not songs.enabled():
@@ -312,3 +327,101 @@ async def playing(request):
         _LIVE.pop(next(iter(_LIVE)), None)
     _LIVE[uid] = (time.monotonic() + 40, track_id(track))
     return web.json_response({"ok": True})
+
+
+def _wave_prune(now):
+    for cache in (_WAVES, _WAVE_METADATA):
+        for key, entry in list(cache.items()):
+            if entry[0] <= now:
+                cache.pop(key, None)
+    for uid, stamp in list(_WAVE_LAST.items()):
+        if stamp + 60 <= now:
+            _WAVE_LAST.pop(uid, None)
+
+
+async def _wave_search(query):
+    key = query.casefold()
+    cached = _WAVE_METADATA.get(key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    existing = _WAVE_LOOKUPS.get(key)
+    if existing is not None:
+        return await asyncio.shield(existing)
+    if _SEARCH_SLOTS.locked() or len(_WAVE_LOOKUPS) >= 3:
+        return []
+
+    async def lookup():
+        try:
+            async with _SEARCH_SLOTS:
+                tracks = await songs.find_songs(query)
+                if len(_WAVE_METADATA) >= _WAVE_CACHE_LIMIT:
+                    _WAVE_METADATA.pop(next(iter(_WAVE_METADATA)))
+                _WAVE_METADATA[key] = (time.monotonic() + _WAVE_CACHE_TTL, tracks)
+                return tracks
+        finally:
+            _WAVE_LOOKUPS.pop(key, None)
+
+    task = asyncio.create_task(lookup())
+    _WAVE_LOOKUPS[key] = task
+    return await asyncio.shield(task)
+
+
+async def wave(request):
+    uid, db = request["actor"]["id"], request.app["db"]
+    if not songs.enabled():
+        return _error("Музыкальный каталог пока не подключён.", 503)
+    problem = await songs.song_care_error(db, uid)
+    if problem:
+        return _error(problem, 403)
+    now = time.monotonic()
+    _wave_prune(now)
+    if uid in _IN_FLIGHT or now - _WAVE_LAST.get(uid, -100) < 4:
+        return _error("Подожди немного перед обновлением волны.", 429)
+    if len(_WAVE_LAST) >= _MAX_USERS:
+        _WAVE_LAST.pop(next(iter(_WAVE_LAST)))
+    _WAVE_LAST[uid] = now
+    _IN_FLIGHT.add(uid)
+    try:
+        collection = await get_collection(db, uid)
+        history = await read_history(db, uid)
+        taste = Counter()
+        for track in collection.values():
+            if artist := track.get("artist"):
+                taste[artist[:120]] += 3
+        for record in history.values():
+            if record["at"] and (artist := record["track"].get("artist")):
+                taste[artist[:120]] += 1
+        favorites = [artist for artist, _ in taste.most_common(8)]
+        queries = random.sample(favorites, min(2, len(favorites)))
+        discovery = [seed for seed in _WAVE_SEEDS if seed.casefold() not in {q.casefold() for q in queries}]
+        queries += random.sample(discovery, 3 - len(queries))
+        batches = await asyncio.gather(*(_wave_search(q) for q in queries), return_exceptions=True)
+        candidates = {}
+        for batch in batches:
+            if isinstance(batch, list):
+                candidates.update((song.id, song) for song in batch)
+        if not candidates:
+            return _error("Волна пока недоступна. Попробуй обновить позже.", 503)
+        existing = _WAVES.get(uid)
+        previous = existing[1] if existing else {}
+        heard = {record["track"].get("catalog_id") for record in history.values() if record["at"]}
+        fresh = [song for key, song in candidates.items() if key not in heard and key not in previous]
+        familiar = [song for key, song in candidates.items() if key in heard or key in previous]
+        random.shuffle(fresh)
+        random.shuffle(familiar)
+        selected = (fresh + familiar)[:15]
+        # Retain prior choices so a search or refresh cannot invalidate the active queue.
+        authorized = {**previous, **{song.id: song for song in selected}}
+        while len(authorized) > 90:
+            authorized.pop(next(iter(authorized)))
+        if len(_WAVES) >= _MAX_USERS and uid not in _WAVES:
+            _WAVES.pop(next(iter(_WAVES)))
+        _WAVES[uid] = (time.monotonic() + _WAVE_TTL, authorized)
+        saved = {track.get("catalog_id"): key for key, track in collection.items() if track.get("catalog_id")}
+        return web.json_response({"tracks": [
+            {"id": song.id, "title": song.title, "artist": song.artist,
+             "duration": song.duration, "cover": song.cover, "saved_id": saved.get(song.id)}
+            for song in selected
+        ], "personalized": bool(favorites)})
+    finally:
+        _IN_FLIGHT.discard(uid)

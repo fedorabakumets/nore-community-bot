@@ -1111,7 +1111,7 @@ window.NoraPrefix = p => {
     if (!(target instanceof Element) || target.closest(excluded)) return;
     let kind;
     if (full() && player.contains(target)) kind = 'close';
-    else if (!blocked() && !mini.hidden && mini.contains(target) && !document.querySelector('dialog[open]')) kind = 'open';
+    else if (!blocked() && !mini.hidden && mini.contains(target) && (!document.querySelector('dialog[open]') || player.classList.contains('music-mini-docked'))) kind = 'open';
     else if (pageReady() && app.contains(target) && !horizontalScroller(target) &&
       p.clientX > 22 && p.clientX < innerWidth - 22) kind = 'page';
     else return;
@@ -1195,7 +1195,7 @@ window.NoraPrefix = p => {
       shade(end, t.height);
       // Vertical movement settles from the exact dragged position.
       animate(player, 0, t.offset, 0, end, 300, () => {
-        if (close && full()) player.close();
+        if (close && full() && !window.NoraProfileTrack?.closeNowPlaying?.()) player.close();
         resetPlayer();
         done();
       });
