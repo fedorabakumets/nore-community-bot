@@ -30,7 +30,12 @@ async def get_track(db, uid):
 
 
 def track_summary(track):
-    return {name: track[name] for name in ("title", "artist", "duration", "revision")} if track else None
+    if not track:
+        return None
+    summary = {name: track[name] for name in ("title", "artist", "duration", "revision")}
+    if track.get("cover"):
+        summary["cover"] = track["cover"]
+    return summary
 
 
 def audio_block(track):
