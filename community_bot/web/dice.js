@@ -122,7 +122,7 @@ function previewDraw(ctx,s){
     if(i===8&&u.i===8&&u.p<7){rr(x-19,y+24,38,3,1,"#ffffff15");rr(x-19,y+24,38*Math.max(0,1-u.grow/2.1),3,1,c)}
   }
   if(i>=9&&i<=16&&!s.acted){const [x,y]=C.pos(6),[a,b]=C.pos(8);if(dragging){line(x+25,y,a-25,b,c+"99",1.5);line(a-31,b-4,a-25,b,c,1.5);line(a-31,b+4,a-25,b,c,1.5)}}
-  if(i===15){const u=g.opp.board[7];label("ПОЛЕ СОПЕРНИКА",180,188,"#ff8fa9",9);if(u)die(u,180,207);else label("−1 точка",180,210,"#ff8fa9")}
+  if(i===15){const u=g.opp.board[7];label("ПОЛЕ СОПЕРНИКА",90,203,"#ff8fa9",9);if(u)die(u,245,198);else label("−1 точка",245,203,"#ff8fa9")}
   for(const shot of g.shots){const col=D[shot.i].color,x=shot.x,y=shot.y;
     if(shot.i===3){lightning(shot.sx,shot.sy,x,y,col);continue}
     ctx.save();ctx.translate(x,y);ctx.rotate(shot.angle);
@@ -135,7 +135,7 @@ function previewDraw(ctx,s){
   }
   for(const f of s.fx){const col=D[f.i]?.color||c,q=1-f.life/f.max;ctx.globalAlpha=1-q;
     if(f.kind==="arc")lightning(f.x,f.y,f.a,f.b,col);
-    else if(f.enemy&&i===15)ring(180,207,12+16*q,"#ff557c",2);
+    else if(f.enemy&&i===15)ring(245,198,12+16*q,"#ff557c",2);
     else{ring(f.x,f.y,4+(f.i===1?35:19)*q,col,1.8);if(f.i===1&&f.kind==="hit")dot(f.x,f.y,6+20*q,col+"40")}
     ctx.globalAlpha=1;
   }
