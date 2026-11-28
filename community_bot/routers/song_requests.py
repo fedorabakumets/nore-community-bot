@@ -378,13 +378,13 @@ async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
         cached = await db.get_bot_state(cache_key)
         if cached:
             try:
-                await bot.send_audio(choice.chat_id, cached, title=song.title, performer=song.artist,
+                sent = await bot.send_audio(choice.chat_id, cached, title=song.title, performer=song.artist,
                                      duration=song.duration or None, caption=song.url)
             except TelegramBadRequest:
                 cached = None
             else:
                 await _mark_sent(db, choice)
-                return
+                return sent.audio
 
         status = await bot.send_message(choice.chat_id, f"🎧 Загружаю: {song.artist} — {song.title}")
         try:
@@ -407,6 +407,7 @@ async def send_song(bot, db: Database, choice: Choices, song: Song) -> None:
                 if sent.audio and sent.audio.file_id:
                     await db.set_bot_state(cache_key, sent.audio.file_id)
                 await _mark_sent(db, choice)
+                return sent.audio
         except (asyncio.TimeoutError, TelegramAPIError):
             logger.warning("Music download/upload failed for track %s", song.id)
             await bot.send_message(choice.chat_id, "Не удалось отправить песню. Повтори запрос позднее.")

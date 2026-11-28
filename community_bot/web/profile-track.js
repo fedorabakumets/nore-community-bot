@@ -434,6 +434,134 @@ window.NoraProfileTrack = (() => {
     return true;
   }
 
+
+  function ownLibrary(panel, result, visibility) {
+    panel.classList.add('music-discovery');
+    panel.querySelector('.profile-library-header h2').textContent = NoraI18n.t("Музыка");
+    const content = panel.querySelector('.profile-library-content');
+    const t = NoraI18n.html;
+    content.innerHTML = '<form class="music-search" data-music-search><span aria-hidden="true">⌕</span>' +
+      '<input type="search" maxlength="120" data-music-query placeholder="' + t("Трек, исполнитель…") + '" aria-label="' + t("Поиск музыки") + '">' +
+      '<button type="submit">' + t("Найти") + '</button></form>' +
+      '<div class="music-tabs" role="group" aria-label="' + t("Музыка") + '">' +
+      '<button type="button" data-music-tab="home" aria-pressed="true">' + t("Обзор") + '</button>' +
+      '<button type="button" data-music-tab="mine" aria-pressed="false">' + t("Мои треки") + '</button>' +
+      '<button type="button" data-music-tab="search" aria-pressed="false">' + t("Поиск") + '</button></div>' +
+      '<div class="music-discovery-cards" data-music-cards>' +
+      '<button type="button" class="music-feature music-feature-purple" data-music-go="search"><small>NORA / MUSIC</small><strong>' + t("Найди свой звук") + '</strong><span>' + t("Музыкальный каталог") + ' ↗</span></button>' +
+      '<button type="button" class="music-feature music-feature-red" data-music-go="mine"><small>YOUR LIBRARY</small><strong>' + t("Моя коллекция") + '</strong><span>' + t("Любимая музыка") + ' ↗</span></button></div>' +
+      '<div class="music-discovery-heading"><h3 data-music-heading>' + t("Недавно добавлено") + '</h3></div>' +
+      '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>' +
+      '<div data-music-local-empty hidden>' + libraryEmpty() + '</div>' +
+      '<section data-music-catalog hidden><h3>' + t("Яндекс Музыка") + '</h3><div data-music-results aria-live="polite"></div></section>' +
+      '<div data-music-visibility>' + visibility + '</div>';
+    const form = content.querySelector('[data-music-search]');
+    const input = content.querySelector('[data-music-query]');
+    const catalog = content.querySelector('[data-music-catalog]');
+    const remote = content.querySelector('[data-music-results]');
+    const list = content.querySelector('.profile-library-list');
+    let mode = 'home', generation = 0, controller = null, importPending = false;
+    const alive = () => panel.isConnected && $('#sheet').open;
+    const normalize = value => value.toLocaleLowerCase().trim();
+    function filter() {
+      const q = normalize(input.value);
+      let count = 0;
+      for (const [i, row] of Array.from(list.querySelectorAll('[data-track-src]')).entries()) {
+        const match = !q || q.split(/\s+/).every(word => normalize(row.dataset.trackTitle + ' ' + row.dataset.trackArtist).includes(word));
+        row.hidden = !match || (mode === 'home' && i >= 5);
+        if (!row.hidden) count++;
+      }
+      for (const button of remote.querySelectorAll('[data-music-import][data-saved-id]')) {
+        const saved = Array.from(list.querySelectorAll('[data-track-src]')).some(row => row.dataset.trackId === button.dataset.savedId);
+        if (!saved && button.textContent === '✓') { button.disabled = false; button.textContent = '+'; }
+      }
+      list.hidden = count === 0;
+      const empty = content.querySelector('[data-music-local-empty]');
+      empty.hidden = count > 0;
+      empty.innerHTML = q ? '<div class="profile-library-empty">' + t("В коллекции ничего не найдено") + '</div>' : libraryEmpty();
+      content.querySelector('[data-music-cards]').hidden = mode !== 'home';
+      content.querySelector('[data-music-visibility]').hidden = mode === 'search';
+      content.querySelector('[data-music-heading]').textContent = NoraI18n.t(mode === 'home' ? "Недавно добавлено" : mode === 'search' ? "В твоей коллекции" : "Мои треки");
+      catalog.hidden = mode !== 'search';
+      panel.querySelector('[data-library-count]').textContent = libraryCount(list.querySelectorAll('[data-track-src]').length);
+    }
+    function setMode(next, focus = false) {
+      mode = next;
+      for (const button of content.querySelectorAll('[data-music-tab]')) button.setAttribute('aria-pressed', String(button.dataset.musicTab === mode));
+      if (mode !== 'search') { input.value = ''; generation++; controller?.abort(); remote.innerHTML = ''; }
+      else if (!remote.innerHTML) remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+      filter();
+      if (focus) input.focus();
+    }
+    content.addEventListener('click', event => {
+      const button = event.target.closest('[data-music-tab], [data-music-go]');
+      if (button) {
+        const next = button.dataset.musicTab || button.dataset.musicGo;
+        setMode(next, next === 'search' && Boolean(button.dataset.musicGo));
+      }
+    });
+    input.addEventListener('input', () => {
+      generation++;
+      controller?.abort();
+      if (mode !== 'search') setMode('search');
+      remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+      filter();
+    });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (importPending) return;
+      const q = input.value.trim();
+      if (q.length < 2) { toast(NoraI18n.t("Введи от 2 до 120 символов.")); return; }
+      setMode('search');
+      input.blur();
+      controller?.abort();
+      controller = new AbortController();
+      const version = ++generation;
+      remote.innerHTML = '<p class="music-catalog-note" role="status">' + t("Ищем музыку…") + '</p>';
+      try {
+        const response = await api('music-library/search?' + new URLSearchParams({q}), null, controller.signal);
+        if (!alive() || version !== generation) return;
+        remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Добавление отправит песню в личку Норы и использует обычный лимит треков.") + '</p>' +
+          response.tracks.map(track => '<article class="music-catalog-row"><span class="music-catalog-art" aria-hidden="true">♫</span><div><strong>' +
+            esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></div><button type="button" data-music-import="' +
+            esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
+          '<p class="music-catalog-note">' + t("Треки не найдены") + '</p>';
+      } catch (error) {
+        if (alive() && version === generation) remote.textContent = error.message;
+      }
+    });
+    remote.addEventListener('click', async event => {
+      const button = event.target.closest('[data-music-import]');
+      if (!button || button.disabled || importPending) return;
+      importPending = true;
+      const version = generation;
+      button.disabled = true;
+      button.textContent = '…';
+      try {
+        const response = await api('music-library/import', {id: button.dataset.musicImport});
+        if (!alive()) return;
+        const track = response.track;
+        if (!Array.from(list.querySelectorAll('[data-track-id]')).some(row => row.dataset.trackId === String(track.id))) {
+          list.insertAdjacentHTML('afterbegin', html(track, '/api/music-library/' + track.id, true));
+        }
+        filter();
+        if (button.isConnected && version === generation) {
+          button.dataset.savedId = String(track.id);
+          button.textContent = '✓';
+          button.setAttribute('aria-label', NoraI18n.t("Добавлено в Мои треки"));
+        }
+        toast(NoraI18n.t("Добавлено в Мои треки"));
+      } catch (error) {
+        if (alive()) toast(error.message);
+        if (button.isConnected) { button.disabled = false; button.textContent = '+'; }
+      } finally {
+        importPending = false;
+      }
+    });
+    panel.addEventListener('music-collection-changed', filter);
+    filter();
+  }
+
   async function showLibrary(owner = '') {
     const path = owner ? 'people/' + encodeURIComponent(owner) + '/music-library' : 'music-library';
     const title = owner ? NoraI18n.t("Треки") : NoraI18n.t("Мои треки");
@@ -447,6 +575,7 @@ window.NoraProfileTrack = (() => {
       const result = await api(path);
       if (!panel.isConnected || !$('#sheet').open) return;
       const visibility = owner ? '' : ("<label class=\"profile-library-visibility\"><span><strong>" + NoraI18n.html("Публичная коллекция") + "</strong><small>" + NoraI18n.html("Другие участники смогут слушать твои треки") + "</small></span><input type=\"checkbox\" role=\"switch\" data-library-visibility ") + (result.public ? 'checked' : '') + '></label>';
+      if (!owner) { ownLibrary(panel, result, visibility); return; }
       panel.querySelector('[data-library-count]').textContent = libraryCount(result.tracks.length);
       panel.querySelector('.profile-library-content').innerHTML = (result.tracks.length
         ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/' + path + '/' + track.id, true, Boolean(owner))).join('') + '</div>'
@@ -512,7 +641,9 @@ window.NoraProfileTrack = (() => {
         if (active?.src === row.dataset.trackSrc) stop();
         const panel = row.closest('[data-music-library-panel]');
         row.remove();
-        if (panel) {
+        if (panel?.classList.contains('music-discovery')) {
+          panel.dispatchEvent(new Event('music-collection-changed'));
+        } else if (panel) {
           const count = panel.querySelectorAll('[data-track-src]').length;
           panel.querySelector('[data-library-count]').textContent = libraryCount(count);
           if (!count) panel.querySelector('.profile-library-list')?.insertAdjacentHTML('afterend', libraryEmpty());
