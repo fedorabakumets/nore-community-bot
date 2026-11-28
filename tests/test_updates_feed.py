@@ -90,3 +90,25 @@ async def test_uncertain_delivery_does_not_duplicate(monkeypatch):
     await updates_feed.run(db, settings, bot)
     await updates_feed.run(db, settings, bot)
     assert bot.send_rich_message.await_count == 1
+
+
+async def test_channel_publish_and_membership(monkeypatch):
+    monkeypatch.setenv("UPDATES_CHAT_ID", "@noranoranoranoranora")
+    monkeypatch.setattr(updates_feed, "is_production", lambda: True)
+    chat = group()
+    chat.type = "channel"
+    bot = AsyncMock()
+    bot.get_chat.return_value = chat
+    bot.send_rich_message.return_value = SimpleNamespace(message_id=42)
+    db = FakeDB()
+    settings = SimpleNamespace(community_chat_id=-100999)
+    event = SimpleNamespace(my_chat_member=SimpleNamespace(
+        new_chat_member=SimpleNamespace(status=ChatMemberStatus.ADMINISTRATOR),
+    ))
+    handler = AsyncMock()
+    await CommunityScopeMiddleware()(handler, event, {
+        "event_chat": chat, "settings": settings, "db": db, "bot": bot,
+    })
+    bot.send_rich_message.assert_awaited_once()
+    handler.assert_not_awaited()
+    bot.leave_chat.assert_not_awaited()
