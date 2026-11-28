@@ -763,13 +763,18 @@ window.NoraProfileTrack = (() => {
     const dialog = $('#sheet');
     const library = dialog.open && dialog.querySelector('#music-library-profile');
     const docked = Boolean(library && active);
+    const wasDocked = dialog.classList.contains('music-mini-docked');
+    const content = $('#sheet-content');
+    const scrollTop = library ? (wasDocked ? content.scrollTop : dialog.scrollTop) : 0;
     if (docked && mini.parentElement !== dialog) {
       dialog.append(mini);
+      mini.hidden = false;
       if (!miniMotion.matches) mini.animate?.([{opacity:0,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(.2,.8,.2,1)'});
     } else if (!docked && mini.parentElement !== miniHome) {
       miniHome.insertBefore(mini, miniNext);
     }
     dialog.classList.toggle('music-mini-docked', docked);
+    if (library && docked !== wasDocked) (docked ? content : dialog).scrollTop = scrollTop;
     return docked;
   }
 
