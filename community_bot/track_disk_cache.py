@@ -124,6 +124,8 @@ class TrackDiskCache:
                 raise
             except SongError as exc:
                 raise ValueError(str(exc)) from exc
+            except Exception as exc:
+                raise OSError('Catalog audio is unavailable') from exc
         return await self._open(track['file_id'], download)
 
     async def _open(self, identity, download):
