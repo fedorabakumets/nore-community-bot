@@ -1,9 +1,12 @@
 """Private, text-only matchmaking for the Mini App. No Telegram chat mirroring."""
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import secrets
 import time
+from contextlib import suppress
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -35,6 +38,8 @@ CREATE TABLE IF NOT EXISTS incognito_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_incognito_messages_session ON incognito_messages(session_id, id);
 """
+
+logger = logging.getLogger(__name__)
 
 QUEUE_TTL = 45
 IDLE_TTL = 1800
@@ -203,7 +208,7 @@ async def operate(db, uid, action, data=None, now=None):
 async def endpoint(request):
     action = request.match_info['action']
     try:
-        if request.content_length and request.content_length > 16000:
+        if request.content_length is None or request.content_length > 16000:
             raise ValueError('Слишком большой запрос')
         data = await request.json()
         result = await operate(request.app['db'], request['actor']['id'], action, data)
@@ -212,3 +217,24 @@ async def endpoint(request):
     except ValueError as exc:
         return web.json_response({'error': str(exc)}, status=400)
     return web.json_response(result)
+
+
+async def cleanup_context(app):
+    async def worker():
+        while True:
+            try:
+                async with app['db'].connect() as conn:
+                    await conn.execute('BEGIN IMMEDIATE')
+                    await purge(conn, time.time())
+                    await conn.commit()
+            except Exception:
+                logger.exception('Incognito cleanup failed')
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(worker())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
