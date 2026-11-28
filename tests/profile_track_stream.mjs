@@ -73,6 +73,19 @@ test('session cache rechecks access and avoids another audio download', async ()
   assert.equal(h.context.cached('/api/profile/track?v=one'),null);
 });
 
+test('same media through a different route reuses bytes only after checking the new route', async () => {
+  const h = harness();
+  const track = {id:'a'.repeat(64)};
+  h.context.respond = src => src.endsWith('&check=1')
+    ? new Response(null,{status:204})
+    : new Response(new Blob(['media'],{type:'audio/mpeg'}));
+  await h.context.load(Object.assign(h.state(), {track}));
+  await h.context.load(Object.assign(h.state('/api/music-library/history/id?v=one'), {track}));
+  assert.deepEqual(h.requests.map(request=>request.src), [
+    '/api/profile/track?v=one', '/api/music-library/history/id?v=one&check=1'
+  ]);
+});
+
 test('bounded LRU and auth changes clear cached tracks', () => {
   const h = harness();
   for (let i=0;i<9;i++) h.context.remember('track'+i,new Blob(['x']));
@@ -120,7 +133,7 @@ test('music mini player moves into modal, preserves scrolling and returns the sa
   const dialog = {open:true,library:panel,full:null,scrollTop:125,append(node){node.parentElement=this;},
     querySelector(s){return s==='#music-library-profile'?this.library:this.full;},
     classList:{contains(v){return classes.has(v);},toggle(v,on){if(on) classes.add(v);else classes.delete(v);}}};
-  const context = vm.createContext({mini,miniHome:home,miniNext:null,miniMotion:{matches:true},
+  const context = vm.createContext({mini,miniHome:home,miniNext:null,miniMotion:{matches:true},closeMotion:null,animateContent(){},
     $:s=>s==='#sheet'?dialog:content,active:{},playerReturn:null,libraryReturn:null,window:{},paint() {}});
   vm.runInContext(code+'\nthis.sync=syncMiniHost;this.closeFull=closeNowPlaying;',context);
   assert.equal(context.sync(),true);
@@ -131,10 +144,12 @@ test('music mini player moves into modal, preserves scrolling and returns the sa
   dialog.library=null;dialog.full={};
   assert.equal(context.sync(),false);
   assert.equal(mini.parentElement,dialog); // preserve the touch target during the swipe
+  assert.equal(mini.inert,true);
   assert.equal(context.closeFull(),true);
   assert.equal(dialog.library,panel);
   assert.equal(content.scrollTop,88);
   assert.equal(context.libraryReturn,7);
+  assert.equal(mini.inert,false);
   assert.equal(mini.parentElement,dialog);
   dialog.open=false;
   context.sync();
@@ -160,4 +175,44 @@ test('music mini is a viewport overlay and modal gestures do not depend on main 
   assert.equal(context.ready(),false);
   mini.hidden=false; player.open=false;
   assert.equal(context.ready(),false);
+});
+
+test('presence skips repeat requests for private listeners and preserves stop/start ordering', async () => {
+  const code = script.slice(script.indexOf('  function trackReference('),script.indexOf('  function paintNowSaved('));
+  const calls = [];
+  let respond;
+  const context = vm.createContext({
+    Date, active:null, activityPublic:undefined, activityVersion:0, pendingPresence:null, presenceRequest:null,
+    api(path, payload) {
+      calls.push([path, payload.source, payload.playing]);
+      return new Promise(resolve => { respond = resolve; });
+    }
+  });
+  vm.runInContext(code + '\nthis.announce=announcePresence;this.setPublic=setActivityPublic;', context);
+  const first = {src:'/api/profile/track?v=first'};
+  const second = {src:'/api/music-library/second?v=1'};
+  const wait = () => new Promise(resolve => setImmediate(resolve));
+  context.announce(first, true);
+  respond({public:false});
+  await wait();
+  context.announce(first, true);
+  context.announce(first, false);
+  context.announce(second, true);
+  assert.equal(calls.length, 1);
+  context.setPublic(true);
+  context.announce(first, true);
+  context.announce(first, false);
+  context.announce(second, true);
+  respond({public:true});
+  await wait();
+  assert.deepEqual(calls, [
+    ['music-library/playing','/api/profile/track',true],
+    ['music-library/playing','/api/profile/track',true],
+    ['music-library/playing','/api/music-library/second',true],
+  ]);
+  respond({public:true});
+  await wait();
+  context.announce(second, false);
+  assert.deepEqual(calls.at(-1), ['music-library/playing','/api/music-library/second',false]);
+  respond({ok:true});
 });

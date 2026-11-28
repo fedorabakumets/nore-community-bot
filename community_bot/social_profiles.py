@@ -291,6 +291,8 @@ async def save_profile_track(request):
 
 
 async def music_library(request):
+    from community_bot.music_discovery import SOCIAL_PREFIX
+
     db, uid = request.app["db"], request["actor"]["id"]
     if request.method == "POST":
         payload = await request.json()
@@ -302,9 +304,11 @@ async def music_library(request):
             return web.json_response({"error": str(error)}, status=400)
         return web.json_response(result)
     entries = await get_collection(db, uid)
-    return web.json_response({"public": await is_public(db, uid), "tracks": [
-        public_track(key, track) for key, track in reversed(list(entries.items()))
-    ]})
+    return web.json_response({
+        "public": await is_public(db, uid),
+        "activity_public": await db.get_bot_state(SOCIAL_PREFIX + str(uid)) == "1",
+        "tracks": [public_track(key, track) for key, track in reversed(list(entries.items()))],
+    })
 
 
 async def library_audio(request):
@@ -543,4 +547,4 @@ async def share_track(request):
     finally:
         if lease:
             lease.close()
-    return web.json_response({"sent": True, "message": "Трек отправлен в чат 🎧", "retry_after": COOLDOWN})
+    return web.json_response({"sent": True, "message": "Трек отправлен в чат", "retry_after": COOLDOWN})

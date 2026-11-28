@@ -1,16 +1,15 @@
-## Music overlay hotfix — 28.11.2026
+# AI_HANDOFF — NORA
 
-- Mini player is an absolute viewport overlay within the native modal, not a flex footer; only sheet-content scrolls, with 94px plus safe-area clearance. Existing body mini player placement remains unchanged. Keep the same mini node mounted in the dialog during fullscreen transitions to avoid iOS touch cancellation; modal swipe readiness bypasses main navigation blocking. Fullscreen collapse resets drag state before restoring the previous library DOM and scroll position. Cache-busted assets and regression tests added. Native iOS visual/gesture verification and Railway deployment verification remain outstanding.
+## Музыкальный плеер и свайпы — 28 ноября 2026
+
+- Рабочая ветка `chatgpt/music-player-polish` от `69b9697`, отдельная рабочая копия. В Mini App обновлены общие переходы, музыкальные экраны и мини-плеер. Мини-плеер поднимается свайпом, полноэкранный сворачивается вниз. Свайпы по мини-плееру и обложке листают очередь, по коллекции переключают вкладки. Возвращаются исходная вкладка, прокрутка и фокус. Кнопки и настройка уменьшенной анимации поддерживаются.
+- Музыкальные действия оформлены SVG. Один активный аудиопоток, без предварительной загрузки соседних треков. Кэш сессии переиспользует аудио по ID и версии после проверки текущего маршрута доступа. Прогресс рисуется отдельно от остальных элементов. Приватное прослушивание обходится без периодических запросов статуса. Лента друзей обновляется только пока видна, проверяет только друзей и пропускает расчёт общего топа. «Моя волна» переиспользует подборку в течение 20 минут.
+- Локальные проверки: 101 профильный тест Python, 8 тестов Node, синтаксис JS, Ruff для изменённых Python-файлов и pip check. Общий Ruff остановил `check_local.py` на ошибках вне изменённых файлов. Chromium проверил ширины 320–1440 px, WebKit проверил интерфейс с подставным аудио. Нативный Telegram, живой каталог и завершение развёртывания Railway проверяет владелец.
 
 ## My Wave — 28.11.2026
 
 - Uses the existing Yandex catalog search API rather than a new dependency, token or external recommendations service. Cold start samples three artist seeds from a varied fixed list, then favors up to two of the user's top eight artists (saved songs weighted 3, listening history weighted 1) plus exploration. Up to 15 results, shuffled, prefers tracks not previously heard/returned. It is a simple taste heuristic, not Yandex's official personalized radio. Metadata cache shared for 30 minutes, at most 128 queries; wave authorization private per user, two hours, at most 90 IDs. Three provider search slots shared with regular search; 4-second refresh protection. No background audio prefetch, no paid APIs or additional workers. On selecting a track the queue loads only its current audio and at end fetches another batch on demand. Existing 128 MB disk cache and 2 downloads unchanged. The same PR includes mini-player docking and search alignment. Verify provider and iOS in production.
 
-## Music Mini App polish — 28.11.2026
-
-- The original mini player is moved into the modal music library while a track is active, instead of creating another player or Audio instance. Footer slides in; content scrolls independently. The full player restores the same library DOM (tab, search, list and scroll) when dismissed via Back or swipe. Outside the library the player returns to its original location. Search input scoped CSS removes generic dialog borders/focus outlines and uses a single grid-aligned frame. Asset versions bumped. Added docking regression test; actual iOS appearance still requires visual check.
-
-# AI_HANDOFF — NORA
 ## Музыка / этап 2 — 28 ноября 2026
 
 - Ветка `chatgpt/music-social-stage2-20261128` от production `94d5653`: поиск теперь позволяет слушать без добавления. В Mini App нет дневного лимита, 60-секундного КД и отправки в личку; проверка питомца сохранена. Команда в Telegram не изменена. Каталог хранит проверенную ссылку `catalog:<id>`; сохранение не скачивает аудио, проигрывание загружает через общий дисковый кэш 128 МБ, до 20 МБ на файл, 2 одновременных скачивания и максимум 8 ожидающих/активных промахов кэша. Повторное скачивание только после вытеснения/перезапуска; Telegram-отправка только по явному share, Rich-карточки каталога показывают текст вместо нативного аудио. Без миграций и новых секретов.

@@ -163,6 +163,28 @@ async def test_chart_is_opt_in_and_counts_unique_listeners(tmp_path):
     assert not json.loads((await discovery.social(req)).body)["top"]
 
 
+async def test_friend_feed_uses_friends_only_and_keeps_privacy_checks(tmp_path):
+    db = Database(tmp_path / "friends.sqlite3")
+    await db.initialize()
+    for uid in (1, 2, 3):
+        await db.ensure_user(uid, telegram_name=str(uid))
+    await db.execute("INSERT INTO mini_friendships VALUES(1,2,1,'accepted','test','now','now',0,0)")
+    for uid in (2, 3):
+        await discovery.remember(db, uid, {
+            "file_id": str(uid), "revision": "a" * 32, "title": "Track",
+            "artist": "Artist", "duration": 90, "mime": "audio/mpeg",
+        }, listened=True)
+        await discovery.activity_visibility(Request(uid, db, None, payload={"public": True}))
+    request = Request(1, db, None, {"view": "friends"})
+    result = json.loads((await discovery.social(request)).body)
+    assert not result["top"]
+    assert [row["name"] for row in result["friends"]] == ["2"]
+    top = json.loads((await discovery.social(Request(1, db, None, {"view": "top"}))).body)
+    assert len(top["top"]) == 2 and not top["friends"]
+    await db.execute("INSERT INTO mini_friend_blocks VALUES(2,1,'test','now')")
+    assert not json.loads((await discovery.social(request)).body)["friends"]
+
+
 async def test_wave_uses_external_metadata_and_personal_taste_without_audio(tmp_path, monkeypatch):
     db = Database(tmp_path / "wave.sqlite3")
     await db.initialize()

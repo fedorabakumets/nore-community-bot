@@ -196,49 +196,61 @@ async def activity_visibility(request):
     return web.json_response({"public": payload["public"]})
 
 
-async def activity_rows(db, uid):
+async def activity_rows(db, uid, view="all"):
     # Include only explicitly shared, currently non-private, non-blocked profiles.
-    return await db.fetchall(
-        "SELECT h.value, u.user_id, u.telegram_name, "
+    friendship = (
         "EXISTS(SELECT 1 FROM mini_friendships f WHERE f.status='accepted' "
-        "AND ((f.low_id=u.user_id AND f.high_id=?) OR (f.high_id=u.user_id AND f.low_id=?))) AS friend "
-        "FROM bot_state h JOIN users u ON h.key='music_history:' || u.user_id "
-        "JOIN bot_state p ON p.key='music_activity_public:' || u.user_id AND p.value='1' "
+        "AND ((f.low_id=u.user_id AND f.high_id=?) OR (f.high_id=u.user_id AND f.low_id=?)))"
+    )
+    projection = ", " + friendship + " AS friend" if view == "all" else ""
+    source = (
+        "FROM (SELECT high_id AS user_id FROM mini_friendships WHERE low_id=? AND status='accepted' "
+        "UNION ALL SELECT low_id FROM mini_friendships WHERE high_id=? AND status='accepted') f "
+        "JOIN users u ON f.user_id=u.user_id "
+        if view == "friends" else "FROM users u "
+    )
+    return await db.fetchall(
+        "SELECT h.value, u.user_id, u.telegram_name" + projection + " " + source
+        + "JOIN bot_state p ON p.key='music_activity_public:' || u.user_id AND p.value='1' "
+        "JOIN bot_state h ON h.key='music_history:' || u.user_id "
         "WHERE COALESCE(u.profile_private,0)=0 "
         "AND NOT EXISTS(SELECT 1 FROM mini_friend_blocks b WHERE "
         "(b.blocker_id=? AND b.blocked_id=u.user_id) OR (b.blocker_id=u.user_id AND b.blocked_id=?))",
-        (uid, uid, uid, uid),
+        (uid, uid) if view == "top" else (uid, uid, uid, uid),
     )
 
 
 async def social(request):
     uid, db = request["actor"]["id"], request.app["db"]
     period = request.query.get("period", "week")
-    if period not in {"day", "week", "all"}:
-        return _error("Некорректный период.")
+    view = request.query.get("view", "all")
+    if period not in {"day", "week", "all"} or view not in {"top", "friends", "all"}:
+        return _error("Некорректный раздел или период.")
     cutoff = time.time() - {"day": 86400, "week": 604800, "all": 10**12}[period]
     ranked, friends = {}, []
     live_now = time.monotonic()
-    for owner, value in list(_LIVE.items()):
-        if value[0] <= live_now:
-            _LIVE.pop(owner, None)
-    for row in await activity_rows(db, uid):
+    for row in await activity_rows(db, uid, view):
         seen = set()
         latest = None
         live = _LIVE.get(row["user_id"])
+        friend = view == "friends" or (view == "all" and row["friend"] and row["user_id"] != uid)
         for key, record in json.loads(row["value"]).items():
             stamp, track = record["at"], record["track"]
             if not stamp:
                 continue
-            item = {**public_track(key, track), "source": "/api/music-library/social/" + key, "at": stamp}
-            if row["friend"] and row["user_id"] != uid:
-                playing = bool(live and live[1] == key)
+            if friend:
+                playing = bool(live and live[0] > live_now and live[1] == key)
                 if playing or latest is None or (not latest["playing"] and stamp > latest["at"]):
-                    latest = {**item, "name": row["telegram_name"] or "Участник", "playing": playing}
-            if stamp < cutoff:
+                    latest = {**public_track(key, track), "source": "/api/music-library/social/" + key,
+                              "at": stamp, "name": row["telegram_name"] or "Участник", "playing": playing}
+            if view == "friends" or stamp < cutoff:
                 continue
             identity = track.get("catalog_id") or key
-            entry = ranked.setdefault(identity, {**item, "listeners": 0})
+            entry = ranked.get(identity)
+            if entry is None:
+                entry = ranked[identity] = {**public_track(key, track),
+                                            "source": "/api/music-library/social/" + key,
+                                            "at": stamp, "listeners": 0}
             if identity not in seen:
                 entry["listeners"] += 1
                 seen.add(identity)
@@ -251,14 +263,17 @@ async def social(request):
 
 
 async def resolve(db, uid, source, revision):
-    match = re.fullmatch(r"/api/music-library/(history|social)/([a-f0-9]{64})", source) if isinstance(source, str) else None
+    match = (
+        re.fullmatch(r"/api/music-library/(history|social)/([a-f0-9]{64})", source)
+        if isinstance(source, str) else None
+    )
     if not match or not isinstance(revision, str):
         return None
     scope, key = match.groups()
     if scope == "history":
         records = [await read_history(db, uid)]
     else:
-        records = [json.loads(row["value"]) for row in await activity_rows(db, uid)]
+        records = (json.loads(row["value"]) for row in await activity_rows(db, uid, "top"))
     for entries in records:
         record = entries.get(key)
         if record and (scope == "history" or record["at"]) and record["track"]["revision"] == revision:
@@ -314,9 +329,12 @@ async def playing(request):
     body = await request.json()
     if not isinstance(body, dict) or type(body.get("playing")) is not bool:
         return _error("Некорректный запрос.")
-    if not body["playing"] or await db.get_bot_state(SOCIAL_PREFIX + str(uid)) != "1":
+    if not body["playing"]:
         _LIVE.pop(uid, None)
         return web.json_response({"ok": True})
+    if await db.get_bot_state(SOCIAL_PREFIX + str(uid)) != "1":
+        _LIVE.pop(uid, None)
+        return web.json_response({"ok": True, "public": False})
     source = body.get("source")
     if not isinstance(source, str) or not source.startswith(("/api/music-library/", "/api/profile/track")):
         return _error("Некорректный трек.")
@@ -326,7 +344,7 @@ async def playing(request):
     if len(_LIVE) >= 512 and uid not in _LIVE:
         _LIVE.pop(next(iter(_LIVE)), None)
     _LIVE[uid] = (time.monotonic() + 40, track_id(track))
-    return web.json_response({"ok": True})
+    return web.json_response({"ok": True, "public": True})
 
 
 def _wave_prune(now):

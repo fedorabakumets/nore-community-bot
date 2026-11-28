@@ -177,7 +177,7 @@ const NoraProfileWaves = (() => {
       s.element?.style.setProperty('--music-energy',Math.max(s.energy*.45,s.beat).toFixed(3));
       s.layer.style.setProperty('--music-beat',s.beat.toFixed(3));
     }
-    if(!reduced.matches)s.raf=requestAnimationFrame(t=>tick(s,t));
+    if(s.renderer&&!reduced.matches)s.raf=requestAnimationFrame(t=>tick(s,t));
   }
   function wake(s) {
     if(!s||!s.running||document.hidden||s.raf)return;
@@ -185,7 +185,7 @@ const NoraProfileWaves = (() => {
   }
   function sync(element,playing,track=null) {
     const person=element?.closest('#person-profile');
-    const own=element?.closest('#app[data-screen="lk"] .lk-screen');
+    const own=!document.querySelector('dialog[open]')&&element?.closest('#app[data-screen="lk"] .lk-screen');
     const host=person&&person.closest('dialog')?.open?person.closest('dialog'):own?document.body:null;
     if(!playing||!host||!element.isConnected){
       if(scene?.running)stopScene(scene,!host||!element?.isConnected);
@@ -224,8 +224,9 @@ const NoraProfileWaves = (() => {
 
 window.NoraProfileTrack = (() => {
   let active = null, libraryReturn = null;
-  let queue = [], queueIndex = -1, shuffle = false, repeat = false;
-  let playIntent = 0, playerReturn = null;
+  let queue = [], queueIndex = -1, shuffle = false, repeat = false, queueLoading = false;
+  let playIntent = 0, playerReturn = null, closeMotion = null;
+  let activityPublic, activityVersion = 0, presenceRequest = null, pendingPresence = null;
   const mini = document.getElementById('nora-mini-player');
   const miniHome = mini.parentElement, miniNext = mini.nextSibling;
   const miniOpen = mini.querySelector('[data-mini-open]');
@@ -236,6 +237,36 @@ window.NoraProfileTrack = (() => {
   const miniShare = mini.querySelector('[data-mini-share]');
   let sharePending = false, miniSource = '', sharedSource = '', shareUntil = 0, shareTimer = 0;
   const miniMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const icons = {
+    note:'M9 18V5l12-2v13M9 9l12-2M9 18c0 2.7-6 2.7-6 0s6-2.7 6 0Zm12-2c0 2.7-6 2.7-6 0s6-2.7 6 0Z',
+    search:'M16 16l4 4m-2-9a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z',
+    arrow:'m9 6 6 6-6 6',
+    down:'m6 9 6 6 6-6',
+    check:'m5 12 4 4L19 6',
+    plus:'M12 5v14M5 12h14',
+    play:'M8 5v14l11-7z',
+    pause:'M7 5h3v14H7zM14 5h3v14h-3z',
+    next:'M5 5v14l11-7zM19 5v14',
+    prev:'M19 5v14L8 12zM5 5v14',
+    shuffle:'M3 6h3c4 0 6 12 10 12h5m-3-3 3 3-3 3M3 18h3c1.6 0 2.8-2 4-4m4-4c.8-2.4 2-4 4-4h3m-3-3 3 3-3 3',
+    repeat:'M20 7H7a3 3 0 0 0-3 3v1m13-7 3 3-3 3M4 17h13a3 3 0 0 0 3-3v-1m-13 7-3-3 3-3',
+    refresh:'M20 5v5h-5m5 0a8 8 0 1 0 .1 4',
+    send:'m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13',
+    heart:'M20.8 8.5c0 4.1-8.8 9.7-8.8 9.7S3.2 12.6 3.2 8.5a4.7 4.7 0 0 1 8.8-2.3 4.7 4.7 0 0 1 8.8 2.3Z',
+    loading:'M20 12a8 8 0 1 1-8-8',
+  };
+  function icon(name, className = '') {
+    const filled = name === 'play' || name === 'pause';
+    return '<svg class="music-icon ' + className + '" viewBox="0 0 24 24" fill="' + (filled ? 'currentColor' : 'none') +
+      '" stroke="currentColor" stroke-width="' + (filled ? '1.1' : '1.7') + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + icons[name] + '"/></svg>';
+  }
+  function animateContent(element, distance = 0) {
+    if (miniMotion.matches) return;
+    return element.animate?.([
+      {opacity:.65, transform:'translate3d(' + distance + 'px,' + (distance ? 0 : 8) + 'px,0)'},
+      {opacity:1, transform:'translate3d(0,0,0)'}
+    ], {duration:230, easing:'cubic-bezier(.22,.72,.25,1)'});
+  }
   // Session-only LRU: never persist private profile music on a shared device.
   const musicCache = new Map();
   const musicCacheLimit = 64 * 1024 * 1024, musicCacheCount = 8, musicCacheTTL = 20 * 60 * 1000;
@@ -385,17 +416,20 @@ window.NoraProfileTrack = (() => {
   function coverImage(track, className = 'music-cover') {
     const url = track?.cover;
     if (typeof url !== 'string' || !/^https:\/\/avatars(?:\.mds)?\.yandex\.net\/[A-Za-z0-9_./-]+$/.test(url)) return '';
-    return '<img class="' + className + '" src="' + esc(url) + '" loading="lazy" referrerpolicy="no-referrer" alt="">';
+    const full = className === 'music-full-cover';
+    return '<img class="' + className + '" src="' + esc(url) + '" decoding="async"' +
+      (full ? '' : ' loading="lazy"') + ' referrerpolicy="no-referrer" alt="">';
   }
 
   function html(track, endpoint, library = false, readonly = false) {
     if (!track) return '';
     const src = endpoint + '?v=' + encodeURIComponent(track.revision);
     const saved = library || Boolean(track.saved);
-    const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? NoraI18n.t("Удалить из моих треков") : NoraI18n.t("Добавить в мои треки")}">${saved ? '✓' : '+'}</button>` : '';
+    const save = track.id && !readonly ? `<button type="button" class="profile-track-save" data-track-save data-track-id="${esc(track.id)}" data-save-path="${esc(library ? 'music-library' : endpoint.slice(5) + '/save')}" data-track-revision="${esc(track.revision)}" data-saved="${saved}" aria-pressed="${saved}" aria-label="${saved ? NoraI18n.t("Удалить из моих треков") : NoraI18n.t("Добавить в мои треки")}">${icon(saved ? 'check' : 'plus')}</button>` : '';
     return `<section class="profile-track" data-track-src="${esc(src)}" data-track-id="${esc(track.id || '')}" data-track-title="${esc(track.title)}" data-track-artist="${esc(track.artist || NoraI18n.t("Неизвестен"))}" data-track-length="${esc(track.duration || 0)}" data-track-cover="${esc(track.cover || '')}" aria-label="${library ? NoraI18n.t("Сохранённый трек") : NoraI18n.t("Трек профиля")}"><div class="profile-track-actions">
       <button type="button" class="profile-track-toggle" data-track-toggle aria-label="${NoraI18n.html("Включить трек:")} ${esc(track.title)}">
-        ${library ? coverImage(track) : ''}<span class="profile-track-copy">
+        ${library ? '<span class="music-track-art" aria-hidden="true">' + coverImage(track) +
+          icon('play') + icon('pause') + icon('loading', 'music-loading') + '</span>' : ''}<span class="profile-track-copy">
           <strong title="${esc(track.title)}">${esc(track.title)}</strong>
           <small>${library ? '' : '– '}${esc(track.artist || NoraI18n.t("Неизвестен"))}</small>
         </span>
@@ -409,7 +443,7 @@ window.NoraProfileTrack = (() => {
   }
 
   function libraryButton(owner = '') {
-    return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? NoraI18n.t("Треки") : NoraI18n.t("Мои треки")} <span aria-hidden="true">›</span></button>`;
+    return `<button type="button" class="profile-library-open" data-music-library="${esc(owner)}">${owner ? NoraI18n.t("Треки") : NoraI18n.t("Мои треки")} ${icon('arrow')}</button>`;
   }
 
   function libraryScreen(title, subtitle, content) {
@@ -431,8 +465,10 @@ window.NoraProfileTrack = (() => {
   function back() {
     const dialog = $('#sheet');
     if (!dialog.open) return false;
-    if ($('#nora-now-playing')) { closeNowPlaying(); return true; }
-    if (!$('#music-library-profile')) return false;
+    if ($('#nora-now-playing')) return closeNowPlaying({animate:true});
+    const library = $('#music-library-profile');
+    if (!library) return false;
+    if (library.musicBack?.()) return true;
     const origin = libraryReturn;
     libraryReturn = null;
     if (origin) {
@@ -449,7 +485,7 @@ window.NoraProfileTrack = (() => {
     panel.querySelector('.profile-library-header h2').textContent = NoraI18n.t("Музыка");
     const content = panel.querySelector('.profile-library-content');
     const t = NoraI18n.html;
-    content.innerHTML = '<form class="music-search" data-music-search><span aria-hidden="true">⌕</span>' +
+    content.innerHTML = '<form class="music-search" data-music-search>' + icon('search') +
       '<input type="search" maxlength="120" data-music-query placeholder="' + t("Трек, исполнитель…") + '" aria-label="' + t("Поиск музыки") + '">' +
       '<button type="submit">' + t("Найти") + '</button></form>' +
       '<div class="music-tabs" role="group" aria-label="' + t("Музыка") + '">' +
@@ -457,16 +493,16 @@ window.NoraProfileTrack = (() => {
       '<button type="button" data-music-tab="mine" aria-pressed="false">' + t("Мои треки") + '</button>' +
       '<button type="button" data-music-tab="search" aria-pressed="false">' + t("Поиск") + '</button></div>' +
       '<div class="music-discovery-cards" data-music-cards>' +
-      '<button type="button" class="music-feature music-feature-purple" data-music-go="wave"><small>NORA / WAVE</small><strong>' + t("Моя волна") + '</strong><span>' + t("Музыка в твоём вкусе") + ' ↗</span></button>' +
-      '<button type="button" class="music-feature music-feature-red" data-music-go="top"><small>NORA / TOP</small><strong>' + t("Топ Норы") + '</strong><span>' + t("Популярная музыка") + ' ↗</span></button>' +
-      '<button type="button" class="music-feature music-feature-blue" data-music-go="friends"><small>FRIENDS</small><strong>' + t("Музыка друзей") + '</strong><span>' + t("На одной волне") + ' ↗</span></button>' +
-      '<button type="button" class="music-feature music-feature-history" data-music-go="history"><small>RECENT</small><strong>' + t("История") + '</strong><span>' + t("Недавно слушал") + ' ↗</span></button></div>' +
+      '<button type="button" class="music-feature music-feature-purple" data-music-go="wave"><strong>' + t("Моя волна") + '</strong><span>' + t("Музыка в твоём вкусе") + '</span>' + icon('arrow') + '</button>' +
+      '<button type="button" class="music-feature music-feature-red" data-music-go="top"><strong>' + t("Топ Норы") + '</strong><span>' + t("Популярная музыка") + '</span>' + icon('arrow') + '</button>' +
+      '<button type="button" class="music-feature music-feature-blue" data-music-go="friends"><strong>' + t("Музыка друзей") + '</strong><span>' + t("На одной волне") + '</span>' + icon('arrow') + '</button>' +
+      '<button type="button" class="music-feature music-feature-history" data-music-go="history"><strong>' + t("История") + '</strong><span>' + t("Недавно слушал") + '</span>' + icon('arrow') + '</button></div>' +
       '<section data-music-social hidden><div class="music-social-header"><h3 data-music-social-title></h3><div data-music-period class="music-period" hidden><button type="button" data-period="day">' + t("Сутки") + '</button><button type="button" data-period="week" aria-pressed="true">' + t("Неделя") + '</button><button type="button" data-period="all">' + t("Вся история") + '</button></div></div><div data-music-social-results aria-live="polite"></div></section>' +
       '<label class="profile-library-visibility" data-music-activity-wrap><span><strong>' + t("Музыкальная активность") + '</strong><small>' + t("Друзья увидят недавнюю музыку, треки попадут в общий рейтинг") + '</small></span><input type="checkbox" role="switch" data-music-activity disabled></label>' +
       '<div class="music-discovery-heading"><h3 data-music-heading>' + t("Недавно добавлено") + '</h3></div>' +
       '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/music-library/' + track.id, true)).join('') + '</div>' +
       '<div data-music-local-empty hidden>' + libraryEmpty() + '</div>' +
-      '<section data-music-catalog hidden><div class="music-wave-head"><h3 data-catalog-heading>' + t("Яндекс Музыка") + '</h3><button type="button" data-wave-refresh hidden>' + t("Обновить") + ' ↻</button></div><div data-music-results aria-live="polite"></div></section>' +
+      '<section data-music-catalog hidden><div class="music-wave-head"><h3 data-catalog-heading>' + t("Яндекс Музыка") + '</h3><button type="button" data-wave-refresh hidden>' + t("Обновить") + icon('refresh') + '</button></div><div data-music-results aria-live="polite"></div></section>' +
       '<div data-music-visibility>' + visibility + '</div>';
     const form = content.querySelector('[data-music-search]');
     const input = content.querySelector('[data-music-query]');
@@ -476,20 +512,28 @@ window.NoraProfileTrack = (() => {
     const social = content.querySelector('[data-music-social]');
     const socialResults = content.querySelector('[data-music-social-results]');
     const activity = content.querySelector('[data-music-activity]');
-    let mode = 'home', generation = 0, controller = null, importPending = false, socialGeneration = 0, period = 'week', waveTracks = [];
+    const modes = ['home', 'mine', 'search'];
+    const scroller = $('#sheet-content');
+    const searchHint = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+    let mode = 'home', generation = 0, controller = null, importPending = false, period = 'week';
+    let waveResponse = null, waveRequest = null, waveExpires = 0;
+    let socialRequest = null, friendsRefresh = 0, paneMotion = null;
     const alive = () => panel.isConnected && $('#sheet').open;
     const normalize = value => value.toLocaleLowerCase().trim();
     function filter() {
       const q = normalize(input.value);
+      const words = q ? q.split(/\s+/) : [];
+      const rows = Array.from(list.querySelectorAll('[data-track-src]'));
+      const ids = new Set(rows.map(row => row.dataset.trackId));
       let count = 0;
-      for (const [i, row] of Array.from(list.querySelectorAll('[data-track-src]')).entries()) {
-        const match = !q || q.split(/\s+/).every(word => normalize(row.dataset.trackTitle + ' ' + row.dataset.trackArtist).includes(word));
+      for (const [i, row] of rows.entries()) {
+        const title = normalize(row.dataset.trackTitle + ' ' + row.dataset.trackArtist);
+        const match = words.every(word => title.includes(word));
         row.hidden = !match || (mode === 'home' && i >= 5);
         if (!row.hidden) count++;
       }
       for (const button of remote.querySelectorAll('[data-music-import][data-saved-id]')) {
-        const saved = Array.from(list.querySelectorAll('[data-track-src]')).some(row => row.dataset.trackId === button.dataset.savedId);
-        if (!saved && button.textContent === '✓') { button.disabled = false; button.textContent = '+'; }
+        if (button.dataset.importState === 'check' && !ids.has(button.dataset.savedId)) paintImport(button, 'plus');
       }
       const socialMode = ['top','friends','history'].includes(mode);
       const waveMode = mode === 'wave';
@@ -506,117 +550,174 @@ window.NoraProfileTrack = (() => {
       content.querySelector('.music-discovery-heading').hidden = socialMode || waveMode;
       social.hidden = !socialMode;
       content.querySelector('[data-music-activity-wrap]').hidden = mode === 'search' || waveMode;
-      panel.querySelector('[data-library-count]').textContent = libraryCount(list.querySelectorAll('[data-track-src]').length);
+      panel.querySelector('[data-library-count]').textContent = libraryCount(rows.length);
     }
-    function setMode(next, focus = false) {
+    function setMode(next, {fromInput = false, direction = 0} = {}) {
+      if (next === mode) return;
       const previousMode = mode;
       mode = next;
+      stopSocial();
       for (const button of content.querySelectorAll('[data-music-tab]')) button.setAttribute('aria-pressed', String(button.dataset.musicTab === mode));
-      if (mode !== 'search') { input.value = ''; generation++; controller?.abort(); remote.innerHTML = ''; }
-      else if (previousMode !== 'search' || !remote.innerHTML) remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+      if (mode !== 'search') { input.value = ''; generation++; controller?.abort(); remote.replaceChildren(); }
+      else remote.innerHTML = searchHint;
       filter();
+      if (!fromInput) {
+        scroller.scrollTop = 0;
+        const distance = direction || Math.sign(modes.indexOf(mode) - modes.indexOf(previousMode));
+        let pane = list.hidden ? content.querySelector('[data-music-local-empty]') : list;
+        if (mode === 'wave' || mode === 'search') pane = catalog;
+        if (['top','friends','history'].includes(mode)) pane = social;
+        if (mode === 'home') pane = content.querySelector('[data-music-cards]');
+        paneMotion?.cancel();
+        paneMotion = animateContent(pane, distance * 14);
+      }
       if (mode === 'wave') void loadWave();
       if (['top','friends','history'].includes(mode)) void loadSocial();
-      else socialGeneration++;
-      if (focus) input.focus();
     }
+    panel.musicSwipe = direction => {
+      const index = modes.indexOf(mode);
+      const next = index >= 0 && modes[index + direction];
+      if (next) setMode(next, {direction});
+      return Boolean(next);
+    };
+    panel.musicBack = () => {
+      if (mode === 'home') return false;
+      setMode('home');
+      return true;
+    };
 
     function socialRow(track, label = '') {
       const live = track.playing ? '<span class="music-equalizer" aria-hidden="true"><i></i><i></i><i></i></span> ' + t("Сейчас слушает") : '';
       return '<div class="music-social-item">' + (label ? '<p class="music-social-label">' + esc(label) + (live ? ' · ' + live : '') + '</p>' : '') +
         html(track, track.source, true, true) + '</div>';
     }
-    let friendsRefresh = 0;
-    async function loadSocial(quiet = false) {
+    function stopSocial() {
       clearTimeout(friendsRefresh);
-      const version = ++socialGeneration;
+      socialRequest?.abort();
+      socialRequest = null;
+    }
+    async function loadSocial(quiet = false) {
+      stopSocial();
+      if (!alive() || document.hidden) return;
+      const request = socialRequest = new AbortController();
       const kind = mode;
       content.querySelector('[data-music-social-title]').textContent = NoraI18n.t({top:"Топ Норы",friends:"Музыка друзей",history:"История"}[kind]);
       content.querySelector('[data-music-period]').hidden = kind !== 'top';
       for (const item of content.querySelectorAll('[data-period]')) item.setAttribute('aria-pressed', String(item.dataset.period === period));
-      if (!quiet) socialResults.innerHTML = '<p class="music-catalog-note">' + t("Загрузка…") + '</p>';
+      if (!quiet) {
+        socialResults.musicMarkup = '';
+        socialResults.innerHTML = '<p class="music-catalog-note">' + t("Загрузка…") + '</p>';
+      }
       try {
-        const response = await api(kind === 'history' ? 'music-library/history' : 'music-library/social?' + new URLSearchParams({period}));
-        if (!alive() || version !== socialGeneration) return;
+        const path = kind === 'history' ? 'music-library/history' : 'music-library/social?' + new URLSearchParams({period, view:kind});
+        const response = await api(path, null, request.signal);
+        if (!alive() || request.signal.aborted) return;
         const tracks = kind === 'history' ? response.tracks : kind === 'top' ? response.top : response.friends;
-        socialResults.innerHTML = tracks.length ? '<div class="music-social-list">' +
+        const markup = tracks.length ? '<div class="music-social-list">' +
           tracks.map((track, i) => socialRow(track, kind === 'top' ? (i+1) + ' · ' + track.listeners + ' ' + NoraI18n.t("слушателей") : kind === 'friends' ? track.name : '')).join('') + '</div>' :
           '<div class="profile-library-empty">' + t("Здесь пока тихо") + '</div>';
+        if (socialResults.musicMarkup !== markup) {
+          socialResults.innerHTML = markup;
+          socialResults.musicMarkup = markup;
+        }
       } catch (error) {
-        if (alive() && version === socialGeneration && !quiet) socialResults.textContent = error.message;
+        if (alive() && !request.signal.aborted && !quiet) socialResults.textContent = error.message;
       } finally {
-        if (kind === 'friends' && alive() && version === socialGeneration) friendsRefresh = setTimeout(() => {
-          if (alive() && mode === 'friends') void loadSocial(true);
-        }, 20000);
+        if (kind === 'friends' && alive() && !document.hidden && !request.signal.aborted) {
+          friendsRefresh = setTimeout(() => void loadSocial(true), 30000);
+        }
       }
     }
-    void api('music-library/history').then(value => {
-      if (alive()) { activity.checked = Boolean(value.public); activity.disabled = false; }
-    }).catch(() => {});
+    panel.addEventListener('music-library-hidden', stopSocial);
+    panel.addEventListener('music-library-restored', () => {
+      if (mode === 'friends') void loadSocial(true);
+      else if (['top','history'].includes(mode) && !socialResults.musicMarkup) void loadSocial();
+    });
+    setActivityPublic(result.activity_public === true);
+    activity.checked = activityPublic;
+    activity.disabled = false;
     activity.addEventListener('change', async () => {
       const value = activity.checked;
       activity.disabled = true;
-      try { await api('music-library/activity', {public:value}); }
+      try {
+        const response = await api('music-library/activity', {public:value});
+        setActivityPublic(response.public);
+      }
       catch (error) { activity.checked = !value; toast(error.message); }
       finally { activity.disabled = false; }
       if (['top','friends'].includes(mode)) void loadSocial();
     });
     content.addEventListener('click', event => {
       const periodButton = event.target.closest('[data-period]');
-      if (periodButton) { period = periodButton.dataset.period; void loadSocial(); return; }
+      if (periodButton) {
+        if (period !== periodButton.dataset.period) { period = periodButton.dataset.period; void loadSocial(); }
+        return;
+      }
       const button = event.target.closest('[data-music-tab], [data-music-go]');
       if (button) {
         const next = button.dataset.musicTab || button.dataset.musicGo;
-        setMode(next, next === 'search' && Boolean(button.dataset.musicGo));
+        setMode(next);
       }
     });
     input.addEventListener('input', () => {
       generation++;
       controller?.abort();
-      if (mode !== 'search') setMode('search');
-      remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+      if (mode !== 'search') setMode('search', {fromInput:true});
+      remote.innerHTML = searchHint;
       filter();
     });
     function renderCatalog(response, wave = false) {
       remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t(wave ? (response.personalized ? "Подборка по твоему вкусу и новые открытия" : "Случайная музыка из каталога") : "Слушай без лимитов. Новому треку может понадобиться время на загрузку.") + '</p>' +
-          response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">▶</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
+          response.tracks.map(track => '<article class="music-catalog-row"><button type="button" class="music-catalog-art" data-music-play="' + esc(track.id) + '" aria-label="' + t("Воспроизвести") + '">' + coverImage(track) + '<span class="music-catalog-glyph">' + icon('play') + icon('pause') + icon('loading', 'music-loading') + '</span></button><button type="button" class="music-catalog-copy" data-music-play="' + esc(track.id) + '"><strong>' +
             esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></button><button type="button" data-music-import="' +
-            esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
+            esc(track.id) + '" data-import-state="' + (track.saved_id ? 'check' : 'plus') + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>' + icon('check') : '>' + icon('plus')) + '</button></article>').join('') :
           '<p class="music-catalog-note">' + t("Треки не найдены") + '</p>';
+      const matching = Array.from(remote.querySelectorAll('.music-catalog-art')).find(button =>
+        button.dataset.musicPlay === active?.catalogId);
+      if (matching) matching.closest('.music-catalog-row').dataset.playSource = active.src;
+      paintCatalog(active);
     }
-    async function loadWave() {
+    async function loadWave(refresh = false) {
       if (importPending) return;
+      if (waveResponse && !refresh && Date.now() < waveExpires) { renderCatalog(waveResponse, true); filter(); return; }
       const version = ++generation;
-      const refresh = content.querySelector('[data-wave-refresh]');
-      refresh.disabled = true;
+      const button = content.querySelector('[data-wave-refresh]');
+      button.disabled = true;
       remote.innerHTML = '<p class="music-catalog-note" role="status">' + t("Собираем твою волну…") + '</p>';
+      const request = waveRequest ||= api('music-library/wave');
       try {
-        const response = await api('music-library/wave');
-        if (!alive() || version !== generation || mode !== 'wave') return;
-        waveTracks = response.tracks;
-        renderCatalog(response, true);
+        waveResponse = await request;
+        waveExpires = Date.now() + 20 * 60 * 1000;
+        if (alive() && version === generation && mode === 'wave') { renderCatalog(waveResponse, true); filter(); }
       } catch (error) {
         if (alive() && version === generation) remote.textContent = error.message;
-      } finally { refresh.disabled = false; }
+      } finally {
+        if (waveRequest === request) waveRequest = null;
+        button.disabled = false;
+      }
     }
-    content.querySelector('[data-wave-refresh]').addEventListener('click', () => void loadWave());
+    content.querySelector('[data-wave-refresh]').addEventListener('click', () => void loadWave(true));
     form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (importPending) return;
+      if (importPending || form.hasAttribute('aria-busy')) return;
       const q = input.value.trim();
       if (q.length < 2) { toast(NoraI18n.t("Введи от 2 до 120 символов.")); return; }
       setMode('search');
       input.blur();
       controller?.abort();
       controller = new AbortController();
+      const signal = controller.signal;
       const version = ++generation;
+      form.setAttribute('aria-busy', 'true');
       remote.innerHTML = '<p class="music-catalog-note" role="status">' + t("Ищем музыку…") + '</p>';
       try {
-        const response = await api('music-library/search?' + new URLSearchParams({q}), null, controller.signal);
+        const response = await api('music-library/search?' + new URLSearchParams({q}), null, signal);
         if (!alive() || version !== generation) return;
         renderCatalog(response);
       } catch (error) {
         if (alive() && version === generation) remote.textContent = error.message;
+      } finally {
+        if (controller?.signal === signal) form.removeAttribute('aria-busy');
       }
     });
     remote.addEventListener('click', async event => {
@@ -631,30 +732,36 @@ window.NoraProfileTrack = (() => {
         const intent = ++playIntent;
         const version = generation;
         importPending = true;
-        const art = row.querySelector('.music-catalog-glyph');
-        art.textContent = '…';
+        row.dataset.musicState = 'loading';
         try {
           const isWave = mode === 'wave';
           const response = await api('music-library/play', {id:playButton.dataset.musicPlay, wave:isWave});
           if (!alive() || version !== generation || intent !== playIntent) return;
           const track = response.track;
-          const item = {src: response.source + '?v=' + encodeURIComponent(track.revision), track};
+          const item = {src: response.source + '?v=' + encodeURIComponent(track.revision), track, catalogId:playButton.dataset.musicPlay};
           row.dataset.playSource = item.src;
+          if (active?.src === item.src) {
+            paintCatalog(active);
+            void toggleActive(active);
+            return;
+          }
           if (isWave) {
-            queue = waveTracks.map(t => t.id === playButton.dataset.musicPlay ? {...item,wave:true,catalogId:t.id} : {wave:true,catalogId:t.id,track:t});
+            queue = waveResponse.tracks.map(t => t.id === playButton.dataset.musicPlay ? {...item,wave:true,catalogId:t.id} : {wave:true,catalogId:t.id,track:t});
             queueIndex = queue.findIndex(t=>t.catalogId === playButton.dataset.musicPlay);
           } else { queue = [item]; queueIndex = 0; }
           void startTrack(item);
         } catch (error) { if (alive()) toast(error.message); }
-        finally { importPending = false; if (art.textContent === '…') art.textContent = '▶'; }
+        finally {
+          importPending = false;
+          if (active?.src !== row.dataset.playSource || !row.dataset.playSource) row.dataset.musicState = 'idle';
+        }
         return;
       }
       const button = event.target.closest('[data-music-import]');
       if (!button || button.disabled || importPending) return;
       importPending = true;
       const version = generation;
-      button.disabled = true;
-      button.textContent = '…';
+      paintImport(button, 'loading');
       try {
         const response = await api('music-library/import', {id: button.dataset.musicImport, wave:mode === 'wave'});
         if (!alive()) return;
@@ -665,13 +772,12 @@ window.NoraProfileTrack = (() => {
         filter();
         if (button.isConnected && version === generation) {
           button.dataset.savedId = String(track.id);
-          button.textContent = '✓';
-          button.setAttribute('aria-label', NoraI18n.t("Добавлено в Мои треки"));
+          paintImport(button, 'check');
         }
         toast(NoraI18n.t("Добавлено в Мои треки"));
       } catch (error) {
         if (alive()) toast(error.message);
-        if (button.isConnected) { button.disabled = false; button.textContent = '+'; }
+        if (button.isConnected) paintImport(button, 'plus');
       } finally {
         importPending = false;
       }
@@ -692,7 +798,7 @@ window.NoraProfileTrack = (() => {
     $('#sheet-content').scrollTop = 0;
     try {
       const result = await api(path);
-      if (!panel.isConnected || !$('#sheet').open) return;
+      if ((!panel.isConnected && playerReturn?.panel !== panel) || !$('#sheet').open) return;
       const visibility = owner ? '' : ("<label class=\"profile-library-visibility\"><span><strong>" + NoraI18n.html("Публичная коллекция") + "</strong><small>" + NoraI18n.html("Другие участники смогут слушать твои треки") + "</small></span><input type=\"checkbox\" role=\"switch\" data-library-visibility ") + (result.public ? 'checked' : '') + '></label>';
       if (!owner) { ownLibrary(panel, result, visibility); return; }
       panel.querySelector('[data-library-count]').textContent = libraryCount(result.tracks.length);
@@ -700,15 +806,31 @@ window.NoraProfileTrack = (() => {
         ? '<div class="profile-library-list">' + result.tracks.map(track => html(track, '/api/' + path + '/' + track.id, true, Boolean(owner))).join('') + '</div>'
         : libraryEmpty()) + visibility;
     } catch (error) {
-      if (panel.isConnected) {
+      if (panel.isConnected || playerReturn?.panel === panel) {
         panel.querySelector('[data-library-count]').textContent = NoraI18n.t("Коллекция недоступна");
         panel.querySelector('.profile-library-content').innerHTML = '<div class="profile-library-empty">' + esc(error.message) + '</div>';
       }
     }
   }
 
+  let visibleLibrary = null;
+  function updateLibraryVisibility() {
+    const dialog = $('#sheet');
+    const panel = !document.hidden && dialog.open && dialog.querySelector('#music-library-profile');
+    if (panel === visibleLibrary) return;
+    visibleLibrary?.dispatchEvent?.(new Event('music-library-hidden'));
+    visibleLibrary = panel || null;
+    visibleLibrary?.dispatchEvent(new Event('music-library-restored'));
+  }
+  document.addEventListener('visibilitychange', updateLibraryVisibility);
   document.addEventListener('close', event => {
-    if (event.target === $('#sheet')) { libraryReturn = null; playerReturn = null; syncMiniHost(); }
+    if (event.target !== $('#sheet') || event.target.open) return;
+    libraryReturn = null;
+    playerReturn = null;
+    closeMotion?.cancel();
+    closeMotion = null;
+    syncMiniHost();
+    updateLibraryVisibility();
   }, true);
 
   document.addEventListener('cancel', event => {
@@ -731,11 +853,18 @@ window.NoraProfileTrack = (() => {
     }
   });
 
+  function paintImport(button, state) {
+    button.dataset.importState = state;
+    button.disabled = state !== 'plus';
+    button.innerHTML = icon(state, state === 'loading' ? 'music-loading' : '');
+    button.setAttribute('aria-label', NoraI18n.t(state === 'check' ? "Добавлено в Мои треки" : "Добавить в мои треки"));
+  }
+
   function paintSaved(button, saved) {
     button.dataset.saved = String(saved);
     button.setAttribute('aria-pressed', String(saved));
     button.setAttribute('aria-label', saved ? NoraI18n.t("Удалить из моих треков") : NoraI18n.t("Добавить в мои треки"));
-    button.textContent = saved ? '✓' : '+';
+    button.innerHTML = icon(saved ? 'check' : 'plus');
   }
 
   document.addEventListener('click', async event => {
@@ -783,23 +912,19 @@ window.NoraProfileTrack = (() => {
       element.dataset.trackSrc === state.src && !element.closest('dialog:not([open])'));
   }
 
-  function currentRow(state) {
-    const rows = matchingRows(state);
-    return rows.find(element => element.closest('dialog[open]')) || rows[0] || null;
-  }
-
   function syncMiniHost() {
     const dialog = $('#sheet');
     const library = dialog.open && dialog.querySelector('#music-library-profile');
     const full = dialog.open && dialog.querySelector('#nora-now-playing');
     const docked = Boolean(library && active);
+    mini.inert = Boolean(full);
     const wasDocked = dialog.classList.contains('music-mini-docked');
     // Keep the actual touched element mounted throughout a swipe into the
     // full player. Moving it during a touch sequence cancels gestures on iOS.
     if (docked && mini.parentElement !== dialog) {
       dialog.append(mini);
       mini.hidden = false;
-      if (!miniMotion.matches) mini.animate?.([{opacity:0,transform:'translateY(18px)'},{opacity:1,transform:'translateY(0)'}],{duration:280,easing:'cubic-bezier(.2,.8,.2,1)'});
+      animateContent(mini);
     } else if (!docked && !full && mini.parentElement !== miniHome) {
       miniHome.insertBefore(mini, miniNext?.parentElement === miniHome ? miniNext : dialog);
     }
@@ -807,20 +932,53 @@ window.NoraProfileTrack = (() => {
     return docked;
   }
 
-  function closeNowPlaying() {
+  function closeNowPlaying({animate = false} = {}) {
     const dialog = $('#sheet');
-    if (!dialog.querySelector('#nora-now-playing')) return false;
-    if (!playerReturn) { dialog.close(); return true; }
-    const saved = playerReturn;
-    playerReturn = null;
-    $('#sheet-content').replaceChildren(saved.panel);
-    libraryReturn = saved.libraryReturn;
-    syncMiniHost();
-    $('#sheet-content').scrollTop = saved.scrollTop;
-    saved.panel.focus({preventScroll:true});
-    window.NoraShop?.syncBack();
-    if (active) paint(active);
+    if (!dialog.open || !dialog.querySelector('#nora-now-playing')) return false;
+    if (closeMotion) return true;
+    const restore = () => {
+      if (!playerReturn) { dialog.close(); return; }
+      const saved = playerReturn;
+      playerReturn = null;
+      $('#sheet-content').replaceChildren(saved.panel);
+      libraryReturn = saved.libraryReturn;
+      syncMiniHost();
+      $('#sheet-content').scrollTop = saved.scrollTop;
+      (saved.focus?.isConnected && !saved.focus.inert ? saved.focus : saved.panel).focus({preventScroll:true});
+      window.NoraShop?.syncBack();
+      if (active) paint(active);
+    };
+    if (!animate || miniMotion.matches || !dialog.animate) { restore(); return true; }
+    const animation = closeMotion = dialog.animate([
+      {transform:'translate3d(0,0,0)', opacity:1},
+      {transform:playerReturn ? 'translate3d(0,16px,0)' : 'translate3d(0,100%,0)', opacity:playerReturn ? .7 : 1}
+    ], {duration:220, easing:'cubic-bezier(.32,.05,.32,1)', fill:'forwards'});
+    animation.finished.then(() => {
+      closeMotion = null;
+      restore();
+      animation.cancel();
+    }, () => {
+      if (closeMotion === animation) closeMotion = null;
+    });
     return true;
+  }
+
+  function paintCatalog(state) {
+    for (const row of document.querySelectorAll('.music-catalog-row[data-play-source]')) {
+      const current = state && row.dataset.playSource === state.src;
+      const playing = current && !state.audio.paused && !state.audio.ended;
+      row.dataset.musicState = current && state.loading ? 'loading' : playing ? 'playing' : 'idle';
+      row.querySelector('.music-catalog-art').setAttribute('aria-label',
+        NoraI18n.t(row.dataset.musicState === 'loading' ? "Загружаем трек" : playing ? "Пауза" : "Воспроизвести"));
+    }
+  }
+
+  function paintMiniProgress(audio) {
+    const progress = Number.isFinite(audio.duration) && audio.duration > 0
+      ? Math.min(1, Math.max(0, audio.currentTime / audio.duration)) : 0;
+    if (miniProgress.value === progress) return;
+    miniProgress.value = progress;
+    mini.style.setProperty('--mini-progress', String(progress));
   }
 
   function paintMini() {
@@ -829,8 +987,10 @@ window.NoraProfileTrack = (() => {
     const visible = Boolean(state && document.querySelector('#nav .nav-drop'));
     mini.hidden = !visible;
     document.body.classList.toggle('nora-mini-player-active', visible);
+    paintCatalog(state);
     if (!visible) {
-      for (const art of document.querySelectorAll('.music-catalog-row[data-play-source] .music-catalog-glyph')) art.textContent = '▶';
+      mini.dataset.playing = 'false';
+      mini.dataset.loading = 'false';
       return;
     }
     const { audio, loading, track } = state;
@@ -843,9 +1003,7 @@ window.NoraProfileTrack = (() => {
       const artwork = mini.querySelector('.nora-mini-art');
       artwork.querySelector('img')?.remove();
       artwork.insertAdjacentHTML('beforeend', coverImage(track, 'music-mini-cover'));
-      if (!miniMotion.matches) mini.querySelector('.nora-mini-copy').animate?.([
-        {opacity: .25, transform: 'translateY(5px)'}, {opacity: 1, transform: 'translateY(0)'}
-      ], {duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)'});
+      animateContent(mini.querySelector('.nora-mini-copy'));
     }
     miniShare.disabled = loading || sharePending || Date.now() < shareUntil;
     miniShare.dataset.sending = String(sharePending);
@@ -858,35 +1016,43 @@ window.NoraProfileTrack = (() => {
       fullShare.dataset.sent = miniShare.dataset.sent;
       fullShare.setAttribute('aria-label', miniShare.getAttribute('aria-label'));
     }
-    for (const row of document.querySelectorAll('.music-catalog-row[data-play-source]')) {
-      const art = row.querySelector('.music-catalog-glyph');
-      if (art) art.textContent = row.dataset.playSource === state.src ? (loading ? '…' : playing ? 'Ⅱ' : '▶') : '▶';
-    }
     mini.dataset.playing = String(playing);
+    mini.dataset.loading = String(loading);
     miniToggle.disabled = loading;
     miniToggle.setAttribute('aria-label', loading ? NoraI18n.t("Загружаем трек") : playing ? NoraI18n.t("Пауза") : NoraI18n.t("Воспроизвести"));
     miniOpen.setAttribute('aria-label', NoraI18n.t("Открыть плеер: ") + track.title);
-    const progress = Number.isFinite(audio.duration) && audio.duration > 0
-      ? Math.min(1, Math.max(0, audio.currentTime / audio.duration)) : 0;
-    miniProgress.value = progress;
-    mini.style.setProperty('--mini-progress', String(progress));
+    paintMiniProgress(audio);
+  }
+
+  function paintProgress(state) {
+    const {audio} = state;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    for (const {element, seek, time, total} of state.rows || []) {
+      if (!element.isConnected || seek.dataset.scrubbing === 'true') continue;
+      const current = audio.currentTime || 0;
+      seek.value = duration ? current / duration : 0;
+      seek.style.setProperty('--track-progress', (Number(seek.value) * 100) + '%');
+      const timestamp = clock(current);
+      if (time.textContent !== timestamp) {
+        time.textContent = timestamp;
+        seek.setAttribute('aria-valuetext', timestamp);
+      }
+      if (duration && total.textContent !== clock(duration)) total.textContent = clock(duration);
+    }
+    if (active === state && !mini.hidden && !mini.inert) paintMiniProgress(audio);
   }
 
   function paint(state) {
-    const { audio, loading } = state;
+    const {audio, loading} = state;
     const playing = active === state && !audio.paused && !audio.ended;
     const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    const current = audio.currentTime || 0;
-    for (const element of matchingRows(state)) {
-      const seek = element.querySelector('[data-track-seek]');
-      seek.value = duration ? current / duration : 0;
+    const rows = matchingRows(state);
+    state.rows = rows.map(element => ({
+      element, seek:element.querySelector('[data-track-seek]'), time:element.querySelector('[data-track-time]'),
+      total:element.querySelector('[data-track-duration]')
+    }));
+    for (const {element, seek} of state.rows) {
       seek.disabled = !duration;
-      seek.style.setProperty('--track-progress', (Number(seek.value) * 100) + '%');
-      seek.setAttribute('aria-valuetext', clock(current));
-      const time = element.querySelector('[data-track-time]');
-      if (time.textContent !== clock(current)) time.textContent = clock(current);
-      const total = element.querySelector('[data-track-duration]');
-      if (duration && total.textContent !== clock(duration)) total.textContent = clock(duration);
       element.dataset.ready = String(Boolean(duration && !loading && active === state));
       element.dataset.playing = String(playing);
       element.dataset.loading = String(loading);
@@ -894,10 +1060,12 @@ window.NoraProfileTrack = (() => {
       play.disabled = loading;
       play.setAttribute('aria-label', (loading ? NoraI18n.t("Загружаем трек") : playing ? NoraI18n.t("Поставить на паузу") : NoraI18n.t("Включить трек")) + ': ' + state.track.title);
     }
-    state.element = currentRow(state);
+    paintProgress(state);
+    state.element = rows.find(element => element.closest('dialog[open]')) || rows[0] || null;
     NoraProfileWaves.sync(state.element, playing && !loading, state);
-    if (active === state && !loading) void prepareMusicEnvelope(state);
+    if (playing && !loading && !document.hidden) void prepareMusicEnvelope(state);
     paintMini();
+    paintQueue();
   }
 
   function waitMediaEvent(target, name, signal, action, timeout = 5000) {
@@ -934,11 +1102,14 @@ window.NoraProfileTrack = (() => {
   async function loadTrack(state) {
     const signal = state.controller.signal;
     const headers = {Authorization: 'tma ' + auth};
-    let blob = cachedTrack(state.src);
+    const version = state.src.split('?v=')[1];
+    // Profile, library and history can reference the same authorized media.
+    const key = version && /^[a-f0-9]{64}$/.test(state.track?.id) ? state.track.id + ':' + version : state.src;
+    let blob = cachedTrack(key);
     if (blob) {
       // A cached file must never bypass profile privacy, bans, or revision checks.
       const check = await fetch(state.src + '&check=1', {headers, signal, cache:'no-store'});
-      if (!check.ok) { removeCachedTrack(state.src); throw Error('Track access changed'); }
+      if (!check.ok) { removeCachedTrack(key); throw Error('Track access changed'); }
       if (active !== state) return;
       installBlob(state, blob);
       state.loading = false; paint(state);
@@ -956,7 +1127,7 @@ window.NoraProfileTrack = (() => {
     if (mime !== 'audio/mpeg' || !Media || !response.body?.getReader) {
       blob = await response.blob();
       if (active !== state) return;
-      rememberTrack(state.src, blob); installBlob(state, blob);
+      rememberTrack(key, blob); installBlob(state, blob);
       state.loading = false; paint(state);
       await toggleActive(state);
       return;
@@ -1003,7 +1174,7 @@ window.NoraProfileTrack = (() => {
     if (active !== state) return;
     blob = new Blob(chunks, {type:mime});
     if (!blob.size) throw Error('Empty track');
-    rememberTrack(state.src, blob);
+    rememberTrack(key, blob);
     if (!state.progressiveFailed) {
       try { if (media.readyState === 'open') media.endOfStream(); }
       catch { state.progressiveFailed = true; }
@@ -1031,7 +1202,7 @@ window.NoraProfileTrack = (() => {
     const state = active;
     if (!state) return;
     active = null;
-    void api('music-library/playing', {...trackReference(state), playing:false}).catch(() => {});
+    announcePresence(state, false);
     state.controller.abort();
     state.blob=null;state.envelope=null;state.beats=null;state.hits=null;state.hitOrdinals=null;
     state.audio.pause();
@@ -1069,6 +1240,45 @@ window.NoraProfileTrack = (() => {
     return {source, revision: decodeURIComponent(revision || '')};
   }
 
+  function setActivityPublic(value) {
+    if (activityPublic === value) return;
+    activityPublic = value;
+    ++activityVersion;
+    if (value === false) pendingPresence = null;
+    if (value && active && !active.audio.paused && !active.audio.ended) announcePresence(active, true);
+  }
+
+  function announcePresence(state, playing) {
+    if (activityPublic === false || (!playing && !state.presenceAnnounced)) return;
+    const reference = trackReference(state);
+    if (!reference.source.startsWith('/api/music-library/') && reference.source !== '/api/profile/track') return;
+    state.presenceAnnounced = playing;
+    state.lastPresence = Date.now();
+    pendingPresence = {...reference, playing};
+    if (presenceRequest) return;
+    void flushPresence();
+  }
+
+  async function flushPresence() {
+    while (pendingPresence) {
+      const payload = pendingPresence;
+      pendingPresence = null;
+      if (payload.playing && activityPublic === false) continue;
+      const version = activityVersion;
+      try {
+        presenceRequest = api('music-library/playing', payload, undefined, !payload.playing);
+        const result = await presenceRequest;
+        if (version === activityVersion && typeof result.public === 'boolean') {
+          activityPublic = result.public;
+        }
+      } catch {
+        // The server expires presence automatically if a heartbeat is lost.
+      } finally {
+        presenceRequest = null;
+      }
+    }
+  }
+
   function paintNowSaved(state) {
     const panel = $('#nora-now-playing');
     if (!panel || panel.dataset.trackSrc !== state.src) return;
@@ -1085,6 +1295,8 @@ window.NoraProfileTrack = (() => {
   }
 
   async function loadNowSaved(state) {
+    if (state.saveStatusLoading || state.saved != null) return;
+    state.saveStatusLoading = true;
     const request = state.saveStatusRequest = (state.saveStatusRequest || 0) + 1;
     try {
       const result = await api('music-library/current?' + new URLSearchParams(trackReference(state)));
@@ -1097,6 +1309,8 @@ window.NoraProfileTrack = (() => {
         toast(error.message);
         paintNowSaved(state);
       }
+    } finally {
+      state.saveStatusLoading = false;
     }
   }
 
@@ -1142,29 +1356,44 @@ window.NoraProfileTrack = (() => {
     }
   }
 
-  function openNowPlaying() {
+  function openNowPlaying({dragging = false, trackChanged = false} = {}) {
     const state = active;
-    if (!state) return;
+    if (!state || closeMotion) return;
     const dialog = $('#sheet'), library = dialog.querySelector('#music-library-profile');
     if (dialog.open && library) {
-      playerReturn = {panel:library, libraryReturn, scrollTop:$('#sheet-content').scrollTop};
+      const focus = document.activeElement;
+      playerReturn = {panel:library, libraryReturn, scrollTop:$('#sheet-content').scrollTop,
+        focus:library.contains(focus) || mini.contains(focus) ? focus : null};
     }
     libraryReturn = null;
-    const svg = (path, cls='') => '<svg class="' + cls + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
-    sheet('<section id="nora-now-playing" aria-label="' + NoraI18n.html("Музыкальный плеер") + '" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
-      ("<p class=\"nora-now-playing-label\">" + NoraI18n.html("Сейчас играет") + "</p>") +
-      '<div class="nora-now-playing-art" aria-hidden="true">' + coverImage(state.track, 'music-full-cover') + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="18" cy="16" rx="3" ry="2"/></svg></div>' +
+    const t = NoraI18n.html;
+    sheet('<section id="nora-now-playing" aria-label="' + t("Музыкальный плеер") + '" tabindex="-1" data-track-src="' + esc(state.src) + '">' +
+      '<header class="nora-now-head"><button type="button" class="nora-now-collapse" data-now-collapse aria-label="' + t("Свернуть плеер") + '">' +
+        icon('down') + '</button><p class="nora-now-playing-label">' + t("Сейчас играет") + '</p></header>' +
+      '<div class="nora-now-playing-art" aria-hidden="true">' + coverImage(state.track, 'music-full-cover') + icon('note') + '</div>' +
       '<div class="nora-now-meta"><div class="nora-now-copy"><h2>' + esc(state.track.title) + '</h2><p>' + esc(state.track.artist) + '</p></div>' +
-      ("<button type=\"button\" class=\"nora-now-save\" data-now-save data-saved=\"false\" aria-label=\"" + NoraI18n.html("Поставить лайк треку") + "\" aria-pressed=\"false\" disabled>") +
-      svg('M20.8 8.5c0 4.1-8.8 9.7-8.8 9.7S3.2 12.6 3.2 8.5a4.7 4.7 0 0 1 8.8-2.3 4.7 4.7 0 0 1 8.8 2.3Z','nora-now-heart') + svg('m5 12 4 4L19 6','nora-now-check') + '</button></div>' +
-      ("<div class=\"nora-now-timeline\"><input type=\"range\" min=\"0\" max=\"1\" step=\"0.001\" value=\"0\" data-track-seek aria-label=\"" + NoraI18n.html("Позиция в треке") + "\" disabled><div class=\"nora-now-times\"><span data-track-time>0:00</span><span data-track-duration>") + clock(state.track.duration) + '</span></div></div>' +
-      ("<div class=\"nora-now-controls\"><button type=\"button\" class=\"nora-now-secondary nora-now-profile\" data-now-profile data-saved=\"false\" aria-label=\"" + NoraI18n.html("Добавить трек в профиль") + "\" aria-pressed=\"false\" disabled>") + svg('M12 5v14M5 12h14','nora-now-profile-plus') + svg('m5 12 4 4L19 6','nora-now-profile-check') + '</button>' +
-      ("<button type=\"button\" class=\"nora-now-play\" data-track-toggle aria-label=\"" + NoraI18n.html("Воспроизвести") + "\"><svg class=\"nora-now-play-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 4.5v15l12-7.5z\"/></svg><svg class=\"nora-now-pause-icon\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/><rect x=\"14\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1\"/></svg></button>") +
-      ("<button type=\"button\" class=\"nora-now-secondary nora-mini-share\" data-now-share aria-label=\"" + NoraI18n.html("Поделиться треком в чате") + "\">") + svg('m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13','nora-mini-send') + svg('m5 12 4 4L19 6','nora-mini-sent') + '</button></div><div class="music-queue-controls"><button type="button" data-queue-prev aria-label="' + NoraI18n.html("Предыдущий трек") + '">⏮</button><button type="button" data-queue-shuffle aria-pressed="' + shuffle + '" aria-label="' + NoraI18n.html("Перемешать") + '">⤨</button><button type="button" data-queue-repeat aria-pressed="' + repeat + '" aria-label="' + NoraI18n.html("Повтор трека") + '">↻</button><button type="button" data-queue-next aria-label="' + NoraI18n.html("Следующий трек") + '">⏭</button></div></section>');
-    $('#sheet').scrollTop = 0;
-    $('#sheet-content').scrollTop = 0;
-    $('#nora-now-playing')?.focus({preventScroll:true});
+        '<button type="button" class="nora-now-save" data-now-save data-saved="false" aria-label="' + t("Поставить лайк треку") + '" aria-pressed="false" disabled>' +
+        icon('heart', 'nora-now-heart') + icon('check', 'nora-now-check') + '</button></div>' +
+      '<div class="nora-now-timeline"><input type="range" min="0" max="1" step="0.001" value="0" data-track-seek aria-label="' + t("Позиция в треке") +
+        '" disabled><div class="nora-now-times"><span data-track-time>0:00</span><span data-track-duration>' + clock(state.track.duration) + '</span></div></div>' +
+      '<div class="nora-now-controls"><button type="button" class="nora-now-secondary" data-queue-prev aria-label="' + t("Предыдущий трек") + '">' + icon('prev') + '</button>' +
+        '<button type="button" class="nora-now-play" data-track-toggle aria-label="' + t("Воспроизвести") + '">' +
+        icon('play', 'nora-now-play-icon') + icon('pause', 'nora-now-pause-icon') + icon('loading', 'music-loading') + '</button>' +
+        '<button type="button" class="nora-now-secondary" data-queue-next aria-label="' + t("Следующий трек") + '">' + icon('next') + '</button></div>' +
+      '<div class="music-queue-controls"><button type="button" data-queue-shuffle aria-pressed="' + shuffle + '" aria-label="' + t("Перемешать") + '">' + icon('shuffle') + '</button>' +
+        '<button type="button" data-queue-repeat aria-pressed="' + repeat + '" aria-label="' + t("Повтор трека") + '">' + icon('repeat') + '</button>' +
+        '<button type="button" class="nora-now-profile" data-now-profile data-saved="false" aria-label="' + t("Добавить трек в профиль") + '" aria-pressed="false" disabled>' +
+        icon('plus', 'nora-now-profile-plus') + icon('check', 'nora-now-profile-check') + '</button>' +
+        '<button type="button" class="nora-mini-share" data-now-share aria-label="' + t("Поделиться треком в чате") + '">' +
+        icon('send', 'nora-mini-send') + icon('check', 'nora-mini-sent') + '</button></div></section>', {animate:false});
+    const panel = $('#nora-now-playing');
+    if (!trackChanged) {
+      $('#sheet').scrollTop = 0;
+      $('#sheet-content').scrollTop = 0;
+    }
+    panel.focus({preventScroll:true});
     window.NoraShop?.syncBack();
+    if (!dragging) animateContent(trackChanged ? panel.querySelector('.nora-now-playing-art') : panel);
     paint(state);
     paintNowSaved(state);
     void loadNowSaved(state);
@@ -1183,7 +1412,7 @@ window.NoraProfileTrack = (() => {
       shareUntil = Date.now() + Math.max(1, Number(result.retry_after) || 300) * 1000;
       clearTimeout(shareTimer);
       shareTimer = setTimeout(paintMini, Math.max(0, shareUntil - Date.now()));
-      toast(result.message || NoraI18n.t("Трек отправлен в чат 🎧"));
+      toast(result.message || NoraI18n.t("Трек отправлен в чат"));
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     } catch (error) {
       toast(error.message);
@@ -1194,13 +1423,19 @@ window.NoraProfileTrack = (() => {
   }
 
   miniShare.addEventListener('click', () => void shareCurrent());
-  miniOpen.addEventListener('click', openNowPlaying);
+  miniOpen.addEventListener('click', () => openNowPlaying());
   miniToggle.addEventListener('click', () => void toggleActive(active));
   document.addEventListener('click', event => {
+    if (event.target.closest('[data-now-collapse]')) { closeNowPlaying({animate:true}); return; }
     if (event.target.closest('[data-queue-prev]')) { void stepQueue(-1); return; }
     if (event.target.closest('[data-queue-next]')) { void stepQueue(1); return; }
     const shuffleButton = event.target.closest('[data-queue-shuffle]');
-    if (shuffleButton) { shuffle = !shuffle; shuffleButton.setAttribute('aria-pressed',String(shuffle)); return; }
+    if (shuffleButton) {
+      shuffle = !shuffle;
+      shuffleButton.setAttribute('aria-pressed',String(shuffle));
+      paintQueue();
+      return;
+    }
     const repeatButton = event.target.closest('[data-queue-repeat]');
     if (repeatButton) { repeat = !repeat; repeatButton.setAttribute('aria-pressed',String(repeat)); return; }
     if (event.target.closest('[data-now-save]')) { void addNowTrack(); return; }
@@ -1221,6 +1456,8 @@ window.NoraProfileTrack = (() => {
     if (!item) return;
     if (!item.src && item.wave && item.catalogId) {
       const intent = ++playIntent;
+      queueLoading = true;
+      paintQueue();
       try {
         const response = await api('music-library/play', {id:item.catalogId,wave:true});
         if (intent !== playIntent) return;
@@ -1230,33 +1467,44 @@ window.NoraProfileTrack = (() => {
           if (row.querySelector('[data-music-play]')?.dataset.musicPlay === item.catalogId) row.dataset.playSource = item.src;
         }
       } catch (error) { if (intent === playIntent) toast(error.message); return; }
+      finally { queueLoading = false; paintQueue(); }
     }
-    if (active?.src === item.src) { await toggleActive(active); return; }
+    if (active?.src === item.src) {
+      if (active.audio.ended) {
+        active.audio.currentTime = 0;
+        await toggleActive(active);
+      }
+      return;
+    }
     const full = $('#sheet').open && Boolean($('#nora-now-playing'));
     stop();
     const audio = new Audio();
-    active = {audio, element:null, src:item.src, controller:new AbortController(), loading:true, track:item.track};
+    active = {audio, element:null, src:item.src, catalogId:item.catalogId, controller:new AbortController(), loading:true, track:item.track};
     const state = active;
-    let listened = 0, last = 0, lastPresence = 0;
-    const presence = (playing) => {
-      lastPresence = Date.now();
-      void api('music-library/playing', {...trackReference(state), playing}).catch(() => {});
-    };
+    let listened = 0, last = 0;
     for (const name of ['loadedmetadata','timeupdate','play','playing','pause','ended']) {
       audio.addEventListener(name, () => {
         if (active !== state) return;
-        if (name === 'playing') presence(true);
-        if (name === 'pause' || name === 'ended') presence(false);
+        if (name === 'playing' && !state.presenceAnnounced) announcePresence(state, true);
+        if (name === 'pause' || name === 'ended') announcePresence(state, false);
         if (name === 'timeupdate') {
-          if (!audio.paused && Date.now() - lastPresence >= 15000) presence(true);
+          if (!audio.paused && state.lastPresence && Date.now() - state.lastPresence >= 25000) announcePresence(state, true);
           const delta = audio.currentTime - last;
-          if (!audio.paused && delta > 0 && delta < 2) listened += delta;
+          if (!audio.paused && !state.seeking && delta > 0 && delta < 2) listened += delta;
+          state.seeking = false;
           last = audio.currentTime;
           const threshold = Math.min(15, (audio.duration || 30) * .65);
-          if (!state.historySent && listened >= threshold) {
+          if (!state.historySent && listened >= threshold && Date.now() >= (state.historyRetryAt || 0)) {
             state.historySent = true;
-            void api('music-library/listened', trackReference(state)).catch(() => {state.historySent=false;});
+            void api('music-library/listened', trackReference(state)).catch(() => {
+              state.historyRetryAt = Date.now() + 60000;
+              state.historySent = false;
+            });
           }
+        }
+        if (name === 'timeupdate') {
+          if (!document.hidden) paintProgress(state);
+          return;
         }
         paint(state);
         if (name === 'ended') {
@@ -1270,20 +1518,35 @@ window.NoraProfileTrack = (() => {
       if (state.progressive) { state.progressiveFailed = true; return; }
       stop(); toast(NoraI18n.t("Не удалось воспроизвести трек"));
     });
-    if (full) openNowPlaying();
+    if (full && !closeMotion) openNowPlaying({trackChanged:true});
     paint(state);
     try { await loadTrack(state); }
     catch { if (active === state) { stop(); toast(NoraI18n.t("Трек сейчас недоступен")); } }
   }
 
+  function canStep(direction) {
+    if (queueLoading || queueIndex < 0) return false;
+    if (direction < 0) return queueIndex > 0;
+    return queueIndex + 1 < queue.length || Boolean(queue[queueIndex]?.wave) || (shuffle && queue.length > 1);
+  }
+
+  function paintQueue() {
+    const panel = $('#nora-now-playing');
+    if (!panel) return;
+    panel.querySelector('[data-queue-prev]').disabled = !canStep(-1);
+    panel.querySelector('[data-queue-next]').disabled = !canStep(1);
+  }
+
   async function stepQueue(direction) {
-    if (!queue.length) return;
+    if (!canStep(direction)) return;
     let next = queueIndex + direction;
     if (shuffle && direction > 0 && queue.length > 1) {
       next = (queueIndex + 1 + Math.floor(Math.random() * (queue.length-1))) % queue.length;
     }
     if (next >= queue.length && direction > 0 && queue[queueIndex]?.wave) {
       const intent = ++playIntent;
+      queueLoading = true;
+      paintQueue();
       try {
         const response = await api('music-library/wave');
         if (intent !== playIntent || !response.tracks.length) return;
@@ -1292,9 +1555,11 @@ window.NoraProfileTrack = (() => {
         queue = (fresh.length ? fresh : response.tracks).map(track=>({wave:true,catalogId:track.id,track}));
         next = 0;
       } catch (error) { if (intent === playIntent) toast(error.message); return; }
+      finally { queueLoading = false; paintQueue(); }
     }
     if (next < 0 || next >= queue.length) return;
     queueIndex = next;
+    paintQueue();
     await startTrack(queue[next]);
   }
 
@@ -1305,40 +1570,68 @@ window.NoraProfileTrack = (() => {
     if (!element) return;
     if (active?.src === element.dataset.trackSrc) { await toggleActive(active); return; }
     ++playIntent;
+    if (element.id === 'nora-now-playing') {
+      await startTrack(queue[queueIndex]);
+      return;
+    }
     const group = element.closest('.profile-library-list,.music-social-list');
     queue = group ? Array.from(group.querySelectorAll('[data-track-src]')).filter(row=>!row.hidden).map(queueItem) : [queueItem(element)];
     queueIndex = queue.findIndex(item => item.src === element.dataset.trackSrc);
     await startTrack(queue[queueIndex] || queueItem(element));
   });
 
+  function seekState(seek) {
+    return active?.src === seek.closest('[data-track-src]')?.dataset.trackSrc &&
+      Number.isFinite(active?.audio.duration) ? active : null;
+  }
   document.addEventListener('input', event => {
     const seek = event.target;
-    if (!seek.matches('[data-track-seek]') || !active || active.src !== seek.closest('[data-track-src]')?.dataset.trackSrc) return;
-    const { audio } = active;
-    if (Number.isFinite(audio.duration)) {
-      audio.currentTime = Number(seek.value) * audio.duration;
-      paint(active);
-    }
+    if (!seek.matches('[data-track-seek]')) return;
+    const state = seekState(seek);
+    if (!state) return;
+    seek.dataset.scrubbing = 'true';
+    const position = Number(seek.value);
+    const timestamp = clock(position * state.audio.duration);
+    seek.style.setProperty('--track-progress', (position * 100) + '%');
+    seek.setAttribute('aria-valuetext', timestamp);
+    const track = seek.closest('[data-track-src]');
+    track.querySelector('[data-track-time]').textContent = timestamp;
+  });
+  document.addEventListener('change', event => {
+    const seek = event.target;
+    if (!seek.matches('[data-track-seek]')) return;
+    delete seek.dataset.scrubbing;
+    const state = seekState(seek);
+    if (!state) return;
+    state.seeking = true;
+    state.audio.currentTime = Number(seek.value) * state.audio.duration;
+    paintProgress(state);
+  });
+  document.addEventListener('pointercancel', event => {
+    const seek = event.target;
+    if (!seek.matches('[data-track-seek]') || !seek.dataset.scrubbing) return;
+    delete seek.dataset.scrubbing;
+    const state = seekState(seek);
+    if (state) paintProgress(state);
   });
 
   // Reattach only the UI after route changes, refreshes and dialog dismissal.
   // In-memory audio is cleared when the authenticated navigation is removed.
   function rebind() {
+    updateLibraryVisibility();
     if (!document.querySelector('#nav .nav-drop')) { stop(); clearMusicCache(); return; }
     syncMiniHost();
-    if (!active) return;
-    const replacement = currentRow(active);
-    if (active.element !== replacement) {
-      active.element = replacement;
-      paint(active);
-    }
+    if (active) paint(active);
   }
-  const observer = new MutationObserver(rebind);
+  const observer = new MutationObserver(records => {
+    if (records.some(record => record.type === 'attributes' ||
+      [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1))) rebind();
+  });
   for (const id of ['app', 'sheet-content', 'nav']) {
-    observer.observe(document.getElementById(id), { childList: true, subtree: true });
+    observer.observe(document.getElementById(id), {childList:true, subtree:true});
   }
-  observer.observe($('#sheet'), { attributes: true, attributeFilter: ['open'] });
-  document.addEventListener('close', rebind, true);
+  observer.observe($('#sheet'), {attributes:true, attributeFilter:['open']});
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && active) paint(active); });
   window.addEventListener('pagehide', () => { stop(); clearMusicCache(); });
-  return { html, libraryButton, back, closeNowPlaying };
+  return {html, libraryButton, back, closeNowPlaying, openNowPlaying, stepQueue, icon};
 })();

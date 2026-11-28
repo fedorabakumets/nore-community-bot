@@ -472,19 +472,10 @@ function animateRouteChange(app, selected, swiped) {
   const from = routeMotionOrder.indexOf(oldSection), to = routeMotionOrder.indexOf(selected);
   const distance = from >= 0 && to >= 0 && from !== to ? (to > from ? 14 : -14) : 0;
   const rise = distance ? 2 : 10;
-  // Six steps create a smooth acceleration/deceleration profile on fast displays.
-  const frame = (offset, remaining, opacity) => ({
-    offset, opacity,
-    transform: `translate3d(${(distance * remaining).toFixed(2)}px,${(rise * remaining).toFixed(2)}px,0) scale(${(1 - .008 * remaining).toFixed(4)})`
-  });
   const animation = app.animate([
-    frame(0, 1, .72),
-    frame(.16, .86, .81),
-    frame(.36, .52, .91),
-    frame(.58, .23, .975),
-    frame(.82, .045, .998),
-    frame(1, 0, 1)
-  ], {duration: 310, easing: 'linear'});
+    {opacity:.8, transform:'translate3d(' + distance + 'px,' + rise + 'px,0)'},
+    {opacity:1, transform:'translate3d(0,0,0)'}
+  ], {duration:270, easing:'cubic-bezier(.22,.72,.25,1)'});
   routeMotion = animation;
   animation.addEventListener('finish', () => {
     if (routeMotion === animation) routeMotion = null;
@@ -538,14 +529,14 @@ $('#nav').addEventListener('pointermove',event=>{
 },{passive:true});
 
 let sheetContentMotion = null;
-function sheet(html) {
+function sheet(html, {animate = true} = {}) {
   const dialog = $('#sheet'), content = $('#sheet-content'), wasOpen = dialog.open;
   sheetContentMotion?.cancel();
   sheetContentMotion = null;
   content.innerHTML = html;
   if (!wasOpen) { dialog.showModal(); return; }
   // A confirmation inside the same drawer moves only its content.
-  if (navReducedMotion.matches || typeof content.animate !== 'function') return;
+  if (!animate || navReducedMotion.matches || typeof content.animate !== 'function') return;
   sheetContentMotion = content.animate([
     {offset: 0, opacity: .75, transform: 'translate3d(0,8px,0)'},
     {offset: .5, opacity: .95, transform: 'translate3d(0,2px,0)'},
@@ -621,7 +612,7 @@ $('#sheet').addEventListener('close',()=>{
   const notice=$('#toast');
   if(notice.parentElement===dialog)document.body.append(notice);
 });
-$('#dismiss').onclick=()=>{if(!window.NoraProfileTrack?.back?.())$('#sheet').close()};$('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet')){const r=e.target.getBoundingClientRect();if(e.clientY<r.top||e.clientY>r.bottom||e.clientX<r.left||e.clientX>r.right)e.target.close()}});
+$('#dismiss').onclick=()=>{if(!window.NoraProfileTrack?.back?.())$('#sheet').close()};$('#sheet').addEventListener('click',e=>{if(e.target===$('#sheet')){const r=e.target.getBoundingClientRect();if(e.clientY<r.top||e.clientY>r.bottom||e.clientX<r.left||e.clientX>r.right){if(!window.NoraProfileTrack?.back?.())e.target.close()}}});
 function telegramStartParam() {
   return tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('tgWebAppStartParam') || '';
 }
@@ -973,8 +964,8 @@ window.NoraPrefix = p => {
 (() => {
   const app = $('#app'), player = $('#sheet'), mini = $('#nora-mini-player');
   const excluded = 'input,textarea,select,video,audio,canvas,[contenteditable="true"],[data-no-swipe]';
-  const curve = 'cubic-bezier(.18,.82,.24,1)';
-  let touch = null, settling = false, suppressUntil = 0, pageSwipe = null;
+  const curve = 'cubic-bezier(.22,.72,.25,1)';
+  let touch = null, settling = false, suppressUntil = 0, pageSwipe = null, trackMotion = null;
   const full = () => player.open && !!player.querySelector('#nora-now-playing');
   const blocked = () => !data?.profile || app.inert || $('#nav').inert ||
     currentGame() || document.body.classList.contains('intro-playing');
@@ -1012,6 +1003,7 @@ window.NoraPrefix = p => {
   cancelPageSwipe = () => {
     if (touch?.kind === 'page') touch = null;
     if (!pageSwipe) return;
+    cancelAnimationFrame(pageSwipe.frame);
     pageSwipe.animations?.forEach(animation => animation.cancel());
     pageSwipe = null;
     previewViewport.remove();
@@ -1099,6 +1091,7 @@ window.NoraPrefix = p => {
     animation.finished.then(() => {
       try { done(); } finally { animation.cancel(); }
     }, () => { done(); });
+    return animation;
   }
   function movePlayer(t, dy) {
     t.offset = Math.max(0, Math.min(t.height, t.kind === 'open' ? t.origin + dy : dy));
@@ -1106,19 +1099,27 @@ window.NoraPrefix = p => {
     shade(t.offset, t.height);
   }
   function start(event) {
-    if (touch?.kind === 'page' && event.touches.length > 1) finish(null, true);
+    if (touch && event.touches.length > 1) finish(null, true);
+    if (event.touches.length === 1) suppressUntil = 0;
     if (settling || touch || event.touches.length !== 1) return;
-    suppressUntil = 0;
     const p = event.touches[0], target = event.target;
     if (!(target instanceof Element) || target.closest(excluded)) return;
-    let kind;
-    if (full() && player.contains(target)) kind = 'close';
-    else if (miniReady() && mini.contains(target)) kind = 'open';
-    else if (pageReady() && app.contains(target) && !horizontalScroller(target) &&
-      p.clientX > 22 && p.clientX < innerWidth - 22) kind = 'page';
+    let kind, surface;
+    const inBounds = p.clientX > 22 && p.clientX < innerWidth - 22;
+    if (full() && player.contains(target)) {
+      surface = target.closest('.nora-now-playing-art');
+      if (!surface && !target.closest('.nora-now-head')) return;
+      kind = 'close';
+    } else if (miniReady() && mini.contains(target)) {
+      surface = mini;
+      kind = 'open';
+    } else if (player.open && inBounds && (surface = target.closest('.music-discovery'))) {
+      if (!surface.musicSwipe || horizontalScroller(target)) return;
+      kind = 'library';
+    } else if (pageReady() && app.contains(target) && inBounds && !horizontalScroller(target)) kind = 'page';
     else return;
-    touch = {kind, id:p.identifier, x:p.clientX, y:p.clientY, start:performance.now(),
-      from:tab, locked:false, offset:0, dy:0, dx:0};
+    touch = {kind, surface, id:p.identifier, x:p.clientX, y:p.clientY, start:performance.now(),
+      from:tab, locked:false, offset:0, dy:0, dx:0, frame:0};
   }
   function move(event) {
     const t = touch;
@@ -1133,12 +1134,16 @@ window.NoraPrefix = p => {
       const horizontal = Math.abs(dx) > Math.abs(dy) * 1.25;
       const vertical = Math.abs(dy) > Math.abs(dx) * 1.25;
       if (!horizontal && !vertical) return;
+      if (horizontal && t.surface && (t.kind === 'open' || t.kind === 'close')) t.kind = 'track';
       if ((t.kind === 'page' && (!horizontal || !pageReady())) ||
+          (t.kind === 'library' && !horizontal) ||
           (t.kind === 'close' && (!vertical || dy <= 0 || player.scrollTop > 1 || !full())) ||
           (t.kind === 'open' && (!vertical || dy >= 0 || !miniReady()))) { touch = null; return; }
       if (!event.cancelable) { touch = null; return; }
       event.preventDefault();
       t.locked = true;
+      trackMotion?.cancel();
+      trackMotion = null;
       if (t.kind === 'page') {
         routeMotion?.cancel(); routeMotion = null;
         app.classList.remove('app-enter');
@@ -1148,12 +1153,11 @@ window.NoraPrefix = p => {
         t.sampleAt = t.start;
         t.velocity = 0;
         if (!navReducedMotion.matches) document.documentElement.classList.add('nora-page-swiping');
-      } else {
+      } else if (t.kind === 'open' || t.kind === 'close') {
         player.classList.add('nora-player-dragging');
         if (t.kind === 'open') {
           const miniTop = mini.getBoundingClientRect().top;
-          // The existing click handler creates the same drawer and preserves Audio.
-          mini.querySelector('[data-mini-open]').click();
+          window.NoraProfileTrack?.openNowPlaying({dragging:true});
           if (!full()) { resetPlayer(); touch = null; return; }
           t.height = Math.max(1, player.offsetHeight);
           t.origin = Math.max(0, Math.min(t.height, miniTop - player.offsetTop));
@@ -1170,15 +1174,32 @@ window.NoraPrefix = p => {
         t.sampleAt = now;
         t.sampleX = p.clientX;
       }
-      movePage(t, dx);
-    } else if (full()) movePlayer(t, dy);
+    }
+    if (!t.frame) t.frame = requestAnimationFrame(() => {
+      t.frame = 0;
+      if (touch === t) drawTouch(t);
+    });
+  }
+  function drawTouch(t) {
+    if (t.kind === 'page') movePage(t, t.dx);
+    else if (t.kind === 'track') {
+      t.offset = Math.max(-64, Math.min(64, t.dx * .32));
+      shift(t.surface, t.offset, 0);
+    } else if ((t.kind === 'open' || t.kind === 'close') && full()) movePlayer(t, t.dy);
   }
   function finish(event, cancelled = false) {
     const t = touch;
     if (!t) return;
-    if (event && !point(event.changedTouches, t.id)) return;
+    const released = event && point(event.changedTouches, t.id);
+    if (event && !released) return;
+    if (released && !cancelled && Number.isFinite(released.clientX) && Number.isFinite(released.clientY)) {
+      t.dx = released.clientX - t.x;
+      t.dy = released.clientY - t.y;
+    }
     touch = null;
     if (!t.locked) return;
+    cancelAnimationFrame(t.frame);
+    drawTouch(t);
     suppressUntil = performance.now() + 450;
     if (event?.cancelable) event.preventDefault();
     settling = true;
@@ -1186,11 +1207,20 @@ window.NoraPrefix = p => {
     const passed = (distance, limit) => !cancelled &&
       (distance >= limit || (distance > 30 && distance / elapsed > .5));
     const done = () => { settling = false; };
+    const direction = t.dx < 0 ? 1 : -1;
     if (t.kind === 'page') {
       settlePage(t, cancelled);
+    } else if (t.kind === 'library') {
+      if (passed(Math.abs(t.dx), 58)) t.surface.musicSwipe(direction);
+      done();
+    } else if (t.kind === 'track') {
+      t.surface.style.removeProperty('transform');
+      if (passed(Math.abs(t.dx), 55)) void window.NoraProfileTrack?.stepQueue(direction);
+      trackMotion = animate(t.surface, t.offset, 0, 0, 0, 190, () => {});
+      done();
     } else {
       const close = t.kind === 'close'
-        ? passed(t.dy, Math.min(130,t.height * .22))
+        ? passed(t.dy, Math.min(104,t.height * .18))
         : !passed(-t.dy, Math.min(105,t.height * .18));
       if (!full()) { resetPlayer(); done(); return; }
       const end = close ? t.height + 12 : 0;
@@ -1208,7 +1238,9 @@ window.NoraPrefix = p => {
   document.addEventListener('touchend', event => finish(event), {capture:true, passive:false});
   document.addEventListener('touchcancel', event => finish(event, true), {capture:true, passive:false});
   document.addEventListener('click', event => {
-    if (event.isTrusted && performance.now() < suppressUntil) {
+    const touchClick = event.detail > 0 && (!event.pointerType || event.pointerType === 'touch' ||
+      event.sourceCapabilities?.firesTouchEvents);
+    if (event.isTrusted && touchClick && performance.now() < suppressUntil) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
