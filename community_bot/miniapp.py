@@ -652,7 +652,10 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import community_api, social_profiles
 
     app.router.add_get('/api/community', community_api.status)
-    from community_bot import staff_chat, staff_chat_live
+    from community_bot import incognito_api, staff_chat, staff_chat_live
+
+    app.router.add_post('/api/incognito/{action}', incognito_api.endpoint)
+    app.cleanup_ctx.append(incognito_api.cleanup_context)
 
     chat_hub = staff_chat_live.StaffChatHub()
     app['staff_chat_hub'] = chat_hub
