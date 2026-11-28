@@ -15,7 +15,8 @@ from aiohttp import web
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incognito_queue (
     user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-    expires_at REAL NOT NULL
+    expires_at REAL NOT NULL,
+    avoid_user_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS incognito_sessions (
     id TEXT PRIMARY KEY,
@@ -87,17 +88,19 @@ async def enqueue(conn, uid, now, excluded=None):
     if await current_session(conn, uid):
         return
     await conn.execute(
-        'INSERT INTO incognito_queue(user_id, expires_at) VALUES (?, ?) '
-        'ON CONFLICT(user_id) DO UPDATE SET expires_at = excluded.expires_at',
-        (uid, now + QUEUE_TTL),
+        'INSERT INTO incognito_queue(user_id, expires_at, avoid_user_id) VALUES (?, ?, ?) '
+        'ON CONFLICT(user_id) DO UPDATE SET expires_at = excluded.expires_at, '
+        'avoid_user_id = COALESCE(excluded.avoid_user_id, incognito_queue.avoid_user_id)',
+        (uid, now + QUEUE_TTL, excluded),
     )
+    own_queue = await one(conn, 'SELECT avoid_user_id FROM incognito_queue WHERE user_id = ?', (uid,))
     async with conn.execute(
         'SELECT q.user_id FROM incognito_queue q JOIN users u ON u.user_id = q.user_id '
         'WHERE q.user_id != ? AND q.user_id != ? AND q.expires_at > ? '
-        'AND u.birth_date <= ? '
+        'AND u.birth_date <= ? AND (q.avoid_user_id IS NULL OR q.avoid_user_id != ?) '
         'AND NOT EXISTS (SELECT 1 FROM incognito_members m WHERE m.user_id = q.user_id) '
         'ORDER BY RANDOM() LIMIT 20',
-        (uid, excluded or uid, now, adult_cutoff().isoformat()),
+        (uid, own_queue['avoid_user_id'] or uid, now, adult_cutoff().isoformat(), uid),
     ) as cursor:
         candidates = await cursor.fetchall()
     for candidate in candidates:
