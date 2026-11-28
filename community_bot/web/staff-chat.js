@@ -186,6 +186,7 @@ window.NoraStaffChat = (() => {
           <h1>${NoraI18n.html("Чат Норы")}</h1>
           <span id="staff-chat-live-status" data-live-state="connecting"><i aria-hidden="true"></i><b>${NoraI18n.html("Подключаем…")}</b><small id="staff-chat-live-count"></small></span>
         </div>
+        <button type="button" class="incognito-entry" data-incognito-open aria-label="Инкогнито"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 20c4-9 10-11 18-6 8-5 14-3 18 6l-4 10c-3 7-10 5-14-1-4 6-11 8-14 1z"/><path d="M12 23q5-5 10 0m4 0q5-5 10 0"/></svg></button>
         <span class="staff-chat-team-label">${NoraI18n.html("КОМАНДА")}</span>
       </header>
       <div id="staff-chat-feed" class="staff-chat-feed" aria-label="${NoraI18n.html("Сообщения чата")}" aria-live="off">
