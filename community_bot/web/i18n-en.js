@@ -14,7 +14,7 @@ window.NoraEnglish = Object.freeze({
   "Друзья увидят недавнюю музыку, треки попадут в общий рейтинг": "Friends can see recent music and tracks count toward the chart",
   "слушателей": "listeners",
   "Здесь пока тихо": "It's quiet here for now",
-  "Слушай без добавления. Первая загрузка использует обычный лимит треков и может отправить песню в личку.": "Listen without saving. The first download uses the usual allowance and may send a track to your DM.",
+  "Слушай без лимитов. Новому треку может понадобиться время на загрузку.": "Listen without limits. New tracks may take a moment to load.",
   "Предыдущий трек": "Previous track",
   "Следующий трек": "Next track",
   "Перемешать": "Shuffle",
