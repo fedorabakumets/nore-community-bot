@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -6,9 +7,9 @@ from aiohttp import web
 
 from community_bot import music_discovery as discovery
 from community_bot.database import Database
-from community_bot.music_library import get_collection
+from community_bot.music_library import get_collection, track_id
 from community_bot.routers import song_requests as songs
-from community_bot.track_disk_cache import START_BYTES
+from community_bot.track_disk_cache import START_BYTES, TrackDiskCache
 
 
 class Request(dict):
@@ -262,6 +263,66 @@ async def test_wave_prefix_checks_offer_and_pet_without_preparing_or_downloading
     with pytest.raises(web.HTTPNotFound):
         await buffer_for(1)
     assert cache.cached_start.await_count == 1
+
+
+async def test_wave_preload_downloads_a_cold_track_once_without_writing_history(tmp_path, monkeypatch):
+    db = Database(tmp_path / "wave-preload.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Listener")
+    cache = TrackDiskCache(tmp_path / "cache")
+    bot = AsyncMock()
+    gate = AsyncMock(return_value=None)
+    monkeypatch.setattr(songs, "enabled", lambda: True)
+    monkeypatch.setattr(songs, "song_care_error", gate)
+    offer = {"123": songs.Song("123", None, "Test", "Artist", 120)}
+    discovery._WAVES[1] = (discovery.time.monotonic() + 30, offer)
+
+    async def download(song, directory, *, max_bytes):
+        assert song.id == "123"
+        output = Path(directory) / "song.mp3"
+        output.write_bytes(b"test audio")
+        return output
+
+    provider = AsyncMock(side_effect=download)
+    monkeypatch.setattr(songs, "download_song", provider)
+
+    def request(uid, query):
+        req = Request(uid, db, bot, query)
+        req.app["track_disk_cache"] = cache
+        return req
+
+    try:
+        with pytest.raises(web.HTTPNotFound):
+            await discovery.preload(request(2, {"wave": "123"}))
+        provider.assert_not_awaited()
+        async with discovery._PRELOAD_SLOTS:
+            assert (await discovery.preload(request(1, {"wave": "123"}))).status == 204
+        provider.assert_not_awaited()
+        response = await discovery.preload(request(1, {"wave": "123"}))
+        assert response.headers["X-Music-Track-Id"] == track_id({"file_id": "catalog:123"})
+        try:
+            assert response.lease.file.read() == b"test audio"
+        finally:
+            response.lease.close()
+        assert not await discovery.read_history(db, 1)
+        assert not await get_collection(db, 1)
+
+        play = json.loads((await discovery.play_track(Request(1, db, bot, payload={"id": "123", "wave": True}))).body)
+        playback = request(1, {"v": play["track"]["revision"]})
+        playback.path = play["source"]
+        result = await discovery.audio(playback)
+        try:
+            assert result.lease.file.read() == b"test audio"
+        finally:
+            result.lease.close()
+        provider.assert_awaited_once()
+
+        gate.side_effect = [None, "Pet gate"]
+        with pytest.raises(web.HTTPNotFound):
+            await discovery.preload(request(1, {"wave": "123"}))
+        provider.assert_awaited_once()
+    finally:
+        cache.close()
 
 
 async def test_wave_stations_filter_provider_matches_and_keep_previous_choices(tmp_path, monkeypatch):

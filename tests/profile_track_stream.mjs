@@ -26,7 +26,8 @@ function harness({progressive = false, failAppend = false} = {}) {
   }
   const context = vm.createContext({
     auth: 'session-1', active: null, Date, Blob, setTimeout, clearTimeout, URLSearchParams, AbortController,
-    document:{hidden:false}, navigator:{connection:{}}, queue:[], queueIndex:0, shuffle:false, repeat:false,
+    navigator:{connection:{}}, queue:[], queueIndex:0, shuffle:false, repeat:false, shuffledNext:null,
+    queueLoading:null, playIntent:0, hasWaveContinuation:() => false,
     window: progressive ? {MediaSource:Media} : {},
     URL: {
       createObjectURL(value) { const url = 'blob:' + (++urlId); urls.set(url,value); return url; },
@@ -40,7 +41,8 @@ function harness({progressive = false, failAppend = false} = {}) {
     async toggleActive(state) { plays++; state.wantsPlayback = true; state.audio.paused = false; }
   });
   vm.runInContext(cache + playback + '\nthis.load = loadTrack; this.remember = rememberTrack; this.cached = cachedTrack;' +
-    'this.buffer = bufferQueueStarts; this.cancelBuffer = cancelQueueStarts; this.starts = queueStarts;', context);
+    'this.preload = preloadNext; this.cancelPreload = cancelNextPreload; this.ready = () => nextPreload;' +
+    'this.nextIndex = nextQueueIndex;', context);
   function state(src = '/api/profile/track?v=one') {
     const audio = new EventTarget();
     audio.paused = true;
@@ -125,92 +127,91 @@ test('append failure falls back to complete blob without a second request', asyn
   assert.equal(h.plays(),1);
 });
 
-const prefixSize = 128 * 1024;
-const marker = '"' + 'a'.repeat(32) + '"';
-const warmHeaders = {
-  'Content-Type':'audio/mpeg', 'Content-Length':String(prefixSize), ETag:marker,
-  'Content-Range':'bytes 0-' + (prefixSize - 1) + '/' + (prefixSize + 2),
-};
-const resumeHeaders = {...warmHeaders, 'Content-Length':'2',
-  'Content-Range':'bytes ' + prefixSize + '-' + (prefixSize + 1) + '/' + (prefixSize + 2)};
+const nextTrack = {id:'a'.repeat(64)};
+const nextSource = '/api/music-library/next?v=two';
+const preloadResponse = () => new Response('audio', {headers:{
+  'Content-Type':'audio/mp4', 'Content-Length':'5', 'X-Music-Track-Id':nextTrack.id,
+}});
 
-test('the playing track is ready before buffering up to three starts in order', async () => {
-  const h = harness({progressive:true});
-  const state = h.state();
-  state.audio.paused = false;
-  h.context.queue = [state, {src:'/api/music-library/next?v=three'}, {wave:true,catalogId:'42'},
-    {src:'/api/music-library/third?v=two'}, {src:'/api/music-library/fourth?v=one'}];
-  let outstanding = 0;
-  h.context.respond = async () => {
-    assert.equal(++outstanding, 1);
-    await new Promise(resolve => setImmediate(resolve));
-    outstanding--;
-    return new Response(new Uint8Array(prefixSize), {status:206,headers:warmHeaders});
-  };
-  await h.context.buffer(state);
+test('one next track starts preloading as soon as the current track plays, even without MediaSource', async () => {
+  const h = harness();
+  const first = h.state();
+  const next = {src:nextSource, track:nextTrack};
+  h.context.queue = [first, next, {wave:true,catalogId:'42'}];
+  h.context.respond = preloadResponse;
+  await h.context.preload(first);
   assert.equal(h.requests.length, 0);
-  state.bytesReady = true;
+  first.audio.paused = false;
   h.context.navigator.connection.saveData = true;
-  await h.context.buffer(state);
+  await h.context.preload(first);
   assert.equal(h.requests.length, 0);
   h.context.navigator.connection.saveData = false;
-  await h.context.buffer(state);
-  assert.deepEqual(h.requests.map(request => new URLSearchParams(request.src.split('?')[1]).get('source') ||
-    new URLSearchParams(request.src.split('?')[1]).get('wave')), [
-    '/api/music-library/next', '42', '/api/music-library/third',
-  ]);
-  assert.ok(h.requests.every(request => request.options.headers.Range === 'bytes=0-131071'));
-  assert.equal(h.context.starts.size, 3);
-  await h.context.buffer(state);
-  assert.equal(h.requests.length, 3);
+  await h.context.preload(first);
+  await h.context.preload(first);
+  assert.equal(h.requests.length, 1);
+  assert.match(h.requests[0].src, /^\/api\/music-library\/preload\?/);
+  assert.equal(new URLSearchParams(h.requests[0].src.split('?')[1]).get('source'),nextSource.split('?')[0]);
+  assert.equal(h.context.ready().item,next);
+  assert.equal(h.context.ready().blob.type,'audio/mp4');
+
+  // The natural pause/ended events keep the finished preload for the switch.
+  h.context.cancelPreload(true);
+  const ready = h.context.ready();
+  h.context.cancelPreload();
+  h.context.respond = () => new Response(null,{status:204});
+  await h.context.load(Object.assign(h.state(nextSource), {track:nextTrack}), ready);
+  assert.deepEqual(h.requests.slice(1).map(({src}) => src), [nextSource + '&check=1']);
+  assert.equal(h.plays(),1);
 });
 
-test('a verified start plays before the remaining MP3 bytes arrive', async () => {
-  const h = harness({progressive:true});
-  const state = h.state();
-  const head = new Uint8Array(prefixSize);
-  head[0] = 7;
-  h.context.cached(state.src); // Initialize the session before storing its bytes.
-  h.context.starts.set(state.src, {data:head.buffer,marker,size:prefixSize + 2,expires:Date.now() + 5000});
-  let controller;
-  const body = new ReadableStream({start(value){controller=value;}});
-  h.context.respond = () => new Response(body, {status:206,headers:resumeHeaders});
-  const loading = h.context.load(state);
-  try {
-    for (let i=0;i<30 && h.plays()===0;i++) await new Promise(resolve=>setTimeout(resolve,5));
-    assert.equal(h.plays(),1);
-    assert.equal(h.requests[0].options.headers.Range,'bytes=131072-');
-    assert.equal(h.requests[0].options.headers['If-Range'],marker);
-  } finally {
-    controller.enqueue(new Uint8Array([8,9]));
-    controller.close();
-    await loading;
-  }
-  const bytes = new Uint8Array(await state.blob.arrayBuffer());
-  assert.equal(bytes.length,prefixSize + 2);
-  assert.equal(bytes[0],7);
-  assert.deepEqual([...bytes.slice(-2)],[8,9]);
+test('a shuffled Wave track keeps its chosen index and a canceled preload falls back to streaming', async () => {
+  const h = harness();
+  const first = h.state();
+  first.audio.paused = false;
+  h.context.queue = [first, {wave:true,catalogId:'42'}, {wave:true,catalogId:'43'}];
+  h.context.shuffle = true;
+  const index = h.context.nextIndex();
+  let finish;
+  h.context.respond = () => new Promise(resolve => { finish = resolve; });
+  const pending = h.context.preload(first);
+  assert.equal(h.context.nextIndex(),index);
+  assert.equal(new URLSearchParams(h.requests[0].src.split('?')[1]).get('wave'),
+    h.context.queue[index].catalogId);
+  h.context.cancelPreload();
+  assert.ok(h.requests[0].options.signal.aborted);
+  finish(preloadResponse());
+  await pending;
+  assert.equal(h.context.ready(),null);
+  h.context.respond = () => new Response(new Blob(['normal'],{type:'audio/mpeg'}));
+  await h.context.load(Object.assign(h.state(nextSource), {track:nextTrack}));
+  assert.equal(h.requests[1].src,nextSource);
+  assert.equal(h.plays(),1);
 });
 
-test('a full response after eviction does not prepend old audio', async () => {
-  const h = harness({progressive:true});
+test('the last Wave track starts preparing and preloading the next batch before it ends', async () => {
+  const h = harness();
   const state = h.state();
-  h.context.cached(state.src); // Initialize the session before storing its bytes.
-  h.context.starts.set(state.src, {data:new ArrayBuffer(prefixSize),marker,size:prefixSize+2,expires:Date.now()+5000});
-  h.context.respond = () => new Response(new Uint8Array([5,6,7]), {headers:{'Content-Type':'audio/mpeg'}});
-  await h.context.load(state);
-  assert.deepEqual([...new Uint8Array(await state.blob.arrayBuffer())],[5,6,7]);
+  state.audio.paused = false;
+  h.context.queue = [state];
+  h.context.hasWaveContinuation = () => true;
+  const next = {wave:true,catalogId:'42'};
+  let selections = 0;
+  h.context.continueWave = async () => { selections++; return [next]; };
+  h.context.respond = preloadResponse;
+  await Promise.all([h.context.preload(state), h.context.preload(state)]);
+  assert.equal(selections,1);
+  assert.deepEqual(await state.followingWave,[next]);
   assert.equal(h.requests.length,1);
-  assert.equal(h.context.starts.size,0);
+  assert.equal(h.requests[0].src,'/api/music-library/preload?wave=42');
+  assert.equal(h.context.ready().item,next);
 });
 
-test('denied access never plays the locally buffered start', async () => {
-  const h = harness({progressive:true});
-  const state = h.state();
-  h.context.cached(state.src); // Initialize the session before storing its bytes.
-  h.context.starts.set(state.src, {data:new ArrayBuffer(prefixSize),marker,size:prefixSize+2,expires:Date.now()+5000});
+test('denied access never plays the preloaded track', async () => {
+  const h = harness();
+  const state = Object.assign(h.state(nextSource), {track:nextTrack});
   h.context.respond = () => new Response(null,{status:404});
-  await assert.rejects(h.context.load(state));
+  await assert.rejects(h.context.load(state, {auth:'session-1', id:nextTrack.id, blob:new Blob(['warm'])}));
+  assert.equal(h.requests[0].src,nextSource + '&check=1');
   assert.equal(h.plays(),0);
 });
 

@@ -20,6 +20,7 @@ _SEARCHES = {}
 _LAST = {}
 _IN_FLIGHT = set()
 _SEARCH_SLOTS = asyncio.Semaphore(3)
+_PRELOAD_SLOTS = asyncio.Semaphore(1)
 _MAX_USERS = 256
 _WAVES = {}
 _WAVE_LAST = {}
@@ -104,6 +105,12 @@ def _matches_artist(song, artist):
 
 def _error(message, status=400):
     return web.json_response({"error": message}, status=status)
+
+
+def _catalog_track(song):
+    return {"file_id": "catalog:" + song.id, "mime": "audio/mpeg", "title": song.title,
+            "artist": song.artist, "duration": song.duration, "catalog_id": song.id,
+            "album_id": song.album_id, "cover": song.cover}
 
 
 def _prune(now):
@@ -192,11 +199,8 @@ async def prepare_track(request, *, save):
         problem = await songs.song_care_error(db, uid)
         if problem:
             return _error(problem, 403)
-        # The trusted catalog reference is durable; audio is fetched lazily
-        # by the shared disk cache only when the user actually presses play.
-        track = {"file_id": "catalog:" + song.id, "mime": "audio/mpeg",
-                 "title": song.title, "artist": song.artist, "duration": song.duration,
-                 "revision": uuid4().hex, "catalog_id": song.id, "album_id": song.album_id, "cover": song.cover}
+        # The durable reference can reuse audio already fetched by the shared cache.
+        track = {**_catalog_track(song), "revision": uuid4().hex}
         if save:
             result = await add_resolved_track(db, uid, track)
             key = result["id"]
@@ -393,6 +397,52 @@ async def buffer_start(request):
             raise web.HTTPNotFound()
 
     return await request.app["track_disk_cache"].cached_start(track)
+
+
+async def preload(request):
+    """Load one authorized upcoming track without writing history or presence."""
+    from community_bot.social_profiles import _share_track_source
+
+    uid, db = request["actor"]["id"], request.app["db"]
+    catalog_id = request.query.get("wave")
+    bot = request.app.get("bot")
+    if not bot:
+        raise web.HTTPNotFound()
+
+    async def resolve_track():
+        if catalog_id is None:
+            source = request.query.get("source", "")
+            if not source.startswith("/api/music-library/"):
+                return None
+            return await _share_track_source(
+                db, request.app["settings"], uid, source, request.query.get("revision"),
+            )
+        entry = _WAVES.get(uid)
+        song = entry[1].get(catalog_id) if entry and time.monotonic() < entry[0] else None
+        if not song or not songs.enabled() or await songs.song_care_error(db, uid):
+            return None
+        return _catalog_track(song)
+
+    track = await resolve_track()
+    if track is None:
+        raise web.HTTPNotFound()
+    # Keep a download slot free for foreground playback and avoid a speculative queue.
+    if _PRELOAD_SLOTS.locked():
+        return web.Response(status=204, headers={"Cache-Control": "no-store"})
+    try:
+        async with _PRELOAD_SLOTS:
+            lease = await request.app["track_disk_cache"].open_track(bot, track)
+    except (TelegramAPIError, ClientError, OSError, ValueError):
+        raise web.HTTPBadGateway() from None
+    try:
+        if await resolve_track() != track:
+            raise web.HTTPNotFound()
+        response = TrackResponse(lease, track["mime"])
+        response.headers["X-Music-Track-Id"] = track_id(track)
+        return response
+    except BaseException:
+        lease.close()
+        raise
 
 
 async def listened(request):
