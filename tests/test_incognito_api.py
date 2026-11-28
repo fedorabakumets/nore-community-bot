@@ -11,7 +11,9 @@ async def db(tmp_path):
     database = Database(tmp_path / 'incognito.sqlite')
     async with database.connect() as conn:
         await conn.executescript(
-            'CREATE TABLE users(user_id INTEGER PRIMARY KEY, birth_date TEXT);' + SCHEMA,
+            'CREATE TABLE users(user_id INTEGER PRIMARY KEY, birth_date TEXT);'
+            'CREATE TABLE reports(reporter_id INTEGER, target_id INTEGER, chat_id INTEGER, '
+            'message_id INTEGER, text TEXT, reason TEXT, created_at TEXT);' + SCHEMA,
         )
         await conn.executemany('INSERT INTO users VALUES (?, ?)', [
             (1, '1990-01-01'), (2, '1991-01-01'), (3, '1992-01-01'),
@@ -83,3 +85,35 @@ async def test_expiration_and_age_gate(db):
     await operate(db, 1, 'join', now=200)
     await operate(db, 2, 'join', now=201)
     assert (await operate(db, 1, 'status', now=201 + IDLE_TTL))['state'] == 'idle'
+
+
+@pytest.mark.asyncio
+async def test_report_after_peer_leaves_and_never_rematch(db):
+    await operate(db, 1, 'join', now=100)
+    sid = (await operate(db, 2, 'join', now=101))['session']
+    await operate(db, 2, 'send', {
+        'session': sid, 'client_id': 'abcdefghijklmnop', 'text': 'evidence',
+    }, now=102)
+    await operate(db, 2, 'end', {'session': sid}, now=103)
+    ended = await operate(db, 1, 'status', now=104)
+    assert ended['recent'] == sid and ended['messages'] == []
+    with pytest.raises(ValueError):
+        await operate(db, 3, 'report', {'session': sid}, now=105)
+    await operate(db, 1, 'report', {'session': sid}, now=106)
+    async with db.connect() as conn:
+        async with conn.execute('SELECT reporter_id, target_id, text FROM reports') as cursor:
+            rows = await cursor.fetchall()
+    assert len(rows) == 1
+    assert rows[0]['reporter_id'] == 1 and rows[0]['target_id'] == 2
+    assert 'evidence' in rows[0]['text']
+    await operate(db, 1, 'join', now=107)
+    assert (await operate(db, 2, 'join', now=108))['state'] == 'searching'
+
+
+@pytest.mark.asyncio
+async def test_typing_and_presence(db):
+    await operate(db, 1, 'join', now=100)
+    sid = (await operate(db, 2, 'join', now=101))['session']
+    await operate(db, 1, 'typing', {'session': sid}, now=102)
+    assert (await operate(db, 2, 'status', now=103))['typing']
+    assert not (await operate(db, 2, 'status', now=107))['typing']
