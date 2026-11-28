@@ -1,0 +1,52 @@
+.incognito-open{overflow:hidden}
+#nora-incognito[hidden],#nora-incognito [hidden]{display:none!important}
+#nora-incognito{position:fixed;inset:0;margin:0;border:0;border-radius:0;padding:0;width:100%;max-width:none;height:100dvh;max-height:none;background:#111013;color:#f5f4f6;box-sizing:border-box;overflow:hidden;overscroll-behavior:contain;font-family:inherit}
+#nora-incognito[open]{display:flex;flex-direction:column;animation:inc-enter .28s cubic-bezier(.2,.8,.2,1) both}
+#nora-incognito::backdrop{background:#111013}
+#nora-incognito button{font:inherit;cursor:pointer;border:0;color:inherit;min-width:0;-webkit-tap-highlight-color:transparent}
+#nora-incognito button:active{transform:scale(.97)}
+.incognito-header{flex:none;display:flex;align-items:center;gap:12px;padding:calc(max(env(safe-area-inset-top),var(--tg-content-safe-area-inset-top,0px)) + 10px) 16px 10px;min-height:68px;border-bottom:1px solid #ffffff0b}
+.incognito-heading{display:grid;gap:3px;flex:1;min-width:0}
+.incognito-heading strong{font-size:17px;font-weight:650;letter-spacing:-.02em}
+.incognito-heading small{font-size:12px;color:#aaa5ad}
+#nora-incognito .incognito-round{width:40px;height:40px;border-radius:50%;background:#ffffff0c;font-size:27px;display:grid;place-content:center;line-height:1}
+.incognito-lobby{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 24px calc(30px + env(safe-area-inset-bottom));text-align:center}
+.incognito-lobby h1{font-size:28px;font-weight:620;letter-spacing:-.06em;line-height:1.12;margin:30px 0 12px}
+.incognito-lobby p{font-size:15px;line-height:1.55;color:#aaa5ad;margin:0 0 32px}
+.incognito-lobby small{font-size:11px;color:#847f88;margin-top:14px}
+.incognito-orbit{position:relative;width:170px;height:170px;display:grid;place-items:center;isolation:isolate;flex:none}
+.incognito-orbit i{position:absolute;width:94px;height:94px;border:1px solid #f64e5d42;border-radius:50%;opacity:.6;transform:scale(1.25)}
+.incognito-orbit i:nth-child(2){transform:scale(1.55);opacity:.35}
+.incognito-orbit i:nth-child(3){transform:scale(1.8);opacity:.16}
+.incognito-symbol{display:grid;place-items:center;width:94px;height:94px;border-radius:50%;background:radial-gradient(circle at 50% 25%,#452027,#22161b 70%);border:1px solid #f04b5e55;color:#fb6879;box-shadow:0 0 45px #f0314420}
+.incognito-symbol svg{width:52px;height:52px}
+[data-state="searching"] .incognito-orbit i{animation:inc-radar 2.7s ease-out infinite}
+[data-state="searching"] .incognito-orbit i:nth-child(2){animation-delay:.9s}
+[data-state="searching"] .incognito-orbit i:nth-child(3){animation-delay:1.8s}
+[data-state="searching"] .incognito-symbol{animation:inc-breathe 2.7s ease-in-out infinite}
+#nora-incognito .incognito-primary{background:#db374a;border-radius:22px;width:min(100%,320px);padding:16px 24px;font-weight:620;min-height:54px}
+[data-state="searching"] .incognito-primary{background:#262329!important;color:#d9d4dc!important}
+.incognito-feed{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:16px;overscroll-behavior:contain}
+.incognito-feed::before{content:'Ваши личности скрыты';align-self:center;font-size:11px;color:#99929e;background:#ffffff08;padding:6px 12px;border-radius:20px;margin:4px 0 12px}
+.incognito-bubble{align-self:flex-start;max-width:82%;background:#252329;border-radius:19px 19px 19px 5px;padding:9px 12px 7px;display:grid;gap:3px;overflow-wrap:anywhere;white-space:pre-wrap;font-size:15px;line-height:1.4;animation:inc-message .18s ease-out both}
+.incognito-bubble.mine{align-self:flex-end;background:#842938;border-radius:19px 19px 5px 19px}
+.incognito-bubble time{justify-self:end;font-size:10px;color:#ffffff88;line-height:1.2}
+.incognito-compose{flex:none;display:flex;align-items:flex-end;gap:8px;padding:8px 12px 0;margin:0}
+.incognito-compose textarea{flex:1;min-width:0;resize:none;height:44px;max-height:105px;padding:12px 16px;border:1px solid #ffffff10;outline:0;border-radius:25px;background:#242227;color:#fff;font:16px/20px inherit;font-size:16px;box-sizing:border-box}
+#nora-incognito .incognito-compose button{height:44px;width:44px;border-radius:50%;background:#db374a;display:grid;place-items:center;flex:none}
+.incognito-compose button svg{width:23px;height:23px}
+.incognito-tools{flex:none;display:flex;gap:8px;padding:10px 12px calc(12px + max(env(safe-area-inset-bottom),var(--tg-content-safe-area-inset-bottom,0px)))}
+#nora-incognito .incognito-tools button{flex:1;border-radius:15px;background:#ffffff0b;padding:12px 6px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:7px}
+.incognito-tools button svg{width:17px;height:17px}
+.incognito-error{flex:none;font-size:12px;color:#ff8290;text-align:center;padding:8px 16px}
+.incognito-menu{position:absolute;z-index:2;top:calc(max(env(safe-area-inset-top),var(--tg-content-safe-area-inset-top,0px)) + 64px);right:12px;display:grid;background:#2a272f;border:1px solid #ffffff1a;border-radius:20px;padding:5px;box-shadow:0 15px 40px #0008}
+#nora-incognito .incognito-menu button{padding:14px 16px;background:transparent;text-align:left;font-size:14px;border-radius:14px}
+#nora-incognito .incognito-menu button:not(:last-child){color:#ff8290}
+.incognito-entry-icon{width:24px;height:24px;display:grid;place-content:center;color:#f16b78;font-size:18px}
+.staff-chat-header .incognito-entry{display:grid;place-items:center;width:35px;height:35px;flex:none;background:#ffffff0c;color:#f16b78;border:0;border-radius:50%;padding:7px}
+.incognito-entry svg,.incognito-entry-icon svg{width:22px;height:22px;display:block}
+@keyframes inc-enter{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes inc-radar{0%{transform:scale(1);opacity:.65}100%{transform:scale(1.9);opacity:0}}
+@keyframes inc-breathe{50%{transform:scale(1.06);opacity:.85}}
+@keyframes inc-message{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){#nora-incognito,#nora-incognito *{animation:none!important;transition:none!important}}
