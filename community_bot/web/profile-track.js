@@ -505,14 +505,15 @@ window.NoraProfileTrack = (() => {
       content.querySelector('[data-wave-refresh]').hidden = !waveMode;
       content.querySelector('.music-discovery-heading').hidden = socialMode || waveMode;
       social.hidden = !socialMode;
-      content.querySelector('[data-music-activity-wrap]').hidden = mode === 'search';
+      content.querySelector('[data-music-activity-wrap]').hidden = mode === 'search' || waveMode;
       panel.querySelector('[data-library-count]').textContent = libraryCount(list.querySelectorAll('[data-track-src]').length);
     }
     function setMode(next, focus = false) {
+      const previousMode = mode;
       mode = next;
       for (const button of content.querySelectorAll('[data-music-tab]')) button.setAttribute('aria-pressed', String(button.dataset.musicTab === mode));
       if (mode !== 'search') { input.value = ''; generation++; controller?.abort(); remote.innerHTML = ''; }
-      else if (!remote.innerHTML) remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
+      else if (previousMode !== 'search' || !remote.innerHTML) remote.innerHTML = '<p class="music-catalog-note">' + t("Введи название или исполнителя и нажми «Найти».") + '</p>';
       filter();
       if (mode === 'wave') void loadWave();
       if (['top','friends','history'].includes(mode)) void loadSocial();
