@@ -158,8 +158,15 @@ async def private_menu_content(db: Database, settings: Settings, user_id: int) -
         return WELCOME_MEMBER_TEXT if approved else "👋 С возвращением! Выбери раздел.", markup
     help_row = [InlineKeyboardButton(text="🎫 Помощь", callback_data="menu:question")]
     pending = await db.pending_application_photo_status(user_id)
-    markup = start_apply_keyboard(pending=bool(pending))
+    markup = start_apply_keyboard(pending=bool(pending), open_app=not ban)
+    if not ban:
+        from community_bot.onboarding_invites import entry_keyboard
+
+        markup.inline_keyboard.extend(entry_keyboard(settings).inline_keyboard)
     text = WELCOME_PENDING_TEXT if pending else WELCOME_TEXT
+    if not ban:
+        access_text = "Приложение Норы и игры можно открыть сразу. В общий чат впускают админы по заявкам."
+        text = f"{text}\n\n{access_text}" if pending else f"👋 Привет!\n\n{access_text}"
     if pending and not pending["has_photo"]:
         text += f"\n\n{APPLICATION_PHOTO_PROMPT}"
     return text, InlineKeyboardMarkup(inline_keyboard=[*markup.inline_keyboard, help_row])
@@ -1358,17 +1365,8 @@ async def application_bio(
         await message.answer(reason)
         await restore_private_menu(message, db, settings)
         return
-    if not await db.decide_application(application_id, settings.owner_id, "approved", None):
-        await message.answer("Анкета уже рассмотрена. Открой /start, чтобы проверить доступ.")
-        return
-    try:
-        await _notify_application_decision(
-            bot, db, settings, application_id, settings.owner_id, "approved", None,
-            automatic=True,
-        )
-    except TelegramAPIError as error:
-        logger.warning("Automatic application %s approved; invite delivery failed (%s)",
-                       application_id, type(error).__name__)
+    await notify_application_reviewers(bot, settings, application_id, user.id, user.username, answers)
+    await restore_private_menu(message, db, settings)
 
 
 @router.message(F.photo, MagicData(F.application_photo_target))
@@ -1460,8 +1458,6 @@ async def _notify_application_decision(
     moderator_id: int,
     status: str,
     reason: str | None,
-    *,
-    automatic: bool = False,
 ) -> None:
     application = await db.get_application(application_id)
     if not application or application["status"] != status:
@@ -1483,11 +1479,7 @@ async def _notify_application_decision(
         if approved:
             from community_bot.onboarding_invites import send_entry
 
-            await send_entry(bot, settings, user_id, new_member=True)
-            if automatic:
-                from community_bot.onboarding_invites import BROADCAST_MARKER
-
-                await db.set_bot_state(f"{BROADCAST_MARKER}{user_id}", "sent")
+            await send_entry(bot, settings, user_id)
         else:
             await safe_send(bot, user_id, f"{result}.{reason_text}", parse_mode="HTML")
     with fresh_private_panel(user_id):
@@ -1502,10 +1494,9 @@ async def _notify_application_decision(
                 pass  # No pending request or Telegram has already processed it.
             except TelegramAPIError as error:
                 logger.warning("Existing community join request approval failed (%s)", type(error).__name__)
-    if not automatic:
-        report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
-        for reviewer_id in settings.reviewers - {moderator_id, user_id}:
-            await safe_send(bot, reviewer_id, report, parse_mode="HTML")
+    report = f"{result}: анкета №{application_id}, решение принял <code>{moderator_id}</code>.{reason_text}"
+    for reviewer_id in settings.reviewers - {moderator_id, user_id}:
+        await safe_send(bot, reviewer_id, report, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("application:approve:"))

@@ -561,13 +561,8 @@ async def event_pay_charge(callback: CallbackQuery, db: Database) -> None:
 
 @router.chat_join_request()
 async def captcha_join_request(event: ChatJoinRequest, db: Database, bot: Bot, settings: Settings) -> None:
-    from community_bot.access import needs_reapplication
-
-    if event.chat.id == settings.community_chat_id and await needs_reapplication(db, event.from_user.id):
-        await event.decline()
-        with suppress(*_TG_ERRORS):
-            await bot.send_message(event.from_user.id, "Чтобы вернуться в Нору, заполни новую анкету через /start.")
-        return
+    if event.chat.id == settings.community_chat_id:
+        return  # Community join requests are handled by admins in Telegram.
     if not await db.feature_enabled("join_captcha"):
         await event.approve()
         return
@@ -632,8 +627,6 @@ async def captcha_ok(callback: CallbackQuery, db: Database, bot: Bot, settings: 
             callback.from_user.id,
             permissions=_full_chat_permissions(),
         )
-    with suppress(*_TG_ERRORS):
-        await bot.approve_chat_join_request(chat_id, callback.from_user.id)
     await callback.answer("Добро пожаловать.")
     if callback.message and callback.message.chat.type == "private":
         await callback.message.answer("Можно писать в чат.")

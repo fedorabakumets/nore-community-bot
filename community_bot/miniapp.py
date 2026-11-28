@@ -69,12 +69,12 @@ async def protection(request, handler):
             db, settings, uid = request.app['db'], request.app['settings'], request['actor']['id']
             path = request.path
             ban = await db.ban_reset_state(uid)
-            if not await private_allowed(db, settings, uid, ban=ban):
+            if ban and not await private_allowed(db, settings, uid, ban=ban):
                 if path not in {'/api/me', '/api/application', '/api/application/photo', '/api/cities'}:
                     return web.json_response({'error': 'Раздел откроется после одобрения анкеты'},
                                              status=403, headers={'Cache-Control': 'no-store'})
                 request['application_ban'] = ban
-            elif path not in {'/api/me', '/api/city', '/api/cities'}:
+            elif path not in {'/api/me', '/api/city', '/api/cities', '/api/application', '/api/application/photo'}:
                 registered = await db.get_user(uid)
                 if not registered or not str(registered.get('city') or '').strip():
                     return web.json_response(
@@ -168,7 +168,7 @@ async def application_onboarding(db, uid, ban):
 async def submit_application(request):
     from community_bot.application_form import validate_application_age
     from community_bot.city_lookup import city_label_matches, resolve_city_id, resolve_city_text
-    from community_bot.routers.private import _notify_application_decision
+    from community_bot.routers.private import notify_application_reviewers
 
     if 'application_ban' not in request:
         return web.json_response({'status': 'admitted'})
@@ -215,17 +215,10 @@ async def submit_application(request):
         if onboarding['status'] != 'form':
             return web.json_response(onboarding)
         return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
-    if not await db.decide_application(application_id, settings.owner_id, 'approved', None):
-        return web.json_response({'error': 'Условия доступа изменились. Открой анкету заново.'}, status=409)
-    try:
-        await _notify_application_decision(
-            request.app['bot'], db, settings, application_id, settings.owner_id,
-            'approved', None, automatic=True,
-        )
-    except TelegramAPIError:
-        # Approval must not roll back because Telegram could not deliver the private invitation.
-        pass
-    return web.json_response({'status': 'admitted'})
+    await notify_application_reviewers(
+        request.app['bot'], settings, application_id, uid, request['actor'].get('username'), answers,
+    )
+    return web.json_response({'status': 'pending', 'application_id': application_id, 'has_photo': False})
 
 
 async def overview(request):
@@ -303,7 +296,7 @@ async def overview(request):
              'details': list(item.details) if not item.sections else []}
             for item in reversed(UPDATES[-5:])]
     community_url = str(getattr(settings, 'community_invite_url', '') or '').strip()
-    if stats['fill_percent'] < 100 or not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
+    if not re.fullmatch(r'https://t\.me/[A-Za-z0-9_+/-]+', community_url):
         community_url = ''
     return web.json_response({
         'user': {k: user.get(k) for k in ('user_id', 'telegram_name', 'profile_name', 'username',

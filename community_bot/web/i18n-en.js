@@ -2418,6 +2418,7 @@ window.NoraEnglish = Object.freeze({
   "Продолжить": "Continue",
   "Продолжить для всех": "Continue for everyone",
   "Продолжить общение": "Continue communication",
+  "Вход по заявке": "Join by request",
   "Продолжить этот полёт? В запасе: ": "Continue this flight? In stock:",
   "Проектор": "Projector",
   "Проектор кинотеатра": "Cinema projector",

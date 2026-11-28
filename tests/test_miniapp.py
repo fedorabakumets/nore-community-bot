@@ -95,14 +95,20 @@ async def test_overview_exposes_only_allowlisted_own_fields(db, monkeypatch):
     assert data['home']['news'][0]['details'] == ['Возможности для участников']
 
 
-async def test_miniapp_gate_accepts_staff_and_approved_members(db):
+async def test_miniapp_gate_accepts_users_without_chat_approval(db):
     req = Request(db)
     req.path = '/api/profile'
     req.headers = {'Authorization': 'tma '+signed(date=int(time.time()))}
     handler = AsyncMock(return_value=web.json_response({'ok': True}))
     await db.execute("UPDATE users SET profile_name='Анна', birth_date='2000-01-01', hobbies='Кино',"
                      "profile_bio='Описание', avatar_file_id='photo' WHERE user_id=7")
-    assert (await protection(req, handler)).status == 403
+    assert (await protection(req, handler)).status == 200
+    application_id = await db.create_application(7, {})
+    req.path = '/api/dot/status'
+    assert (await protection(req, handler)).status == 200
+    await db.decide_application(application_id, 99, 'rejected', None)
+    assert (await protection(req, handler)).status == 200
+    req.path = '/api/profile'
     await db.set_role(7, 'admin')
     assert (await protection(req, handler)).status == 200
     await db.set_role(7, 'member')
@@ -119,7 +125,7 @@ async def test_miniapp_gate_accepts_staff_and_approved_members(db):
     assert (await db.get_user(7))['cookies'] == 100
 
 
-async def test_web_application_approves_questionnaire_and_grants_access(db):
+async def test_web_application_for_returning_banned_user_requires_review(db):
     bot = SimpleNamespace(
         send_message=AsyncMock(),
         me=AsyncMock(return_value=SimpleNamespace(username='nora_community_bot')),
@@ -143,36 +149,11 @@ async def test_web_application_approves_questionnaire_and_grants_access(db):
 
     assert (await call('/api/application', submit_application, answers, signed_in=False))[0] == 401
     status, home = await call('/api/me', overview)
-    assert status == 200 and set(home) == {'onboarding'}
-    assert home['onboarding']['status'] == 'form'
-    assert await db.get_user(42) is None
-    handler = AsyncMock(return_value=web.json_response({'ok': True}))
-    assert (await call('/api/profile', handler))[0] == 403
-
-    for invalid in (
-        {'name': ' '}, {'age': '2000-01-01'}, {'age': 13}, {'age': 121}, {'age': True},
-        {'city': ''}, {'bio': 'x' * 1001},
-    ):
-        assert (await call('/api/application', submit_application, answers | invalid))[0] == 400
-    assert await db.get_user(42) is None
-
-    status, result = await call('/api/application', submit_application, answers)
-    assert status == 200 and result == {'status': 'admitted'}
-    assert await db.has_approved_application(42)
-    assert (await db.get_user(42))['city'] == 'Москва'
-    assert await db.pending_applications() == []
-    application = await db.fetchone(
-        'SELECT answers_json FROM applications WHERE user_id = ?', (42,),
-    )
-    assert json.loads(application['answers_json']) == {
-        'name': 'Ника', 'age': 26, 'city': 'Москва', 'bio': 'Люблю музыку <3',
-    }
-    assert bot.send_message.await_count == 2
-    entry = bot.send_message.call_args_list[0]
-    assert entry.args[0] == 42
-    assert entry.kwargs['reply_markup'].inline_keyboard[0][0].url == 'https://t.me/+NoraTest'
+    assert status == 200 and home == {'city_required': True}
+    assert await db.get_user(42) is not None
     assert (await call('/api/application', submit_application, answers))[1] == {'status': 'admitted'}
-    assert (await call('/api/profile', handler))[0] == 200
+    assert not await db.has_approved_application(42)
+    assert await db.pending_applications() == []
 
     await db.reset_banned_user(42, until=None)
     assert (await call('/api/me', overview))[1] == {'onboarding': {'status': 'blocked'}}
@@ -182,6 +163,28 @@ async def test_web_application_approves_questionnaire_and_grants_access(db):
     assert status == 200 and home['onboarding']['status'] == 'form'
     assert home['onboarding']['ban_version']
     assert (await call('/api/application', submit_application, answers))[0] == 409
+    answers['ban_version'] = home['onboarding']['ban_version']
+
+    for invalid in (
+        {'name': ' '}, {'age': '2000-01-01'}, {'age': 13}, {'age': 121}, {'age': True},
+        {'city': ''}, {'bio': 'x' * 1001},
+    ):
+        assert (await call('/api/application', submit_application, answers | invalid))[0] == 400
+
+    status, result = await call('/api/application', submit_application, answers)
+    assert status == 200 and result['status'] == 'pending'
+    assert not await db.has_approved_application(42)
+    assert (await db.get_user(42))['city'] == 'Москва'
+    application = await db.get_application(result['application_id'])
+    assert application['answers'] == {
+        'name': 'Ника', 'age': 26, 'city': 'Москва', 'bio': 'Люблю музыку <3',
+    }
+    review = bot.send_message.call_args
+    assert bot.send_message.await_count == 1
+    assert review.args[0] == 99
+    assert review.kwargs['reply_markup'].inline_keyboard[0][0].callback_data.startswith('application:approve:')
+    assert (await call('/api/application', submit_application, answers))[1] == result
+    assert bot.send_message.await_count == 1
 
 
 async def test_current_role_badges_enrich_game_views_without_changing_seasonal_catalog(db):
