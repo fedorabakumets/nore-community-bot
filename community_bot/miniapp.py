@@ -312,6 +312,7 @@ async def overview(request):
                                         'warnings', 'profile_private',
                                         'hate_shields', 'hate_immunity_until')} | {'age': profile_age(user)},
         'staff_chat_available': role in {'owner', 'admin', 'moderator'},
+        'beta_games_available': role in {'owner', 'admin'},
         'admin_available': await has_permission(
             db, settings, user['user_id'], 'admin.panel',
         ),
@@ -638,6 +639,9 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/admin/upload', admin_web.upload)
     app.router.add_get('/api/admin/media/{media_id}', admin_web.media)
     app.router.add_get('/api/me', overview)
+    from community_bot.beta_games import dice_access
+
+    app.router.add_get('/api/dice/access', dice_access)
     app.router.add_get('/api/cities', city_suggestions)
     app.router.add_post('/api/city', set_city)
     app.router.add_post('/api/application', submit_application)
@@ -820,6 +824,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'staff-chat-delivery.js', 'staff-chat.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot-core.js', 'dot.js',
+                 'dice-core.js', 'dice.js', 'dice.css',
                  'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):
