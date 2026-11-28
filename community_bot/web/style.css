@@ -190,10 +190,9 @@ nav button{font-size:clamp(10px,2.6vw,12px);min-height:44px}
   scroll-padding-top:var(--safe-top);
 }
 main{padding-top:max(var(--safe-top),calc(var(--device-top) + 56px))}
-/* Keep Telegram's controls above a solid surface in the Mini App shell. */
-body::before,body::after{content:"";position:fixed;left:0;right:0;z-index:60;background:var(--poster-bg)}
+/* Keep Telegram's top controls above a solid surface in the Mini App shell. */
+body::before{content:"";position:fixed;left:0;right:0;z-index:60;background:var(--poster-bg)}
 body::before{top:0;height:var(--safe-top)}
-body::after{bottom:0;height:var(--safe-bottom)}
 .nav-profile-wrap{position:relative;display:block;width:28px;height:28px;margin:0 auto 3px}.nav-profile-wrap .nav-profile-photo{margin:0}.nav-unread-dot{position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:var(--red);border:2px solid #121214;display:none}.nav-profile-wrap.has-unread .nav-unread-dot{display:block}
 
 
@@ -5118,7 +5117,6 @@ body:has(#app[data-screen="dot"]){height:100dvh;min-height:0}
 body:has(#app[data-screen="dot"]) #scroll-jump{display:none!important;pointer-events:none!important}
 body:has(#app[data-screen="dot"]) #nav{box-shadow:inset 0 1px 2px #ffffff35,inset 0 -1px 2px #ffffff0d,inset 0 0 0 1px #ffffff16}
 body:has(#app[data-screen="dot"]) #nav .nav-drop{box-shadow:inset 0 1px 2px #ffffff2b,inset 0 0 0 1px #ffffff15}
-body:has(#app[data-screen="dot"])::after{background:var(--nora-background,#111013)}
 #app[data-screen="dot"],body.nora-mini-player-active #app[data-screen="dot"]{
   position:fixed!important;inset:max(var(--safe-top,0px),calc(var(--device-top,0px) + 56px)) 0 calc(80px + var(--safe-bottom,0px)) 0;
   width:100%;max-width:680px;height:auto;min-height:0;max-height:none;margin:0 auto!important;
