@@ -727,8 +727,11 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_post('/api/music-library/visibility', social_profiles.library_visibility)
     app.router.add_get('/api/music-library/current', social_profiles.current_track_collection)
     app.router.add_post('/api/music-library/current', social_profiles.current_track_collection)
-    from community_bot import music_discovery
+    from community_bot import music_artist, music_discovery
 
+    app.router.add_get('/api/music-library/artist', music_artist.artist_page)
+    app.router.add_post('/api/music-library/artist', music_artist.save_all)
+    app.router.add_get('/api/music-library/artist/{track_id}', music_artist.audio)
     app.router.add_get('/api/music-library/search', music_discovery.search)
     app.router.add_get('/api/music-library/wave', music_discovery.wave)
     app.router.add_post('/api/music-library/import', music_discovery.import_track)
@@ -754,7 +757,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/nora-game/records', music_api.collection)
     app.router.add_post('/api/nora-game/records', music_api.record_action)
     for name in ('dedzytwo-s1.mp3', 'dedzytwo-02.mp3', 'dedzytwo-03.mp3', 'dedzytwo-04.mp3',
-                 'dedzytwo-06.mp3', 'dedzytwo-cover.png'):
+                 'dedzytwo-06.mp3', 'dedzytwo-cover.png', 'dedzytwo-playlist.jpg'):
         app.router.add_get('/game/' + name, lambda r, n=name: web.FileResponse(ASSETS / 'game' / n))
     app['nora_lobby'] = {}
     app['nora_visits'] = nora_burrows.Visits()
@@ -839,7 +842,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'staff-chat-delivery.js', 'staff-chat.js', 'avatars.js', 'commands.js',
                  'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot-core.js', 'dot.js',
-                 'dice-core.js', 'dice.js', 'dice.css',
+                 'dice-core.js', 'dice.js', 'dice.css', 'music-artist.css',
                  'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):

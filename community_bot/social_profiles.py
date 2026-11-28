@@ -362,6 +362,10 @@ async def public_music_library(request):
 
 async def _share_track_source(db, settings, uid, source, revision):
     """Resolve only an authorized, current audio reference; never accept a file ID from the client."""
+    from community_bot import music_artist
+
+    if isinstance(source, str) and source.startswith(music_artist.SOURCE):
+        return music_artist.resolve(source, revision)
     if isinstance(source, str) and source.startswith(("/api/music-library/history/", "/api/music-library/social/")):
         from community_bot.music_discovery import resolve
 
@@ -455,6 +459,7 @@ async def current_track_collection(request):
             if saved:
                 await add_resolved_track(db, uid, track)
                 _PLAYER_UNDO.pop((uid, source, revision), None)
+                result["track"] = public_track(key, track)
             else:
                 await change_collection(db, uid, key=key, saved=False)
                 _remember_unliked(uid, source, revision, track)
@@ -526,7 +531,12 @@ async def share_track(request):
     lease = None
     try:
         media = track["file_id"]
-        if media.startswith("catalog:"):
+        from community_bot.music_artist import release_paths
+
+        local = release_paths().get(media)
+        if local:
+            media = FSInputFile(local)
+        elif media.startswith("catalog:"):
             lease = await request.app["track_disk_cache"].open_track(bot, track)
             # Recheck source after a possible external download.
             if not await _player_track_source(db, settings, uid, source, revision):

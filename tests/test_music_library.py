@@ -307,3 +307,43 @@ async def test_player_profile_and_likes_independent(tmp_path):
     restored = json.loads((await current_track_collection(req)).body)
     assert restored["saved"] and restored["in_profile"]
     assert await get_collection(db, 1) == {key: track}
+
+
+async def test_artist_bulk_save_is_idempotent_and_keeps_existing_tracks(tmp_path):
+    from community_bot import music_artist
+    from community_bot.music_library import add_resolved_track, track_id
+    from community_bot.social_profiles import _share_track_source
+    from community_bot.track_disk_cache import TrackDiskCache
+
+    db = Database(tmp_path / "artist.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Автор коллекции")
+    await db.ensure_user(2, "ourcreator", "dedzyTWO")
+    await db.ensure_user(3, telegram_name="Другой слушатель")
+
+    class Request(dict):
+        app = {"db": db}
+
+    request = Request(actor={"id": 1})
+    page = json.loads((await music_artist.artist_page(request)).body)
+    assert page["profile_id"] == 2
+    assert page["channel"] == "https://t.me/thededzzyDJ"
+    assert len(page["tracks"]) == 5
+    first = page["tracks"][0]
+    source = music_artist.SOURCE + first["id"]
+    track = await _share_track_source(db, None, 1, source, first["revision"])
+    assert track and await _share_track_source(db, None, 1, source, "a" * 32) is None
+    await add_resolved_track(db, 1, track)
+    other = sample()
+    await add_resolved_track(db, 1, other)
+    responses = await asyncio.gather(music_artist.save_all(request), music_artist.save_all(request))
+    assert sorted(json.loads(response.body)["added"] for response in responses) == [0, 4]
+    entries = await get_collection(db, 1)
+    assert len(entries) == 6
+    assert entries[track_id(other)] == other
+    assert not await get_collection(db, 3)
+    lease = await TrackDiskCache().open_track(None, entries[first["id"]])
+    try:
+        assert lease.file.read(16)
+    finally:
+        lease.close()

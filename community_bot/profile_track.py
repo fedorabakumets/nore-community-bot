@@ -39,10 +39,16 @@ def track_summary(track):
 
 
 def audio_block(track):
+    from aiogram.types import FSInputFile
+
+    from community_bot.music_artist import release_paths
+
+    local = release_paths().get(track["file_id"])
     if track["file_id"].startswith("catalog:"):
         return InputRichBlockParagraph(text=f"🎧 {track['artist']} · {track['title']} (Mini App)")
     return InputRichBlockAudio(audio=InputMediaAudio(
-        media=track["file_id"], title=track["title"], performer=track["artist"] or None,
+        media=FSInputFile(local) if local else track["file_id"],
+        title=track["title"], performer=track["artist"] or None,
     ))
 
 

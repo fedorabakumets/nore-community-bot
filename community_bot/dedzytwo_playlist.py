@@ -23,6 +23,8 @@ from aiogram.types import (
 )
 
 logger = logging.getLogger(__name__)
+ASSETS = Path(__file__).resolve().parent.parent / "assets" / "game"
+COVER_URL = "/game/dedzytwo-playlist.jpg"
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,13 @@ def load_tracks(manifest, original):
         logger.warning('Invalid dedzytwo playlist manifest; using the original track')
         return [original]
     return tracks
+
+
+def artist_tracks(assets=ASSETS):
+    return load_tracks(
+        assets / "dedzytwo-playlist.json",
+        Track(FSInputFile(assets / "dedzytwo-s1.mp3"), "Музыкальная пластинка «?» (S1)", "dedzytwo", 66),
+    )
 
 
 def playlist_message(cover, tracks, username):

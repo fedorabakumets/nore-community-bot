@@ -73,21 +73,32 @@ async def change_collection(db, uid, *, target_id=None, revision=None, key=None,
 
 async def add_resolved_track(db, uid, track):
     """Idempotently add an already authorized audio reference without uploading it."""
-    key = track_id(track)
+    await add_resolved_tracks(db, uid, [track])
+    return {"id": track_id(track), "saved": True}
+
+
+async def add_resolved_tracks(db, uid, tracks):
+    """Add missing tracks in one transaction and return the updated collection."""
     async with db.connect() as conn:
         await conn.execute("BEGIN IMMEDIATE")
         row = await (await conn.execute(
             "SELECT value FROM bot_state WHERE key=?", (collection_key(uid),),
         )).fetchone()
         entries = json.loads(row["value"]) if row else {}
-        if key not in entries:
-            entries[key] = track
+        added = 0
+        # Collections are displayed newest first. Keep the artist's track order.
+        for track in reversed(tracks):
+            key = track_id(track)
+            if key not in entries:
+                entries[key] = track
+                added += 1
+        if added:
             await conn.execute(
                 "INSERT INTO bot_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (collection_key(uid), json.dumps(entries, ensure_ascii=False)),
             )
         await conn.commit()
-    return {"id": key, "saved": True}
+    return entries, added
 
 
 def save_button(track, target_id):

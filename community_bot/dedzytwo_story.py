@@ -68,7 +68,7 @@ async def poster(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(POSTER, headers={"Cache-Control": "public, max-age=86400"})
 
 
-async def _recipient_id(db) -> int:
+async def _recipient_id(db, *, remember=True) -> int:
     """Resolve the DJ's actual NORA profile once, then keep its stable Telegram ID.
 
     Telegram usernames can be missing or stale in our database. The Mini App's
@@ -113,7 +113,8 @@ async def _recipient_id(db) -> int:
         raise ValueError("Не удалось однозначно найти профиль dedzyTWO в Норе")
 
     user_id = int(person["user_id"])
-    await db.set_bot_state(TARGET_ID_KEY, str(user_id))
+    if remember:
+        await db.set_bot_state(TARGET_ID_KEY, str(user_id))
     return user_id
 
 

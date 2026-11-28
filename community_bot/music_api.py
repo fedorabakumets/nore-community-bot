@@ -2,15 +2,13 @@
 import json
 import math
 import time
-from pathlib import Path
 
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import FSInputFile
 from aiohttp import web
 
-from .dedzytwo_playlist import PlaylistDelivery, Track, load_tracks
+from .dedzytwo_playlist import ASSETS, PlaylistDelivery, artist_tracks
 
-ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'game'
 RECORDS = {'standard', 'dedzytwo'}
 COOLDOWN = 300
 CHAT_COOLDOWN = 300
@@ -238,12 +236,8 @@ async def send_track(request):
         await save(db, f'nora_music_send:{uid}', now)
         await save(db, 'nora_music_chat', now)
         await db.commit()
-    tracks = load_tracks(
-        ASSETS / 'dedzytwo-playlist.json',
-        Track(FSInputFile(ASSETS / 'dedzytwo-s1.mp3'), 'Музыкальная пластинка «?» (S1)', 'dedzytwo', 66),
-    )
     delivery = PlaylistDelivery(
-        request.app['bot'], FSInputFile(ASSETS / 'dedzytwo-playlist.jpg'), tracks,
+        request.app['bot'], FSInputFile(ASSETS / 'dedzytwo-playlist.jpg'), artist_tracks(ASSETS),
     )
     sent = []
     for recipient in (chat, uid):
