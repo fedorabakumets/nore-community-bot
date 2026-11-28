@@ -21,13 +21,13 @@ _lock = asyncio.Lock()
 # Only the repository-controlled release list can publish. Keep IDs immutable.
 POSTS = (
     {
-        "id": "nora-intro-repost-20261128",
+        "id": "nora-intro-final-20261128",
         "revision": "1",
         "pin": True,
         "intro": True,
         "blocks": [
             {"type": "heading", "text": "Что это?", "size": 1},
-            {"type": "paragraph", "text": "**Нора** — твоё **цифровое пространство внутри Telegram**. Здесь можно общаться, знакомиться, играть, слушать музыку, находить случайных собеседников в анонимном чате и участвовать в событиях сообщества"},
+            {"type": "paragraph", "text": [{"type": "bold", "text": "Нора"}, " — твоё ", {"type": "bold", "text": "цифровое пространство внутри Telegram"}, ". Здесь можно общаться, знакомиться, играть, слушать музыку, находить случайных собеседников в анонимном чате и участвовать в событиях сообщества"]},
         ],
     },
     {
