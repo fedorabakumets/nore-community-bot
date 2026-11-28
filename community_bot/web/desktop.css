@@ -1,0 +1,87 @@
+/* Desktop alpha: isolated from phone and game-specific layouts. */
+@media (min-width:1050px) and (pointer:fine) {
+  body.nora-desktop {
+    --desk-left:228px; --desk-right:258px; --desk-gap:20px; --desk-top:20px;
+    --desk-l:calc(var(--desk-left) + var(--desk-gap) * 2);
+    --desk-r:calc(var(--desk-right) + var(--desk-gap) * 2);
+    --desk-glass:color-mix(in srgb,var(--nora-background,#141318) 78%,var(--nora-text,#fff) 6%);
+    --desk-line:color-mix(in srgb,var(--nora-text,#fff) 10%,transparent);
+    --desk-muted:color-mix(in srgb,var(--nora-text,#fff) 54%,transparent);
+  }
+  body.nora-desktop #nav {display:none!important;}
+  body.nora-desktop #app:not([data-screen="staffchat"]) {
+    margin:0 var(--desk-r) 0 var(--desk-l)!important;
+    width:auto!important;max-width:none!important;
+    padding:32px 12px 108px!important;min-width:0;
+  }
+  body.nora-desktop #app[data-screen="staffchat"] {
+    left:var(--desk-l)!important;right:var(--desk-r)!important;top:var(--desk-top)!important;
+    width:auto!important;height:calc(100dvh - 40px)!important;padding:0!important;
+    border:1px solid var(--desk-line);border-radius:24px;
+  }
+  body.nora-desktop .desktop-sidebar {
+    position:fixed;top:var(--desk-top);bottom:var(--desk-top);
+    z-index:4;display:flex;flex-direction:column;gap:16px;
+    padding:18px 14px;border:1px solid var(--desk-line);border-radius:26px;
+    background:var(--desk-glass);box-shadow:0 16px 50px #0002,inset 0 1px 0 #ffffff0c;
+    color:var(--nora-text,#f5f3f5);overflow:auto;scrollbar-width:thin;
+  }
+  body.nora-desktop .desktop-sidebar[hidden]{display:none!important}
+  #nora-desktop-left{left:var(--desk-gap);width:var(--desk-left)}
+  #nora-desktop-right{right:var(--desk-gap);width:var(--desk-right)}
+  .desktop-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px}
+  .desktop-brand img{width:40px;height:40px;object-fit:contain;border-radius:12px}
+  .desktop-brand strong{display:block;font-size:22px;font-weight:800;letter-spacing:.05em;line-height:1.1}
+  .desktop-brand small{display:block;color:var(--desk-muted);font-size:9px;letter-spacing:.12em;margin-top:5px}
+  .desktop-nav{display:flex;flex-direction:column;gap:4px}
+  .desktop-nav-item{display:flex;align-items:center;gap:13px;min-height:43px;border-radius:13px;padding:10px 12px;background:transparent;text-align:left;color:var(--desk-muted);font-size:14px;transition:background .18s,color .18s,transform .18s}
+  .desktop-nav-item svg{width:20px;height:20px;flex:none}
+  .desktop-nav-item:hover,.desktop-friend:hover,.desktop-event:hover{background:var(--desk-line);color:var(--nora-text)}
+  .desktop-nav-item.active{background:var(--desk-line);box-shadow:inset 0 0 0 1px var(--desk-line);color:var(--nora-text);font-weight:600}
+  .desktop-nav-item.active svg{color:var(--red,#ff405a)}
+  .desktop-nav-item:active{transform:scale(.98)}
+  .desktop-nav-item[aria-disabled=true]{opacity:.45}
+  .desktop-identity{margin-top:auto;display:flex;align-items:center;gap:10px;padding:12px 8px 0;border-top:1px solid var(--desk-line);background:transparent;text-align:left;color:inherit}
+  .desktop-avatar{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--desk-line);font-size:14px;font-weight:650}
+  .desktop-identity-copy,.desktop-friend-copy{display:flex;flex-direction:column;min-width:0;flex:1}
+  .desktop-identity-copy b,.desktop-friend-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .desktop-identity-copy small,.desktop-friend-copy small{color:var(--desk-muted);font-size:11px}
+  .desktop-side-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px}
+  .desktop-side-heading h2{font:600 17px Rubik,system-ui,sans-serif;margin:0}
+  .desktop-link{background:none;color:var(--desk-muted);font-size:12px;padding:4px;text-align:left}
+  .desktop-link:hover{color:var(--nora-text)}
+  .desktop-muted{font-size:12px;color:var(--desk-muted);margin:4px 4px 10px;line-height:1.5}
+  .desktop-friends,.desktop-events{display:flex;flex-direction:column;gap:5px}
+  .desktop-friend,.desktop-event{display:flex;align-items:center;gap:10px;padding:8px 5px;border-radius:12px;background:transparent;text-align:left;color:inherit;min-width:0}
+  .desktop-presence{width:7px;height:7px;border-radius:50%;background:var(--desk-line);flex:none}
+  .desktop-presence.online{background:#82c997}
+  .desktop-event-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:var(--desk-line);flex:none}
+  .desktop-event b{font-size:13px;font-weight:500;overflow-wrap:anywhere}
+  body.nora-desktop #app .community-home{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;align-items:start;max-width:none!important}
+  body.nora-desktop .community-home>*{min-width:0;margin-block:0}
+  body.nora-desktop .community-home>:is(.home-intro,#home-event-carousel,.home-meetup,.home-stories,.home-news,.home-access,.home-welcome){grid-column:1/-1}
+  body.nora-desktop .community-home .home-intro{display:flex;align-items:center;gap:20px;justify-content:flex-start;padding:4px}
+  body.nora-desktop .home-intro .nora-logo{width:140px;flex:none}
+  body.nora-desktop .home-intro .home-wordmark{width:140px;margin:0}
+  body.nora-desktop .home-intro h1{font-size:40px!important;margin:0 0 7px!important}
+  body.nora-desktop .home-shortcuts{grid-column:1/-1}
+  body.nora-desktop .home-account{grid-column:1/-1}
+  body.nora-desktop .home-community{grid-column:1/-1}
+  body.nora-desktop .home-meetup{min-height:270px}
+  body.nora-desktop .home-updates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;gap:12px}
+  body.nora-desktop .home-updates>.home-news-article{min-width:0;width:auto;max-width:none}
+  body.nora-desktop .home-updates+.home-carousel-dots{display:none}
+  body.nora-desktop > #nora-mini-player:not([hidden]) {
+    left:var(--desk-l);right:var(--desk-r);bottom:20px;max-width:none;width:auto;margin:0;
+    border-radius:22px;min-height:66px;
+  }
+  body.nora-desktop #scroll-jump{right:calc(var(--desk-r) + 10px);bottom:100px}
+  body.nora-desktop #toast{bottom:105px}
+  body.nora-desktop #sheet[open]:not(:has(#nora-now-playing,#music-library-profile,#person-profile)){
+    inset:0;margin:auto;max-height:88dvh;width:min(620px,85vw);max-width:620px;border-radius:24px;
+  }
+}
+@media (min-width:1050px) and (max-width:1250px) and (pointer:fine) {
+  body.nora-desktop{--desk-left:192px;--desk-right:218px;--desk-gap:12px}
+}
+@media (prefers-reduced-motion:reduce){.desktop-nav-item{transition:none}}
