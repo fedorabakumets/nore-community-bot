@@ -3,6 +3,169 @@
 "use strict";
 const C=window.NoraDiceCore,D=C.dice,rar=["Обычный","Редкий","Уникальный","Легендарный"],rarColor=["#b7c5df","#78dfff","#c4a0ff","#ffce87"];
 const presets=[[0,1,2,3,4],[0,8,9,10,11],[1,6,7,12,13],[8,9,11,14,17],[4,9,10,15,16]],pn=["Старт","Слияния","Экономика","Гармония","Атака"];
+
+/* Card demonstrations use the same simulation and merge rules as the match.
+   Scripted setups, durable targets and a shortened Growth timer are preview-only. */
+const previewNames=[
+"Скорострельность","Взрыв по области","Накопление льда","Цепная молния","Удар по сильнейшему","Периодический урон",
+"Критический резонанс","Ускорение союзников","Автоматический рост","Копирование","Свободное слияние","Усиление без смены типа",
+"Генерация SP","Дополнительный призыв","Обмен клеток","Атака поля соперника","Нарастающий урон","Гармония линий"];
+function previewScenario(i,rank){
+  const pool=[...new Set([0,i,1,2,3,4])].slice(0,5);
+  const g=C.create(pool,i===15?"duel":"training",()=>0.001),p=g.you;
+  const s={g,p,i,rank,t:0,acted:false,fx:[],status:"",duration:5.4};
+  p.spawn=Infinity;if(g.opp)g.opp.spawn=Infinity;
+  const add=(id,n,k)=>C.add(g,p,id,n,k);
+  const target=(pos,h,boss=false)=>{const e=C.spawn(g,p,boss);e.pos=pos;e.h=e.max=h;e.skill=Infinity;return e};
+  if(i<=5){
+    add(i,rank,7);
+    if(i===4){target(35,380);target(75,20000,true);target(105,380)}
+    else if(i===2||i===5){target(55,20000);if(i===5)target(105,10000)}
+    else{target(55,4000);target(72,4000);target(89,4000)}
+  }else if(i===6||i===7){
+    add(i,rank,6);add(0,rank,7);add(0,rank,11);target(48,20000);target(95,20000);
+  }else if(i===8){
+    add(i,rank,7);if(rank<7)p.board[7].grow=2.1;
+  }else if(i===17){
+    for(const k of [2,5,6,7,8,9])add(17,k===7?rank:1,k);
+    target(45,20000);
+  }else{
+    add(i,rank,6);add([12,13,15,16].includes(i)?i:0,rank,8);
+    if(i===15)C.add(g,g.opp,2,3,7);
+    if(i===16)add(16,rank,11);
+  }
+  g.events.length=0;
+  return s;
+}
+function previewStep(s,dt){
+  const {g,p,i,rank}=s;s.t+=dt;
+  const special=i>=9&&i<=16;
+  if(special){
+    if(!s.acted&&s.t>=1.8){
+      s.acted=true;s.merged=C.merge(g,p,6,8);
+    }
+  }else{
+    if(i===17&&!s.acted&&s.t>=1.8){s.acted=true;C.add(g,p,17,1,12)}
+    C.tick(g,dt);
+  }
+  for(const e of g.events.splice(0)){
+    if(!["hit","arc","summon","merge","assassin","kill"].includes(e.kind))continue;
+    const xy=e.k>=0?C.pos(e.k):[e.x,e.y];
+    if(!Number.isFinite(xy[0])||!Number.isFinite(xy[1]))continue;
+    s.fx.push({kind:e.kind,x:xy[0],y:xy[1],a:e.a,b:e.b,i:e.i??i,enemy:e.p!==p,life:.45,max:.45});
+  }
+  s.fx=s.fx.filter(f=>(f.life-=dt)>0).slice(-90);
+  return s;
+}
+function previewStatus(s){
+  const {i,rank,p,g,acted,t}=s;
+  if(i===0)return rank+" точ. · "+(D[0].interval/rank).toFixed(2)+" с между атаками";
+  if(i===1)return "Цель + 70% урона ближайшим противникам";
+  if(i===2){const n=Math.max(0,...p.enemies.map(e=>e.ice));return "Обледенение "+n+"/3 · замедление "+(n*8)+"%"}
+  if(i===3)return "До 3 целей · 100% → 70% → 30%";
+  if(i===4)return "Выбор цели с максимальным HP · ×2 против босса";
+  if(i===5)return p.enemies.some(e=>e.poison>0)?"Яд активен · 13 урона/с · 4 с":"Случайная цель · наложение яда";
+  if(i===6)return "Соседи: +"+(2.5*rank).toLocaleString("ru-RU")+" п.п. к шансу крита";
+  if(i===7)return "Соседи: +"+(7*rank)+"% к скорости атаки";
+  if(i===8)return rank===7?"7 точек · рост завершён":p.board[7]?.p>rank?"Результат: случайный тип · +1 точка":"Рост через 14 с · время в превью ускорено";
+  if(i===17)return acted?"Гармония: пересечение двух линий · ×5 урон":"Заполнена горизонтальная линия · ×2 урон";
+  if(!acted)return "Перетащить на кубик с таким же числом точек";
+  if(!s.merged)return "7 точек · дальнейшее слияние недоступно";
+  if(i===9)return "Копия создана · оба кубика сохранены";
+  if(i===10)return "Случайный кубик · +1 точка";
+  if(i===11)return "Тип цели сохранён · +1 точка";
+  if(i===12)return "+"+(80*rank)+" SP";
+  if(i===13)return "Дополнительный случайный кубик · бесплатно";
+  if(i===14)return "Кубики поменялись местами";
+  if(i===15)return "Кубик соперника потерял одну точку";
+  if(i===16)return "COMBO "+p.combo+" · +"+(p.combo*7)+" урона всем COMBO";
+  return "";
+}
+function previewDraw(ctx,s){
+  const {i,rank,g,p,t}=s,c=D[i].color;
+  const W=360,H=222;ctx.setTransform(2,0,0,2,0,0);ctx.fillStyle="#090b12";ctx.fillRect(0,0,W,H);
+  function rr(x,y,w,h,r,f,stroke){ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);if(f){ctx.fillStyle=f;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=.9;ctx.stroke()}}
+  function dot(x,y,r,col){ctx.beginPath();ctx.arc(x,y,Math.max(.01,r),0,Math.PI*2);ctx.fillStyle=col;ctx.fill()}
+  function ring(x,y,r,col,w=1){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.strokeStyle=col;ctx.lineWidth=w;ctx.stroke()}
+  function label(str,x,y,col="#b5bbcc",size=10){ctx.font="600 "+size+"px system-ui,sans-serif";ctx.textAlign="center";ctx.fillStyle=col;ctx.fillText(str,x,y)}
+  function line(x,y,a,b,col,w=1){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(a,b);ctx.strokeStyle=col;ctx.lineWidth=w;ctx.stroke()}
+  function lightning(x,y,a,b,col){ctx.beginPath();ctx.moveTo(x,y);for(let k=1;k<6;k++){const f=k/6;ctx.lineTo(x+(a-x)*f+Math.sin(k*17+t*35)*3,y+(b-y)*f+Math.cos(k*13+t*29)*5)}ctx.lineTo(a,b);ctx.strokeStyle=col+"44";ctx.lineWidth=5;ctx.stroke();ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke()}
+  function die(u,x,y,alpha=1){const col=D[u.i].color;ctx.save();ctx.globalAlpha=alpha;rr(x-22,y-21,44,42,10,"#151824",col+"b0");rr(x-18,y-17,36,34,7,col+"1e","#ffffff1f");
+    for(const [a,b] of C.pips[u.p]){dot(x+a*10,y-2+b*9,5.4,col+"22");dot(x+a*10,y-2+b*9,3.7,col);dot(x+a*10-.8,y-3+b*9,1.3,"#fff")}
+    label(D[u.i].name==="SUPPLEMENT"?"SUPPL.":D[u.i].name,x,y+15,col,6.5);ctx.restore()}
+  for(let k=0;k<35;k++)dot((k*97.3)%W,(k*63.7)%H,.5,"#9aaed525");
+  const combat=i<=7||i===17;
+  if(combat){
+    line(18,29,342,29,"#ffffff1c",11);line(342,29,342,195,"#ffffff16",11);
+    for(const e of p.enemies){const [x,y]=C.path(e.pos),r=e.boss?10:5.5,col=e.poison>0?"#92e47e":e.ice?"#75dfff":"#d6ddef";
+      if(e.poison>0)ring(x,y,r+5,col+"77",2);
+      ctx.save();ctx.translate(x,y);ctx.rotate(t*.4);rr(-r,-r,r*2,r*2,2,e.flash>0?"#fff":col+"30",col);ctx.restore();
+      rr(x-10,y-r-6,20,2,1,"#ffffff20");rr(x-10,y-r-6,20*Math.max(0,e.h/e.max),2,1,col);
+      for(let j=0;j<e.ice;j++)dot(x+Math.cos(j*2.094)*8,y+Math.sin(j*2.094)*8,2.5,"#9de8ff");
+      if(e.boss)label("MAX HP",x,y+23,col,8);
+    }
+  }
+  for(let k=0;k<15;k++){const [x,y]=C.pos(k);rr(x-24,y-22,48,43,10,"#ffffff03","#ffffff12")}
+  if(i===6||i===7){
+    const [x,y]=C.pos(6);for(const k of [7,11]){const[a,b]=C.pos(k);line(x,y,a,b,c+"80",2);ring(a,b,24,c+"50",1.5)}
+    ring(x,y,26,c+"55",1.6);
+  }
+  if(i===17){
+    line(72,108,288,108,c+"40",7);if(s.acted)line(180,63,180,153,c+"60",7);
+  }
+  const dragging=i>=9&&i<=16&&rank<7||[9,14].includes(i);
+  const move=dragging&&!s.acted?Math.max(0,Math.min(1,(t-.65)/1.15)):0;
+  for(let k=0;k<15;k++){
+    const u=p.board[k];if(!u)continue;const[x,y]=C.pos(k);
+    if(k===6&&move>0){const[a,b]=C.pos(8);die(u,x+(a-x)*move,y+(b-y)*move,.86)}
+    else die(u,x,y);
+    if(i===8&&u.i===8&&u.p<7){rr(x-19,y+24,38,3,1,"#ffffff15");rr(x-19,y+24,38*Math.max(0,1-u.grow/2.1),3,1,c)}
+  }
+  if(i>=9&&i<=16&&!s.acted){const [x,y]=C.pos(6),[a,b]=C.pos(8);if(dragging){line(x+25,y,a-25,b,c+"99",1.5);line(a-31,b-4,a-25,b,c,1.5);line(a-31,b+4,a-25,b,c,1.5)}}
+  if(i===15){const u=g.opp.board[7];label("ПОЛЕ СОПЕРНИКА",180,188,"#ff8fa9",9);if(u)die(u,180,207);else label("−1 точка",180,210,"#ff8fa9")}
+  for(const shot of g.shots){const col=D[shot.i].color,x=shot.x,y=shot.y;
+    if(shot.i===3){lightning(shot.sx,shot.sy,x,y,col);continue}
+    ctx.save();ctx.translate(x,y);ctx.rotate(shot.angle);
+    if(shot.i===0){rr(-8,-1,13,2,1,col);dot(4,0,1.5,"#fff")}
+    else if(shot.i===1){dot(0,0,9,col+"25");dot(0,0,5,col);dot(1,-1,2.6,"#ffdfa7")}
+    else if(shot.i===2){ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-5,-3);ctx.lineTo(-1,0);ctx.lineTo(-5,3);ctx.closePath();ctx.fillStyle=col;ctx.fill()}
+    else if(shot.i===4)rr(-4,-3,8,6,1,col,"#fff");
+    else{dot(0,0,5,col+"35");dot(0,0,3,col)}
+    ctx.restore();
+  }
+  for(const f of s.fx){const col=D[f.i]?.color||c,q=1-f.life/f.max;ctx.globalAlpha=1-q;
+    if(f.kind==="arc")lightning(f.x,f.y,f.a,f.b,col);
+    else if(f.enemy&&i===15)ring(180,207,12+16*q,"#ff557c",2);
+    else{ring(f.x,f.y,4+(f.i===1?35:19)*q,col,1.8);if(f.i===1&&f.kind==="hit")dot(f.x,f.y,6+20*q,col+"40")}
+    ctx.globalAlpha=1;
+  }
+  if(i===12&&s.acted&&s.merged)label("+"+80*rank+" SP",180,65,c,18);
+  if(i===16&&s.acted&&s.merged)label("COMBO "+p.combo,180,55,c,16);
+}
+function mountPreview(panel,i,rank){
+  const canvas=panel.querySelector("canvas"),ctx=canvas?.getContext("2d");if(!ctx)return ()=>{};
+  const status=panel.querySelector("[data-preview-status]"),toggle=panel.querySelector("[data-preview-toggle]"),replay=panel.querySelector("[data-preview-replay]");
+  let s=previewScenario(i,rank),raf=0,last=0,visible=true,disposed=false,playing=!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  function paint(){previewDraw(ctx,s);const next=previewStatus(s);if(status.textContent!==next)status.textContent=next}
+  function syncButton(){toggle.textContent=playing?"Ⅱ":"▶";toggle.setAttribute("aria-label",playing?"Приостановить демонстрацию":"Воспроизвести демонстрацию");toggle.setAttribute("aria-pressed",String(!playing))}
+  function frame(now){
+    raf=0;if(disposed||!panel.isConnected||!playing||!visible||document.hidden)return;
+    if(last&&now-last<30){raf=requestAnimationFrame(frame);return}
+    const dt=last?Math.min(.075,(now-last)/1000):0;last=now;
+    if(s.t>=s.duration)s=previewScenario(i,rank);
+    const steps=Math.max(1,Math.ceil(dt*60));for(let j=0;j<steps;j++)previewStep(s,dt/steps);
+    paint();raf=requestAnimationFrame(frame);
+  }
+  function sync(){cancelAnimationFrame(raf);raf=0;last=0;if(!disposed&&playing&&visible&&!document.hidden)raf=requestAnimationFrame(frame)}
+  function onToggle(){playing=!playing;syncButton();sync()}
+  function onReplay(){s=previewScenario(i,rank);playing=true;paint();syncButton();sync()}
+  toggle.addEventListener("click",onToggle);replay.addEventListener("click",onReplay);
+  const observer=typeof IntersectionObserver==="function"?new IntersectionObserver(entries=>{visible=entries[0]?.isIntersecting!==false;sync()},{threshold:.01}):null;
+  observer?.observe(panel);document.addEventListener("visibilitychange",sync);
+  paint();syncButton();sync();
+  return ()=>{disposed=true;cancelAnimationFrame(raf);observer?.disconnect();document.removeEventListener("visibilitychange",sync);toggle.removeEventListener("click",onToggle);replay.removeEventListener("click",onReplay)};
+}
+
 let active=null;
 function mount(host,{api,exit,tg}){
 if(active?.host===host)return;
@@ -38,17 +201,18 @@ const btn=(a,label,i="",cl="dice-secondary")=>'<button type="button" class="'+cl
 function card(i,small=false){const d=D[i];return '<button type="button" data-dice="'+(small?"slot":"card")+'" data-i="'+i+'" class="dice-card '+(small?"dice-small":"")+' '+(S.slot>=0&&S.deck[S.slot]===i?"chosen":"")+'" style="--dc:'+d.color+';--edge:'+rarColor[d.rarity]+'">'+art(i)+'<b>'+d.name+'</b><small>CLASS '+(1+2*d.rarity+S.levels[i])+'</small></button>'}
 function top(){return '<header class="dice-top"><div><strong>DICE<span>.</span></strong><small>ADMIN ALPHA / NORA</small></div><div>'+btn("sound",S.sound?"♪":"♪ ×")+btn("exit","×")+'</div></header>'}
 function nav(){return '<nav class="dice-nav" aria-label="Разделы DICE">'+[["shop","Магазин"],["deck","Колода"],["arena","Арена"],["modes","Режимы"]].map(([a,n])=>btn("nav",n,a,"dice-tab "+(S.tab===a?"chosen":""))).join("")+'</nav>'}
-function menu(){if(S.dead)return;cancelAnimationFrame(S.raf);S.game=null;S.fx=[];S.trail.clear();
+function menu(){if(S.dead)return;S.previewStop?.();S.previewStop=null;cancelAnimationFrame(S.raf);S.game=null;S.fx=[];S.trail.clear();
 let h="",i=S.detail;
-if(i>=0){const d=D[i],level=1+2*d.rarity+S.levels[i],damage=d.damage*(1+.05*S.levels[i]);h=btn("back","‹ Коллекция")+'<div class="dice-detail" style="--dc:'+d.color+'"><small style="color:'+rarColor[d.rarity]+'">'+rar[d.rarity]+'</small><div class="dice-hero-art">'+art(i,S.rank)+'</div><h2>'+d.name+'</h2><p>'+d.ru+'</p></div><div class="dice-stats"><div><strong>'+Math.round(damage)+'</strong><small>Урон</small></div><div><strong>'+(d.interval/S.rank).toFixed(2)+'с</strong><small>Интервал</small></div><div><strong>'+Math.round(damage*S.rank/d.interval)+'</strong><small>DPS</small></div></div><div class="dice-ranks">'+[1,2,3,4,5,6,7].map(n=>btn("rank",n,n,"dice-secondary "+(S.rank===n?"chosen":""))).join("")+'</div><article class="dice-panel"><small>СПОСОБНОСТЬ</small><p>'+d.description+'</p><small>Точки влияют на частоту атак; Power Up усиливает тип в матче.</small></article><article class="dice-panel"><small>CLASS '+level+' · Копии '+S.copies[i]+'/'+(level+1)+'</small><p>Постоянное улучшение: +5% базового урона за класс.</p>'+btn("upgrade","Улучшить · "+(100*level)+" ◈",i,"dice-primary")+'</article>'}
+if(i>=0){const d=D[i],level=1+2*d.rarity+S.levels[i],damage=d.damage*(1+.05*S.levels[i]);h=btn("back","‹ Коллекция")+'<div class="dice-detail" style="--dc:'+d.color+'"><small style="color:'+rarColor[d.rarity]+'">'+rar[d.rarity]+'</small><div class="dice-hero-art">'+art(i,S.rank)+'</div><h2>'+d.name+'</h2><p>'+d.ru+'</p></div><section class="dice-preview" style="--dc:'+d.color+'"><header><div><small>ДЕМОНСТРАЦИЯ</small><b>'+previewNames[i]+'</b></div><div class="dice-preview-buttons"><button type="button" class="dice-secondary" data-preview-replay aria-label="Повторить демонстрацию">↻</button><button type="button" class="dice-secondary" data-preview-toggle aria-label="Приостановить демонстрацию">Ⅱ</button></div></header><canvas width="720" height="444" aria-label="Демонстрация способности '+d.name+'"></canvas><p data-preview-status></p></section><div class="dice-stats"><div><strong>'+Math.round(damage)+'</strong><small>Урон</small></div><div><strong>'+(d.interval/S.rank).toFixed(2)+'с</strong><small>Интервал</small></div><div><strong>'+Math.round(damage*S.rank/d.interval)+'</strong><small>DPS</small></div></div><div class="dice-ranks">'+[1,2,3,4,5,6,7].map(n=>btn("rank",n,n,"dice-secondary "+(S.rank===n?"chosen":""))).join("")+'</div><article class="dice-panel"><small>СПОСОБНОСТЬ</small><p>'+d.description+'</p><small>Точки влияют на частоту атак; Power Up усиливает тип в матче.</small></article><article class="dice-panel"><small>CLASS '+level+' · Копии '+S.copies[i]+'/'+(level+1)+'</small><p>Постоянное улучшение: +5% базового урона за класс.</p>'+btn("upgrade","Улучшить · "+(100*level)+" ◈",i,"dice-primary")+'</article>'}
 else if(S.tab==="deck"){h='<h2>Колода</h2><p>Пять разных кубиков.</p><div class="dice-deck">'+S.deck.map(i=>card(i,true)).join("")+'</div><small>'+ (S.slot>=0?"Выбери замену для "+D[S.deck[S.slot]].name:"Нажми на слот, затем на кубик в коллекции.")+'</small><h3>Готовые колоды</h3><div class="dice-presets">'+pn.map((n,k)=>btn("preset",n,k)).join("")+'</div><h3>Коллекция · 18/18</h3><div class="dice-collection">'+D.map(d=>card(d.id)).join("")+'</div>'}
 else if(S.tab==="shop"){h='<h2>Магазин</h2><p>Тестовая валюта: '+S.gold+' ◈</p><div class="dice-panel dice-detail"><div class="dice-hero-art">'+art(9,4)+'</div><h3>ORIGIN CACHE</h3><p>12 случайных копий</p>'+btn("chest","Открыть · 180 ◈","","dice-primary")+'</div><h3>Предложения</h3>'+[0,8,9,12,15].map(i=>'<div class="dice-offer dice-panel">'+art(i)+'<div><b>'+D[i].name+'</b><small>5 копий</small></div>'+btn("buy",(80+40*D[i].rarity)+" ◈",i)+'</div>').join("")}
 else if(S.tab==="modes"){h='<h2>Режимы</h2>'+[["training","TRAINING","Лаборатория, свободные эксперименты"],["duel","DUEL","Локальный соперник с ИИ"],["survival","SURVIVAL","Бесконечные волны и боссы"]].map(([id,n,desc])=>btn("mode",'<b>'+n+'</b><small>'+desc+'</small>',id,"dice-mode "+(S.mode===id?"chosen":""))).join("")+'<div class="dice-panel"><b>SYNC</b><p>Кооператив · SOON</p></div>'}
 else{h='<div class="dice-detail"><small>SEASON 01 / ORIGIN</small><div class="dice-hero-art">'+art(1,5)+'</div><h2>ORIGIN</h2><p>Закрытая альфа</p></div><h3>Твоя колода</h3><div class="dice-deck">'+S.deck.map(i=>card(i,true)).join("")+'</div><div class="dice-mode-label"><small>'+S.mode.toUpperCase()+'</small>'+btn("nav","Изменить","modes")+'</div>'+btn("start","Начать бой","","dice-primary")+'<p>Тестовые матчи без печенек и рейтинга.</p>'}
 host.dataset.diceScreen=i>=0?"detail":S.tab;
 host.innerHTML=top()+'<div class="dice-body">'+h+'<p class="dice-notice">'+S.notice+'</p></div>'+(i<0?nav():"");
+if(i>=0)S.previewStop=mountPreview($(".dice-preview"),i,S.rank);
 }
-function start(){audio();cancelAnimationFrame(S.raf);S.game=C.create(S.deck,S.mode,Math.random,S.levels);S.fx=[];S.trail.clear();S.selected=S.drag=-1;S.point=null;S.last=0;S.paused=false;S.speed=1;S.lab=false;S.notice="Призови кубик. Слияние: одинаковый тип и точки.";const g=S.game;if(g.opp){C.summon(g,g.opp);C.summon(g,g.opp)}
+function start(){S.previewStop?.();S.previewStop=null;audio();cancelAnimationFrame(S.raf);S.game=C.create(S.deck,S.mode,Math.random,S.levels);S.fx=[];S.trail.clear();S.selected=S.drag=-1;S.point=null;S.last=0;S.paused=false;S.speed=1;S.lab=false;S.notice="Призови кубик. Слияние: одинаковый тип и точки.";const g=S.game;if(g.opp){C.summon(g,g.opp);C.summon(g,g.opp)}
 const h=g.opp?444:222;host.dataset.diceScreen="battle";host.innerHTML=top()+'<div class="dice-body"><div class="dice-mode-label">'+btn("menu","‹ Арена")+'<small>'+S.mode.toUpperCase()+'</small>'+btn("speed","1×")+'</div><div class="dice-stats"><div><strong data-dice-wave>01</strong><small>ВОЛНА</small></div><div><strong data-dice-sp>100</strong><small>SP</small></div><div><strong data-dice-boss>45с</strong><small>ДО БОССА</small></div></div><div class="dice-stage '+(g.opp?"duel":"")+'"><canvas width="720" height="'+h*2+'" class="dice-canvas" aria-label="Игровое поле"></canvas></div><div class="dice-actions">'+btn("summon","Призвать","","dice-primary")+btn("pause","Ⅱ")+(S.mode==="training"?btn("lab","⚗"):"")+'</div><small>POWER UP</small><div class="dice-deck">'+S.deck.map(i=>'<button type="button" class="dice-card dice-small" data-dice="power" data-i="'+i+'" style="--dc:'+D[i].color+';--edge:'+D[i].color+'">'+art(i)+'<b>'+D[i].name+'</b><span class="dice-bars">'+("<i></i>".repeat(5))+'</span><small>100 SP</small></button>').join("")+'</div>'+(S.mode==="training"?btn("demo","Заполнить поле для теста атак"):"")+'<div data-dice-lab></div><p class="dice-notice"></p><div data-dice-result></div></div>';
 const cv=$("canvas");S.cv=cv;S.ctx=cv.getContext("2d");
 const pointer=e=>{const r=cv.getBoundingClientRect();return [(e.clientX-r.left)*360/r.width,(e.clientY-r.top)*h/r.height]};
@@ -126,10 +290,10 @@ if(a==="upgrade"){const n=1+2*D[i].rarity+S.levels[i];if(S.copies[i]>=n+1&&S.gol
 if(a==="chest"){if(S.gold>=180){S.gold-=180;for(let j=0;j<12;j++)S.copies[Math.floor(Math.random()*D.length)]++;S.notice="12 копий добавлены"}else S.notice="Недостаточно тестовой валюты"}
 if(a==="buy"){const price=80+40*D[i].rarity;if(S.gold>=price){S.gold-=price;S.copies[i]+=5;S.notice=D[i].name+" ×5"}else S.notice="Недостаточно тестовой валюты"}
 menu()}
-S.dispose=()=>{S.dead=true;cancelAnimationFrame(S.raf);host.removeEventListener("click",click);S.ac?.close().catch(()=>{});S.game=null;S.fx=[];S.trail.clear()};
+S.dispose=()=>{S.dead=true;S.previewStop?.();S.previewStop=null;cancelAnimationFrame(S.raf);host.removeEventListener("click",click);S.ac?.close().catch(()=>{});S.game=null;S.fx=[];S.trail.clear()};
 host.innerHTML='<p class="sub">Проверяем доступ к закрытой альфе…</p>';
 api("dice/access").then(r=>{if(S.dead||!host.isConnected)return;if(r.allowed!==true)throw Error("SOON");host.addEventListener("click",click);menu()}).catch(()=>{if(!S.dead&&host.isConnected){host.innerHTML='<p class="sub">DICE · SOON</p><button type="button" class="secondary" data-tab="games">К играм</button>'}});
 }
 function unmount(){if(active){active.dispose();active=null}}
-window.NoraDice={mount,unmount};
+window.NoraDice={mount,unmount,previewScenario,previewStep,previewStatus,previewDraw};
 })();
