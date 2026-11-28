@@ -67,7 +67,7 @@ async def search(request):
     saved = {track.get("catalog_id"): key for key, track in existing.items() if track.get("catalog_id")}
     return web.json_response({"tracks": [
         {"id": song.id, "title": song.title, "artist": song.artist,
-         "duration": song.duration, "url": song.url, "saved_id": saved.get(song.id)}
+         "duration": song.duration, "url": song.url, "cover": song.cover, "saved_id": saved.get(song.id)}
         for song in tracks
     ]})
 
@@ -128,7 +128,7 @@ async def prepare_track(request, *, save):
             return _error("Доступ изменился. Открой приложение снова.", 403)
         track = {"file_id": audio.file_id, "mime": "audio/mpeg",
                  "title": song.title, "artist": song.artist, "duration": audio.duration,
-                 "revision": uuid4().hex, "catalog_id": song.id}
+                 "revision": uuid4().hex, "catalog_id": song.id, "cover": song.cover}
         if save:
             result = await add_resolved_track(db, uid, track)
             key = result["id"]
