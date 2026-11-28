@@ -298,7 +298,7 @@ def is_full_track(actual: float, expected: int) -> bool:
     return actual >= 40
 
 
-def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
+def _download_sync(song: Song, directory: str, cookie_file: str, *, max_bytes=MAX_FILE_BYTES) -> str:
     import yt_dlp
 
     options = {
@@ -311,7 +311,7 @@ def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
         "cookiefile": cookie_file,
         "socket_timeout": 20,
         "retries": 2,
-        "max_filesize": MAX_FILE_BYTES,
+        "max_filesize": max_bytes,
         "cachedir": False,
     }
     with yt_dlp.YoutubeDL(options) as ydl:
@@ -320,7 +320,7 @@ def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
     if len(files) != 1:
         raise SongError("Яндекс не отдал MP3. Возможно, доступен только другой формат.")
     audio = files[0]
-    if not 0 < audio.stat().st_size <= MAX_FILE_BYTES:
+    if not 0 < audio.stat().st_size <= max_bytes:
         raise SongError("Файл превышает лимит размера Telegram.")
     try:
         actual = MP3(str(audio)).info.length
