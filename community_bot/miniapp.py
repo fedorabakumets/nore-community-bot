@@ -730,6 +730,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     from community_bot import music_discovery
 
     app.router.add_get('/api/music-library/search', music_discovery.search)
+    app.router.add_get('/api/music-library/wave', music_discovery.wave)
     app.router.add_post('/api/music-library/import', music_discovery.import_track)
     app.router.add_post('/api/music-library/play', music_discovery.play_track)
     app.router.add_get('/api/music-library/history', music_discovery.history)
