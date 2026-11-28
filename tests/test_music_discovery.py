@@ -256,3 +256,31 @@ async def test_wave_prefix_checks_offer_and_pet_without_preparing_or_downloading
     with pytest.raises(web.HTTPNotFound):
         await buffer_for(1)
     assert cache.cached_start.await_count == 1
+
+
+async def test_wave_stations_filter_provider_matches_and_keep_previous_choices(tmp_path, monkeypatch):
+    db = Database(tmp_path / "stations.sqlite3")
+    await db.initialize()
+    await db.ensure_user(1, telegram_name="Listener")
+    monkeypatch.setattr(songs, "enabled", lambda: True)
+    monkeypatch.setattr(songs, "song_care_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(discovery.random, "sample", lambda values, count: list(values)[:count])
+    monkeypatch.setattr(discovery, "_WAVE_GENRES", {"house": ("First", "Second", "Third")})
+    names = ["First", "Second", "Third", "Chosen"]
+
+    async def lookup(query):
+        index = names.index(query) + 1
+        return [
+            songs.Song(str(index), None, query, query + ", Guest", 120),
+            songs.Song(str(index + 10), None, query, "Unrelated", 120),
+        ]
+
+    monkeypatch.setattr(songs, "find_songs", lookup)
+    genre = await discovery.wave(Request(1, db, None, {"genre": "house"}))
+    assert {track["id"] for track in json.loads(genre.body)["tracks"]} == {"1", "2", "3"}
+    discovery._WAVE_LAST.clear()
+    artist = await discovery.wave(Request(1, db, None, {"artist": " Chosen "}))
+    assert [track["id"] for track in json.loads(artist.body)["tracks"]] == ["4"]
+    assert set(discovery._WAVES[1][1]) == {"1", "2", "3", "4"}
+    invalid = await discovery.wave(Request(1, db, None, {"genre": "house", "artist": "Chosen"}))
+    assert invalid.status == 400

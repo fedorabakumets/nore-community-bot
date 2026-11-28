@@ -35,6 +35,27 @@ _WAVE_SEEDS = (
     'Imagine Dragons', 'Dua Lipa', 'Tame Impala', 'Gorillaz', 'Radiohead', 'The xx',
 )
 
+_WAVE_GENRES = {
+    "pop": ("Dua Lipa", "Ariana Grande", "Adele", "Sabrina Carpenter", "Lady Gaga"),
+    "hiphop": ("Kendrick Lamar", "Nas", "J. Cole", "Баста", "Kanye West"),
+    "house": ("Disclosure", "Kerri Chandler", "Bicep", "Peggy Gou", "Fred again.."),
+    "electronic": ("Daft Punk", "M83", "ODESZA", "Justice", "The Chemical Brothers"),
+    "rock": ("Nirvana", "Foo Fighters", "Queens of the Stone Age", "Кино", "Arctic Monkeys"),
+    "indie": ("The xx", "Tame Impala", "Beach House", "Alvvays", "Молчат Дома"),
+    "rnb": ("SZA", "Frank Ocean", "H.E.R.", "Daniel Caesar", "Summer Walker"),
+    "chill": ("Bonobo", "Tycho", "Khruangbin", "Emancipator", "Ólafur Arnalds"),
+}
+
+
+def _artist_key(artist):
+    return " ".join(artist.casefold().split())
+
+
+def _matches_artist(song, artist):
+    return artist == _artist_key(song.artist) or any(
+        artist == _artist_key(name) for name in song.artist.split(", ")
+    )
+
 
 def _error(message, status=400):
     return web.json_response({"error": message}, status=status)
@@ -379,7 +400,7 @@ def _wave_prune(now):
         for key, entry in list(cache.items()):
             if entry[0] <= now:
                 cache.pop(key, None)
-    for uid, stamp in list(_WAVE_LAST.items()):
+    for uid, (stamp, _) in list(_WAVE_LAST.items()):
         if stamp + 60 <= now:
             _WAVE_LAST.pop(uid, None)
 
@@ -393,7 +414,7 @@ async def _wave_search(query):
     if existing is not None:
         return await asyncio.shield(existing)
     if _SEARCH_SLOTS.locked() or len(_WAVE_LOOKUPS) >= 3:
-        return []
+        raise songs.SongError("Волна пока недоступна. Попробуй обновить позже.")
 
     async def lookup():
         try:
@@ -413,6 +434,10 @@ async def _wave_search(query):
 
 async def wave(request):
     uid, db = request["actor"]["id"], request.app["db"]
+    genre = request.query.get("genre", "")
+    artist = " ".join(request.query.get("artist", "").split())
+    if (genre and (genre not in _WAVE_GENRES or artist)) or (artist and not 2 <= len(artist) <= 120):
+        return _error("Некорректная настройка.")
     if not songs.enabled():
         return _error("Музыкальный каталог пока не подключён.", 503)
     problem = await songs.song_care_error(db, uid)
@@ -420,32 +445,46 @@ async def wave(request):
         return _error(problem, 403)
     now = time.monotonic()
     _wave_prune(now)
-    if uid in _IN_FLIGHT or now - _WAVE_LAST.get(uid, -100) < 4:
+    station = (genre, _artist_key(artist))
+    last, previous_station = _WAVE_LAST.get(uid, (-100, None))
+    cooldown = 4 if station == previous_station else 1
+    if uid in _IN_FLIGHT or now - last < cooldown:
         return _error("Подожди немного перед обновлением волны.", 429)
-    if len(_WAVE_LAST) >= _MAX_USERS:
+    if len(_WAVE_LAST) >= _MAX_USERS and uid not in _WAVE_LAST:
         _WAVE_LAST.pop(next(iter(_WAVE_LAST)))
-    _WAVE_LAST[uid] = now
+    _WAVE_LAST[uid] = (now, station)
     _IN_FLIGHT.add(uid)
     try:
         collection = await get_collection(db, uid)
         history = await read_history(db, uid)
         taste = Counter()
         for track in collection.values():
-            if artist := track.get("artist"):
-                taste[artist[:120]] += 3
+            if name := track.get("artist"):
+                taste[name[:120]] += 3
         for record in history.values():
-            if record["at"] and (artist := record["track"].get("artist")):
-                taste[artist[:120]] += 1
+            if record["at"] and (name := record["track"].get("artist")):
+                taste[name[:120]] += 1
         favorites = [artist for artist, _ in taste.most_common(8)]
-        queries = random.sample(favorites, min(2, len(favorites)))
-        discovery = [seed for seed in _WAVE_SEEDS if seed.casefold() not in {q.casefold() for q in queries}]
-        queries += random.sample(discovery, 3 - len(queries))
+        if artist:
+            queries = [artist]
+        elif genre:
+            queries = random.sample(_WAVE_GENRES[genre], 3)
+        else:
+            queries = random.sample(favorites, min(2, len(favorites)))
+            chosen = {_artist_key(name) for name in queries}
+            discovery = [seed for seed in _WAVE_SEEDS if _artist_key(seed) not in chosen]
+            queries += random.sample(discovery, 3 - len(queries))
         batches = await asyncio.gather(*(_wave_search(q) for q in queries), return_exceptions=True)
         candidates = {}
-        for batch in batches:
-            if isinstance(batch, list):
-                candidates.update((song.id, song) for song in batch)
+        artist_key = _artist_key(artist)
+        for query, batch in zip(queries, batches, strict=True):
+            if not isinstance(batch, list):
+                continue
+            match = artist_key or (_artist_key(query) if genre else "")
+            candidates.update((song.id, song) for song in batch if not match or _matches_artist(song, match))
         if not candidates:
+            if artist and isinstance(batches[0], list):
+                return web.json_response({"tracks": [], "personalized": False, "artists": favorites})
             return _error("Волна пока недоступна. Попробуй обновить позже.", 503)
         existing = _WAVES.get(uid)
         previous = existing[1] if existing else {}
@@ -467,6 +506,6 @@ async def wave(request):
             {"id": song.id, "title": song.title, "artist": song.artist,
              "duration": song.duration, "cover": song.cover, "saved_id": saved.get(song.id)}
             for song in selected
-        ], "personalized": bool(favorites)})
+        ], "personalized": bool(favorites) and not (genre or artist), "artists": favorites})
     finally:
         _IN_FLIGHT.discard(uid)
