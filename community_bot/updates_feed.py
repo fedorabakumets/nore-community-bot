@@ -43,7 +43,7 @@ def target():
 
 def is_updates_chat(chat):
     destination = target()
-    if chat.type != "supergroup" or destination is None:
+    if chat.type not in {"supergroup", "channel"} or destination is None:
         return False
     if isinstance(destination, int):
         return chat.id == destination
@@ -92,7 +92,7 @@ async def publish_post(db, bot, chat_id, post):
 
 
 async def run(db, settings, bot):
-    """Publish configured releases only in the separate, verified production group."""
+    """Publish configured releases only in the separate, verified production channel or group."""
     destination = target()
     if not is_production() or not destination or not settings.community_chat_id:
         return
@@ -100,7 +100,7 @@ async def run(db, settings, bot):
         try:
             chat = await bot.get_chat(destination)
             if not is_updates_chat(chat) or chat.id == settings.community_chat_id:
-                logger.warning("Updates feed target is not a separate configured supergroup")
+                logger.warning("Updates feed target is not a separate configured channel or supergroup")
                 return
             for post in POSTS:
                 try:
