@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import json
-import re
 import random
+import re
 import time
+from collections import Counter
 from uuid import uuid4
 
 from aiogram.exceptions import TelegramAPIError
@@ -24,6 +24,7 @@ _MAX_USERS = 256
 _WAVES = {}
 _WAVE_LAST = {}
 _WAVE_METADATA = {}
+_WAVE_LOOKUPS = {}
 _WAVE_TTL = 2 * 60 * 60
 _WAVE_CACHE_TTL = 30 * 60
 _WAVE_CACHE_LIMIT = 128
@@ -343,18 +344,26 @@ async def _wave_search(query):
     cached = _WAVE_METADATA.get(key)
     if cached and cached[0] > time.monotonic():
         return cached[1]
-    if _SEARCH_SLOTS.locked():
+    existing = _WAVE_LOOKUPS.get(key)
+    if existing is not None:
+        return await asyncio.shield(existing)
+    if _SEARCH_SLOTS.locked() or len(_WAVE_LOOKUPS) >= 3:
         return []
-    async with _SEARCH_SLOTS:
-        # Recheck after waiting for a slot. Do not download audio here.
-        cached = _WAVE_METADATA.get(key)
-        if cached and cached[0] > time.monotonic():
-            return cached[1]
-        tracks = await songs.find_songs(query)
-        if len(_WAVE_METADATA) >= _WAVE_CACHE_LIMIT:
-            _WAVE_METADATA.pop(next(iter(_WAVE_METADATA)))
-        _WAVE_METADATA[key] = (time.monotonic() + _WAVE_CACHE_TTL, tracks)
-        return tracks
+
+    async def lookup():
+        try:
+            async with _SEARCH_SLOTS:
+                tracks = await songs.find_songs(query)
+                if len(_WAVE_METADATA) >= _WAVE_CACHE_LIMIT:
+                    _WAVE_METADATA.pop(next(iter(_WAVE_METADATA)))
+                _WAVE_METADATA[key] = (time.monotonic() + _WAVE_CACHE_TTL, tracks)
+                return tracks
+        finally:
+            _WAVE_LOOKUPS.pop(key, None)
+
+    task = asyncio.create_task(lookup())
+    _WAVE_LOOKUPS[key] = task
+    return await asyncio.shield(task)
 
 
 async def wave(request):
