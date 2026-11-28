@@ -4,9 +4,12 @@ import html
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, Message
+from aiogram.types import (
+    CallbackQuery, FSInputFile, InputMediaPhoto, InputRichBlockDetails,
+    InputRichBlockParagraph, InputRichMessage, Message,
+)
 
 from community_bot.aliases import command_or_alias
 from community_bot.blocks import cover_file
@@ -22,6 +25,8 @@ from community_bot.keyboards import flow_reply_keyboard, pet_keyboard, shop_cate
 from community_bot.menu_art import menu_cover
 from community_bot.pet_care import care_error, needs_care
 from community_bot.pets_talk import SPECIES, aftercare_line, pet_pronouns, species_meta
+from community_bot.private_rich import standalone_rich_message, text_blocks
+from community_bot.reply_rich import bot_publication
 from community_bot.shop_catalog import shop_header_lines, shop_prices_for
 from community_bot.states import PetFlow
 from community_bot.ui_owner import bind_ui_owner
@@ -65,29 +70,39 @@ def pet_text(pet: dict[str, object], timezone: str = "Europe/Moscow") -> str:
         f"💧 <code>{_bar(thirst)}</code> <b>{thirst}/100</b>\n"
         f"😊 <code>{_bar(mood)}</code> <b>{mood}/100</b>\n"
         f"🎒 Припасы: {pet['food_units']} еды · {pet['water_units']} воды\n"
-        f"{notice}{expedition}\n"
-        "<blockquote expandable>Как это работает?\n"
-        "Питомец находит сезонные вещи, коллекционные награды и призы с мероприятий.\n"
-        "Для доступа к возможностям сытость и вода должны быть не ниже 50. "
-        "Кормление и поилка доступны всегда.\n"
-        f"{_expedition_line(pet, words, timezone)}\n"
-        "Печеньки питомец приносит только из экспедиции — сам по себе он их не фармит."
-        "</blockquote>"
+        f"{notice}{expedition}"
     )
 
 
-def _expedition_line(pet: dict[str, object], words: dict[str, str], timezone: str) -> str:
-    if pet.get("expedition_until"):
-        return (
-            f"{words['returned'].capitalize()} — одно сообщение в чат и в личку. "
-            "Можно вернуть питомца раньше без находки. "
-            "Потраченные сытость, вода и настроение не возвращаются."
-        )
-    return (
-        "Поход длится 24 часа. Сытость и вода должны быть не ниже 50. "
-        "При отправке расходуется 60 сытости, 60 воды и 40 настроения. "
+def _pet_help(pet: dict[str, object]) -> str:
+    words = pet_pronouns(str(pet["species"]))
+    expedition = (
+        f"{words['returned'].capitalize()} — одно сообщение в чат и в личку. "
+        "Можно вернуть питомца раньше без находки. Потраченные ресурсы не возвращаются."
+        if pet.get("expedition_until") else
+        "Поход длится 24 часа. Расход: 60 сытости, 60 воды и 40 настроения. "
         "Настроение влияет на шанс и размер находки; возможна неудача."
     )
+    return (
+        "Питомец находит сезонные вещи, коллекционные награды и призы с мероприятий.\n"
+        "Для доступа к возможностям сытость и вода должны быть не ниже 50. "
+        "Кормление и поилка доступны.\n"
+        f"{expedition}\n"
+        "Печеньки питомец приносит только из экспедиции."
+    )
+
+
+def _pet_rich(pet: dict[str, object], text: str, photo: FSInputFile | None) -> InputRichMessage:
+    blocks = [{"type": "photo", "photo": {"type": "photo", "media": photo}}] if photo else []
+    return InputRichMessage(blocks=[
+        *blocks,
+        *text_blocks(text, "HTML", compact=False),
+        InputRichBlockDetails(
+            summary="Как это работает?",
+            blocks=[InputRichBlockParagraph(text=_pet_help(pet))],
+        ),
+    ])
+
 
 async def _maybe_announce(message: Message, db: Database, settings: Settings, pet: dict[str, object]) -> None:
     sent = pet.get("expedition_notice_sent")
@@ -114,7 +129,15 @@ async def send_pet_card(
     photo = pet_photo(str(pet["species"]))
     sent: Message | None = None
     markup = pet_keyboard(pet)
-    if photo:
+    try:
+        sent = await message.answer(
+            rich_message=_pet_rich(pet, text, photo or cover_file("pet")),
+            reply_markup=markup,
+        )
+    except (TelegramBadRequest, TelegramNotFound, ValueError, TypeError):
+        # Never make the optional Rich layout a prerequisite for accessing the pet.
+        pass
+    if sent is None and photo:
         try:
             sent = await message.answer_photo(photo, caption=text, parse_mode="HTML", reply_markup=markup)
         except TelegramBadRequest:
@@ -127,7 +150,8 @@ async def send_pet_card(
             except TelegramBadRequest:
                 sent = None
     if sent is None:
-        sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
+        with standalone_rich_message(), bot_publication():
+            sent = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     if db and message.from_user:
         await bind_ui_owner(db, sent, message.from_user.id, "pet")
     return sent
@@ -143,6 +167,16 @@ async def refresh_pet_card(
     text = pet_text(pet, timezone)
     photo = pet_photo(str(pet["species"]))
     markup = pet_keyboard(pet)
+    if getattr(target, "rich_message", None):
+        try:
+            await target.edit_text(
+                rich_message=_pet_rich(pet, text, photo or cover_file("pet")),
+                reply_markup=markup,
+            )
+            return
+        except (TelegramBadRequest, TelegramNotFound, ValueError, TypeError) as error:
+            if "message is not modified" in str(error).casefold():
+                return
     if photo:
         try:
             await target.edit_media(
