@@ -1,6 +1,13 @@
 'use strict';
 // English UI and trusted server copy. Keys are the original Russian strings.
 window.NoraEnglish = Object.freeze({
+  "Моя волна": "My Wave",
+  "Музыка в твоём вкусе": "Music for your taste",
+  "Подборка по твоему вкусу и новые открытия": "Picked for your taste, with new discoveries",
+  "Случайная музыка из каталога": "Discover random music from the catalog",
+  "Собираем твою волну…": "Building your wave…",
+  "Подожди немного перед обновлением волны.": "Wait a moment before refreshing your wave.",
+  "Волна пока недоступна. Попробуй обновить позже.": "Wave is unavailable. Try refreshing later.",
   "Сейчас слушает": "Listening now",
   "Топ Норы": "Nora charts",
   "Популярная музыка": "Popular music",
