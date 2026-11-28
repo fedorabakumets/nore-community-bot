@@ -1,0 +1,3 @@
+# Desktop alpha
+
+Desktop shell uses existing signed Telegram Mini App identity and APIs. Activates at >=1050px with a fine pointer, on ordinary screens; game screens retain their existing layout. The friends panel fetches only on visible route changes, with a two-minute throttle, or an explicit refresh. No new API or database changes. Standalone browser login remains a separate security-sensitive milestone. Manual QA: resize 390/1049/1050/1440/1920, switch routes, verify incomplete-profile and staff permissions, music queue continuity, modal focus, theme and friend privacy, and open/exit games. No production deployment from this branch.
