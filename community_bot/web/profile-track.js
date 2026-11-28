@@ -471,6 +471,10 @@ window.NoraProfileTrack = (() => {
         row.hidden = !match || (mode === 'home' && i >= 5);
         if (!row.hidden) count++;
       }
+      for (const button of remote.querySelectorAll('[data-music-import][data-saved-id]')) {
+        const saved = Array.from(list.querySelectorAll('[data-track-src]')).some(row => row.dataset.trackId === button.dataset.savedId);
+        if (!saved && button.textContent === '✓') { button.disabled = false; button.textContent = '+'; }
+      }
       list.hidden = count === 0;
       const empty = content.querySelector('[data-music-local-empty]');
       empty.hidden = count > 0;
@@ -520,7 +524,7 @@ window.NoraProfileTrack = (() => {
         remote.innerHTML = response.tracks.length ? '<p class="music-catalog-note">' + t("Добавление отправит песню в личку Норы и использует обычный лимит треков.") + '</p>' +
           response.tracks.map(track => '<article class="music-catalog-row"><span class="music-catalog-art" aria-hidden="true">♫</span><div><strong>' +
             esc(track.title) + '</strong><small>' + esc(track.artist) + ' · ' + clock(track.duration) + '</small></div><button type="button" data-music-import="' +
-            esc(track.id) + '" aria-label="' + t("Добавить в мои треки") + '">+</button></article>').join('') :
+            esc(track.id) + '" data-saved-id="' + esc(track.saved_id || '') + '" aria-label="' + t(track.saved_id ? "Добавлено в Мои треки" : "Добавить в мои треки") + '"' + (track.saved_id ? ' disabled>✓' : '>+') + '</button></article>').join('') :
           '<p class="music-catalog-note">' + t("Треки не найдены") + '</p>';
       } catch (error) {
         if (alive() && version === generation) remote.textContent = error.message;
@@ -542,6 +546,7 @@ window.NoraProfileTrack = (() => {
         }
         filter();
         if (button.isConnected && version === generation) {
+          button.dataset.savedId = String(track.id);
           button.textContent = '✓';
           button.setAttribute('aria-label', NoraI18n.t("Добавлено в Мои треки"));
         }
