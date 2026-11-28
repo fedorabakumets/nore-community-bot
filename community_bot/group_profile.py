@@ -253,7 +253,7 @@ async def send_group_profile(
                     *([[ibtn("ТГК", f"gprofile:tgk:{int(user['user_id'])}")]] if not tgk_url else []),
                 ]),
             )
-    if track and not audio_inline:
+    if track and not audio_inline and not track['file_id'].startswith('catalog:'):
         try:
             await sent.reply_audio(track["file_id"], title=track["title"], performer=track["artist"] or None)
         except TelegramAPIError:

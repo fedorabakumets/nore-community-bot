@@ -100,3 +100,52 @@ async def test_http_response_sends_complete_audio_and_releases_lease(tmp_path):
             assert leases[-1].file.closed
     assert bot.download.await_count == 1
     cache.close()
+
+
+async def test_catalog_download_is_shared_and_does_not_use_telegram(tmp_path, monkeypatch):
+    from pathlib import Path
+    from community_bot.routers import song_requests
+
+    calls = []
+    monkeypatch.setattr(song_requests, "enabled", lambda: True)
+    monkeypatch.setattr(song_requests, "_cookie_bytes", lambda: b"test")
+    def download(song, directory, cookie_file, *, max_bytes):
+        calls.append((song.id, max_bytes))
+        output = Path(directory) / "song.mp3"
+        output.write_bytes(b"test audio")
+        return str(output)
+    monkeypatch.setattr(song_requests, "_download_sync", download)
+    cache = TrackDiskCache(tmp_path)
+    bot = AsyncMock()
+    track = {"file_id": "catalog:123", "catalog_id": "123", "title": "Song", "artist": "Artist", "duration": 120}
+    a, b = await asyncio.gather(cache.open_track(bot, track), cache.open_track(bot, {**track, "revision": "other"}))
+    assert a.file.read() == b.file.read() == b"test audio"
+    assert calls == [("123", track_disk_cache.MAX_TRACK_BYTES)]
+    bot.download.assert_not_awaited()
+    a.close()
+    b.close()
+    cache.close()
+
+
+async def test_catalog_download_limit_rejects_excess_pending(tmp_path, monkeypatch):
+    monkeypatch.setattr(track_disk_cache, "MAX_PENDING", 2)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    async def download(file_id, *, destination, **kwargs):
+        entered.set()
+        await release.wait()
+        destination.write(b"x")
+    bot = AsyncMock()
+    bot.download.side_effect = download
+    cache = TrackDiskCache(tmp_path)
+    one = asyncio.create_task(cache.open(bot, "one"))
+    await entered.wait()
+    two = asyncio.create_task(cache.open(bot, "two"))
+    await asyncio.sleep(0)
+    with pytest.raises(OSError, match="busy"):
+        await cache.open(bot, "three")
+    release.set()
+    for lease in await asyncio.gather(one, two):
+        lease.close()
+    assert cache._pending == 0
+    cache.close()

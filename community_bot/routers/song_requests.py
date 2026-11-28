@@ -62,6 +62,7 @@ class Song:
     title: str
     artist: str
     duration: int
+    cover: str | None = None
 
     @property
     def url(self) -> str:
@@ -182,7 +183,14 @@ def parse_search_results(data: dict) -> list[Song]:
             duration = max(0, int(duration_ms) // 1000)
         except (TypeError, ValueError):
             duration = 0
-        songs.append(Song(track_id, album_id, title[:180], artist[:180], duration))
+        cover = item.get("coverUri")
+        if isinstance(cover, str):
+            cover = "https://" + cover.removeprefix("https://").replace("%%", "200x200")
+            if not re.fullmatch(r"https://avatars(?:\.mds)?\.yandex\.net/[A-Za-z0-9_./-]+", cover):
+                cover = None
+        else:
+            cover = None
+        songs.append(Song(track_id, album_id, title[:180], artist[:180], duration, cover))
         seen.add(track_id)
         if len(songs) == MAX_RESULTS:
             break
@@ -290,7 +298,7 @@ def is_full_track(actual: float, expected: int) -> bool:
     return actual >= 40
 
 
-def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
+def _download_sync(song: Song, directory: str, cookie_file: str, *, max_bytes=MAX_FILE_BYTES) -> str:
     import yt_dlp
 
     options = {
@@ -303,7 +311,7 @@ def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
         "cookiefile": cookie_file,
         "socket_timeout": 20,
         "retries": 2,
-        "max_filesize": MAX_FILE_BYTES,
+        "max_filesize": max_bytes,
         "cachedir": False,
     }
     with yt_dlp.YoutubeDL(options) as ydl:
@@ -312,7 +320,7 @@ def _download_sync(song: Song, directory: str, cookie_file: str) -> str:
     if len(files) != 1:
         raise SongError("Яндекс не отдал MP3. Возможно, доступен только другой формат.")
     audio = files[0]
-    if not 0 < audio.stat().st_size <= MAX_FILE_BYTES:
+    if not 0 < audio.stat().st_size <= max_bytes:
         raise SongError("Файл превышает лимит размера Telegram.")
     try:
         actual = MP3(str(audio)).info.length

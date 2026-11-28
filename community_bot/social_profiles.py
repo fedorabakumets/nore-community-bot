@@ -256,7 +256,7 @@ async def track_audio(request):
     if request.query.get("check") == "1":
         return web.Response(status=204)
     try:
-        lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
+        lease = await request.app["track_disk_cache"].open_track(bot, track)
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
     try:
@@ -321,7 +321,7 @@ async def library_audio(request):
     if request.query.get("check") == "1":
         return web.Response(status=204)
     try:
-        lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
+        lease = await request.app["track_disk_cache"].open_track(bot, track)
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
     try:
@@ -358,6 +358,10 @@ async def public_music_library(request):
 
 async def _share_track_source(db, settings, uid, source, revision):
     """Resolve only an authorized, current audio reference; never accept a file ID from the client."""
+    if isinstance(source, str) and source.startswith(("/api/music-library/history/", "/api/music-library/social/")):
+        from community_bot.music_discovery import resolve
+
+        return await resolve(db, uid, source, revision)
     match = re.fullmatch(
         r"/api/(?:(?:people/([1-9][0-9]{0,15})/)?(track|music-library/[a-f0-9]{64})|profile/track)",
         source,
@@ -458,6 +462,8 @@ async def current_track_collection(request):
 
 async def share_track(request):
     """Send the selected track as a native Telegram audio in the configured community."""
+    from aiogram.types import FSInputFile
+
     from community_bot.group_message_close import without_group_close
     from community_bot.music_api import CHAT_COOLDOWN, COOLDOWN, save
     from community_bot.reply_rich import bot_publication
@@ -513,17 +519,28 @@ async def share_track(request):
         await save(conn, "nora_music_chat", now)
         await conn.commit()
     name = html.escape(str(user.get("profile_name") or user.get("telegram_name") or "Участник")[:80])
+    lease = None
     try:
+        media = track["file_id"]
+        if media.startswith("catalog:"):
+            lease = await request.app["track_disk_cache"].open_track(bot, track)
+            # Recheck source after a possible external download.
+            if not await _player_track_source(db, settings, uid, source, revision):
+                return web.json_response({"error": "Трек больше недоступен"}, status=404)
+            media = FSInputFile(lease.file.name, filename="track.mp3")
         with bot_publication(), without_group_close():
             await bot.send_audio(
-                chat_id=chat, audio=track["file_id"], title=track["title"],
+                chat_id=chat, audio=media, title=track["title"],
                 performer=track["artist"] or None, duration=track["duration"],
                 caption=f'🎧 <b><a href="tg://user?id={uid}">{name}</a></b> поделился треком',
                 parse_mode="HTML",
             )
-    except (TelegramAPIError, OSError, TimeoutError):
+    except (TelegramAPIError, OSError, TimeoutError, ValueError):
         # Keep the reservation: Telegram may have accepted a timed-out request.
         return web.json_response(
             {"error": "Отправка не подтверждена. Проверь чат перед повтором"}, status=502,
         )
+    finally:
+        if lease:
+            lease.close()
     return web.json_response({"sent": True, "message": "Трек отправлен в чат 🎧", "retry_after": COOLDOWN})

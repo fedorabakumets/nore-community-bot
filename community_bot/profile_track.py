@@ -10,7 +10,7 @@ from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import BufferedInputFile, InputMediaAudio, InputRichBlockAudio
+from aiogram.types import BufferedInputFile, InputMediaAudio, InputRichBlockAudio, InputRichBlockParagraph
 
 MAX_TRACK_MB = 20
 MAX_TRACK_BYTES = MAX_TRACK_MB * 1024 * 1024
@@ -30,10 +30,17 @@ async def get_track(db, uid):
 
 
 def track_summary(track):
-    return {name: track[name] for name in ("title", "artist", "duration", "revision")} if track else None
+    if not track:
+        return None
+    summary = {name: track[name] for name in ("title", "artist", "duration", "revision")}
+    if track.get("cover"):
+        summary["cover"] = track["cover"]
+    return summary
 
 
 def audio_block(track):
+    if track["file_id"].startswith("catalog:"):
+        return InputRichBlockParagraph(text=f"🎧 {track['artist']} · {track['title']} (Mini App)")
     return InputRichBlockAudio(audio=InputMediaAudio(
         media=track["file_id"], title=track["title"], performer=track["artist"] or None,
     ))

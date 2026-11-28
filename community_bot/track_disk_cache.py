@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import shutil
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ from community_bot.profile_track import MAX_TRACK_BYTES
 
 CACHE_BYTES = 128 * 1024 * 1024
 DOWNLOADS = 2
+MAX_PENDING = 8
 
 
 class _BoundedFile(io.BufferedWriter):
@@ -58,6 +60,7 @@ class TrackDiskCache:
         self._entries = OrderedDict()
         self._locks = WeakValueDictionary()
         self._downloads = asyncio.Semaphore(DOWNLOADS)
+        self._pending = 0
 
     def _root(self):
         if self._directory is None:
@@ -88,33 +91,76 @@ class TrackDiskCache:
             raise OSError("Audio cache is busy")
 
     async def open(self, bot, file_id):
-        key = hashlib.sha256(file_id.encode()).hexdigest()
+        async def download(partial):
+            with _BoundedFile(partial.open('wb', buffering=0)) as output:
+                await bot.download(file_id, destination=output, timeout=25, seek=False)
+        return await self._open('telegram:' + file_id, download)
+
+    async def open_track(self, bot, track):
+        if not track['file_id'].startswith('catalog:'):
+            return await self.open(bot, track['file_id'])
+        from community_bot.routers.song_requests import Song, SongError, _cookie_bytes, _download_sync, enabled
+
+        async def download(partial):
+            if not enabled():
+                raise ValueError('Music catalog disabled')
+            song = Song(track['catalog_id'], track.get('album_id'), track['title'], track['artist'], track['duration'])
+            def worker():
+                with TemporaryDirectory(prefix='nora-catalog-') as temp:
+                    cookie_file = Path(temp) / 'cookies.txt'
+                    cookie_file.touch(mode=0o600)
+                    cookie_file.write_bytes(_cookie_bytes())
+                    path = _download_sync(song, temp, str(cookie_file), max_bytes=MAX_TRACK_BYTES)
+                    shutil.move(path, partial)
+            task = asyncio.create_task(asyncio.to_thread(worker))
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Keep the slot until the actual worker has stopped writing.
+                try:
+                    await task
+                except Exception:
+                    pass
+                raise
+            except SongError as exc:
+                raise ValueError(str(exc)) from exc
+            except Exception as exc:
+                raise OSError('Catalog audio is unavailable') from exc
+        return await self._open(track['file_id'], download)
+
+    async def _open(self, identity, download):
+        key = hashlib.sha256(identity.encode()).hexdigest()
         lease = self._hit(key)
         if lease is not None:
             return lease
-        # Deduplicate concurrent downloads of the same Telegram file.
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            lease = self._hit(key)
-            if lease is not None:
-                return lease
-            async with self._downloads:
-                root = self._root()
-                partial = root / (key + ".part")
-                final = root / key
-                try:
-                    with _BoundedFile(partial.open("wb", buffering=0)) as output:
-                        await bot.download(file_id, destination=output, timeout=25, seek=False)
-                    size = partial.stat().st_size
-                    if not size:
-                        raise ValueError("Empty audio file")
-                    self._make_room(size)
-                    partial.replace(final)
-                    entry = _Entry(final, size)
-                    self._entries[key] = entry
-                    self._bytes += size
-                    return TrackLease(entry)
-                finally:
-                    partial.unlink(missing_ok=True)
+        if self._pending >= MAX_PENDING:
+            raise OSError("Audio cache is busy")
+        self._pending += 1
+        try:
+            # Deduplicate concurrent downloads of the same Telegram file.
+            async with self._locks.setdefault(key, asyncio.Lock()):
+                lease = self._hit(key)
+                if lease is not None:
+                    return lease
+                async with self._downloads:
+                    root = self._root()
+                    partial = root / (key + ".part")
+                    final = root / key
+                    try:
+                        await download(partial)
+                        size = partial.stat().st_size
+                        if not 0 < size <= MAX_TRACK_BYTES:
+                            raise ValueError("Invalid audio file size")
+                        self._make_room(size)
+                        partial.replace(final)
+                        entry = _Entry(final, size)
+                        self._entries[key] = entry
+                        self._bytes += size
+                        return TrackLease(entry)
+                    finally:
+                        partial.unlink(missing_ok=True)
+        finally:
+            self._pending -= 1
 
     def close(self):
         for entry in self._entries.values():

@@ -1858,11 +1858,11 @@ class Database:
             from community_bot.profile_track import track_key
 
             await db.execute(
-                "DELETE FROM bot_state WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?) OR key GLOB ?",
+                "DELETE FROM bot_state WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) OR key GLOB ?",
                 (f"birthday_date:{user_id}", f"nora_records:{user_id}", f"nora_lobby_cooldown:{user_id}",
                  f"durak_night:{user_id}", f"nora_game_seen:{user_id}", track_key(user_id),
-                 collection_key(user_id), visibility_key(user_id),
-                 f"birthday_gift:{user_id}:*"),
+                 collection_key(user_id), visibility_key(user_id), f"music_history:{user_id}",
+                 f"music_activity_public:{user_id}", f"birthday_gift:{user_id}:*"),
             )
             await db.execute(
                 "INSERT OR REPLACE INTO bot_state(key,value) VALUES (?,?)",
