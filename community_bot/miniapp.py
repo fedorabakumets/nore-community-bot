@@ -736,6 +736,7 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
     app.router.add_get('/api/music-library/social', music_discovery.social)
     app.router.add_post('/api/music-library/activity', music_discovery.activity_visibility)
     app.router.add_post('/api/music-library/listened', music_discovery.listened)
+    app.router.add_post('/api/music-library/playing', music_discovery.playing)
     app.router.add_get('/api/music-library/history/{track_id}', music_discovery.audio)
     app.router.add_get('/api/music-library/social/{track_id}', music_discovery.audio)
     app.router.add_get('/api/music-library/{track_id}', social_profiles.library_audio)
