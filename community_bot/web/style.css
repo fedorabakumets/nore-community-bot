@@ -5576,10 +5576,17 @@ body:has(#app[data-screen="poker"]) :is(#nav,#nora-mini-player,#scroll-jump){dis
 #sheet:has(#music-library-profile):not(.music-mini-docked) #music-library-profile {
   padding-bottom:calc(24px + var(--safe-bottom,0px));
 }
-#sheet:has(#nora-now-playing) > #nora-mini-player {display:none!important;}
+#sheet:has(#nora-now-playing) > #nora-mini-player:not([hidden]) {
+  position:absolute; bottom:0; opacity:0!important; pointer-events:none; animation:none;
+}
 /* Dragging the full player must not trigger a native scroll before JS locks. */
 #sheet:has(#nora-now-playing) {touch-action:pan-x;}
 #sheet:has(#nora-now-playing) input[type="range"] {touch-action:pan-x;}
+@media(max-height:560px) {
+  #sheet:has(#nora-now-playing) {touch-action:auto;}
+  #nora-now-playing .nora-now-playing-label {touch-action:none;}
+  #nora-now-playing .nora-now-playing-art {width:min(100%,25dvh,180px);margin-bottom:12px;}
+}
 .nora-mini-art {position:relative;overflow:hidden;}
 .nora-mini-art .music-mini-cover {position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;}
 /* A single search outline: neutralize generic sheet input styling on this input only. */
