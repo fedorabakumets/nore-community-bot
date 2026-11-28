@@ -823,7 +823,8 @@ def create_app(db: Database, settings, bot, admin_runtime=None):
                  'nora-world.js', 'nora-records.js', 'nora-game.js', 'people.js', 'profile-track.js',
                  'nora-observatory.js', 'nora-observatory.json', 'nora-chat.js', 'nora-cinema.js', 'nora-cinema.json',
                  'community.js', 'staff-chat-delivery.js', 'staff-chat.js', 'avatars.js', 'commands.js',
-                 'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot-core.js', 'dot.js', 'dice-core.js', 'dice.js', 'dice.css',
+                 'events.js', 'sea.js', 'durak.js', 'durak.css', 'dot-core.js', 'dot.js',
+                 'dice-core.js', 'dice.js', 'dice.css',
                  'barricade.js', 'barricade-board.js', 'barricade-audio.js', 'barricade.css', 'style.css'):
         app.router.add_get('/'+name, lambda r, n=name: web.FileResponse(ROOT / n))
     for name in ('three.module.js', 'three.core.js'):
