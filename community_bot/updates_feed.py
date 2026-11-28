@@ -21,8 +21,8 @@ _lock = asyncio.Lock()
 # Only the repository-controlled release list can publish. Keep IDs immutable.
 POSTS = (
     {
-        "id": "nora-intro-20261128",
-        "revision": "2",
+        "id": "nora-intro-repost-20261128",
+        "revision": "1",
         "pin": True,
         "intro": True,
         "blocks": [
