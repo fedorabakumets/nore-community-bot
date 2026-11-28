@@ -11,7 +11,6 @@ from aiogram.exceptions import TelegramAPIError
 from aiohttp import ClientError, web
 
 from community_bot.music_library import add_resolved_track, get_collection, public_track, track_id
-from community_bot.profile_track import MAX_TRACK_BYTES
 from community_bot.routers import song_requests as songs
 from community_bot.track_disk_cache import TrackResponse
 
@@ -82,14 +81,14 @@ async def play_track(request):
 
 async def prepare_track(request, *, save):
     uid = request["actor"]["id"]
-    db, bot = request.app["db"], request.app.get("bot")
+    db = request.app["db"]
     payload = await request.json()
     if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
         return _error("Некорректный трек.")
     entry = _SEARCHES.get(uid)
     if not entry or entry[0] <= time.monotonic() or payload["id"] not in entry[1]:
         return _error("Поиск устарел. Найди трек снова.", 409)
-    if not songs.enabled() or bot is None:
+    if not songs.enabled():
         return _error("Музыкальный каталог пока не подключён.", 503)
     song = entry[1][payload["id"]]
     existing = await get_collection(db, uid)
@@ -109,26 +108,14 @@ async def prepare_track(request, *, save):
         return _error("Дождись завершения предыдущего запроса.", 429)
     _IN_FLIGHT.add(uid)
     try:
-        problem = await songs.song_care_error(db, uid) or await songs._quota_error(db, uid)
+        problem = await songs.song_care_error(db, uid)
         if problem:
             return _error(problem, 403)
-        if await songs._remaining(db, uid, uid):
-            return _error("Следующую песню можно запросить после окончания паузы.", 429)
-        ban = await db.ban_reset_state(uid)
-        choice = songs.Choices(uid, uid, entry[0], [song])
-        try:
-            audio = await songs.send_song(bot, db, choice, song)
-        except TelegramAPIError:
-            return _error("Не удалось отправить песню в личку Норы.", 502)
-        if not audio:
-            return _error("Трек не добавлен. Проверь сообщение от Норы в личке.", 409)
-        if audio.file_size and audio.file_size > MAX_TRACK_BYTES:
-            return _error("Трек отправлен в личку, но слишком большой для плеера.", 413)
-        if await db.ban_reset_state(uid) != ban:
-            return _error("Доступ изменился. Открой приложение снова.", 403)
-        track = {"file_id": audio.file_id, "mime": "audio/mpeg",
-                 "title": song.title, "artist": song.artist, "duration": audio.duration,
-                 "revision": uuid4().hex, "catalog_id": song.id, "cover": song.cover}
+        # The trusted catalog reference is durable; audio is fetched lazily
+        # by the shared disk cache only when the user actually presses play.
+        track = {"file_id": "catalog:" + song.id, "mime": "audio/mpeg",
+                 "title": song.title, "artist": song.artist, "duration": song.duration,
+                 "revision": uuid4().hex, "catalog_id": song.id, "album_id": song.album_id, "cover": song.cover}
         if save:
             result = await add_resolved_track(db, uid, track)
             key = result["id"]
@@ -273,7 +260,7 @@ async def audio(request):
     if request.query.get("check") == "1":
         return web.Response(status=204)
     try:
-        lease = await request.app["track_disk_cache"].open(bot, track["file_id"])
+        lease = await request.app["track_disk_cache"].open_track(bot, track)
     except (TelegramAPIError, ClientError, OSError, ValueError):
         raise web.HTTPBadGateway() from None
     try:
